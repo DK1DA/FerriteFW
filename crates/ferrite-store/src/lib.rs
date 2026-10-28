@@ -145,5 +145,20 @@ mod tests {
         c.update(b"56789");
         assert_eq!(c.get(), 0xCBF4_3926);
         assert_eq!(super::crc16(b"123456789"), 0x29B1);
+        assert_eq!(super::Crc32::default().get(), super::Crc32::new().get());
+    }
+
+    /// `block` polls a future that isn't ready yet again until it is (one that wakes itself, as the radio's
+    /// timers would), without an executor.
+    #[test]
+    fn block_polls_until_ready() {
+        let mut n = 0;
+        let v = super::block(core::future::poll_fn(|cx| {
+            n += 1;
+            let w = cx.waker().clone(); // a timer keeps its own copy
+            w.wake_by_ref();
+            if n < 3 { core::task::Poll::Pending } else { core::task::Poll::Ready(n * 10) }
+        }));
+        assert_eq!(v, 30);
     }
 }

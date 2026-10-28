@@ -769,3 +769,63 @@ impl Contacts {
         }
     }
 }
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use crate::block;
+    use crate::sim::SimFlash;
+    use ferrite_core::layout::{CONTACTS, EVENT_LOG, WAYPOINTS};
+
+    fn rec(body: u8) -> [u8; REC as usize] {
+        let mut r = [0xFFu8; REC as usize];
+        r[4..8].copy_from_slice(&1_800_000_000u32.to_le_bytes());
+        r[BODY] = body;
+        r
+    }
+
+    /// INBOX-8: an append the flash failed under this power-on leaves a torn slot; the next append blanks it and
+    /// takes it, so no seq is skipped, before or after a remount. A seq not stored reads as nothing.
+    #[test]
+    fn a_torn_append_is_blanked_and_its_slot_reused() {
+        let f = Flash::new(SimFlash::new());
+        let r = Ring::new(EVENT_LOG.start, EVENT_LOG.end, EVENT_END);
+        block(r.mount(&f)).unwrap();
+        assert!(r.is_empty() && r.newest_time(&f).is_none());
+        assert_eq!(block(r.append(&f, &mut rec(1))), Ok(0));
+        let n = f.nor().ops;
+        f.nor().cut_at = Some(n + 5);
+        assert!(block(r.append(&f, &mut rec(2))).is_err());
+        f.nor().power_on();
+        assert!(!f.blank(r.addr(1), REC).unwrap(), "the slot is torn");
+        assert_eq!(block(r.append(&f, &mut rec(3))), Ok(1), "the same slot, the next seq");
+        assert!(!r.is_empty());
+        assert_eq!((r.len(), r.read(&f, 0).unwrap()[BODY], r.by_seq(&f, 0).unwrap()[BODY]), (2, 3, 1));
+        assert!(r.by_seq(&f, 2).is_none(), "not stored yet");
+        let again = Ring::new(EVENT_LOG.start, EVENT_LOG.end, EVENT_END);
+        block(again.mount(&f)).unwrap();
+        assert_eq!((again.len(), again.read(&f, 0).unwrap()[BODY], again.newest_time(&f)), (2, 3, Some(1_800_000_000)));
+    }
+
+    /// APRS-37, GPS-10: saving a contact exactly as stored writes nothing; deleting one not saved, or a waypoint not
+    /// stored, changes nothing and says so.
+    #[test]
+    fn unchanged_or_missing_records_write_nothing() {
+        let f = Flash::new(SimFlash::new());
+        let (c, w) = (Contacts::new(CONTACTS.start), Waypoints::new(WAYPOINTS.start));
+        block(c.0.mount(&f)).unwrap();
+        block(w.mount(&f)).unwrap();
+        assert!(c.0.is_empty() && w.is_empty());
+        let k = Contact { call: Buf::from(b"VE3KPW-9"), name: Buf::from(b"Pat") };
+        assert_eq!(block(c.put(&f, &k)), Ok(true));
+        let ops = f.nor().ops;
+        assert_eq!(block(c.put(&f, &k)), Ok(true));
+        assert_eq!(f.nor().ops, ops, "the same contact again: nothing written");
+        assert_eq!(block(c.delete(&f, b"VA3RTX")), Ok(false));
+        let wp = Waypoint { name: Buf::from(b"Camp"), pos: Pos { lat: 1, lon: 2 }, src: WpSrc::Link };
+        assert_eq!(block(w.delete(&f, &wp)), Ok(false));
+        assert_eq!(block(w.add(&f, &wp)), Ok(true));
+        assert!(!w.is_empty() && !c.0.is_empty());
+        assert_eq!(f.nor().ops - ops, 32, "only the waypoint's own record programmed");
+    }
+}

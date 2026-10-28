@@ -429,6 +429,25 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
     assert_eq!(e[0].end, 14_600_000);
 }
 
+/// WX-1: a first boot that already has range presets (the simulator's sample radio) keeps its own after setup and
+/// gets no seeded ones, and with channels of its own no weather zone either; its channels stay as they were.
+#[test]
+fn first_boot_keeps_presets_and_channels_already_there() {
+    let s = mount(SimFlash::new());
+    let own = RangePreset { name: Buf::from(b"Mine"), start: 14_400_000, end: 14_600_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
+    assert!(s.add_preset(&own));
+    let mine = channel(992, NO_ZONE, 14_652_000, "Simplex", DEFAULT_CFG);
+    assert!(s.apply(ChanWrite::Put { ch: mine, from: None }));
+    let mut a = app();
+    a.settings_mut().set_region(Some(ferrite_core::txplan::Region::Canada));
+    a.settings_mut().setup_done = true;
+    assert!(s.save(&a));
+    assert_eq!(s.mounted(), Mounted::Ok);
+    assert!(s.presets() == 1 && s.preset(0).unwrap().name.as_bytes() == b"Mine", "only its own preset");
+    assert!(s.get(992).unwrap() == mine, "a number in use left alone");
+    assert_eq!((s.zones(), s.count()), (0, 1), "no weather zone");
+}
+
 /// A flash that stays busy a few polls after each program and erase, and whose pause yields once: the store's
 /// writes take several polls, as on the radio, and the test reads in between, as the UI does.
 struct Slow {

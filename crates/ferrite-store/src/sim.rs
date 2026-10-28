@@ -157,3 +157,45 @@ impl Nor for SimFlash {
 
     async fn pause() {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrite_core::layout::{CALIBRATION, CHANNELS, UPDATE_AREA};
+
+    /// A saved image lands where it was taken, cut at the end of the simulated chip; the rest is erased.
+    #[test]
+    fn an_image_is_placed_and_clipped() {
+        let f = SimFlash::with_image(CHANNELS.start, &[0x42; 8]);
+        let a = CHANNELS.start as usize;
+        assert_eq!(&f.mem[a - 1..a + 9], &[0xFF, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0xFF]);
+        let f = SimFlash::with_image(LOW as u32 - 4, &[0; 16]);
+        assert_eq!(&f.mem[LOW - 4..LOW + 1], &[0, 0, 0, 0, 0xFF], "past the low part: dropped, the scratch ring untouched");
+        assert!(SimFlash::default().mem.iter().all(|&b| b == 0xFF));
+    }
+
+    /// The power off: every call fails, nothing changes, until it is back on.
+    #[test]
+    fn a_dead_chip_does_nothing() {
+        let mut f = SimFlash::new();
+        f.dead = true;
+        let mut b = [0u8; 4];
+        assert!(f.read(CHANNELS.start, &mut b).is_err() && f.start_program(CHANNELS.start, &[0]).is_err() && f.start_erase(CHANNELS.start).is_err() && f.busy().is_err());
+        assert!(f.mem.iter().all(|&b| b == 0xFF) && f.ops == 0 && !f.dirty);
+        f.power_on();
+        assert!(f.start_program(CHANNELS.start, &[0]).is_ok() && f.busy() == Ok(false) && f.mem[CHANNELS.start as usize] == 0);
+    }
+
+    /// SAFE-1: calibration is never written; the simulated chip panics on it, as on the update area.
+    #[test]
+    #[should_panic(expected = "write outside the writable ranges")]
+    fn programming_calibration_panics() {
+        let _ = SimFlash::new().start_program(CALIBRATION.start, &[0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside the simulated flash")]
+    fn the_update_area_is_outside_the_simulated_chip() {
+        SimFlash::at(UPDATE_AREA.start);
+    }
+}

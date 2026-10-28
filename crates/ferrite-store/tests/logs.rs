@@ -636,6 +636,43 @@ fn heard_rows_survive_a_restart() {
     assert_eq!(cycle(s).heard_stored(), 0, "the reset erases them");
 }
 
+/// INBOX-3.1: at power-on the mail badge counts the unread messages to us (a read one or ours doesn't count). On
+/// the radio the log entry, the message and the heard row wait in the queue until the Storage task writes them;
+/// meanwhile there is no room for a link's channel records (LINK-41.1: only channel writes may queue together).
+#[test]
+fn the_radio_queue_and_the_mail_badge() {
+    use ferrite_app::uistate;
+    use ferrite_core::msg::{Device, LiveAll};
+    let s = mount(SimFlash::new());
+    s.set_deferred(true);
+    assert!(s.log(&ev(Src::Aprs, 1)));
+    assert!(s.message_in(true, b"VE3KPW-9", b"QSL?", 0));
+    assert!(s.message_in(true, b"VA3RTX", b"Read me", 0));
+    assert!(s.message_in(false, b"VA3RTX", b"Ours", 0));
+    assert!(s.heard_row(&st(b"VE3OCB-7", b"", 1)));
+    assert!(s.has_jobs() && !s.idle() && s.busy());
+    assert_eq!((s.write_room(), s.events(), s.messages(), s.heard_stored()), (0, 0, 0, 0), "nothing written yet");
+    while let Some(j) = s.next_job() {
+        assert!(ferrite_store::block(s.run(j)));
+    }
+    assert!(s.idle() && !s.has_jobs() && s.write_room() > 0);
+    assert_eq!((s.events(), s.messages(), s.heard_stored()), (1, 3, 1));
+    assert!(s.request(Op::MessageRead(1)));
+    while let Some(j) = s.next_job() {
+        assert!(ferrite_store::block(s.run(j)));
+    }
+    let s = cycle(s);
+    let mut a = app();
+    assert!(!s.restore(&mut a), "no settings stored");
+    let (dev, live) = (Device::default(), LiveAll::default());
+    let mut l = ferrite_app::term::cmd::Line::new();
+    let bar = (0..)
+        .map_while(|i| uistate::line(&a, &s, &dev, &live, i, &mut l).then(|| String::from_utf8_lossy(l.as_bytes()).into_owned()))
+        .find(|t| t.starts_with("bar"))
+        .unwrap();
+    assert!(bar.contains(" inbox=1 "), "{bar}");
+}
+
 /// APRS-4.5: the heard list keeps only its own fields in RAM for stations restored at power-on; the store fills
 /// the path, course, altitude, comment and FX.25 from each station's stored row when it is shown.
 #[test]

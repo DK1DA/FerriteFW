@@ -237,3 +237,80 @@ mod wait_tests {
         assert_eq!(block(f.program(SCRATCH_RING.start, &[0u8; 16])), Err(NorError));
     }
 }
+
+#[cfg(all(test, feature = "std"))]
+mod read_tests {
+    use super::*;
+    use crate::sim::SimFlash;
+    use core::future::Future;
+    use core::task::{Context, Poll, Waker};
+    use ferrite_core::layout::CHANNELS;
+
+    /// The simulated chip with an erase that lands only after two busy polls, and a pause that yields once: an
+    /// erase still running when the reader looks.
+    struct Late {
+        f: SimFlash,
+        erase: Option<u32>,
+        polls: u32,
+    }
+
+    impl Nor for Late {
+        fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result {
+            self.f.read(addr, buf)
+        }
+        fn start_program(&mut self, addr: u32, data: &[u8]) -> Result {
+            self.f.start_program(addr, data)
+        }
+        fn start_erase(&mut self, addr: u32) -> Result {
+            (self.erase, self.polls) = (Some(addr), 2);
+            Ok(())
+        }
+        fn busy(&mut self) -> Result<bool> {
+            if self.polls > 0 {
+                self.polls -= 1;
+                return Ok(true);
+            }
+            if let Some(a) = self.erase.take() {
+                self.f.start_erase(a)?;
+            }
+            Ok(false)
+        }
+        async fn pause() {
+            let mut once = false;
+            core::future::poll_fn(|_| if core::mem::replace(&mut once, true) { Poll::Ready(()) } else { Poll::Pending }).await
+        }
+    }
+
+    /// A sector being erased for the reset reads as erased from the start, while the chip still holds the old
+    /// bytes; once the erase lands both agree.
+    #[test]
+    fn a_blanked_erase_reads_erased_while_it_runs() {
+        let s = CHANNELS.start;
+        let mut chip = SimFlash::new();
+        chip.mem[s as usize..s as usize + 64].fill(0x12);
+        let f = Flash::new(Late { f: chip, erase: None, polls: 0 });
+        let mut cx = Context::from_waker(Waker::noop());
+        let mut fut = core::pin::pin!(f.erase_blanked(s));
+        assert!(fut.as_mut().poll(&mut cx).is_pending());
+        let (mut seen, mut raw) = ([0u8; 16], [0u8; 16]);
+        f.read(s + 8, &mut seen).unwrap();
+        f.raw_read(s + 8, &mut raw).unwrap();
+        assert_eq!((seen, raw), ([0xFF; 16], [0x12; 16]), "the reader sees it erased, the chip not yet");
+        while fut.as_mut().poll(&mut cx).is_pending() {}
+        f.raw_read(s + 8, &mut raw).unwrap();
+        assert_eq!(raw, [0xFF; 16]);
+    }
+
+    /// `same` compares in 64-byte pieces and stops at the first that differs.
+    #[test]
+    fn same_finds_a_difference_past_the_first_piece() {
+        let mut chip = SimFlash::new();
+        let (a, b) = (CHANNELS.start as usize, CHANNELS.start as usize + 4096);
+        chip.mem[a..a + 200].fill(7);
+        chip.mem[b..b + 200].fill(7);
+        chip.mem[b + 150] = 8;
+        let f = Flash::new(chip);
+        assert_eq!(f.same(a as u32, b as u32, 150), Ok(true));
+        assert_eq!(f.same(a as u32, b as u32, 200), Ok(false));
+    }
+}
