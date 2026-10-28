@@ -2364,3 +2364,6 @@ fn mic_e_by_name() {
     r.cmd("set 0 5 5 7 off");
     assert_eq!(r.app.aprs_cfg().mic_e, 0);
 }
+
+/// Keys and pages: escape sequences, the PIN prompt, the lists' movement keys, help per page.
+mod nav;
