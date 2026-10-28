@@ -636,6 +636,19 @@ fn heard_rows_survive_a_restart() {
     assert_eq!(cycle(s).heard_stored(), 0, "the reset erases them");
 }
 
+/// What other tasks keep in RAM comes from them through the store: the callsign, the fix, the heard stations (a
+/// station with no stored row as the task has it), the beacon, the satellites and the scan's skips.
+#[test]
+fn other_tasks_records_pass_through() {
+    let s = mount(SimFlash::new());
+    assert_eq!(s.callsign().unwrap().as_bytes(), b"VA7FER-9");
+    assert_eq!(s.fix().map(|f| f.pos), Tasks.fix().map(|f| f.pos));
+    assert_eq!(s.stations(), 1);
+    assert!(Data::station(&s, 0) == Tasks.station(0) && Data::station(&s, 1).is_none());
+    assert!(s.beacon() == Tasks.beacon());
+    assert_eq!((s.sats(), s.sat(0).is_none(), s.skips(), s.skip(0)), (0, true, 0, None));
+}
+
 /// INBOX-3.1: at power-on the mail badge counts the unread messages to us (a read one or ours doesn't count). On
 /// the radio the log entry, the message and the heard row wait in the queue until the Storage task writes them;
 /// meanwhile there is no room for a link's channel records (LINK-41.1: only channel writes may queue together).

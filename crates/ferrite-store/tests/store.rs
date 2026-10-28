@@ -429,6 +429,27 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
     assert_eq!(e[0].end, 14_600_000);
 }
 
+/// CHAN-25: Recent lists the channels used, newest first, in RAM. The lookups the screens use: the next free
+/// number from a given one (wrapping past 999), a number's zone, a channel with its position.
+#[test]
+fn channel_lookups() {
+    let s = mount(SimFlash::new());
+    for n in [5u16, 6, 998, 999] {
+        assert!(s.queue_write(ChanWrite::Put { ch: channel(n, NO_ZONE, 14_652_000, "Ch", DEFAULT_CFG), from: None }));
+    }
+    assert!(s.add_zone(b"Local", &ZoneCfg::default()));
+    assert!(s.request(Op::Move(6, 0)));
+    assert_eq!((s.free_num(5), s.free_num(998), s.free_num(0)), (Some(7), Some(0), Some(0)));
+    assert_eq!((s.zone_of(5), s.zone_of(6), s.zone_of(7), s.zone_of(MAX_CHANNELS)), (Some(NO_ZONE), Some(0), None, None));
+    assert!(s.located(5).is_none() && s.located(7).is_none() && s.get(MAX_CHANNELS).is_none(), "no position, no channel");
+    assert!(s.apply(ChanWrite::PutPos { ch: s.get(5).unwrap(), pos: Some(ferrite_app::data::Pos { lat: 45, lon: -75 }) }));
+    assert!(s.located(5).is_some_and(|(c, p)| c.num == 5 && p.lat == 45 && p.lon == -75));
+    s.used(5);
+    s.used(998);
+    s.tuned(6);
+    assert_eq!((s.recent(0), s.recent(1), s.recent(2), s.recent(3)), (Some(6), Some(998), Some(5), None));
+}
+
 /// WX-1: a first boot that already has range presets (the simulator's sample radio) keeps its own after setup and
 /// gets no seeded ones, and with channels of its own no weather zone either; its channels stay as they were.
 #[test]
