@@ -126,6 +126,11 @@ impl Radio {
         // CAL-12: the chip tunes the word with the factory crystal trim; everything else keeps `f`.
         let setup = RxSetup { freq: self.sqcal.rx_word(f), narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
         radio_chip::tune_rest(&mut self.chip(n), &setup);
+        // TERM-42: the bench's receive AF filter override over the FM tune's REG_2B.
+        #[cfg(feature = "bench")]
+        if let Some(bits) = self.rxaf.filter(|_| !slot.am) {
+            radio_chip::rx_af_override(&mut self.chip(n), bits);
+        }
         // SQL-1: stock's thresholds for this frequency and the slot's level (stock writes them at each receive
         // setup); only when they differ from what the chip has.
         let regs = self.sqcal.regs(f, slot.sq);
@@ -251,6 +256,9 @@ impl Radio {
                 false
             }
         };
+        // TERM-43: the FSK modem test reads its FIFO every tick (8 words fill in 53 ms at 2400 baud).
+        #[cfg(feature = "bench")]
+        let xb = xb || self.fsk.is_some();
         set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || self.scope.is_some() || self.seek.is_some() || xb
     }
 

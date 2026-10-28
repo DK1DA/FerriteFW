@@ -1334,7 +1334,8 @@ pub fn writes(line: &[u8]) -> bool {
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
-    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && same(w, b"turns"));
+    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf")));
+    let shows = shows || same(c, b"fsk") && rest == 0; // TERM-43: `fsk` alone shows the counts
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
     !(reads || shows)
 }
@@ -1392,6 +1393,8 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"txtest") => txtest(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"bk") => bk(&mut t),
+        #[cfg(feature = "bench")]
+        _ if same(c, b"fsk") => fsk(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"si") => si(&mut t),
         #[cfg(feature = "bench")]
@@ -1530,7 +1533,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 11] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd"];
+pub const BENCH_ONLY: [&str; 12] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
@@ -1574,13 +1577,14 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
 
 #[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save; bk turns [reset]";
+    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save; bk turns [reset]; bk rxaf";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
         b"1" => 1,
         w if same(w, b"settle") => return settle(t),
         w if same(w, b"save") => return bk_save(t),
         w if same(w, b"turns") => return turns(t),
+        w if same(w, b"rxaf") => return rxaf(t),
         _ => return Err(msg!("{}", USAGE)),
     };
     let w = t.word(USAGE)?;
@@ -1599,6 +1603,66 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => Err(msg!("{}", USAGE)),
     }
+}
+
+#[cfg(feature = "bench")]
+/// TERM-42 (decision 305, a bench test): `bk rxaf` shows the receive AF filter override, `bk rxaf HEX` sets it (REG_2B
+/// bits 10:8 only: 400 the 300 Hz high-pass off, 200 the 3 kHz low-pass off, 100 de-emphasis off; 700 all three),
+/// written after every FM tune on either chip, `bk rxaf off` ends it. RAM only.
+fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bk rxaf [HEX|off]: REG_2B bits 10:8 after every FM tune (400 HPF off, 200 LPF off, 100 de-emphasis off; 700 all)";
+    let set = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"off") => Some(None),
+        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| v & !0x0700 == 0).ok_or_else(|| msg!("{}", USAGE))? as u16)),
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::RxAf(set))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-43 (decision 305, a bench test): the BK4829's FSK modem. `fsk` shows the counts and the last frame, `fsk off`
+/// ends it, `fsk rx SPEED [nocrc]` receives on the active slot's chip, `fsk tx SPEED N [nocrc]` arms N frames (1 to
+/// 999) for the next PTT key-up. SPEED: `1200`, `2400` (any plain FSK rate 300 to 9600), `ffsk1800`, `ffsk2400`;
+/// `nocrc` turns the chip's CRC off. Anything else is refused here, before anything is sent.
+fn fsk(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::fskbench::{Ask, Cfg, Speed, COUNT_MAX};
+    const USAGE: &str = "fsk [off], fsk rx SPEED [nocrc], fsk tx SPEED N [nocrc]: SPEED 1200, 2400 (300-9600), ffsk1800, ffsk2400; N 1-999";
+    let bad = || msg!("{}", USAGE);
+    fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
+        match t.next()? {
+            None => Ok(None),
+            Some(Tok::Word(w)) => Ok(Some(w)),
+            _ => Err(msg!("{}", USAGE)),
+        }
+    }
+    let ask = match word(t)? {
+        None => Ask::Show,
+        Some(w) if same(w, b"off") => Ask::Off,
+        Some(w) if same(w, b"rx") || same(w, b"tx") => {
+            let tx = same(w, b"tx");
+            let speed = word(t)?.and_then(Speed::parse).ok_or_else(bad)?;
+            let n = if tx { Some(word(t)?.and_then(number).filter(|n| (1..=COUNT_MAX as u32).contains(n)).ok_or_else(bad)? as u16) } else { None };
+            let crc = match word(t)? {
+                None => true,
+                Some(w) if same(w, b"nocrc") => false,
+                Some(_) => return Err(bad()),
+            };
+            let cfg = Cfg { speed, crc };
+            match n {
+                Some(n) => Ask::Tx(cfg, n),
+                None => Ask::Rx(cfg),
+            }
+        }
+        Some(_) => return Err(bad()),
+    };
+    if t.next()?.is_some() {
+        return Err(bad());
+    }
+    Ok(Done::Debug(Job::new(Kind::Fsk(ask))))
 }
 
 #[cfg(feature = "bench")]
@@ -2131,12 +2195,15 @@ const HELP_BENCH: &str = concat!(
     "                         at that % on the next PTT key-up until release (tx builds)\n",
     "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator\n",
     "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)\n",
+    "  bk rxaf 700   bk rxaf off   bench test: REG_2B 10:8 after every FM tune (RX filters)\n",
+    "  fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off\n",
+    "  fsk tx 2400 20         20 test frames at the next PTT key-up (Dry TX only; ffsk1800 ...)\n",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 );
 #[cfg(not(feature = "bench"))]
 const HELP_BENCH: &str = concat!(
     "\n",
-    "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:\n",
+    "Bench commands: mem mem32 gpio bk si bt rx mic txtest fsk, gps query|nmea|standby:\n",
     "  not in this build; a bench build (bring-up, tx-bench) has them.",
 );
 

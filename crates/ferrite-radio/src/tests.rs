@@ -1218,3 +1218,60 @@ fn suite_steps_and_restore() {
         }
     }
 }
+
+#[cfg(feature = "bench")]
+/// TERM-42: `bk rxaf` after an FM tune sets REG_2B bits 10:8 over the tune's 0x0000 and keeps the other bits.
+#[test]
+fn rx_af_override_after_fm_tune() {
+    let mut b = bk();
+    chip::tune(&mut b, &RxSetup { freq: mhz(145) + 49_500, narrow: false, am: false, rx_tone: 0, rx_tail: false });
+    assert_eq!(b.read(reg::AF_FILTERS), 0x0000);
+    b.write(reg::AF_FILTERS, 0x0005);
+    chip::rx_af_override(&mut b, 0x0700);
+    assert_eq!(b.read(reg::AF_FILTERS), 0x0705);
+    chip::rx_af_override(&mut b, 0x0400);
+    assert_eq!(b.read(reg::AF_FILTERS), 0x0405);
+}
+
+#[cfg(feature = "bench")]
+/// TERM-43: `fsk rx 2400` sets the modem up as stock's FSK 2400 (REG_58 0x00C9, REG_72 0x60CA, REG_70 0x00AC, REG_5C
+/// 0x5665) with the bench frame's length (32 bytes: REG_5D 0x1F00), 8 preamble bytes and the 4-byte reset sync word,
+/// no scramble (REG_59 0x0078), then clears the FIFO and turns receive on; `nocrc` clears REG_5C bit 6.
+#[test]
+fn fsk_bench_rx_registers() {
+    use ferrite_core::fskbench::{Cfg, Speed};
+    let c = Cfg { speed: Speed::parse(b"2400").unwrap(), crc: true };
+    let mut b = bk();
+    chip::fsk_bench_rx(&mut b, &c);
+    let bus = b.release();
+    for (r, v) in [(reg::FSK_MODE, 0x00C9), (reg::TONE2_FREQ, 0x60CA), (reg::TONE, 0x00AC), (reg::FSK_CRC, 0x5665), (reg::FSK_LEN, 0x1F00), (reg::FSK_SYNC01, 0x85CF), (reg::FSK_SYNC23, 0xAB45)] {
+        assert_eq!(bus.last(r), Some(v), "REG_{r:02X}");
+    }
+    let n = bus.writes.len();
+    assert_eq!(bus.writes[n - 3..n - 1], [(reg::FSK_CTRL, 0x4078), (reg::FSK_CTRL, 0x1078)], "clear, then receive");
+    let mut b = bk();
+    chip::fsk_bench_rx(&mut b, &Cfg { crc: false, ..c });
+    assert_eq!(b.release().last(reg::FSK_CRC), Some(0x5625));
+}
+
+#[cfg(all(feature = "bench", feature = "tx"))]
+/// TERM-43 `fsk tx`: tone transmit through stock's step, the modem set up, frame 0's 16 words into REG_5F after the
+/// FIFO clear and before transmit on (REG_59 bit 11); the end leaves transmit off in the modem and the modem off.
+#[test]
+fn fsk_bench_tx_registers() {
+    use ferrite_core::fskbench::{payload, words, Cfg, Speed};
+    let c = Cfg { speed: Speed::parse(b"ffsk1800").unwrap(), crc: true };
+    let mut b = bk();
+    chip::fsk_bench_tx_begin(&mut b, &c, false, 0);
+    let bus = b.release();
+    assert_eq!(bus.writes[..2], [(reg::POWER, 0x0200), (reg::POWER, 0xC3FA)]);
+    assert_eq!(bus.last(reg::FSK_MODE), Some(0x3FC3));
+    let fifo: Vec<u16> = bus.writes.iter().filter(|w| w.0 == reg::FSK_FIFO).map(|w| w.1).collect();
+    assert_eq!(fifo, words(&payload(0)));
+    let n = bus.writes.len();
+    assert_eq!(bus.writes[n - 1], (reg::FSK_CTRL, 0x0878), "transmit on last");
+    let mut b = Bk4829::new(bus);
+    chip::fsk_bench_tx_end(&mut b, &c);
+    let bus = b.release();
+    assert_eq!((bus.last(reg::FSK_CTRL), bus.last(reg::TONE), bus.last(reg::FSK_MODE)), (Some(0x0078), Some(0), Some(0)));
+}

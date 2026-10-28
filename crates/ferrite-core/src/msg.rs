@@ -477,6 +477,13 @@ pub enum DebugReq {
     /// WATCH-17.1 (decision 262, a bench measure): each slot's turns on a chip so far
     /// ([`crate::watch::TurnClock`]), zeroed after if `reset`. The Radio task answers with [`DebugAns::Turns`].
     Turns { reset: bool },
+    #[cfg(feature = "bench")]
+    /// TERM-42 (decision 305, a bench test): the receive AF filter override, REG_2B bits 10:8 after every FM tune
+    /// (`Some(Some(bits))`), off (`Some(None)`), or only asked (`None`). RAM only. Answered with [`DebugAns::RxAf`].
+    RxAf(Option<Option<u16>>),
+    #[cfg(feature = "bench")]
+    /// TERM-43 (decision 305, a bench test): the BK4829's FSK modem. Answered with [`DebugAns::Fsk`].
+    Fsk(crate::fskbench::Ask),
 }
 
 /// TERM-40: a change to [`LcdBench`].
@@ -596,6 +603,12 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// WATCH-17.1: each slot's whole turns and their ms, before any reset.
     Turns(crate::watch::Turns),
+    #[cfg(feature = "bench")]
+    /// TERM-42: the receive AF filter override in force (REG_2B bits 10:8), None off.
+    RxAf(Option<u16>),
+    #[cfg(feature = "bench")]
+    /// TERM-43: the FSK modem test's state and counts.
+    Fsk(crate::fskbench::Report),
     /// Not done, and why.
     Refused(&'static str),
 }

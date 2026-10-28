@@ -83,6 +83,12 @@ pub enum Kind {
     #[cfg(feature = "bench")]
     /// `bk turns [reset]`: each slot's turns on a chip (WATCH-17.1).
     Turns { reset: bool },
+    #[cfg(feature = "bench")]
+    /// `bk rxaf [HEX|off]`: the receive AF filter override (TERM-42).
+    RxAf(Option<Option<u16>>),
+    #[cfg(feature = "bench")]
+    /// `fsk ...`: the BK4829's FSK modem test (TERM-43).
+    Fsk(ferrite_core::fskbench::Ask),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -172,6 +178,10 @@ impl Job {
             Kind::Save(c) => DebugReq::Save(c),
             #[cfg(feature = "bench")]
             Kind::Turns { reset } => DebugReq::Turns { reset },
+            #[cfg(feature = "bench")]
+            Kind::RxAf(set) => DebugReq::RxAf(set),
+            #[cfg(feature = "bench")]
+            Kind::Fsk(a) => DebugReq::Fsk(a),
         })
     }
 
@@ -362,6 +372,43 @@ impl Job {
                 Step::Line
             }
             #[cfg(feature = "bench")]
+            (Kind::RxAf(_), DebugAns::RxAf(bits)) => {
+                match bits {
+                    None => out.push(b"  bk rxaf: off (each FM tune writes REG_2B 0x0000: the receive filters on)"),
+                    Some(b) => {
+                        out.push(b"  bk rxaf: REG_2B bits 10:8 = 0x");
+                        hex(b as u32, 4, out);
+                        out.push(b" after every FM tune (");
+                        let mut any = false;
+                        for (bit, name) in [(0x400, &b"HPF 300 Hz"[..]), (0x200, b"LPF 3 kHz"), (0x100, b"de-emphasis")] {
+                            if b & bit != 0 {
+                                out.push(if any { b", " } else { b"" });
+                                out.push(name);
+                                any = true;
+                            }
+                        }
+                        out.push(if any { &b" off); until bk rxaf off or power-off"[..] } else { b"all on); until bk rxaf off or power-off" });
+                    }
+                }
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Fsk(_), DebugAns::Fsk(r)) => {
+                fsk_line(&r, self.line, out);
+                let last = match r.cfg {
+                    None => 0,
+                    Some(_) if r.tx.is_some() => 0,
+                    Some(_) if r.stats.last_n == 0 => 1,
+                    Some(_) => 3,
+                };
+                if self.line >= last {
+                    self.st = St::Over;
+                }
+                self.line += 1;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
             (Kind::Settle(_), DebugAns::Settle(s)) => {
                 put!(out, "  bk settle: wake {} ms, sleep {} ms", s.wake_ms, s.sleep_ms);
                 if s == ferrite_core::settle::Settle::STOCK {
@@ -509,6 +556,63 @@ impl Job {
                 Step::Line
             }
         }
+    }
+}
+
+/// TERM-43: line `k` of `fsk`'s answer: the run, then (receiving) the counts and the last frame's bytes in two rows.
+#[cfg(feature = "bench")]
+fn fsk_line(r: &ferrite_core::fskbench::Report, k: u8, out: &mut Line) {
+    let Some(c) = r.cfg else {
+        out.push(b"  fsk: off (fsk rx SPEED or fsk tx SPEED N starts it)");
+        return;
+    };
+    let s = &r.stats;
+    let crc = if c.crc { "on" } else { "off" };
+    let odd = if c.speed.documented() { "" } else { " (not a documented speed)" };
+    match (k, r.tx) {
+        (0, Some(n)) => {
+            out.push(b"  fsk tx ");
+            speed_word(c.speed, out);
+            put!(out, " (chip CRC {}){}: {} of {} frames sent", crc, odd, s.sent, n);
+            if r.armed {
+                out.push(b", armed for the next PTT key-up (Dry TX on only)");
+            }
+        }
+        (0, None) => {
+            out.push(b"  fsk rx ");
+            speed_word(c.speed, out);
+            put!(out, " (chip CRC {}){}: ", crc, odd);
+            match r.chip {
+                Some(n) => put!(out, "chip {} listening", n),
+                None => out.push(b"no chip has the active slot now (asleep, or another slot's turn)"),
+            }
+        }
+        (1, _) => put!(out, "  syncs {} ({} inverted), frames {}: chip CRC ok {} bad {}; clean {}, short {}, low byte first {}, PRBS bit errors {}",
+                       s.syncs, s.sync_neg, s.frames, s.crc_ok, s.crc_bad, s.clean, s.short, s.lo_first, s.bit_errors),
+        (k, _) => {
+            let half = k as usize - 2;
+            let n = s.last_n as usize;
+            if half == 0 {
+                put!(out, "  last, #{} ({} bytes):", s.last_counter, n);
+            } else {
+                out.push(b"                      ");
+            }
+            for b in &s.last[(half * 16).min(n)..((half + 1) * 16).min(n)] {
+                out.push(b" ");
+                hex(*b as u32, 2, out);
+            }
+        }
+    }
+}
+
+/// TERM-43: a speed as typed (`2400`, `ffsk1800`).
+#[cfg(feature = "bench")]
+fn speed_word(sp: ferrite_core::fskbench::Speed, out: &mut Line) {
+    use ferrite_core::fskbench::Mode;
+    match sp.mode {
+        Mode::Fsk => put!(out, "{}", sp.baud),
+        Mode::Ffsk1800 => out.push(b"ffsk1800"),
+        Mode::Ffsk2400 => out.push(b"ffsk2400"),
     }
 }
 

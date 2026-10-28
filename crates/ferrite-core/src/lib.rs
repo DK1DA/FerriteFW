@@ -22,6 +22,8 @@ pub mod stuck;
 pub mod dcs;
 pub mod decoders;
 pub mod dtmfrx;
+#[cfg(feature = "bench")]
+pub mod fskbench;
 pub mod freq;
 pub mod gps;
 pub mod gpspower;

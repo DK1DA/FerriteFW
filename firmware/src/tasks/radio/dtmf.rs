@@ -18,12 +18,16 @@ impl Radio {
                 continue;
             }
             let t = self.tuned[i];
-            let want = self.dtmf_on && self.aprs_slots == 0 && self.has(n) && self.same.chip != Some(n) && t.is_some_and(|(s, _)| (s as usize) < SLOTS);
+            #[cfg(feature = "bench")]
+            let fsk = self.fsk_chip(); // TERM-43: likewise the FSK modem test's chip
+            #[cfg(not(feature = "bench"))]
+            let fsk = None;
+            let want = self.dtmf_on && self.aprs_slots == 0 && self.has(n) && self.same.chip != Some(n) && fsk != Some(n) && t.is_some_and(|(s, _)| (s as usize) < SLOTS);
             let key = if want { t } else { None };
             if key != self.dtmf_key[i] {
                 if key.is_some() {
                     self.chip(n).dtmf_rx(true);
-                } else if t.is_some() && self.has(n) && self.same.chip != Some(n) {
+                } else if t.is_some() && self.has(n) && self.same.chip != Some(n) && fsk != Some(n) {
                     self.chip(n).dtmf_rx(false);
                 }
                 self.dtmf_key[i] = key;

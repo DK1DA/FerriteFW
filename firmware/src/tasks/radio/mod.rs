@@ -78,6 +78,8 @@ use ferrite_core::{
 mod cmd;
 #[cfg(feature = "bench")]
 mod debug;
+#[cfg(feature = "bench")]
+mod fskbench;
 mod tune;
 mod tick;
 mod same;
@@ -300,6 +302,12 @@ struct Radio {
     dtmf_key: [Option<(u8, Freq10)>; 2],
     dtmf: [ferrite_core::dtmfrx::Track; SLOTS],
     same: SameRx,
+    /// TERM-42 (decision 305): `bk rxaf`'s REG_2B bits 10:8, written after every FM tune; None off. RAM only.
+    #[cfg(feature = "bench")]
+    rxaf: Option<u16>,
+    /// TERM-43 (decision 305): the FSK modem test while it runs.
+    #[cfg(feature = "bench")]
+    fsk: Option<fskbench::FskRun>,
     #[cfg(feature = "tx")]
     tx: Tx,
     /// The crossband repeater while it runs (168 + 8 bytes).
@@ -751,6 +759,10 @@ pub async fn task() {
         dtmf_key: [None; 2],
         dtmf: [ferrite_core::dtmfrx::Track::NEW; SLOTS],
         same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
+        #[cfg(feature = "bench")]
+        rxaf: None,
+        #[cfg(feature = "bench")]
+        fsk: None,
         #[cfg(feature = "tx")]
         tx: Tx {
             seq: TxSeq::new(),

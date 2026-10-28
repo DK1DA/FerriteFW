@@ -568,3 +568,70 @@ pub fn suite_end<B: Bus>(bk: &mut Bk4829<B>, was: &SuiteRegs) {
     bk.write(bk4829::reg::CTC, was.r07);
     bk.write(bk4829::reg::CTCSS_THRESH, was.r52);
 }
+
+/// TERM-42 (decision 305, a bench test): `bk rxaf`'s receive AF filter bits, REG_2B 10:8 (1 = off: 10 the 300 Hz
+/// high-pass, 9 the 3 kHz low-pass, 8 de-emphasis), written over [`tune_rest`]'s FM REG_2B (0x0000) with the
+/// register's other bits kept. The Radio task calls it after every FM tune while the override is set.
+#[cfg(feature = "bench")]
+pub fn rx_af_override<B: Bus>(bk: &mut Bk4829<B>, bits: u16) {
+    let r = bk.read(bk4829::reg::AF_FILTERS);
+    bk.write(bk4829::reg::AF_FILTERS, (r & !0x0700) | (bits & 0x0700));
+}
+
+/// TERM-43 (decision 305, a bench test): the modem set-up for an `fsk` run (`ferrite_core::fskbench`): REG_58 and the
+/// rate word, tone 2's gain, REG_5C, all from [`ferrite_core::fskbench::Speed`]; [`ferrite_core::fskbench::PREAMBLE`]
+/// bytes of preamble, the 4-byte sync word, [`ferrite_core::fskbench::LEN`] data bytes, no scramble.
+#[cfg(feature = "bench")]
+pub fn fsk_bench(c: &ferrite_core::fskbench::Cfg) -> Fsk {
+    use ferrite_core::fskbench as f;
+    Fsk {
+        mode: c.speed.reg58(),
+        tone_word: c.speed.rate_word(),
+        tone_gain: c.speed.tone_gain(),
+        preamble: f::PREAMBLE,
+        sync: f::SYNC,
+        sync4: true,
+        crc: c.speed.reg5c(c.crc),
+        scramble: false,
+        len: f::LEN as u16,
+    }
+}
+
+/// TERM-43: the modem receiving on a tuned chip (set up, FIFO cleared, receive on, its interrupts enabled); again
+/// after each frame, `fsk_bench_rearm`.
+#[cfg(feature = "bench")]
+pub fn fsk_bench_rx<B: Bus>(bk: &mut Bk4829<B>, c: &ferrite_core::fskbench::Cfg) {
+    let f = fsk_bench(c);
+    bk.fsk_setup(&f);
+    bk.fsk_rx(&f);
+}
+
+/// TERM-43: listening for the next frame: FIFO cleared and receive on again (REG_59), as stock after each packet.
+#[cfg(feature = "bench")]
+pub fn fsk_bench_rearm<B: Bus>(bk: &mut Bk4829<B>, c: &ferrite_core::fskbench::Cfg) {
+    bk.fsk_rx(&fsk_bench(c));
+}
+
+/// TERM-43 `fsk tx`, on the keyed chip after the key-up's plan: tone transmit through stock's step (REG_30 0x0200
+/// wide or 0 narrow, then 0xC3FA, the mic off), the modem set up, then frame `n` loaded and sent.
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub fn fsk_bench_tx_begin<B: Bus>(bk: &mut Bk4829<B>, c: &ferrite_core::fskbench::Cfg, narrow: bool, n: u16) {
+    bk.tx_on(bk4829::tx::Source::Tones, !narrow);
+    bk.fsk_setup(&fsk_bench(c));
+    fsk_bench_tx_frame(bk, c, n);
+}
+
+/// TERM-43: frame `n` into the FIFO and sent (the FIFO cleared first, the done interrupt enabled).
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub fn fsk_bench_tx_frame<B: Bus>(bk: &mut Bk4829<B>, c: &ferrite_core::fskbench::Cfg, n: u16) {
+    use ferrite_core::fskbench::{payload, words};
+    bk.fsk_send(&fsk_bench(c), &words(&payload(n)));
+}
+
+/// TERM-43: the frames done or the key-up ending: transmit off in the modem, its interrupts off, then the modem
+/// off (REG_70 0, REG_58 0, as stock after its FSK). REG_30 stays at tone transmit for the unkey.
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub fn fsk_bench_tx_end<B: Bus>(bk: &mut Bk4829<B>, c: &ferrite_core::fskbench::Cfg) {
+    bk.fsk_tx_end(&fsk_bench(c));
+    bk.fsk_off();
+}
