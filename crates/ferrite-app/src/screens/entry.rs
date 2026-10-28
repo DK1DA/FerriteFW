@@ -85,8 +85,9 @@ pub(crate) fn range_edge(mut p: crate::data::RangePreset, start: bool, f: Freq10
     if p.start >= p.end {
         return Err("Start under end: the range runs upward");
     }
-    if [mhz(18), mhz(64)].iter().any(|&e| p.start < e && p.end > e) {
-        return Err("Can't span 18 or 64 MHz: one side only");
+    // SCAN-14: named as the preset editor's knob names it; the toast's head holds 20 characters
+    if let Some(e) = [mhz(18), mhz(64)].into_iter().find(|&e| p.start < e && p.end > e) {
+        return Err(if e == mhz(18) { "Can't span 18 MHz: one side only" } else { "Can't span 64 MHz: one side only" });
     }
     Ok(p)
 }

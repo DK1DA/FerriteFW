@@ -98,6 +98,9 @@ pub mod value;
 pub mod xb;
 pub mod zones;
 
+#[cfg(test)]
+mod cov;
+
 use crate::chan::ChannelStore;
 use crate::keys::KeyEvent;
 use crate::App;

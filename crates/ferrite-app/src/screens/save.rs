@@ -246,9 +246,11 @@ impl View for Save {
         };
         if app.dirty(R_NOTE, hash(&(why, tip))) {
             let y = 100 + 24 * s.rows().len() as i32;
+            // Add repeater's seven rows leave 28 px: two lines at 14 (at 16 only one, and the notes are two)
+            let lh = if s.repeater() { 14 } else { 16 };
             match why {
-                Some(t) => para(lcd, 8, y, 224, (296 - y) / 16, 16, t.as_bytes(), &UI_12, AMBER, BG),
-                None => para(lcd, 8, y, 224, (296 - y) / 16, 16, tip, &UI_12, SUB, BG),
+                Some(t) => para(lcd, 8, y, 224, (296 - y) / lh, lh, t.as_bytes(), &UI_12, AMBER, BG),
+                None => para(lcd, 8, y, 224, (296 - y) / lh, lh, tip, &UI_12, SUB, BG),
             };
         }
     }

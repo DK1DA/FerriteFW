@@ -262,12 +262,13 @@ impl View for ChEdit {
             let (x, y) = (GX + (i as i32 % 3) * 77, GY + (i as i32 / 3) * 34);
             app.grid_cell(lcd, i, x, y, 72, 29, c.label().as_bytes(), v.as_bytes(), cell == GRID0 + i as u8, grey);
         }
-        // The note: why the focused cell is greyed (EDIT-7), or what the focused field does.
+        // The note: why the focused cell is greyed (EDIT-7), or what the focused field does. One line of 226 px:
+        // 32 characters.
         let mut note = Buf::<48>::new();
         let mut col = SUB;
         match (cell, self.at()) {
-            (ZONE, _) => note.set(b"Knob: move the channel to another zone"),
-            (NAME, _) => note.set(b"OK: type the name (16 characters)"),
+            (ZONE, _) => note.set(b"Knob: move it to another zone"),
+            (NAME, _) => note.set(b"OK: type the name, 16 at most"),
             (FREQ, _) => note.set("Knob: step \u{b7} OK: type it".as_bytes()),
             (_, Some(Cell::F(ChField::It(it)))) if app.greyed(it).is_some() => {
                 note.set(it.label().as_bytes());
@@ -275,8 +276,8 @@ impl View for ChEdit {
                 note.push(app.greyed(it).unwrap_or("").as_bytes());
                 col = AMBER;
             }
-            (_, Some(Cell::Number)) => note.set(b"Knob: the next free number moves it"),
-            (_, Some(Cell::F(ChField::Home))) => note.set(b"Hold 0 on home jumps to the home channel"),
+            (_, Some(Cell::Number)) => note.set(b"Knob: to the next free number"),
+            (_, Some(Cell::F(ChField::Home))) => note.set(b"Hold 0 on home tunes it"),
             _ => {}
         }
         if app.dirty(R_HELP, hash(&(note, col))) {

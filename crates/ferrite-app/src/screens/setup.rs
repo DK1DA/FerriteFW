@@ -400,7 +400,7 @@ impl View for Setup {
                 }
                 let mode = self.flags & (LOWER | DIGITS);
                 if app.dirty(R_ROW + 3, hash(&mode)) {
-                    let m = ["ABC", "abc", "", "123"][(mode / 4) as usize];
+                    let m = ["ABC", "abc", "123"][(mode / 4) as usize];
                     let mut t = Buf::<48>::new();
                     let _ = uwrite!(t, "{} \u{b7} * changes", m);
                     w::field(lcd, 10, 220, 240, 258, 254, Align::Left, t.as_bytes(), &UI_12, SUB, BG);

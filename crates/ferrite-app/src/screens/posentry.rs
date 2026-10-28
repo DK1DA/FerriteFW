@@ -28,6 +28,9 @@ pub struct PosEntry {
     /// The digits typed on that row, two to a byte, and how many (0: the row shows its saved value).
     buf: [u8; 5],
     n: u8,
+    /// \* pressed while typing: the typed value's sign is the other one (kept with it), so a first position can
+    /// be south or west before anything is saved.
+    neg: bool,
 }
 
 const ROWS: [&str; 3] = ["Latitude", "Longitude", "Altitude"];
@@ -40,7 +43,7 @@ const ALT_DIGITS: u8 = 5;
 
 impl PosEntry {
     pub fn new() -> Self {
-        PosEntry { row: 0, buf: [0; 5], n: 0 }
+        PosEntry { row: 0, buf: [0; 5], n: 0, neg: false }
     }
 
     fn digit(self, i: u8) -> u8 {
@@ -138,7 +141,8 @@ fn row_text(app: &App, s: PosEntry, row: u8, b: &mut Buf<24>) {
     let typing = s.row == row && s.n > 0;
     if row == 2 {
         if typing {
-            let _ = uwrite!(b, "{} m", s.value());
+            let neg = (app.set.fixed_alt < 0) != s.neg;
+            let _ = uwrite!(b, "{}{} m", if neg { "-" } else { "" }, s.value());
         } else if app.set.fixed_on {
             let _ = uwrite!(b, "{} m", app.set.fixed_alt);
         } else {
@@ -160,7 +164,7 @@ fn row_text(app: &App, s: PosEntry, row: u8, b: &mut Buf<24>) {
         return;
     }
     let (pos, neg) = if row == 0 { (" N", " S") } else { (" E", " W") };
-    b.push(if v < 0 { neg } else { pos }.as_bytes());
+    b.push(if (v < 0) != (typing && s.neg) { neg } else { pos }.as_bytes());
 }
 
 /// The receiver's own fix now, not the fixed position standing in for one (GPS-35).
@@ -174,7 +178,7 @@ fn keep(app: &mut App, s: PosEntry) -> bool {
         return true;
     }
     if s.row == 2 {
-        let neg = app.set.fixed_alt < 0;
+        let neg = (app.set.fixed_alt < 0) != s.neg;
         let v = s.value().min(i16::MAX as u32) as i16;
         app.set.fixed_alt = if neg { -v } else { v };
         app.set.fixed_on = true;
@@ -191,7 +195,7 @@ fn keep(app: &mut App, s: PosEntry) -> bool {
         Some(a) => {
             let p = &mut app.set.fixed;
             let v = if s.row == 0 { &mut p.lat } else { &mut p.lon };
-            *v = if *v < 0 { -(a as i32) } else { a as i32 };
+            *v = if (*v < 0) != s.neg { -(a as i32) } else { a as i32 };
             app.set.fixed_on = true;
             true
         }
@@ -258,6 +262,7 @@ impl View for PosEntry {
         let max = if s.row == 2 { ALT_DIGITS } else { digits(template(fmt(app), s.row)) };
         match (e.key, e.press) {
             (Key::Digit(d), Short) if s.n < max => s = s.typed(d),
+            (Key::Star, Short) if s.n > 0 => s.neg = !s.neg, // the typed value's sign
             (Key::Star, Short) => {
                 // N/S, E/W, or the altitude's sign
                 let set = &mut app.set;
@@ -272,7 +277,7 @@ impl View for PosEntry {
                     return;
                 }
                 let d = if e.key == Key::Up { 4 } else { 1 };
-                s = PosEntry { row: (s.row + d) % 5, buf: [0; 5], n: 0 };
+                s = PosEntry { row: (s.row + d) % 5, ..PosEntry::new() };
             }
             (Key::Menu, Short) => {
                 if keep(app, s) {
