@@ -384,6 +384,9 @@ pub struct App {
     pub(crate) monitor: u8,
     /// Quick mute (\* on home, HOME-15): slots received but never heard, a bit per slot. RAM only.
     pub(crate) mute: u8,
+    /// Slots turned off (\* on home cycles Normal, Muted, Off: HOME-15.1): not received or watched, a bit per slot.
+    /// Never with a mute bit. RAM only, as the mute.
+    pub(crate) off: u8,
     out: Outbox,
     /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
     /// the owner drains after every input.
@@ -486,6 +489,7 @@ impl App {
             last_rx: (0xFF, 0, 0, i16::MIN),
             monitor: 0,
             mute: ((set.aprs_mode && set.aprs_mute) as u8) << aprs::APRS_SLOT, // APRS-15.1: muted at power on in APRS mode
+            off: 0,
             out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),
@@ -1548,7 +1552,27 @@ impl App {
         if self.low_power() {
             return 0; // PWR-24.4: the active slot alone
         }
-        [0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT
+        ([0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT) & !self.off // WATCH-2.1
+    }
+
+    /// HOME-15.1: slot `s` is turned off.
+    pub(crate) fn slot_off(&self, s: u8) -> bool {
+        self.off & 1 << s != 0
+    }
+
+    /// HOME-15.4: what an off active slot can't do (PTT, a scan, monitor) is refused with a toast and the refusal
+    /// beep. True when refused.
+    pub(crate) fn off_refuse(&mut self, s: u8) -> bool {
+        if !self.slot_off(s) {
+            return false;
+        }
+        self.beep_refused();
+        let mut t = Buf::<16>::new();
+        t.set(b"Slot ");
+        t.push(&[b'A' + s]);
+        t.push(b" is off");
+        self.show_toast(t.as_bytes(), b"* turns it back on", false);
+        true
     }
 
     /// The radio-wide settings the Radio task keeps: scan inputs (0 1 6 3, SCAN-22) and the subtone level

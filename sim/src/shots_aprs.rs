@@ -118,6 +118,7 @@ pub fn run(scale: u32) {
     // APRS-17 (decision 313): the card in each header state, small and large. APRS mode muted C as it came on
     // (APRS-15.1): "Muted" in the header like every card, "APRS first" beside it while A shares the VHF chip.
     s.save("aprsmode-card-muted");
+    s.save_rx("aprsmode-card-rxmuted"); // HOME-15.3: "Muted" with the bold RX beside it
     s.keys(&[Key::Slot, Key::Slot]); // C
     s.save("aprsmode-card-muted-big");
     s.save_rx("aprsmode-card-rxmuted-big"); // "RX muted": the state wins, the priority hides

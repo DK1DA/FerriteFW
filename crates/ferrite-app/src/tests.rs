@@ -150,8 +150,9 @@ fn ram_is_small() {
     // battery % Auto looks at, the side keys' hold time, 0 7 7's new list's remembered row and the bar's mark), 8
     // with padding, to 1552; its home's last reception (PWR-24.8: slot, opened, closed, peak: 11 bytes), 16 with
     // padding, to 1568; each slot's scan's last hit for Return to (SCAN-6: 3 x 4 bytes), 16 with padding, to 1584;
-    // the beacon comment and ambiguity (APRS-50, APRS-51: 41 bytes in the App's AprsCfg), 40 with padding, to 1624
-    assert!(n <= 1624, "App is {n} bytes");
+    // the beacon comment and ambiguity (APRS-50, APRS-51: 41 bytes in the App's AprsCfg), 40 with padding, to 1624;
+    // the slots turned off (HOME-15.1: a byte), 8 with padding, to 1632
+    assert!(n <= 1632, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -1031,6 +1032,7 @@ mod help;
 mod tonehint;
 /// Quick mute (HOME-15).
 mod mute;
+mod slot_off;
 /// The quick menu on hold \* (HOME-17).
 mod qmenu;
 /// The UI readback (LINK-19).

@@ -44,6 +44,9 @@ pub fn side2(app: &mut App, store: &impl ChannelStore) {
     if app.low_power() {
         return app.lpm_refuse(); // PWR-24.4
     }
+    if app.off_refuse(a) {
+        return; // HOME-15.4: an off slot doesn't scan
+    }
     app.radio.clear_hits();
     app.radio.hits_seen = 0;
     app.radio.zones = 0;

@@ -274,6 +274,8 @@ struct Radio {
     monitor: u8,
     /// Quick mute from the UI, a bit per slot (HOME-15): still received, never on the speaker.
     user_mute: u8,
+    /// Slots turned off from the UI, a bit per slot (HOME-15.1): no chip listens to them, never on the speaker.
+    user_off: u8,
     /// Each slot's tone hint (TSRCH-12 to TSRCH-15): when to measure the tone on a carrier its tone squelch keeps
     /// shut, and what was heard.
     hints: [Hint; SLOTS],
@@ -749,6 +751,7 @@ pub async fn task() {
         floor: [-125; 2],
         monitor: 0,
         user_mute: 0,
+        user_off: 0,
         hints: [Hint::new(); SLOTS],
         scan_tx: false,
         tone_level: 1,

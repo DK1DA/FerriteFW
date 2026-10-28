@@ -113,6 +113,9 @@ pub enum RadioCmd {
     /// Quick mute (HOME-15), a bit per slot: these slots still receive (squelch, S-meter, the green LED) but their
     /// audio never reaches the speaker, and they never take it from another slot (WATCH-3). RAM only.
     Mute(u8),
+    /// Slots turned off (\* cycles a slot Normal, Muted, Off: HOME-15.1), a bit per slot: no chip listens to them,
+    /// the active one too, so their watch turns go to the others (WATCH-2.1); never heard, never scanned. RAM only.
+    SlotOff(u8),
     /// Scanning: go on up or down from here (SCAN-16); `resume` leaves the hit it is stopped on at once.
     ScanDir { slot: u8, up: bool, resume: bool },
     /// Band scope sweep around a centre at a step (10 Hz units), with the last [`RadioCmd::ScopeCfg`]; off when

@@ -41,10 +41,12 @@ pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
     (y, h(s))
 }
 
-/// What a card shows: a slot's own (0), the APRS card (1, APRS-17) or the broadcast card (2, BCR-26). A change
-/// redraws the card whole.
+/// What a card shows: a slot's own (0), the APRS card (1, APRS-17), the broadcast card (2, BCR-26) or an off
+/// slot's (3, HOME-15.2). A change redraws the card whole.
 pub(crate) fn card_kind(app: &App, s: u8) -> u8 {
-    if app.aprs_slot(s) {
+    if app.slot_off(s) {
+        3
+    } else if app.aprs_slot(s) {
         1
     } else if app.in_bcast_band(s) {
         2
@@ -404,6 +406,7 @@ impl View for Home {
             // KEY-22: SIDE2 held alone opens the frequency counter when it comes up; SIDE2 + knob or ▲▼ (big
             // steps) never does, whenever the knob turns.
             (Key::Side(2), LongUp) => app.open(Dest::Counter),
+            (Key::Side(1), Short) if app.off_refuse(app.active) => {} // HOME-15.4
             (Key::Side(1), Short) => {
                 // A tap latches monitor on the active slot until tapped again; its card says MON.
                 let a = app.active;
@@ -530,20 +533,99 @@ fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
     }
 }
 
-/// HOME-15: \* mutes or unmutes the active slot: it still receives (state, S-meter, the green LED), but its audio
-/// never reaches the speaker and never holds it from a watched slot. RAM only; it stays with the slot until \* again.
+/// HOME-15, HOME-15.1: \* cycles the active slot Normal, Muted, Off, Normal. Muted: it still receives (state,
+/// S-meter, the green LED), but its audio never reaches the speaker and never holds it from a watched slot. Off: no
+/// chip listens to it at all, so its watch turns go to the other slots. The APRS slot keeps Normal and Muted. RAM
+/// only; each stays with its slot until \* again.
 fn quick_mute(app: &mut App) {
     let a = app.active;
-    app.mute ^= 1 << a;
+    let bit = 1 << a;
+    let (word, then): (&[u8], &[u8]) = if app.off & bit != 0 {
+        app.off &= !bit;
+        (b" on", b"")
+    } else if app.mute & bit != 0 && !app.aprs_slot(a) {
+        // HOME-15.1: muted to off; a latched monitor goes with it
+        (app.mute, app.off) = (app.mute & !bit, app.off | bit);
+        if app.monitor & bit != 0 {
+            app.monitor &= !bit;
+            app.out.push(RadioCmd::Monitor { slot: a, on: false });
+        }
+        (b" off", b"* again to turn on")
+    } else {
+        app.mute ^= bit;
+        if app.mute & bit != 0 {
+            (b" muted", if app.aprs_slot(a) { b"* again to hear it".as_slice() } else { b"* again turns it off" })
+        } else {
+            (b" unmuted", b"")
+        }
+    };
     app.out.push(RadioCmd::Mute(app.mute));
+    app.out.push(RadioCmd::SlotOff(app.off));
+    app.out.push(RadioCmd::Watch(app.watch_mask())); // WATCH-2.1: an off slot's turns go to the others
     if a == crate::aprs::APRS_SLOT && app.set.aprs_mode {
-        app.set.aprs_mute = app.mute & 1 << a != 0; // APRS-2: \* on C in APRS mode is 0 5 9 6
+        app.set.aprs_mute = app.mute & bit != 0; // APRS-2: \* on C in APRS mode is 0 5 9 6
     }
     let mut t = Buf::<16>::new();
     t.set(b"Slot ");
     t.push(&[b'A' + a]);
-    t.push(if app.mute & 1 << a != 0 { b" muted" } else { b" unmuted" });
-    app.show_toast(t.as_bytes(), if app.mute & 1 << a != 0 { b"* again to hear it" } else { b"" }, false);
+    t.push(word);
+    app.show_toast(t.as_bytes(), then, false);
+}
+
+/// HOME-15.2: an off slot's card, powered down (mock-up O1): no surface, a dashed outline (dim; blue on the active
+/// card, which keeps its size so SLOT still shows where it is), the letter dim, a dim header naming what the slot is
+/// on with "Off" at its right, a big dim "OFF" in the middle and "\* turns it back on" under it.
+fn off_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, s: u8, y: i32, h: i32, big: bool) {
+    let p = s as usize;
+    let line = if big { BLUE } else { DIM };
+    if app.dirty(R_FRAME + p, hash(&(s, y, h, line, 3u8))) {
+        app.drawn.card[p] = hash(&(s, y, h, 3u8)) | 1;
+        lcd.fill(6, y, 228, h, BG);
+        // 4 px dashes, 3 px gaps, the corners left open
+        for i in (3..225).step_by(7) {
+            let n = 4.min(225 - i);
+            lcd.fill(6 + i, y, n, 1, line);
+            lcd.fill(6 + i, y + h - 1, n, 1, line);
+        }
+        for j in (3..h - 3).step_by(7) {
+            let n = 4.min(h - 3 - j);
+            lcd.fill(6, y + j, 1, n, line);
+            lcd.fill(233, y + j, 1, n, line);
+        }
+        let (font, base, hint) = if big { (&NAME_26, y + 70, y + 96) } else { (&NAME_22, y + 45, y + 60) };
+        let top = base - font.ascent as i32;
+        w::field(lcd, 14, 212, top, top + font.line_h as i32, base, Align::Center, b"OFF", font, DIM, BG);
+        w::field(lcd, 14, 212, hint - 13, hint + 4, hint, Align::Center, b"* turns it back on", &UI_12, SUB, BG);
+        app.drawn.hash[R_HEAD + p] = 0;
+        app.drawn.meter[p] = None;
+    }
+    // The header: "VFO · VHF · 146.520", or a channel's number and name (its frequency without one).
+    let sl = &app.slots[p];
+    let mut head = Buf::<32>::new();
+    let name = app.chan_name(s, cx.live);
+    if sl.on_channel() {
+        slot::chan_num(sl.ch.map_or(0, |c| c.num), &mut head);
+    } else {
+        app.head_text(s, cx.live, cx.store, &mut head);
+    }
+    head.push(" \u{b7} ".as_bytes());
+    if name.is_empty() {
+        head.push(slot::mhz3(app.tuned_freq(s)).as_bytes());
+    } else {
+        head.push(name.as_bytes());
+    }
+    if app.dirty(R_HEAD + p, hash(&(s, &head, big))) {
+        let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 5, y + 18) };
+        // the letter, dim (as [`w::badge`] draws an outlined one)
+        lcd.fill(14, hy + 1, 14, 14, BG);
+        lcd.frame_r(14, hy + 1, 13, 13, 1, DIM);
+        lcd.text4_rows(17, hy + 12, &[b'A' + s], &UI_12B, DIM, BG, hy + 2, hy + 13);
+        let ow = text4_width(b"Off", &UI_12);
+        let hw = 226 - ow - 8 - 34;
+        lcd.fill(28, hy, 6, 17, BG);
+        w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, DIM, BG);
+        w::field(lcd, 34 + hw, ow + 8, hy, hy + 17, hb, Align::Right, b"Off", &UI_12, SUB, BG);
+    }
 }
 
 /// Card `s` of the cards layout: its frame when it changed, and every part of it that changed.
@@ -556,9 +638,14 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     let lv = live.slots[s as usize];
     // APRS-17.6 (decision 313): the APRS card's state is every card's, Muted and RX muted included
     let (state, sc) = app.state(s, live);
-    let border = if state == "TX" { RED } else if big { BLUE } else if state == "RX" { GREEN } else { LINE };
-    let aprs = app.aprs_slot(s);
     let kind = card_kind(app, s);
+    if kind == 3 {
+        return off_card(app, lcd, cx, s, y, h, big);
+    }
+    // HOME-15.3: muted while receiving is "Muted" with the RX tag beside it, and the border of any receive
+    let rxm = state == "RX muted";
+    let border = if state == "TX" { RED } else if big { BLUE } else if state == "RX" || rxm { GREEN } else { LINE };
+    let aprs = app.aprs_slot(s);
     let geom = hash(&(s, y, h, kind)) | 1;
     let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
     if !app.dirty(R_FRAME + p, hash(&(s, y, h, border, kind))) {
@@ -654,7 +741,13 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         } else if big {
             ferrite_ui::canvas::banded(lcd, sx, y + 6, 228 - sx, 18, SURFACE, |lcd| {
                 // the state at the right (a tag, or its word; idle shows nothing), the clarifier or APRS priority left of it
-                let right = if tagged {
+                let right = if rxm {
+                    // HOME-15.3: the RX tag at the right, "Muted" left of it
+                    w::tag(lcd, 226, y + 7, b"RX", GREEN, SURFACE);
+                    let mw = text4_width(MUTED, &UI_12);
+                    w::field(lcd, 194 - mw, mw, y + 7, y + 24, y + 20, Align::Right, MUTED, &UI_12, AMBER, SURFACE);
+                    194 - mw - 8
+                } else if tagged {
                     w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                     194
                 } else if state != "idle" {
@@ -671,11 +764,18 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
             let (t, c, f) = compact_state(state, &clr, sc, clr_c);
             let tw = text4_width(t, f);
             w::field(lcd, 226 - tw, tw, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
+            // HOME-15.3: "Muted" left of the bold RX
+            let mut sx_ = 226 - tw;
+            if rxm {
+                let mw = text4_width(MUTED, &UI_12) + 8;
+                sx_ -= mw;
+                w::field(lcd, sx_, mw, hy, hy + 17, hb, Align::Left, MUTED, &UI_12, AMBER, SURFACE);
+            }
             // APRS-21: the priority left of a state that isn't idle (an idle compact card shows it in idle's place)
             let note: &[u8] = if state != "idle" { clr.as_bytes() } else { b"" };
-            let gx = (226 - tw - 8).max(sx);
+            let gx = (sx_ - 8).max(sx);
             w::field(lcd, sx, gx - sx, hy, hy + 17, hb, Align::Right, note, &UI_12, clr_c, SURFACE);
-            lcd.fill(gx, hy, 226 - tw - gx, 17, SURFACE);
+            lcd.fill(gx, hy, sx_ - gx, 17, SURFACE);
         }
     }
     if aprs {
@@ -899,9 +999,15 @@ pub(crate) fn copy_to_vfo(app: &mut App) {
     app.show_toast(b"Copied to VFO", b"V/M: channel", false);
 }
 
+/// HOME-15.3: the word muted while receiving shows beside the RX tag.
+const MUTED: &[u8] = b"Muted";
+
 /// A compact card's header state: the clarifier (or APRS-21's priority) in its colour `cc` when idle with one, else the
-/// state (RX in bold).
+/// state (RX in bold; muted while receiving the bold RX, with "Muted" left of it, HOME-15.3).
 fn compact_state<'a>(state: &'a str, clr: &'a Buf<16>, sc: u16, cc: u16) -> (&'a [u8], u16, &'static ferrite_ui::font4::Font4) {
+    if state == "RX muted" {
+        return (b"RX", GREEN, &UI_12B);
+    }
     let f = if matches!(state, "RX" | "TX") { &UI_12B } else { &UI_12 };
     if state == "idle" && !clr.is_empty() { (clr.as_bytes(), cc, f) } else { (state.as_bytes(), sc, f) }
 }
@@ -912,12 +1018,14 @@ pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
     let cw = if clr.is_empty() { 0 } else { text4_width(clr.as_bytes(), &UI_12) };
     // the note beside a state word (the APRS priority, APRS-21): the word, 8 px, the note
     let beside = |w: i32| if cw > 0 { w + 8 + cw } else { w };
+    let muted = if state == "RX muted" { text4_width(MUTED, &UI_12) + 8 } else { 0 };
     if !big {
         let (t, _, f) = compact_state(state, clr, 0, 0);
-        let w = text4_width(t, f);
+        let w = text4_width(t, f) + muted;
         return if state == "idle" { w } else { beside(w) };
     }
     match state {
+        "RX muted" => beside(32 + muted - 8), // HOME-15.3: the RX tag and "Muted" left of it
         "RX" | "TX" | "MON" | "FM" => (text4_width(state.as_bytes(), &UI_12B) + 10).max(if cw > 0 { 32 + cw } else { 0 }),
         "idle" => cw,
         _ => beside(text4_width(state.as_bytes(), &UI_12)),

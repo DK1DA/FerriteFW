@@ -118,7 +118,8 @@ fn main() {
     app.settings_mut().backlight = 0; // shots: the screen never goes dark (lights tested in ferrite-app)
     fake::sample(&mut app, &store, &mut radio);
     let mut t = 0u32;
-    let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| {
+    // (returns whether A's squelch is open, for a shot of A receiving)
+    let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| -> bool {
         while *t <= until {
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
@@ -131,6 +132,7 @@ fn main() {
             app.render(fb, &radio.live, &dev, &store);
             *t += 20;
         }
+        radio.live.slots[0].squelch_open
     };
     let press = |app: &mut App, key: Key, hold: u32, t: &mut u32| {
         app.key_down(key, *t, &store);
@@ -332,6 +334,30 @@ fn main() {
     shot!(600, "home-monitor");
     press(&mut app, Key::Side(1), 100, &mut t);
     run(&mut app, &mut fb, t, &mut t);
+    // HOME-15.1 – HOME-15.3: \* cycles A Normal, Muted, Off. Muted while it receives (the fake's carrier on A is up
+    // 6-9 s of every 10): "Muted" with the RX tag, large and small; then off, the active card and a small one.
+    let rx_at = |t: u32| (t + 3_200).div_ceil(10_000) * 10_000 + 7_500;
+    // (A on 446.000 meanwhile: C's airband scan holds the VHF chip)
+    app.set_vfo(0, 44_600_000);
+    press(&mut app, Key::Star, 100, &mut t);
+    let until = rx_at(t);
+    shot!(until - t, "home-rxmuted");
+    press(&mut app, Key::Slot, 100, &mut t);
+    // (watched, A shares its chip with B and holds it only for its turns: the first frame it reads open)
+    run(&mut app, &mut fb, rx_at(t) - 1_500, &mut t);
+    while !run(&mut app, &mut fb, t, &mut t) {}
+    save(&fb, "home-rxmuted-small", scale);
+    press(&mut app, Key::Slot, 100, &mut t);
+    press(&mut app, Key::Slot, 100, &mut t); // A
+    press(&mut app, Key::Star, 100, &mut t);
+    shot!(3_500, "home-off-active");
+    press(&mut app, Key::Slot, 100, &mut t); // B
+    shot!(3_500, "home-off");
+    press(&mut app, Key::Slot, 100, &mut t);
+    press(&mut app, Key::Slot, 100, &mut t); // A
+    press(&mut app, Key::Star, 100, &mut t); // on again
+    app.set_vfo(0, 14_652_000);
+    run(&mut app, &mut fb, t + 3_500, &mut t);
     // Scan: SIDE2 on A, 9 s in (a hit every 7 s).
     press(&mut app, Key::Side(2), 100, &mut t);
     shot!(9000, "scan");

@@ -365,9 +365,9 @@ fn strip_off_while_broadcast() {
     r.expect_text("+112k");
 }
 
-/// HOME-15: \* on home mutes the active slot: its card says Muted, then RX muted while its carrier is on (the fake
-/// radio still opens its squelch and moves its meter); \* again and it is heard as before. On the broadcast slot \*
-/// keeps the broadcast off the speaker until pressed again.
+/// HOME-15, HOME-15.1, HOME-15.3: \* on home mutes the active slot: its card says Muted, then Muted with the RX tag
+/// while its carrier is on (the fake radio still opens its squelch and moves its meter); \* again turns it off (OFF
+/// on its card) and a third \* back on, heard as before. On the broadcast slot \* keeps the broadcast off the speaker.
 #[test]
 fn quick_mute() {
     use ferrite_core::msg::ModeLive;
@@ -388,9 +388,11 @@ fn quick_mute() {
         }
     }
     assert!(seen, "A still receives");
-    r.wait(100).expect_text("RX muted");
+    r.wait(100).expect_text("Muted RX");
+    r.press(Key::Star).wait(100).expect_text("OFF");
+    assert!(r.take_cmds().contains(&RadioCmd::SlotOff(0b001)));
     r.press(Key::Star).wait(100);
-    assert!(!r.text().contains("Muted") && !r.text().contains("RX muted"));
+    assert!(!r.text().contains("Muted") && !r.text().contains("OFF"));
     // The broadcast slot: muted, the broadcast is never heard.
     r.event(Event::FmStation).wait(2500);
     assert_eq!(r.sim.app().bcast_slot(), Some(0));

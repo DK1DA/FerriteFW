@@ -92,6 +92,7 @@ impl Radio {
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
             RadioCmd::Mute(m) => self.user_mute = m,
+            RadioCmd::SlotOff(m) => self.user_off = m,
             RadioCmd::ScanTx(on) => self.scan_tx = on,
             RadioCmd::ToneLevel(l) => self.tone_level = l.min(2),
             RadioCmd::BeepVol(v) => {
