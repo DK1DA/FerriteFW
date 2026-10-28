@@ -34,6 +34,7 @@ mod text;
 mod tones;
 mod transmit;
 mod xb;
+mod zones;
 
 /// An app on the sample records, a clock, a quiet radio and a panel.
 pub(super) struct T {
