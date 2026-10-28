@@ -194,6 +194,36 @@ fn predictive_no_word_does_not_send() {
     assert!(t.app.text.is_empty());
 }
 
+/// TEXT-3, TEXT-12: keys that spell nothing stop a held digit, 1's mark and \u{25c0} too ("No word"); PTT's send takes
+/// a word being predicted as it stands.
+#[test]
+fn predictive_no_word_other_keys() {
+    let mut t = T::new();
+    compose(&mut t, b"VE3KPW-9", b"Hi ");
+    for _ in 0..4 {
+        t.tap(Key::Digit(9));
+    }
+    for k in [Key::Digit(1), Key::Left] {
+        t.app.toast = None;
+        t.tap(k);
+        assert_eq!(t.toast(), "No word / hold * to spell it", "{k:?}");
+    }
+    t.app.toast = None;
+    t.hold(Key::Digit(7));
+    assert_eq!(t.toast(), "No word / hold * to spell it");
+    assert_eq!(draft(&t), "Hi ");
+    for _ in 0..4 {
+        t.tap(Key::Exit);
+    }
+    for k in [4, 6, 6, 3] {
+        t.tap(Key::Digit(k));
+    }
+    let n = t.s.messages();
+    msgs::send(&mut t.app, &t.s);
+    assert_eq!(t.s.messages(), n + 1, "sent with the word in it");
+    assert!(t.s.message(0).unwrap().text.as_bytes().starts_with(b"Hi "));
+}
+
 /// TEXT-5: holding a digit, or 1's mark, past the limit beeps and says so; a word too long for the room too.
 #[test]
 fn predictive_limit_paths() {

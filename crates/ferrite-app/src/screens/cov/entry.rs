@@ -101,7 +101,7 @@ fn range_edges() {
     assert_eq!(t.toast(), "No preset / deleted meanwhile");
 }
 
-/// A4, A10, VFO-25, SCOPE-3: each target's heading and tip.
+/// A4, A10, SCOPE-3: each target's heading and tip.
 #[test]
 fn headings() {
     let mut t = T::ready();
