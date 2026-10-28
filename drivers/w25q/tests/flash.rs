@@ -159,3 +159,71 @@ fn read_only_build_sends_only_reads() {
     assert_eq!(f.read(0x3FFFFF, &mut [0, 0]), Err(Error::OutOfRange));
     assert!(f.release().txns.iter().all(|t| matches!(t.out[0], 0x03 | 0x9F | 0x4B | 0x05 | 0xAB)));
 }
+
+/// Start-up wakes the chip (ABh alone, then at least tRES1 = 3 us) and reads the JEDEC ID; a bus with no chip
+/// (all ones or all zeros) or a capacity byte out of 0x10..=0x19 is refused.
+#[test]
+fn start_up_wakes_then_refuses_unknown_chips() {
+    for (id, ok) in [([0xFF, 0xFF, 0xFF], None), ([0, 0, 0], None), ([0xEF, 0x40, 0x0F], None), ([0xEF, 0x40, 0x1A], None), ([0xC8, 0x40, 0x10], Some(64 << 10)), ([0xC8, 0x40, 0x19], Some(32 << 20))] {
+        let mut delay = MockDelay::default();
+        let spi = MockSpi::new(move |sent: &[u8], _| match sent.first() {
+            Some(0x9F) => id[sent.len() - 1],
+            _ => 0,
+        });
+        match W25q::new(spi, &mut delay, WRITABLE) {
+            Ok(f) => {
+                assert_eq!(Some(f.size()), ok, "{id:02X?}");
+                let t = f.release().txns;
+                assert_eq!(t.len(), 2);
+                assert_eq!((t[0].out.as_slice(), t[1].out.as_slice()), (&[0xAB][..], &[0x9F, 0, 0, 0][..]));
+            }
+            Err(e) => assert!(e == Error::UnknownChip && ok.is_none(), "{id:02X?}"),
+        }
+        assert!(delay.total_us >= 3);
+    }
+}
+
+/// Power-down is B9h alone; wake is ABh alone, then a wait of at least tRES1 (3 us).
+#[test]
+fn power_down_and_wake() {
+    let (mut f, _, _) = setup();
+    let mut delay = MockDelay::default();
+    f.power_down();
+    f.wake(&mut delay);
+    assert!(delay.total_us >= 3);
+    let t = f.release().txns;
+    let n = t.len();
+    assert_eq!((t[n - 2].out.as_slice(), t[n - 1].out.as_slice()), (&[0xB9][..], &[0xAB][..]));
+}
+
+#[test]
+#[cfg(feature = "write")]
+fn program_and_erase_past_the_end_or_stuck() {
+    let (mut f, chip, mut delay) = setup();
+    // Past the chip's end: out of range before the writable ranges are looked at.
+    assert_eq!(f.program(0x3FFFFF, &[0, 0], &mut delay), Err(Error::OutOfRange));
+    assert_eq!(f.erase(0x400000, &mut delay), Err(Error::OutOfRange));
+    assert_eq!(f.erase(0x000000, &mut delay), Err(Error::Protected));
+    assert_eq!(delay.total_us, 50); // only the start-up wake's
+    // A chip that stays busy after a page program: given up after 3 ms (tPP max), the rest not sent.
+    chip.borrow_mut().stuck = true;
+    assert_eq!(f.program(0x02C0F0, &[0; 32], &mut delay), Err(Error::Timeout));
+    assert_eq!(delay.total_us, 50 + 3_000);
+    assert_eq!(f.release().txns.iter().filter(|t| t.out[0] == 0x02).count(), 1);
+}
+
+/// A blocking erase: write enable, 20h with the address, then status polls until the chip is idle.
+#[test]
+#[cfg(feature = "write")]
+fn blocking_erase_sends_enable_erase_then_polls() {
+    let (mut f, chip, mut delay) = setup();
+    chip.borrow_mut().mem[0x200000] = 0;
+    f.erase(0x200000, &mut delay).unwrap();
+    assert_eq!(chip.borrow().mem[0x200000], 0xFF);
+    assert_eq!(delay.total_us, 50 + 5 * 50);
+    let t = f.release().txns;
+    let ops: Vec<&[u8]> = t[2..].iter().map(|t| t.out.as_slice()).collect();
+    assert_eq!(&ops[..2], &[&[0x06][..], &[0x20, 0x20, 0x00, 0x00][..]]);
+    assert_eq!(ops.len(), 2 + 6);
+    assert!(ops[2..].iter().all(|o| *o == [0x05, 0]));
+}

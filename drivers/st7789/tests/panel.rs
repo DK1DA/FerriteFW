@@ -1,6 +1,9 @@
 //! The driver against a recording bus.
 
-use st7789::{Bus8080, St7789, Step, CASET, DISPON, RAMWR, RASET, STARTUP, VSCRDEF, VSCSAD};
+use st7789::{
+    Bus8080, St7789, Step, CASET, DISPOFF, DISPON, IDMOFF, IDMON, INVOFF, INVON, NORON, PTLAR, PTLON, RAMWR, RASET, SLPIN, SLPOUT, STARTUP,
+    VSCRDEF, VSCSAD,
+};
 use uradio_bus::mock::MockDelay;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -75,4 +78,92 @@ fn scrolling() {
     p.scroll_to(100);
     let ev = p.release().0;
     assert_eq!(ev, vec![Ev::Cmd(VSCRDEF), Ev::Data(vec![0, 20, 1, 24, 0, 20]), Ev::Cmd(VSCSAD), Ev::Data(vec![0, 100])]);
+}
+
+#[test]
+fn size_is_what_it_was_built_with() {
+    let p = St7789::new(Rec::default(), 240, 320);
+    assert_eq!((p.width(), p.height()), (240, 320));
+    // `new` sends nothing.
+    assert!(p.release().0.is_empty());
+}
+
+/// Each mode switch is one bare command with the datasheet's code (chapter 9: 10h/11h sleep, 20h/21h inversion,
+/// 28h/29h display, 38h/39h idle).
+#[test]
+fn mode_switches_are_single_commands() {
+    let mut p = St7789::new(Rec::default(), 240, 320);
+    p.on(true);
+    p.on(false);
+    p.invert(true);
+    p.invert(false);
+    p.sleep(true);
+    p.sleep(false);
+    p.idle(true);
+    p.idle(false);
+    let ev = p.release().0;
+    let want: Vec<Ev> = [DISPON, DISPOFF, INVON, INVOFF, SLPIN, SLPOUT, IDMON, IDMOFF].iter().map(|&c| Ev::Cmd(c)).collect();
+    assert_eq!(ev, want);
+    assert_eq!([DISPON, DISPOFF, INVON, INVOFF, SLPIN, SLPOUT, IDMON, IDMOFF], [0x29, 0x28, 0x21, 0x20, 0x10, 0x11, 0x39, 0x38]);
+}
+
+/// Partial mode: PTLAR (30h) with start and end rows high byte first, then PTLON (12h); back with NORON (13h).
+#[test]
+fn partial_mode_and_back() {
+    let mut p = St7789::new(Rec::default(), 240, 320);
+    p.partial(Some((10, 300)));
+    p.partial(None);
+    let ev = p.release().0;
+    assert_eq!(ev, vec![Ev::Cmd(PTLAR), Ev::Data(vec![0, 10, 1, 44]), Ev::Cmd(PTLON), Ev::Cmd(NORON)]);
+    assert_eq!((PTLAR, PTLON, NORON), (0x30, 0x12, 0x13));
+}
+
+#[test]
+fn steps_return_their_waits() {
+    let mut p = St7789::new(Rec::default(), 240, 320);
+    assert_eq!(p.step(Step::Wait(150)), Some(150));
+    assert_eq!(p.step(Step::Reset(true)), None);
+    assert_eq!(p.step(Step::Command(0x3A, &[0x55])), None);
+    // A command with no data sends no data phase.
+    assert_eq!(p.step(Step::Command(0x01, &[])), None);
+    let ev = p.release().0;
+    assert_eq!(ev, vec![Ev::Reset(true), Ev::Cmd(0x3A), Ev::Data(vec![0x55]), Ev::Cmd(0x01)]);
+}
+
+#[test]
+fn repeat_and_pixels_stream_after_a_window() {
+    let mut p = St7789::new(Rec::default(), 240, 320);
+    assert_eq!(p.window(0, 0, 40, 2), 80);
+    // More than one 32-pixel chunk through the default `pixels`, then a run through `repeat`.
+    let px: Vec<u16> = (0..40u16).map(|i| 0x0100 | i).collect();
+    p.pixels(&px);
+    p.repeat(0x07E0, 40);
+    let ev = p.release().0;
+    let mut want: Vec<u8> = px.iter().flat_map(|c| c.to_be_bytes()).collect();
+    for _ in 0..40 {
+        want.extend_from_slice(&[0x07, 0xE0]);
+    }
+    assert_eq!(ev[5], Ev::Data(want));
+    assert_eq!(ev.len(), 6);
+}
+
+#[test]
+fn off_panel_fill_and_short_blit() {
+    let mut p = St7789::new(Rec::default(), 240, 320);
+    p.fill(0, 320, 10, 10, 0xFFFF); // below the panel: nothing at all
+    p.blit(0, 0, 4, 1, &[0xAAAA, 0xBBBB]); // fewer pixels than the window: only those sent
+    p.blit(0, 0, 1, 1, &[0x1111, 0x2222]); // more: the rest ignored
+    let ev = p.release().0;
+    assert_eq!(ev[..5], [Ev::Cmd(CASET), Ev::Data(vec![0, 0, 0, 3]), Ev::Cmd(RASET), Ev::Data(vec![0, 0, 0, 0]), Ev::Cmd(RAMWR)]);
+    assert_eq!(ev[5], Ev::Data(vec![0xAA, 0xAA, 0xBB, 0xBB]));
+    assert_eq!(ev[11], Ev::Data(vec![0x11, 0x11]));
+    assert_eq!(ev.len(), 12);
+}
+
+#[test]
+fn scroll_area_saturates_when_the_fixed_bars_cover_the_panel() {
+    let mut p = St7789::new(Rec::default(), 240, 320);
+    p.scroll_area(200, 200);
+    let ev = p.release().0;
+    assert_eq!(ev, vec![Ev::Cmd(VSCRDEF), Ev::Data(vec![0, 200, 0, 0, 0, 200])]);
 }
