@@ -2060,4 +2060,51 @@ mod tests {
         std::println!("AprsLive: {n} B, heard entry {} B, out {} B", core::mem::size_of::<Option<Heard>>(), core::mem::size_of::<Option<Out>>());
         assert!(n <= 8_500, "{n}"); // 50 stations (decision 246)
     }
+
+    /// APRS-3: the heard list's symbol from the table and code: a house only from the primary table, the rest from
+    /// either; anything else a handheld.
+    #[test]
+    fn symbols() {
+        for (t, c, s) in [
+            (b'/', b'>', Sym::Car),
+            (b'\\', b'j', Sym::Car),
+            (b'/', b'-', Sym::Home),
+            (b'\\', b'-', Sym::Ht),
+            (b'/', b'#', Sym::Digi),
+            (b'/', b'_', Sym::Wx),
+            (b'\\', b'&', Sym::IGate),
+            (b'/', b'&', Sym::IGate),
+            (b'/', b'k', Sym::Truck),
+            (b'\\', b'u', Sym::Truck),
+            (b'/', b's', Sym::Boat),
+            (b'/', b'Y', Sym::Boat),
+            (b'/', b'[', Sym::Ht),
+        ] {
+            assert_eq!(sym(t, c), s, "{}{}", t as char, c as char);
+        }
+    }
+
+    /// APRS-35: a general query's footprint: decimal degrees and miles; anything malformed is none; the distance
+    /// test wraps at the date line.
+    #[test]
+    fn footprints() {
+        assert_eq!(footprint(b"34.02,-117.15,0200"), Some(((34_020_000, -117_150_000), 200 * 1609)));
+        assert_eq!(footprint(b" 45 , -75.5 , 10 "), Some(((45_000_000, -75_500_000), 10 * 1609)));
+        for bad in [&b"34.02,-117.15"[..], b"34.02,-117.15,", b"91,0,5", b"0,181,5", b"0,0,123456", b"0,0,5,6", b"x,0,5", b"1.1234567,0,5", b"1234,0,5", b".5,0,5"] {
+            assert_eq!(footprint(bad), None, "{}", core::str::from_utf8(bad).unwrap());
+        }
+        // across the date line: 179.9 E and 179.9 W are about 22 km apart at the equator
+        assert!(within((0, 179_900_000), (0, -179_900_000), 30_000));
+        assert!(within((0, -179_900_000), (0, 179_900_000), 30_000));
+        assert!(!within((0, 179_900_000), (0, -179_900_000), 10_000));
+        assert_eq!(degrees(b"-0.5"), Some(-500_000));
+    }
+
+    /// A message number as its digits.
+    #[test]
+    fn message_numbers() {
+        assert_eq!(num(7).as_bytes(), b"7");
+        assert_eq!(num(42).as_bytes(), b"42");
+        assert!(AprsLive::default().stations() == 0);
+    }
 }

@@ -1041,6 +1041,8 @@ mod sample;
 mod store;
 /// The App's channel bookkeeping and boot calls.
 mod app_api;
+/// Remote keys and PTT at their edges.
+mod remote_edges;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]
