@@ -511,6 +511,87 @@ mod tests {
         assert!(n.last().starts_with(b"GNGLL,"));
     }
 
+    /// Sends `s` as it is (no checksum added).
+    fn raw(n: &mut Nmea, s: &[u8]) {
+        s.iter().for_each(|&b| {
+            n.feed(b);
+        });
+    }
+
+    /// The number reader: fractions cut or padded to their digits; a second dot, a letter, nothing or too many
+    /// digits refused; a minus only where signed.
+    #[test]
+    fn fixed_point_fields() {
+        assert_eq!(fixed(b"12.345", 2), Some(1234));
+        assert_eq!(fixed(b"12", 2), Some(1200));
+        assert_eq!(fixed(b".5", 1), Some(5));
+        assert_eq!(fixed(b"1.2.3", 1), None);
+        assert_eq!(fixed(b"1a", 0), None);
+        assert_eq!(fixed(b"-1", 0), None);
+        assert_eq!(fixed(b"", 0), None);
+        assert_eq!(fixed(b"1234567890123456", 0), None);
+        assert_eq!(fixed_signed(b"-34.05", 1), Some(-340));
+        assert_eq!(fixed_signed(b"34.05", 1), Some(340));
+    }
+
+    /// Bytes before a `$` are ignored; a NUL ends the line; a checksum too short or not hex is an error; an
+    /// address that isn't five letters is counted but read as nothing.
+    #[test]
+    fn framing_edges() {
+        let mut n = Nmea::default();
+        raw(&mut n, b"noise\r\n");
+        assert_eq!((n.sentences, n.checksum_errors), (0, 0));
+        let body = b"GPGGA,010203,,,,,0,00,,,,,,,";
+        let sum = body.iter().fold(0u8, |a, &b| a ^ b);
+        let line = std::format!("${}*{sum:02X}\0junk\r\n", core::str::from_utf8(body).unwrap());
+        raw(&mut n, line.as_bytes());
+        assert_eq!((n.sentences, n.checksum_errors, n.utc_hms), (1, 0, 10_203));
+        raw(&mut n, b"$GPGGA,1*5\r\n");
+        raw(&mut n, b"$GPGGA,1*ZZ\r\n");
+        raw(&mut n, b"$GPGGA,1\r\n");
+        assert_eq!((n.sentences, n.checksum_errors), (1, 3));
+        feed(&mut n, &["GPGGAX,020000,,,,,1,05,,,,,,,", "GP,1", "GPXYZ,1"]);
+        assert_eq!((n.sentences, n.utc_hms, n.quality), (4, 10_203, 0), "parsed as nothing");
+    }
+
+    /// The fix kinds: without a GSA, GGA's fix with 4 or more satellites is 3D and with fewer 2D; a GSA's mode
+    /// 2 is 2D. Southern and eastern positions, a negative altitude; a position without its hemisphere, or a fix
+    /// with its position fields empty, keeps the last one.
+    #[test]
+    fn fix_kinds_signs_and_missing_fields() {
+        let mut n = Nmea::new();
+        feed(&mut n, &["GPGGA,010203,3352.1234,S,15112.5000,E,1,04,1.2,-12.3,M,,M,,"]);
+        let f = n.fix(0);
+        assert_eq!((f.fix, f.lat, f.lon, f.alt_dm, f.hdop10), (3, -338_687_233, 1_512_083_333, -123, 12));
+        feed(&mut n, &["GPGGA,,,,,,1,03,1.2,5.0,M,,M,,"]);
+        let f = n.fix(0);
+        assert_eq!((f.fix, f.lat, f.lon, n.utc_hms), (2, -338_687_233, 1_512_083_333, 10_203));
+        feed(&mut n, &["GPGGA,010205,3352.1234,S,15112.5000,E,1,08,1.0,5.0,M,,M,,", "GNGSA,A,2,05,,,,,,,,,,,,2.0,1.2,1.6"]);
+        assert_eq!((n.mode, n.fix(0).fix), (2, 2));
+        feed(&mut n, &["GPRMC,010206,A,4525.0000,,07541.8600,W,0.0,0.0,010126,,,A"]);
+        assert_eq!((n.lat_e7, n.lon_e7), (-338_687_233, -756_976_667), "no hemisphere: latitude kept");
+        // RMC valid but cut short: position kept, no speed or course, the date kept.
+        feed(&mut n, &["GPRMC,,A"]);
+        assert!(n.valid);
+        assert_eq!((n.lon_e7, n.speed_kn10, n.course10, n.date_dmy, n.utc_hms), (-756_976_667, 0, 0, 10_126, 10_206));
+    }
+
+    /// GPS-18: a BeiDou GSA without NMEA 4.10's system ID is told by its talker; a GSV of an unknown talker,
+    /// without its total, or with satellites numbered 0 or over 255, adds nothing.
+    #[test]
+    fn beidou_by_talker_and_odd_gsv() {
+        let mut n = Nmea::new();
+        feed(&mut n, &["GNGGA,010203,4525.2950,N,07541.8600,W,1,05,0.9,71.2,M,,M,,", "BDGSA,A,3,07,,,,,,,,,,,,1.0,1.0,1.0"]);
+        feed(&mut n, &["BDGSV,1,1,02,07,40,200,36,00,10,10,10,0", "GPGSV,1,1,01,07,40,200,30,0"]);
+        assert_eq!((n.nsat, n.sats_view), (2, 3));
+        let bd = n.sat[..2].iter().find(|s| s.talker == 3).copied().unwrap();
+        let gp = n.sat[..2].iter().find(|s| s.talker == 0).copied().unwrap();
+        assert!(n.used(&bd) && !n.used(&gp), "BeiDou 7 is used, GPS 7 isn't");
+        feed(&mut n, &["GNGSV,1,1,01,08,40,200,30,0", "GPGSV,1,2,,09,40,200,30,0", "GPGSV,1,2,01,256,40,200,30,0", "GPGSV,1"]);
+        assert_eq!((n.nsat, n.sats_view), (3, 3), "only GPS 9, added to the group");
+        assert_eq!(n.sat[2].prn, 9);
+    }
+
     /// 7 Oct 2026, 14:32:10 UTC near Ottawa, moving at 12.6 kn: what the ATGM336H sends each second.
     pub(crate) const FIX_SECOND: &[&str] = &[
         "GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,71.2,M,-34.0,M,,",

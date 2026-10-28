@@ -1080,4 +1080,44 @@ mod tests {
         }
         assert!(core::mem::size_of::<GpsManager>() <= 40);
     }
+
+    /// GPS-31: a module powered and never heard gets the power cycle after 5 s, once until it is heard again;
+    /// meanwhile it reads as searching.
+    #[test]
+    fn silent_module_cycled_once() {
+        let mut m = GpsManager::new();
+        assert!(m.step(0, &ON, false).power);
+        m.powered(0, true);
+        assert_eq!(m.phase(100), GpsPhase::Searching);
+        assert_eq!(m.step(SILENT_MS - 100, &ON, false), GpsOut { power: true, ..GpsOut::default() });
+        assert_eq!(m.step(SILENT_MS, &ON, true), GpsOut { power: true, ..GpsOut::default() }, "not while keyed (GPS-32)");
+        let out = m.step(SILENT_MS + 100, &ON, false);
+        assert!(out.cycled && !out.power);
+        assert_eq!(m.phase(SILENT_MS + 200), GpsPhase::Waking);
+        assert!(m.step(SILENT_MS + 100 + CYCLE_OFF_MS, &ON, false).power, "on again after the off time");
+        m.powered(SILENT_MS + 600, true);
+        let t = SILENT_MS + 600 + SILENT_MS + 1_000;
+        assert!(!m.step(t, &ON, false).cycled, "still silent: not again");
+        m.sentence(t);
+        m.powered(t, true);
+        assert!(m.step(t + SILENT_MS + 1_000, &ON, false).cycled, "heard since: it may cycle again");
+    }
+
+    /// A five-digit argument (a standby of hours) is written whole, checksum and all.
+    #[test]
+    fn casic_five_digits() {
+        let cs = b"PCAS12,43200".iter().fold(0u8, |a, &c| a ^ c);
+        assert_eq!(cmd(CAS_STANDBY, 43_200), std::format!("$PCAS12,43200*{cs:02X}"));
+    }
+
+    /// TERM-28: the cable log shows CR and LF by name and other control bytes in hex, cut at its room.
+    #[test]
+    fn shown_for_the_cable_log() {
+        let mut out = [0u8; 64];
+        let n = shown(b"$GP\x00\xFF*\r\n", &mut out);
+        assert_eq!(&out[..n], b"$GP<00><FF>*<CR><LF>");
+        let mut small = [0u8; 5];
+        assert_eq!(shown(b"\r\nAB", &mut small), 5);
+        assert_eq!(&small, b"<CR><");
+    }
 }
