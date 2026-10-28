@@ -34,7 +34,6 @@ fn beacon_line(t: &T, d: &D) -> String {
     String::from_utf8_lossy(b.as_bytes()).into_owned()
 }
 
-
 /// APRS-17, APRS-20, APRS-24: the beacon line: waiting (for the relay: HF), off, manual, smart, the countdown in
 /// seconds then minutes, and soon when no time is known.
 #[test]
