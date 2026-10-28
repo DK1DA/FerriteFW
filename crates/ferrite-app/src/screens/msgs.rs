@@ -265,15 +265,15 @@ impl View for Msgs {
 
 // ---- compose (A16) ----
 
-/// Multi-tap letters per digit (KEY-12); 1 has the punctuation.
-const TAPS: [&[u8]; 10] = [b" 0", ".,?!-/@'1".as_bytes(), b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
+/// Multi-tap letters per digit (KEY-12); 1 has the punctuation, the same marks as predictive's (TEXT-2.1).
+const TAPS: [&[u8]; 10] = [b" 0", b".,?!'/-@:1", b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
 /// The same key again within this many ms changes the last letter instead of adding one.
 pub const TAP_MS: u32 = 1000;
 /// APRS limits: an addressee of 9, a message of 67 characters.
 const TO_MAX: usize = 9;
 const TEXT_MAX: usize = 67;
-/// Predictive: what 1 cycles through after a word (TEXT-2).
-const PUNCT: &[u8] = b".,?!'/-";
+/// Predictive: what 1 cycles through (TEXT-2.1). Printable ASCII, none of APRS's | ~ { (TEXT-13).
+const PUNCT: &[u8] = b".,?!'/-@:";
 /// The case of the next predicted word (TEXT-2): Capital, CAPS, lower.
 const PCASES: [&str; 3] = ["Abc", "ABC", "abc"];
 /// Compose's text is the draft's, unless a quick message is being edited (TEXT-7) or the comment (APRS-50).
@@ -312,6 +312,8 @@ pub struct Compose {
 
 const LISTED: u8 = 1;
 const SVC: u8 = 2;
+/// The quick list put away (TEXT-6.1): # ("Write") or any key that types; the knob on an empty message brings it back.
+const WRITE: u8 = 4;
 
 /// Not decided yet: the first key or draw puts the cursor on the text when the draft has a recipient.
 const UNSET: u8 = 255;
@@ -329,7 +331,7 @@ impl Compose {
     fn resolved(self, store: &impl ChannelStore) -> Self {
         let d = store.data().draft();
         let svc = !self.quick_edit_on() && super::contacts::service(d.to.as_bytes()).is_some();
-        let list = self.list & LISTED | if svc { SVC } else { 0 };
+        let list = self.list & (LISTED | WRITE) | if svc { SVC } else { 0 };
         if self.field != UNSET {
             return Compose { list, ..self };
         }
@@ -528,7 +530,7 @@ impl Compose {
         let mut s = self;
         let mut t = text_of(app, store, s);
         let keys = app.text;
-        let quick_list = t.is_empty() && s.tail == 0 && keys.is_empty() && !s.quick_edit_on();
+        let quick_list = t.is_empty() && s.tail == 0 && keys.is_empty() && !s.quick_edit_on() && s.list & WRITE == 0;
         match (e.key, e.press) {
             (Key::Digit(d @ 2..=9), Short) => {
                 if t.len() + keys.len() + 1 > room(s) || keys.len() >= crate::words::WORD_MAX {
@@ -572,6 +574,8 @@ impl Compose {
                 s.pcase = next_case(t.as_bytes(), s.pcase);
             }
             // # (and 0): the word, then a space
+            // TEXT-6.1: # on the quick list puts it away for an empty editor
+            (Key::Hash, Short) if quick_list => {}
             (Key::Hash | Key::Digit(0), Short) => {
                 if !accept(app, &mut s, &mut t) {
                     return true;
@@ -608,6 +612,8 @@ impl Compose {
             }
             _ => return false,
         }
+        // TEXT-6.1: whatever typed (or # on the list) puts the quick list away until the knob brings it back
+        s.list |= WRITE;
         put_text(app, store, s, t);
         app.screen = Screen::Compose(s);
         true
@@ -623,6 +629,11 @@ impl Compose {
             return true;
         }
         if full_of(app, store, self).is_empty() && !self.quick_edit_on() {
+            if self.list & WRITE != 0 {
+                // TEXT-6.1: the quick list back on an empty message
+                app.screen = Screen::Compose(Compose { list: self.list & !WRITE, tail: 0, ..self });
+                return true;
+            }
             let quick = (self.quick as i32 + d).rem_euclid(crate::words::QUICK as i32) as u8;
             app.screen = Screen::Compose(Compose { quick, ..self });
             return true;
@@ -771,6 +782,7 @@ impl View for Compose {
         // the field being typed in, as one buffer
         let mut cur: Buf<67> = if to { Buf::from(d.to.as_bytes()) } else { text_of(app, store, s) };
         let max = if to { TO_MAX } else { room(s) };
+        s.punct = 0; // 1 starts a new mark after anything else (a BACK, too)
         match (e.key, e.press) {
             (Key::Digit(k), Short) => {
                 let set = TAPS[k as usize];
@@ -883,10 +895,10 @@ impl View for Compose {
         let (word, matched, drop) = if pred && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), self) } else { (Buf::new(), true, 0) };
         // a phrase's short form shows in place of the words it replaces (TEXT-4)
         let text = Buf::<67>::from(&head.as_bytes()[..head.len() - drop]);
-        let quick_list = pred && self.field == 1 && full.is_empty() && keys.is_empty() && !self.quick_edit_on();
+        let quick_list = pred && self.field == 1 && full.is_empty() && keys.is_empty() && !self.quick_edit_on() && self.list & WRITE == 0;
         let listed = quick_list || self.book_up(cx.store);
         if listed != (self.list & LISTED != 0) {
-            app.screen = Screen::Compose(Compose { list: self.list & SVC | listed as u8, ..self });
+            app.screen = Screen::Compose(Compose { list: self.list & (SVC | WRITE) | listed as u8, ..self });
         }
         let pending_tap = self.key != 0;
         // the recipient, or which quick message this is
@@ -964,12 +976,15 @@ impl View for Compose {
             }
         }
         let callsign = cx.store.data().callsign();
-        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head, self.list & SVC);
+        let marks = pred && self.field == 1 && keys.is_empty() && self.punct > 0;
+        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head, self.list & SVC, (marks, self.punct, full.is_empty()));
         if app.dirty(R_NOTE, hash(&strip)) {
             let y = 236;
             ferrite_ui::canvas::banded(lcd, 0, y, 240, 60, BG, |lcd| {
                 if pred && self.field == 1 && !keys.is_empty() {
                     candidate_strip(lcd, y + 2, keys.as_bytes(), head.as_bytes(), self);
+                } else if marks {
+                    mark_strip(lcd, y + 2, self.punct);
                 } else {
                     let mut b = Buf::<40>::new();
                     if let (Some(k), 1) = (super::contacts::service(d.to.as_bytes()), self.field) {
@@ -997,7 +1012,18 @@ impl View for Compose {
                     }
                     _ => {}
                 }
-                let help: &[u8] = if pred && self.field == 1 { "1 marks   hold a digit: digit".as_bytes() } else { "1 . , ? !   0 space   # space".as_bytes() };
+                // TEXT-11.1: how to write your own, and the keys the hint bar has no room for
+                let help: &[u8] = if quick_list {
+                    b"# or a letter: write your own"
+                } else if pred && self.field == 1 && full.is_empty() && !self.quick_edit_on() {
+                    b"Knob: the quick messages again"
+                } else if pred && self.field == 1 && !keys.is_empty() {
+                    b"1 mark   hold a digit: digit"
+                } else if pred && self.field == 1 {
+                    b"# space   hold a digit: digit"
+                } else {
+                    b"1 . , ? ! ' / - @ :   # space"
+                };
                 lcd.text4(8, y + 55, help, &UI_12, DIM, BG);
             });
         }
@@ -1012,11 +1038,11 @@ impl View for Compose {
         } else if pred && !app.text.is_empty() {
             Hints::new(&[("Knob", "Word"), ("#", "Space"), ("Hold *", "Spell")]) // TEXT-11
         } else if pred && self.list & LISTED != 0 {
-            Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("BACK", "To")]) // TEXT-6
+            Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("#", "Write")]) // TEXT-6.1
         } else if self.quick_edit_on() {
             Hints::new(&[("OK", "Keep"), ("Hold *", if pred { "Spell" } else { "Words" }), ("BACK", "Delete")])
         } else if pred {
-            Hints::new(&[("OK", "Send"), ("#", "Space"), ("Hold *", "Spell")])
+            Hints::new(&[("OK", "Send"), ("1", "Mark"), ("Hold *", "Spell")]) // TEXT-11.1
         } else {
             Hints::new(&[("OK", "Send"), ("*", "Case"), ("Hold *", "Words")])
         }
@@ -1127,6 +1153,25 @@ fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], head: &[u8], s: Co
     let _ = uwrite!(c, "{}/{}", s.pick as usize + 1, n);
     let cw = text4_width(c.as_bytes(), &UI_12);
     lcd.text4(232 - cw, y + 13, c.as_bytes(), &UI_12, SUB, BG);
+}
+
+#[cfg(test)]
+pub(crate) fn marks() -> &'static [u8] {
+    PUNCT
+}
+
+#[cfg(test)]
+pub(crate) fn taps() -> [&'static [u8]; 10] {
+    TAPS
+}
+
+/// While 1 cycles the marks (TEXT-2.1): every mark, the one in the text highlighted.
+fn mark_strip(lcd: &mut impl Panel, y: i32, punct: u8) {
+    let mut items: [&[u8]; 9] = [b""; 9];
+    for (i, it) in items.iter_mut().enumerate() {
+        *it = &PUNCT[i..i + 1];
+    }
+    w::chips_sel(lcd, 8, y, 224, &items, Some(punct as usize - 1), BG);
 }
 
 fn pop<const N: usize>(b: &mut Buf<N>) {
