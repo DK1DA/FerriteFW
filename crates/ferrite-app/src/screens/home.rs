@@ -155,13 +155,24 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
     // APRS-17.6: a muted APRS slot says so beside the power, in amber
     let muted = app.mute & 1 << s != 0;
     let mut pwb = Buf::<16>::new();
-    if muted {
+    // APRS-17.2.1: with automatic beacons beside APRS mode or KISS, the small card's bottom right is the beacon's
+    // countdown ("next 4:32", or why it waits, in amber) in place of the power, which the large card keeps
+    let next_here = !big && k.holder != crate::aprs::Holder::Beacon && !k.next.is_empty();
+    // the header says "Muted" already: beside the countdown it would squeeze the last-heard line
+    if muted && !next_here {
         pwb.push("Muted \u{b7} ".as_bytes());
     }
-    pwb.push(k.power.as_bytes());
+    if next_here {
+        if k.next_timed {
+            pwb.push(b"next ");
+        }
+        pwb.push(k.next.as_bytes());
+    } else {
+        pwb.push(k.power.as_bytes());
+    }
     let pw = pwb.as_bytes();
     let pw_w = text4_width(pw, &UI_12);
-    let pc = if muted { AMBER } else { SUB };
+    let pc = if next_here { if k.next_warn { AMBER } else { VIOLET } } else if muted { AMBER } else { SUB };
     app.drawn.meter[p] = None;
     if big {
         let mut beacon = Buf::<28>::new();
@@ -210,7 +221,7 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
                 }
             });
         }
-        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw, muted))) {
+        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw, pc, muted))) {
             ferrite_ui::canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
                 let lw = 211 - pw_w - 8;
                 w::field(lcd, 15, lw, y + 51, y + 65, y + 61, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);

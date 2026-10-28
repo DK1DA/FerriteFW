@@ -38,8 +38,11 @@ pub struct AprsCard {
     /// The beacon's countdown "m:ss" or why there is none ("no fix", "waiting", "by GPS", "soon"); empty while
     /// automatic beacons are off. The readback's `next=`.
     pub next: Buf<16>,
-    /// APRS mode's two counts (APRS-17.2): stations heard since power-on and in the last hour. `right` holds one
-    /// of them in turn ([`COUNT_FLIP_MS`]) for the small card; the large card shows both.
+    /// APRS-17.2.1: `next` is a timed countdown (m:ss) or "soon", not a reason it waits (`next_warn`).
+    pub next_timed: bool,
+    pub next_warn: bool,
+    /// APRS mode's two counts (APRS-17.2): stations heard since power-on and in the last hour. `right` holds the
+    /// first for the small card (APRS-17.2.1); the large card shows both.
     pub counts: Option<(u16, u16)>,
 }
 
@@ -106,11 +109,8 @@ impl App {
             Holder::Mode => {
                 let (n, h, last) = self.heard_counts(data);
                 counts = Some((n, h));
-                if (self.now / COUNT_FLIP_MS).is_multiple_of(2) {
-                    let _ = uwrite!(right, "{} heard", n);
-                } else {
-                    let _ = uwrite!(right, "{} /hr", h);
-                }
+                // APRS-17.2.1: one fixed count on the small card (nothing rotates); the large card shows both
+                let _ = uwrite!(right, "{} heard", n);
                 match last {
                     Some(s) => {
                         let mut a = Buf::<12>::new();
@@ -148,6 +148,7 @@ impl App {
             line = Buf::from(b.as_bytes());
         }
         let power = ["LOW", "MID", "HIGH"][self.aprs_cfg().power as usize % 3];
-        Some(AprsCard { holder, right, countdown, right_warn, line_warn, line, power, next, counts })
+        let next_timed = timed || next.as_bytes() == b"soon";
+        Some(AprsCard { holder, right, countdown, right_warn, line_warn, line, power, next, next_timed, next_warn, counts })
     }
 }

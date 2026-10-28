@@ -283,34 +283,43 @@ fn one_aprs_list_from_c_and_heard() {
     assert!(matches!(a.app.screen(), Screen::Home), "one BACK: no second heard list under it, {}", a.app.screen().name());
 }
 
-/// APRS-17.2 (decision 282, option C): the small card's one bold spot takes the two counts in turn, 5 s each,
-/// each with its own label; the large card shows both. The widest counts fit their places in pixels.
+/// APRS-17.2, APRS-17.2.1: nothing rotates: the small card's bold spot is the heard count at any time, the large
+/// card and the readback carry both counts; with automatic beacons on, the small card's bottom right is the
+/// countdown ("next m:ss" in C's colour, or why it waits in amber) in place of the power. The widest texts fit.
 #[test]
-fn aprs_card_counts_take_turns() {
+fn aprs_card_counts_and_countdown() {
     use crate::aprs_card::COUNT_FLIP_MS;
-    use ferrite_ui::assets::UI_12B;
+    use ferrite_ui::assets::{UI_12, UI_12B};
     use ferrite_ui::gfx::text4_width;
     let mut a = A::new();
     a.app.set_aprs_mode(true);
     a.tick();
     let (_, hour) = a.app.aprs_card(&a.s).unwrap().counts.unwrap();
-    a.t = (a.t / COUNT_FLIP_MS + 1) * COUNT_FLIP_MS; // the next turn: odd
-    if (a.t / COUNT_FLIP_MS).is_multiple_of(2) {
+    for _ in 0..3 {
+        assert_eq!(a.app.aprs_card(&a.s).unwrap().right.as_bytes(), b"0 heard", "fixed, at any time");
         a.t += COUNT_FLIP_MS;
+        a.tick();
     }
-    a.tick();
-    assert_eq!(a.app.aprs_card(&a.s).unwrap().right.as_bytes(), format!("{hour} /hr").as_bytes());
-    a.t += COUNT_FLIP_MS;
-    a.tick();
-    assert_eq!(a.app.aprs_card(&a.s).unwrap().right.as_bytes(), b"0 heard");
     let l = a.card_line();
     assert!(l.contains(" heard=0") && l.contains(&format!(" hour={hour}")), "the readback carries both: {l}");
-    // The small card's spot is 96 px wide; the large card's beacon row gives the counts up to 120 px and keeps at
-    // least "Beacon off" beside them.
-    assert!(text4_width(b"50 heard", &UI_12B) <= 96 && text4_width(b"50 /hr", &UI_12B) <= 96);
+    // beacons on: the countdown takes the bottom right of the small card (C is not active); a fresh radio, so the
+    // first frame draws every region
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() }); // every 10 min
+    a.tick();
+    let k = a.app.aprs_card(&a.s).unwrap();
+    assert!(!k.next.is_empty(), "beacons on: a countdown or a reason");
+    let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
+    let fb = a.fb();
+    let want = if k.next_warn { AMBER } else { VIOLET };
+    assert!(count(&fb, 140, y + 51, 86, 15, want) > 10, "the countdown drawn at the bottom right: {:?}", k.next.as_bytes());
+    // widths: the spot is 96 px; the bottom right leaves the last-heard line room
+    assert!(text4_width(b"50 heard", &UI_12B) <= 96);
+    assert!(text4_width(b"next 59:59", &UI_12) <= 72, "the countdown leaves the last-heard line ~130 px");
     let both = text4_width("50 heard \u{b7} 50 /hr".as_bytes(), &UI_12B);
     assert!(both <= 120, "{both}");
-    assert!(text4_width(b"Beacon off", &ferrite_ui::assets::UI_12) <= 211 - both - 8);
+    assert!(text4_width(b"Beacon off", &UI_12) <= 211 - both - 8);
 }
 
 /// HOME-18: an APRS key-up (a data key-up: no Transmit screen) shows on C's card as a red TX word and border,

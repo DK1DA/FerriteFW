@@ -1150,7 +1150,7 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
                 }
                 crate::aprs::Holder::Beacon => kq(l, "line", k.line.as_bytes()),
                 // LINK-19.4: which count the small card shows now (APRS-17.2: "14 heard", 1 "3 /hr")
-                crate::aprs::Holder::Mode => kn(l, "turn", app.now / crate::aprs_card::COUNT_FLIP_MS % 2),
+                crate::aprs::Holder::Mode => kn(l, "turn", 0), // APRS-17.2.1: the small card no longer flips
             }
             if app.aprs_shared().is_some() {
                 // "VHF: APRS" (1, APRS first) or "VHF: voice" (2, Voice first) in the header (APRS-17, WATCH-17.3)
