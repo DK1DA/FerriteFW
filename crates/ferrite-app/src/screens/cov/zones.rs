@@ -27,7 +27,7 @@ fn editor_rows() {
     t.knob(1);
     assert_ne!(t.s.zone_cfg(0).shown, c0.shown);
     t.tap(Key::Hash);
-    assert_eq!(t.s.zone_cfg(0).shown, true);
+    assert!(t.s.zone_cfg(0).shown);
     t.tap(Key::Down); // by distance
     t.knob(1);
     assert!(t.s.zone_cfg(0).by_distance);
