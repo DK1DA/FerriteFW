@@ -187,6 +187,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("Mode|Off|Manual, timed or smart."),
         Entry("After voice TX|Off|Beacon after you talk."),
         Entry("Power|Low|Beacon and message power."),
+        Entry("Telemetry|Off|Battery, MCU temperature and power after a beacon."),
     ]),
     ((5, 7), &[
         Entry("Digipeat|Off|Relay others' packets."),
@@ -420,7 +421,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 95] = [
+static SETTINGS: [Setting; 96] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -455,6 +456,7 @@ static SETTINGS: [Setting; 95] = [
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
     field!([5, 6, 3], special),
+    field!([5, 6, 4], special), // APRS-54: telemetry
     field!([5, 7, 1], special),
     field!([5, 7, 2], special),
     field!([5, 7, 3], special),
@@ -760,6 +762,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, app.aprs_cfg().after_voice as u8);
             app.aprs_cfg().after_voice
         }
+        [5, 6, 4] => {
+            pick(b, &ON_OFF, app.aprs_cfg().telemetry as u8);
+            app.aprs_cfg().telemetry
+        }
         // The group rows show their setting too (APRS-26).
         [5, 9, 1] => {
             b.set(app.aprs_cfg().path_name());
@@ -961,6 +967,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [5, 5, 4] => s.aprs_fixed = !s.aprs_fixed,
         [5, 6, 3] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
         [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
+        [5, 6, 4] => app.set_aprs(crate::aprs::AprsCfg { telemetry: !app.aprs_cfg().telemetry, ..app.aprs_cfg() }),
         [5, 9, 1] => {
             let c = app.aprs_cfg();
             app.set_aprs(crate::aprs::AprsCfg { path: c.path_step(d), ..c });
@@ -1071,6 +1078,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: crate::aprs::SSID_DEFAULT, ..app.aprs_cfg() }),
         [5, 6, 3] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
         [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
+        [5, 6, 4] => app.set_aprs(crate::aprs::AprsCfg { telemetry: false, ..app.aprs_cfg() }),
         [5, 9, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
         [5, 7, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),

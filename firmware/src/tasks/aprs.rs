@@ -1,7 +1,7 @@
 //! The APRS task (manual chapter 25, roadmap 5b-5d), run by the UI task beside the App and the store it feeds,
 //! as the simulators run theirs: frames from the DSP task's decoder go to [`AprsLive`] (the heard list, messages
 //! to us into the inbox and the log, acks), and once a second it may give a frame to send (an ack, a digipeat,
-//! one of ours, a beacon), which goes out as a data transmission on slot C:
+//! one of ours, a beacon, telemetry after a beacon: APRS-54), which goes out as a data transmission on slot C:
 //!
 //! 0. APRS-10, APRS-29 (decision 181): the frame waits for a clear moment on the APRS frequency (p-persistence on
 //!    C's squelch, [`ClearWait`]) for up to 5 s, else it isn't sent;
@@ -105,8 +105,9 @@ impl Aprs {
 
     /// One turn of the UI task's loop.
     #[inline(never)] // its frames and buffers in its own stack frame, not the UI task's (SBAR-23)
-    pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, now_ms: u32) {
+    pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, dev: &ferrite_core::msg::Device, now_ms: u32) {
         let extra = &store.extra;
+        extra.aprs.readings(dev.battery_mv, dev.mcu_temp); // APRS-54.3: what a telemetry report carries
         let me = app.aprs_call(); // APRS-30: callsign and SSID
         extra.set_callsign(me.as_bytes());
         // KISS-6: the cable (0 9 2 3 on KISS, or 0 5 8 on Cable) or Bluetooth (0 5 8, with Bluetooth on).

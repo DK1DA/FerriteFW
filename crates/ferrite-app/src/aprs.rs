@@ -27,7 +27,7 @@ pub const APRS_SLOT: u8 = 2;
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
 pub const HEARD_MAX: u16 = 50; // 20 until decision 246
 
-/// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 5, 0 5 7).
+/// The APRS settings kept with the APRS store (0 5 6 1 - 0 5 6 4, 0 5 9 1, 0 5 4, 0 5 9 5, 0 5 7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
@@ -67,6 +67,8 @@ pub struct AprsCfg {
     /// Mic-E (0 5 5 7, APRS-52): 0 off (the uncompressed report), else the standard status sent, an index into
     /// [`MIC_E_NAMES`] (Off duty to Priority; Emergency isn't offered).
     pub mic_e: u8,
+    /// APRS-54: telemetry (0 5 6 4): battery, MCU temperature and beacon power after a beacon now and then.
+    pub telemetry: bool,
 }
 
 /// APRS-50: the comment's room.
@@ -142,7 +144,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0 };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0, telemetry: false };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {

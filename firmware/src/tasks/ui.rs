@@ -703,7 +703,7 @@ pub async fn task() {
         }
         // TERM-28.1: only the bring-up build (no store) holds them; the normal build's cable log never does.
         if !(cfg!(feature = "bringup") && bringup::ON.load(Relaxed)) {
-            aprs.poll(&mut app, store, &live, now_ms());
+            aprs.poll(&mut app, store, &live, &dev, now_ms());
             decode.poll(&mut app, store, &live);
         }
         // MODE-6: never waiting on the Radio task: what its channel has no room for waits in the App's queue (and
