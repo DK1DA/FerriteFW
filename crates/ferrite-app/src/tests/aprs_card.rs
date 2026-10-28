@@ -397,5 +397,11 @@ fn aprs_squelch_counts_in_the_readback() {
     a.app.set_aprs_mode(true);
     a.live.aprs_sq = ferrite_core::aprssq::Counts { opens: 3, short: 1, spikes: 2, settle: 4 };
     a.tick();
-    assert!(a.card_line().contains(" sq=3/1/2/4"), "{}", a.card_line());
+    let dev = Device::default();
+    let mut l = crate::term::cmd::Line::new();
+    let line = (0..)
+        .map_while(|i| crate::uistate::line(&a.app, &a.s, &dev, &a.live, i, &mut l).then(|| String::from_utf8_lossy(l.as_bytes()).into_owned()))
+        .find(|l| l.starts_with("aprs_sq"))
+        .expect("aprs_sq line");
+    assert_eq!(line, "aprs_sq opens=3 short=1 spikes=2 settle=4");
 }

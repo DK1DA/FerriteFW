@@ -524,6 +524,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 card(app, cx, s, d);
                 bcast_line(app, cx, s, d);
             }
+            aprs_sq_line(app, cx, d);
         }
         Screen::Quick(qk) => {
             if quick::fm_rows(app) {
@@ -1062,6 +1063,21 @@ fn slot_word(l: &mut Line, s: u8) {
 
 /// Home's card for slot `s`, as [`screens::home`] draws it (HOME-4): the header, the state, the frequency or
 /// the channel's name, the chips and the S-meter.
+/// SQL-19.4: `aprs_sq opens=N short=N spikes=N settle=N`, the APRS squelch's counts since power-on, on its own
+/// line (the card C line is near Live View's room), while C is the APRS slot.
+fn aprs_sq_line<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
+    if app.aprs_holder().is_none() {
+        return;
+    }
+    let Some(l) = d.ln() else { return };
+    let q = cx.live.aprs_sq;
+    l.push(b"aprs_sq");
+    kn(l, "opens", q.opens as u32);
+    kn(l, "short", q.short as u32);
+    kn(l, "spikes", q.spikes as u32);
+    kn(l, "settle", q.settle as u32);
+}
+
 fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     let Some(l) = d.ln() else { return };
     let lv = cx.live.slots[s as usize];
@@ -1127,9 +1143,6 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
                 // LINK-19.4: which count the small card shows now (APRS-17.2: "14 heard", 1 "3 /hr")
                 crate::aprs::Holder::Mode => kn(l, "turn", app.now / crate::aprs_card::COUNT_FLIP_MS % 2),
             }
-            // SQL-19.4: the APRS squelch's counts since power-on: opens, short ones, spikes, opens while settling
-            let q = cx.live.aprs_sq;
-            let _ = uwrite!(l, " sq={}/{}/{}/{}", q.opens, q.short, q.spikes, q.settle);
             if app.aprs_shared().is_some() {
                 // "VHF: APRS" (1, APRS first) or "VHF: voice" (2, Voice first) in the header (APRS-17, WATCH-17.3)
                 kn(l, "shared", 1 + (app.settings().aprs_share != 0) as u32);
