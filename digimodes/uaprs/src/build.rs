@@ -1,4 +1,4 @@
-//! Information fields to send: position reports, messages and acks. Each writes into a caller's buffer and
+//! Information fields to send: position reports, messages and acks, telemetry. Each writes into a caller's buffer and
 //! returns the length, or `None` if the buffer is too small or a field is out of range.
 
 use crate::parse::Timestamp;
@@ -240,6 +240,58 @@ fn reply(kind: &[u8], addressee: &[u8], id: &[u8], out: &mut [u8]) -> Option<usi
     w.put(kind)?;
     w.put(id)?;
     Some(w.len)
+}
+
+/// A telemetry report (APRS 1.0.1 chapter 13): `T#sss,aaa,aaa,aaa,aaa,aaa,bbbbbbbb`, the sequence number
+/// (000-999) and five analog values (000-255), three digits each, then the eight digital bits, B1 first (`bits`'
+/// top bit is B1).
+pub fn telemetry(seq: u16, analog: &[u8; 5], bits: u8, out: &mut [u8]) -> Option<usize> {
+    let mut w = W { out, len: 0 };
+    w.put(b"T#")?;
+    w.num(seq as u32, 3)?;
+    for &a in analog {
+        w.put(b",")?;
+        w.num(a as u32, 3)?;
+    }
+    w.put(b",")?;
+    for i in (0..8).rev() {
+        w.put(if bits >> i & 1 != 0 { b"1" } else { b"0" })?;
+    }
+    Some(w.len)
+}
+
+/// The four telemetry definitions (APRS 1.0.1 chapter 13), each a message to the reporting station itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TelemDef {
+    /// `PARM.`: the channels' names.
+    Parm,
+    /// `UNIT.`: their units (the bits' labels).
+    Unit,
+    /// `EQNS.`: a, b, c per analog channel (value = a·v² + b·v + c).
+    Eqns,
+    /// `BITS.`: the bits' sense, then the project's title.
+    Bits,
+}
+
+/// A telemetry definition: `:ADDRESSEE:PARM.f1,f2,...`, the `fields` joined by commas, as a message without a
+/// number to `addressee` (our own callsign). None as [`message`]: over 67 characters of text, or `|`, `~`, `{`.
+pub fn telemetry_def(addressee: &[u8], def: TelemDef, fields: &[&[u8]], out: &mut [u8]) -> Option<usize> {
+    let mut t = [0u8; 67];
+    let mut w = W { out: &mut t, len: 0 };
+    w.put(match def {
+        TelemDef::Parm => b"PARM.",
+        TelemDef::Unit => b"UNIT.",
+        TelemDef::Eqns => b"EQNS.",
+        TelemDef::Bits => b"BITS.",
+    })?;
+    for (i, f) in fields.iter().enumerate() {
+        if i > 0 {
+            w.put(b",")?;
+        }
+        w.put(f)?;
+    }
+    let n = w.len;
+    message(addressee, &t[..n], None, out)
 }
 
 /// Mic-E's standard messages (APRS 1.0.1 chapter 10): the message bits A, B, C, by name.

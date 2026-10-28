@@ -273,6 +273,22 @@ fn contacts_kept_in_callsign_order() {
     assert!(s.contact_of(b"VE3ZZZ").is_none());
 }
 
+/// APRS-54.1: telemetry is the after-voice byte's bit 1, so the APRS record keeps its length; each is kept
+/// apart from the other.
+#[test]
+fn aprs_telemetry_beside_after_voice() {
+    for (after_voice, telemetry) in [(false, true), (true, false), (false, false)] {
+        let s = mount(SimFlash::new());
+        let a = app();
+        let cfg = AprsCfg { after_voice, telemetry, ..AprsCfg::DEFAULT };
+        s.autosave(1000, &a);
+        assert!(s.request(Op::AprsCfg(cfg)));
+        s.autosave(3100, &a);
+        let s = cycle(s);
+        assert!(s.aprs_cfg() == cfg);
+    }
+}
+
 #[test]
 fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     let s = mount(SimFlash::new());
@@ -282,7 +298,7 @@ fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     comment.copy_from_slice(b"Ferrite on the trail, QRV 146.52 simplex");
     let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
     custom[..7].copy_from_slice(b"WIDE2-2");
-    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5 };
+    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5, telemetry: true };
     s.autosave(1000, &a);
     assert!(s.request(Op::AprsCfg(cfg)));
     assert!(s.aprs_cfg() == cfg);

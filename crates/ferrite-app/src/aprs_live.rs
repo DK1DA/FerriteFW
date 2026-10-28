@@ -53,6 +53,18 @@ const DIGI_GAP_S: u32 = 5;
 const FIX_WAIT_S: u32 = 120;
 /// The destination ("tocall") that names the software: APZ is experimental, FER for Ferrite.
 const TOCALL: [u8; 6] = *b"APZFER";
+/// APRS-54.2: a telemetry report follows a beacon at most this often.
+pub const TELEM_GAP_S: u32 = 600;
+/// APRS-54.4: the definitions go with the first report and then every this many.
+pub const TELEM_DEFS_EVERY: u16 = 10;
+/// APRS-54.4: the definitions' fields: names, units, equations (battery in 0.05 V, the MCU in degrees C less
+/// 50, power 0 Low to 2 High), the bits (none used) and the project's title.
+const TELEM_DEFS: [(uaprs::build::TelemDef, &[&[u8]]); 4] = [
+    (uaprs::build::TelemDef::Parm, &[b"Battery", b"Temp", b"Power"]),
+    (uaprs::build::TelemDef::Unit, &[b"Volts", b"deg.C", b"Level"]),
+    (uaprs::build::TelemDef::Eqns, &[b"0", b"0.05", b"0", b"0", b"1", b"-50", b"0", b"1", b"0"]),
+    (uaprs::build::TelemDef::Bits, &[b"00000000", b"Ferrite"]),
+];
 
 /// A station heard, as the heard list keeps it in RAM (APRS-4.5): what the list and its counts need. The rest
 /// (path, course, altitude, comment, FX.25) is in [`Det`] for the stations heard most recently, else in the
@@ -221,7 +233,7 @@ impl Sending {
     pub fn may_send(self, what: &str) -> bool {
         match self {
             Sending::All => true,
-            Sending::Beacons => what == "Beacon",
+            Sending::Beacons => what == "Beacon" || what == "Telemetry", // APRS-54.5
             Sending::Nothing => false,
         }
     }
@@ -407,6 +419,12 @@ pub struct AprsLive {
     sent_key: Cell<u16>,
     /// What the last turn allowed (APRS-10.1): a frame heard is queued to digipeat only while everything may go.
     sending: Cell<Sending>,
+    /// APRS-54: the battery (mV) and MCU temperature (whole degrees C) the reports carry, the next report's
+    /// number, the beacon the last followed, and what is waiting: 0 nothing, 1 the report, 2-5 a definition.
+    telem_in: Cell<(u16, Option<i8>)>,
+    telem_seq: Cell<u16>,
+    telem_last: Cell<Option<u32>>,
+    telem_q: Cell<u8>,
 }
 
 impl Default for AprsLive {
@@ -446,6 +464,10 @@ impl AprsLive {
             sent: SentLog::new(),
             sent_key: Cell::new(0),
             sending: Cell::new(Sending::Nothing),
+            telem_in: Cell::new((0, None)),
+            telem_seq: Cell::new(0),
+            telem_last: Cell::new(None),
+            telem_q: Cell::new(0),
         }
     }
 
@@ -587,6 +609,7 @@ impl AprsLive {
         self.after_voice.set(false);
         self.fix_wait.set(None);
         self.digi.set(None);
+        self.telem_q.set(0);
     }
 
     /// A station heard now (`h`, with the details its frame gave in `d`): to the front, its old entry (if any)
@@ -652,6 +675,12 @@ impl AprsLive {
         self.beacon_now.set(true);
     }
 
+    /// APRS-54.3: the battery in millivolts and the MCU's temperature in whole degrees (None: not read yet) for
+    /// the next telemetry report (the firmware's each turn).
+    pub fn readings(&self, battery_mv: u16, mcu_c: Option<i8>) {
+        self.telem_in.set((battery_mv, mcu_c));
+    }
+
     /// A voice transmission ended (APRS-27): a beacon at the next turn that APRS-9's spacing allows.
     pub fn after_voice(&self) {
         self.after_voice.set(true);
@@ -708,7 +737,8 @@ impl AprsLive {
             if station.is_some() && f.info.iter().fold(0xFFFF, |h, &b| crc16(h, b)) == self.sent_key.get() {
                 rx.changed |= self.sent.heard_by(by.as_bytes());
             }
-            if station.is_some() && self.echo.get() {
+            // APRS-54.6: our telemetry heard back is neither toasted nor logged
+            if station.is_some() && self.echo.get() && !own_telemetry(f.info) {
                 self.echo.set(false);
                 self.echo_by.set(by);
                 rx.echo = Some(by);
@@ -1014,6 +1044,12 @@ impl AprsLive {
         if self.general.get().is_some_and(|g| now_s > g.due_s + QUERY_TTL_S) {
             self.general.set(None);
         }
+        if !cfg.telemetry {
+            // APRS-54.4: off, nothing waits; turned on again, it starts at report 000 with the definitions
+            self.telem_q.set(0);
+            self.telem_seq.set(0);
+            self.telem_last.set(None);
+        }
         if send == Sending::Beacons {
             // APRS-29: beacons alone answer nothing: acks owed and a digipeat waiting are dropped.
             self.acks.iter().for_each(|a| a.set(None));
@@ -1027,6 +1063,7 @@ impl AprsLive {
             self.digi.set(None);
             self.beacon_now.set(false);
             self.after_voice.set(false);
+            self.telem_q.set(0);
             self.on_since.set(None);
             self.fix_wait.set(None);
             t.changed = self.waiting.replace(false);
@@ -1157,11 +1194,40 @@ impl AprsLive {
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
             if let Some(n) = position_info(&f, cfg, &mut info, &mut dest) {
+                // APRS-54.2: a telemetry report after it, if the last beacon that had one was 10 minutes ago or more
+                if cfg.telemetry && self.telem_q.get() == 0 && self.telem_last.get().is_none_or(|l| now_s.wrapping_sub(l) >= TELEM_GAP_S) {
+                    self.telem_q.set(1);
+                    self.telem_last.set(Some(now_s));
+                }
                 t.changed = true;
                 return self.framed(my, &dest, &info[..n], "Beacon", cfg, out, t);
             }
         }
+        // APRS-54: the report, then any definitions, one per turn at APRS-9's spacing.
+        if auto_ok && self.telem_q.get() > 0 {
+            if let Some(n) = self.telemetry(me, cfg, &mut info) {
+                self.last_auto.set(Some(now_s));
+                return self.framed(my, &TOCALL, &info[..n], "Telemetry", cfg, out, t);
+            }
+        }
         t
+    }
+
+    /// APRS-54: the waiting telemetry frame's information field, and what waits after it. The report
+    /// (`T#000,148,083,000,000,000,00000000`) numbers 000-999 round; the definitions follow every
+    /// [`TELEM_DEFS_EVERY`]th, from the first.
+    fn telemetry(&self, me: &[u8], cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
+        let q = self.telem_q.get();
+        if q == 1 {
+            let seq = self.telem_seq.get();
+            let (mv, temp) = self.telem_in.get();
+            self.telem_seq.set((seq + 1) % 1000);
+            self.telem_q.set(if seq.is_multiple_of(TELEM_DEFS_EVERY) { 2 } else { 0 });
+            return uaprs::build::telemetry(seq, &telem_values(mv, temp, cfg.power), 0, info);
+        }
+        let (def, fields) = TELEM_DEFS[(q as usize - 2).min(TELEM_DEFS.len() - 1)];
+        self.telem_q.set(if q as usize > TELEM_DEFS.len() { 0 } else { q + 1 });
+        uaprs::build::telemetry_def(me, def, fields, info)
     }
 
     /// Our frame with 0 5 9 1's path (APRS-26).
@@ -1173,12 +1239,23 @@ impl AprsLive {
         }
         let dest = Address::from_text(dest).unwrap_or(me);
         let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
-        self.echo.set(self.echo.get() || len > 0);
+        self.echo.set(self.echo.get() || len > 0 && what != "Telemetry"); // APRS-54.6
         if what == "Beacon" && len > 0 {
             self.sent_key.set(info.iter().fold(0xFFFF, |h, &b| crc16(h, b))); // APRS-53.1
         }
         Tick { len, what, ..t }
     }
+}
+
+/// APRS-54.6: a telemetry report or definition of ours (`T#...`, or `:CALL     :PARM.` and the others).
+fn own_telemetry(info: &[u8]) -> bool {
+    info.starts_with(b"T#") || info.get(10..16).is_some_and(|h| h[0] == b':' && matches!(&h[1..], b"PARM." | b"UNIT." | b"EQNS." | b"BITS."))
+}
+
+/// APRS-54.3: the report's analog values: the battery in 0.05 V (up to 12.75 V), the MCU's temperature plus 50
+/// (-50 to 205 degrees; 0, -50, before its first reading), the beacon power (0 Low, 1 Mid, 2 High), two unused.
+pub fn telem_values(battery_mv: u16, mcu_c: Option<i8>, power: u8) -> [u8; 5] {
+    [((battery_mv as u32 + 25) / 50).min(255) as u8, mcu_c.map_or(0, |c| (c as i16 + 50).max(0) as u8), power.min(2), 0, 0]
 }
 
 /// GPS-33: the fix a beacon (or a query's answer, APRS-33) may send: never one older than the beacon interval as
@@ -1871,6 +1948,105 @@ mod tests {
     /// The information field of the frame `tick` wrote.
     fn sent(out: &[u8; FRAME_MAX], t: &Tick) -> std::vec::Vec<u8> {
         Frame::parse(&out[..t.len]).unwrap().info.to_vec()
+    }
+
+    /// APRS-54, APRS-54.2 - APRS-54.4: with telemetry on, a beacon is followed by a report at APRS-9's spacing,
+    /// then (with the first report, and every tenth) the four definitions to our own callsign, one a turn; the
+    /// next beacon has one only 10 minutes after the last that had one.
+    #[test]
+    fn telemetry_follows_a_beacon() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { beacon: 5, power: 1, telemetry: true, ..AprsCfg::DEFAULT }; // every 10 min, Mid
+        a.readings(7_400, Some(33));
+        let mut at = |s: u32| {
+            let t = a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+            (t.what, if t.len > 0 { std::string::String::from_utf8(sent(&out, &t)).unwrap() } else { std::string::String::new() })
+        };
+        assert_eq!(at(100).0, "Beacon");
+        assert_eq!(at(110).1, "", "APRS-9's 30 s");
+        assert_eq!(at(130), ("Telemetry", "T#000,148,083,001,000,000,00000000".into()));
+        assert_eq!(at(160).1, ":VE3XYZ-7 :PARM.Battery,Temp,Power");
+        assert_eq!(at(190).1, ":VE3XYZ-7 :UNIT.Volts,deg.C,Level");
+        assert_eq!(at(220).1, ":VE3XYZ-7 :EQNS.0,0.05,0,0,1,-50,0,1,0");
+        assert_eq!(at(250).1, ":VE3XYZ-7 :BITS.00000000,Ferrite");
+        assert_eq!(at(280).1, "", "nothing more");
+        assert_eq!(at(700).0, "Beacon");
+        assert_eq!(at(730).1, "T#001,148,083,001,000,000,00000000", "no definitions with the second");
+        assert_eq!(at(760).1, "");
+        // reports 2-9 without definitions, the tenth (number 010) with them
+        for k in 2..=10u32 {
+            assert_eq!(at(100 + 600 * k).0, "Beacon");
+            assert!(at(130 + 600 * k).1.starts_with(&std::format!("T#{:03},", k)));
+            assert_eq!(at(160 + 600 * k).1.contains("PARM."), k == 10);
+        }
+    }
+
+    /// APRS-54.2: no more often than every 10 minutes, whatever the beacons do (a manual beacon, Beacon now,
+    /// after 5 min has none); off sends none and starts again at 000 with the definitions.
+    #[test]
+    fn telemetry_at_most_every_ten_minutes() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let mut cfg = AprsCfg { beacon: 1, telemetry: true, ..AprsCfg::DEFAULT }; // manual
+        let me: &[u8] = b"VE3XYZ";
+        a.beacon_now();
+        assert_eq!(a.tick(100, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(130, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Telemetry");
+        a.beacon_now();
+        assert_eq!(a.tick(400, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
+        for s in (430..700).step_by(30) {
+            let t = a.tick(s, Sending::All, true, me, Some(fix()), &cfg, &mut out);
+            assert!(t.len == 0 || !sent(&out, &t).starts_with(b"T#"), "5 min after the last: no report");
+        }
+        cfg.telemetry = false;
+        a.beacon_now();
+        assert_eq!(a.tick(1000, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(1030, Sending::All, true, me, Some(fix()), &cfg, &mut out).len, 0, "off: none");
+        cfg.telemetry = true;
+        a.beacon_now();
+        assert_eq!(a.tick(1100, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
+        let t = a.tick(1130, Sending::All, true, me, Some(fix()), &cfg, &mut out);
+        assert!(sent(&out, &t).starts_with(b"T#000,"), "on again: from 000");
+    }
+
+    /// APRS-54.5: telemetry goes with beacons alone (APRS-29) too; with nothing allowed what waits is dropped
+    /// (APRS-10.1).
+    #[test]
+    fn telemetry_with_beacons_alone_and_dropped_when_off() {
+        assert!(Sending::Beacons.may_send("Telemetry") && !Sending::Nothing.may_send("Telemetry"));
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { beacon: 5, telemetry: true, ..AprsCfg::DEFAULT };
+        assert_eq!(a.tick(100, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(130, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Telemetry");
+        a.tick(140, Sending::Nothing, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
+        assert_eq!(a.tick(170, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "the definitions dropped");
+    }
+
+    /// APRS-54.3: the analog values: battery in 0.05 V to 12.75 V, the MCU's degrees plus 50 (000 before its
+    /// first reading), the power 0-2.
+    #[test]
+    fn telemetry_values() {
+        assert_eq!(telem_values(7_400, Some(33), 1), [148, 83, 1, 0, 0]);
+        assert_eq!(telem_values(8_424, Some(-20), 2), [168, 30, 2, 0, 0]);
+        assert_eq!(telem_values(20_000, Some(127), 9), [255, 177, 2, 0, 0]);
+        assert_eq!(telem_values(0, None, 0), [0, 0, 0, 0, 0]);
+    }
+
+    /// APRS-54.6: our telemetry heard back from a digipeater neither toasts nor logs; our beacon still does.
+    #[test]
+    fn own_telemetry_heard_back_is_quiet() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { beacon: 5, telemetry: true, ..AprsCfg::DEFAULT };
+        assert_eq!(a.tick(100, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
+        let (f, n) = frame(b"VE3XYZ", b"APZFER", &[b"VE3RSB-1*"], b"T#000,148,083,000,000,000,00000000");
+        assert!(a.receive(&f[..n], 101, b"VE3XYZ", &cfg).echo.is_none());
+        let (f, n) = frame(b"VE3XYZ", b"APZFER", &[b"VE3RSB-1*"], b":VE3XYZ   :PARM.Battery,Temp,Power");
+        assert!(a.receive(&f[..n], 102, b"VE3XYZ", &cfg).echo.is_none());
+        let (f, n) = frame(b"VE3XYZ", b"APZFER", &[b"VE3RSB-1*"], b":VE3RSB   :hello");
+        assert!(a.receive(&f[..n], 103, b"VE3XYZ", &cfg).echo.is_some(), "a message of ours still does");
     }
 
     /// APRS-32: a message to us heard again (the sender's retries, a second digipeater's copy) is acked every

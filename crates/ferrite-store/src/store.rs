@@ -100,8 +100,8 @@ pub enum Job {
 }
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
-/// bytes), then the settings added later (path, digipeater, beacon after voice, the SSID: [`APRS_MORE`]), then
-/// the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 5, APRS-45:
+/// bytes), then the settings added later (path, digipeater, beacon after voice with telemetry as its bit 1
+/// (APRS-54), the SSID: [`APRS_MORE`]), then the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 5, APRS-45:
 /// [`APRS_FX25`]), the message sound, symbol, TX delay and level, then the comment and ambiguity
 /// ([`APRS_COMMENT`]), then Mic-E ([`APRS_MIC_E`]). A record from before them is shorter and reads them as their
 /// defaults.
@@ -328,7 +328,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 // APRS-26: custom keeps its value 3 from before APRSAT and ARISS (4, 5); kept only with a custom path set
                 cfg.path = if cfg.path_ok(m[0]) { m[0] } else { cfg.path };
                 cfg.digi = m[1] & 0x73;
-                cfg.after_voice = m[2] == 1;
+                // APRS-54: the after-voice byte's bit 1 is telemetry (the record's length unchanged); erased (0xFF)
+                // reads both off
+                (cfg.after_voice, cfg.telemetry) = if m[2] == 0xFF { (false, false) } else { (m[2] & 1 != 0, m[2] & 2 != 0) };
                 // APRS-30: the spare byte; erased (0xFF, a record from before it) reads as the default
                 cfg.ssid = if m[3] < 16 { m[3] } else { ferrite_app::aprs::SSID_DEFAULT };
             }
@@ -1235,7 +1237,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let c = self.aprs.get();
         p[..2].copy_from_slice(&c.f5k.to_le_bytes());
         (p[2], p[3]) = (c.beacon, c.power);
-        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2], p[APRS_MORE + 3]) = (c.path, c.digi, c.after_voice as u8, c.ssid);
+        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2], p[APRS_MORE + 3]) = (c.path, c.digi, c.after_voice as u8 | (c.telemetry as u8) << 1, c.ssid);
         p[APRS_PATH..APRS_FX25].copy_from_slice(&c.custom);
         p[APRS_FX25] = c.fx25;
         p[APRS_SOUND] = c.sound;

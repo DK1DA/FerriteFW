@@ -507,6 +507,21 @@ fn fx25_on_transmit_setting() {
     assert_eq!(a.app.aprs_cfg().fx25, 16);
 }
 
+/// APRS-54.1: 0 5 6 4, telemetry: Off by default, OK turns it on (the row reads On), # puts it back; kept by
+/// the APRS store's owner, apart from beacon after voice.
+#[test]
+fn telemetry_setting() {
+    use crate::screens::groups::{change, reset};
+    let mut a = A::new();
+    assert!(!a.app.aprs_cfg().telemetry, "off by default");
+    change(&mut a.app, &[5, 6, 4], 1);
+    assert!(a.app.aprs_cfg().telemetry && !a.app.aprs_cfg().after_voice);
+    a.tick();
+    assert!(a.s.aprs_cfg().telemetry, "written back");
+    reset(&mut a.app, &[5, 6, 4]);
+    assert!(!a.app.aprs_cfg().telemetry);
+}
+
 /// APRS-27: with APRS mode and beacon after voice on, releasing PTT asks for a beacon; off, it doesn't.
 #[test]
 fn beacon_after_voice_on_release() {
