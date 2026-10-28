@@ -19,6 +19,7 @@ mod confirm;
 mod entry;
 mod fm;
 mod gps;
+mod groups;
 mod hf;
 mod home;
 mod keytest;
