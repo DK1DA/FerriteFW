@@ -350,11 +350,15 @@ impl App {
         if lv.scanning { lv.freq } else { self.tuned_freq(s) }
     }
 
-    /// The slot's state word and colour on a card: Muted or RX muted (quick mute), RX, relay, off (not watched),
+    /// The slot's state word and colour on a card: TX (a data key-up, HOME-18), Muted or RX muted (quick mute), RX, relay, off (not watched),
     /// heard (a tone hint), scanning, idle; on a broadcast slot FM (playing), muted (a slot heard has the speaker) or off, and "FM on B" on
     /// another slot in the band (BCR-22, BCR-27); "Watch off: relay" while broadcast plays (BCR-15).
     pub(crate) fn state(&self, s: u8, live: &LiveAll) -> (&'static str, u16) {
         let lv = &live.slots[s as usize];
+        // HOME-18: a data key-up (APRS, KISS) has no Transmit screen; the card shows it
+        if live.tx.keyed && live.tx.slot == s && self.radio.keyed.is_none() {
+            return ("TX", RED);
+        }
         // HOME-15: quick mute takes the state word, "RX muted" while it receives (the broadcast slot too).
         if self.mute & 1 << s != 0 && !self.relay_off(s) && !lv.relay {
             return if lv.squelch_open { ("RX muted", AMBER) } else { ("Muted", AMBER) };

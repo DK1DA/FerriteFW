@@ -130,7 +130,7 @@ fn ambiguity() {
 fn statuses() {
     for bits in 0..8u8 {
         let (_, m, _) = round(&report(45_000_000, -75_000_000), bits);
-        assert_eq!(m, MicEStatus { bits, custom: false });
+        assert_eq!(m, MicEStatus { bits, custom: false, device: None });
     }
     assert_eq!(&encode(&report(45_000_000, -75_000_000), build::MIC_E_EMERGENCY).0[..3], b"450");
     assert_eq!(&encode(&report(45_000_000, -75_000_000), build::MIC_E_OFF_DUTY).0[..3], b"TUP");
@@ -203,6 +203,33 @@ fn heard_frames_rebuilt() {
         }
         assert_eq!(&i[7..9], &info[7..9]);
         let Ok(Packet::Position { pos: back, mic_e, .. }) = parse(&d, &i) else { panic!() };
-        assert_eq!((back.lat, back.lon, back.speed, back.course, back.ambiguity, mic_e), (pos.lat, pos.lon, pos.speed, pos.course, pos.ambiguity, Some(m)));
+        assert_eq!((back.lat, back.lon, back.speed, back.course, back.ambiguity, mic_e), (pos.lat, pos.lon, pos.speed, pos.course, pos.ambiguity, Some(MicEStatus { device: None, ..m })));
     }
+}
+
+/// APRS-5.2: the device codes leave the comment and name the radio (aprs-deviceid): the type byte first, the
+/// model suffix last, the altitude after the type byte; an unknown suffix stays as text.
+#[test]
+fn device_codes() {
+    use uaprs::parse::{mic_e_device, MIC_E_DEVICES};
+    let name = |d: Option<u8>| d.map(|i| MIC_E_DEVICES[i as usize].1);
+    let cases: [(&[u8], &[u8], Option<&str>); 9] = [
+        (b"]=", b"", Some("Kenwood TM-D710")),
+        (b"`_\"", b"", Some("Yaesu FTM-350")),
+        (b"`_3", b"", Some("Yaesu FT5D")),
+        (b">&", b"", Some("Kenwood TH-D75")),
+        (b"`146.520[1", b"146.520", Some("APRSdroid")),
+        (b"]TM-D700", b"TM-D700", Some("Kenwood TM-D700")),
+        (b">Hello^", b"Hello", Some("Kenwood TH-D74")),
+        (b"'Stopped", b"Stopped", None),
+        (b"Plain text", b"Plain text", None),
+    ];
+    for (c, text, dev) in cases {
+        let (t, d) = mic_e_device(c);
+        assert_eq!((t, name(d)), (text, dev), "{:?}", core::str::from_utf8(c));
+    }
+    // In a frame: the altitude after the type byte, the model at the end, neither in the comment.
+    let Ok(Packet::Position { pos, mic_e: Some(m), comment, .. }) = parse(b"S4QVYV", b"`.4&l-/k/`\"7q}Hi_3") else { panic!() };
+    assert!(pos.altitude.is_some());
+    assert_eq!((comment.bytes().collect::<Vec<u8>>(), name(m.device)), (b"Hi".to_vec(), Some("Yaesu FT5D")));
 }

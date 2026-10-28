@@ -254,7 +254,18 @@ const ROWS: [(&str, Val<Station>); 8] = [
         // a weather station's comment is what follows its weather fields
         let t = c.x.comment.as_bytes();
         let t = crate::aprs::wx(t).map_or(t, |w| t[w.rest..].trim_ascii());
-        text(b, if t.is_empty() { b"-".as_slice() } else { t })
+        b.set(t);
+        // APRS-5.2: the radio its Mic-E codes named, after the comment
+        if let Some((_, model)) = c.x.device.and_then(|d| uaprs::parse::MIC_E_DEVICES.get(d as usize)) {
+            if !b.is_empty() {
+                b.push(" \u{b7} ".as_bytes());
+            }
+            b.push(model.as_bytes());
+        }
+        if b.is_empty() {
+            b.set(b"-");
+        }
+        TEXT
     }),
     ("Message", |c, b| {
         let s = c.x;

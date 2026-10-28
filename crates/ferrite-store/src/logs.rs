@@ -402,8 +402,9 @@ pub fn msg_is_open(b: &[u8; REC as usize]) -> bool {
 // ---- the heard list (APRS-4) ----
 
 /// Where a heard row's body ends: flags (11), call (12..22), symbol (22), position (23..31), course and speed
-/// (31..35), altitude (35..39), the digipeater (39..49), comment (49..89), times heard (89..91), FX.25 (91).
-pub const HEARD_END: usize = 92;
+/// (31..35), altitude (35..39), the digipeater (39..49), comment (49..89), times heard (89..91), FX.25 (91), the Mic-E
+/// device (92, 0xFF none: rows from before it read as none, APRS-5.2).
+pub const HEARD_END: usize = 93;
 /// What a queued row carries: the body (11..92).
 pub const HEARD_JOB: usize = HEARD_END - BODY;
 
@@ -426,6 +427,7 @@ pub fn heard_job(s: &Station) -> [u8; HEARD_JOB] {
     put(&mut r[49..89], &s.comment);
     r[89..91].copy_from_slice(&s.times.to_le_bytes());
     r[91] = s.fx25.unwrap_or(0);
+    r[92] = s.device.unwrap_or(0xFF);
     let mut j = [0u8; HEARD_JOB];
     j.copy_from_slice(&r[BODY..HEARD_END]);
     j
@@ -467,6 +469,7 @@ pub fn heard_decode(b: &[u8; REC as usize], ago_s: u32) -> Station {
         msg: Buf::new(),
         msg_min: None,
         fx25: (f & 8 != 0).then_some(b[91]),
+        device: (b[92] != 0xFF).then_some(b[92]),
     }
 }
 

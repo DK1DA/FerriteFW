@@ -39,6 +39,7 @@ impl Data for Tasks {
             msg: Buf::new(),
             msg_min: None,
             fx25: None,
+            device: None,
         })
     }
 }
@@ -598,6 +599,7 @@ fn st(call: &[u8], comment: &[u8], times: u16) -> Station {
         msg: Buf::new(),
         msg_min: None,
         fx25: Some(4),
+        device: Some(31),
     }
 }
 

@@ -488,7 +488,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         "RX muted" if app.aprs_slot(s) => ("RX", GREEN),
         _ => (state, sc),
     };
-    let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
+    let border = if state == "TX" { RED } else if big { BLUE } else if state == "RX" { GREEN } else { LINE };
     let aprs = app.aprs_slot(s);
     let kind = card_kind(app, s);
     let geom = hash(&(s, y, h, kind)) | 1;
@@ -576,7 +576,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
             });
         } else if big {
             ferrite_ui::canvas::banded(lcd, sx, y + 6, 228 - sx, 18, SURFACE, |lcd| {
-                let tagged = matches!(state, "RX" | "MON" | "FM");
+                let tagged = matches!(state, "RX" | "TX" | "MON" | "FM");
                 if tagged {
                     w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                 } else if state != "idle" {
@@ -815,7 +815,7 @@ pub(crate) fn copy_to_vfo(app: &mut App) {
 
 /// A compact card's header state: the clarifier in amber when idle with one, else the state (RX in bold).
 fn compact_state<'a>(state: &'a str, clr: &'a Buf<16>, sc: u16) -> (&'a [u8], u16, &'static ferrite_ui::font4::Font4) {
-    let f = if state == "RX" { &UI_12B } else { &UI_12 };
+    let f = if matches!(state, "RX" | "TX") { &UI_12B } else { &UI_12 };
     if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER, f) } else { (state.as_bytes(), sc, f) }
 }
 
@@ -828,7 +828,7 @@ pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
     }
     let cw = if clr.is_empty() { 0 } else { text4_width(clr.as_bytes(), &UI_12) };
     match state {
-        "RX" | "MON" | "FM" => (text4_width(state.as_bytes(), &UI_12B) + 10).max(if cw > 0 { 32 + cw } else { 0 }),
+        "RX" | "TX" | "MON" | "FM" => (text4_width(state.as_bytes(), &UI_12B) + 10).max(if cw > 0 { 32 + cw } else { 0 }),
         "idle" => cw,
         _ => text4_width(state.as_bytes(), &UI_12),
     }

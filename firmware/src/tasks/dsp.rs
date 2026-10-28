@@ -313,6 +313,7 @@ pub async fn task() {
                     audio::capture_start();
                 }
                 AFSK_DONE.signal(true);
+                crate::chan::TERM_WAKE.signal(()); // the UI task's APRS unkeys now, not at its next 20 ms pass
             }
         }
     }

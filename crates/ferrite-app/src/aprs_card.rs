@@ -117,6 +117,8 @@ impl App {
                         age_text(s.ago_s, &mut a);
                         let _ = uwrite!(line, "Last {} \u{b7} {}", Txt(s.call.as_bytes()), Txt(a.as_bytes()));
                     }
+                    // APRS-17.3: stations restored from flash but none since power-on
+                    None if data.stations() > 0 => line.set(b"Nothing since power-on"),
                     None => line.set(b"Nothing heard yet"),
                 }
             }

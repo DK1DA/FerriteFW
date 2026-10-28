@@ -258,7 +258,9 @@ impl TxSeq {
         out.push(Act::Stage);
         // TX-47 (TX audit F5): stock holds the carrier 400 ms at every unkey (0x08024DD8), the tail inside it. A cut
         // (timeout, duty limit, battery under load) drops at once: Ferrite's own protections, no carrier added.
-        if cfg.tail {
+        // TX-47.6 (decision 296): a data frame drops at once too, so we hear the digipeat or ack that follows it.
+        if kind == Kind::Data {
+        } else if cfg.tail {
             out.push(Act::TailElim); // inside stock's 400 ms hold (tonegen::TAIL_MS)
         } else if normal {
             for _ in 0..crate::path::UNKEY_HOLD_MS / 200 {
@@ -425,28 +427,30 @@ mod tests {
         assert_eq!(s.as_slice().last(), Some(&Act::Stage), "after the PA ramp");
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 700_500, &mut s);
-        assert_eq!(s.as_slice()[..3], [Act::Stage, Act::TailElim, Act::PaZero]);
+        assert_eq!(s.as_slice()[..2], [Act::Stage, Act::PaZero], "no tail or hold after a data frame (TX-47.6)");
         // Not keyed: release does nothing.
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 701_000, &mut s);
         assert!(s.is_empty());
     }
 
-    /// TX-47.1, TX-47.4 (TX audit F5): stock's 400 ms carrier hold at every unkey, voice or data, tail or not (the tail
-    /// plays inside it); a cut drops at once.
+    /// TX-47.1, TX-47.4 (TX audit F5): stock's 400 ms carrier hold at every voice unkey, tail or not (the tail plays
+    /// inside it); a cut drops at once. TX-47.6 (decision 296): a data unkey holds nothing, tail on or off.
     #[test]
     fn carrier_held_400_ms_at_every_unkey() {
         let mut t = TxSeq::new();
         let mut p = rx_on(mhz(146));
         let r = req(mhz(146) + 52_000);
-        for kind in [Kind::Voice, Kind::Data] {
+        for (kind, tail) in [(Kind::Voice, false), (Kind::Data, false), (Kind::Data, true)] {
             t.key(&Req { kind, ..r }, &mut p, 0, &mut Steps::default()).unwrap();
             let mut s = Steps::default();
-            t.release(&Cfg::default(), &mut p, 5_000, &mut s);
+            t.release(&Cfg { tail, ..Cfg::default() }, &mut p, 5_000, &mut s);
             let a = s.as_slice();
             let zero = a.iter().position(|x| *x == Act::PaZero).unwrap();
             let held: u32 = a[..zero].iter().map(|x| if let Act::Wait(ms) = x { *ms as u32 } else { 0 }).sum();
-            assert_eq!(held, crate::path::UNKEY_HOLD_MS as u32, "{kind:?}");
+            let want = if kind == Kind::Data { 0 } else { crate::path::UNKEY_HOLD_MS as u32 };
+            assert_eq!(held, want, "{kind:?}");
+            assert!(kind == Kind::Voice || !a.contains(&Act::TailElim), "no tail after a data frame");
             assert_eq!(a[zero + 1], Act::Wait(crate::path::UNKEY_WAIT_MS), "then the unkey wait (F4)");
             assert_eq!(a[zero + 2], Act::ChipRx(0), "then the chip out of transmit");
         }

@@ -54,7 +54,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
             if !ht.is_empty() {
                 w::field(lcd, 232 - ww, ww, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
-            } else if matches!(state, "RX" | "MON" | "FM") {
+            } else if matches!(state, "RX" | "TX" | "MON" | "FM") {
                 w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
             } else if state != "idle" {
                 w::field(lcd, 26 + hw, 206 - hw, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);

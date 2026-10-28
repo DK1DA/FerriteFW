@@ -116,6 +116,8 @@ pub struct Station {
     pub msg_min: Option<u16>,
     /// APRS-44: its last frame came as FX.25, with this many bytes corrected.
     pub fx25: Option<u8>,
+    /// APRS-5.2: the radio its Mic-E device codes named, an index into `uaprs::parse::MIC_E_DEVICES`.
+    pub device: Option<u8>,
 }
 
 /// A message's state (APRS-6, APRS-13, APRS-34).

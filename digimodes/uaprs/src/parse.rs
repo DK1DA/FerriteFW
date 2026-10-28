@@ -97,6 +97,64 @@ pub struct MicEStatus {
     pub bits: u8,
     /// The bits are custom (C0 to C6) rather than standard.
     pub custom: bool,
+    /// The sending radio or tracker, from the comment's device codes: an index into [`MIC_E_DEVICES`].
+    pub device: Option<u8>,
+}
+
+/// Mic-E device codes and the radios they name, from the APRS device identification list (aprs-deviceid's
+/// tocalls.yaml by Hessu, OH7LZB, CC BY-SA 2.0). A comment starting with the type byte `` ` `` or `'` ends with one
+/// of the first group's two-byte suffixes; the legacy Kenwoods start with `>` or `]` and may end with one byte.
+pub const MIC_E_DEVICES: [(&[u8], &str); 32] = [
+    (b"_ ", "Yaesu VX-8"),
+    (b"_\"", "Yaesu FTM-350"),
+    (b"_#", "Yaesu VX-8G"),
+    (b"_$", "Yaesu FT1D"),
+    (b"_(", "Yaesu FT2D"),
+    (b"_0", "Yaesu FT3D"),
+    (b"_3", "Yaesu FT5D"),
+    (b"_1", "Yaesu FTM-300D"),
+    (b"_2", "Yaesu FTM-200D"),
+    (b"_4", "Yaesu FTM-500D"),
+    (b"_5", "Yaesu FTM-510D"),
+    (b"_6", "Yaesu FTX-1"),
+    (b"_7", "Yaesu FTM-310D"),
+    (b"_)", "Yaesu FTM-100D"),
+    (b"_%", "Yaesu FTM-400DR"),
+    (b"(5", "Anytone D578UV"),
+    (b"(8", "Anytone D878UV"),
+    (b"|3", "Byonics TinyTrak3"),
+    (b"|4", "Byonics TinyTrak4"),
+    (b"^A", "APRS Connect"),
+    (b"^v", "HinzTec anyfrog"),
+    (b"*v", "KissOZ Tracker"),
+    (b"*9", "NOR AVRT9"),
+    (b":2", "SQ8L VP-Tracker"),
+    (b" X", "SainSonic AP510"),
+    (b"[1", "APRSdroid"),
+    // legacy: the type byte and the suffix byte
+    (b">", "Kenwood TH-D7A"),
+    (b">=", "Kenwood TH-D72"),
+    (b">^", "Kenwood TH-D74"),
+    (b">&", "Kenwood TH-D75"),
+    (b"]", "Kenwood TM-D700"),
+    (b"]=", "Kenwood TM-D710"),
+];
+
+/// The Mic-E comment `c` without its device codes, and the device they name ([`MIC_E_DEVICES`]). An unknown
+/// suffix after `` ` `` or `'` stays (it may be text); the type byte goes whatever follows.
+pub fn mic_e_device(c: &[u8]) -> (&[u8], Option<u8>) {
+    let find = |code: &[u8]| MIC_E_DEVICES.iter().position(|(k, _)| *k == code).map(|i| i as u8);
+    match c.split_first() {
+        Some((b'`' | b'\'', rest)) => match rest.len().checked_sub(2).map(|n| rest.split_at(n)) {
+            Some((text, sfx)) if find(sfx).filter(|&i| (i as usize) < 26).is_some() => (text, find(sfx)),
+            _ => (rest, None),
+        },
+        Some((&t @ (b'>' | b']'), rest)) => match rest.split_last() {
+            Some((&e @ (b'=' | b'^' | b'&'), text)) if find(&[t, e]).is_some() => (text, find(&[t, e])),
+            _ => (rest, find(&[t])),
+        },
+        _ => (c, None),
+    }
 }
 
 /// A comment: the text after a position, with what was read out of it (an `/A=` altitude, a `!DAO!` precision
@@ -790,29 +848,23 @@ fn mic_e<'a>(dest: &[u8], b: &'a [u8]) -> Result<Packet<'a>, Error> {
     if (1..=360).contains(&course) {
         p.course = Some(course as u16);
     }
-    // Altitude: three base-91 characters and '}', metres above -10 km, at the start of the comment or after a
-    // one-character radio type (`>`, `]`, `` ` ``, `'`).
-    let rest = &b[8..];
+    // The device codes (the type byte first, the model last) out; then the altitude: three base-91 characters and
+    // '}', metres above -10 km, at the start of what is left.
+    let (rest, device) = mic_e_device(trim_end(&b[8..]));
     let mut comment = Comment::plain(rest);
-    for skip in [0, 1] {
-        if let Some(a) = rest.get(skip..skip + 4) {
-            if a[3] == b'}' {
-                if let Some(m) = base91(&a[..3]) {
-                    // Up to 91^3 - 10000 m: feet in 64 bits.
-                    let metres = m as i64 - 10_000;
-                    p.altitude = Some(((metres * 10_000 + if metres < 0 { -1524 } else { 1524 }) / 3048) as i32);
-                    // The radio type character stays in the comment.
-                    comment.cut(skip, skip + 4);
-                    break;
-                }
-            }
+    if let Some(a) = rest.get(..4).filter(|a| a[3] == b'}') {
+        if let Some(m) = base91(&a[..3]) {
+            // Up to 91^3 - 10000 m: feet in 64 bits.
+            let metres = m as i64 - 10_000;
+            p.altitude = Some(((metres * 10_000 + if metres < 0 { -1524 } else { 1524 }) / 3048) as i32);
+            comment.cut(0, 4);
         }
     }
     Ok(Packet::Position {
         pos: p,
         messaging: true,
         timestamp: None,
-        mic_e: Some(MicEStatus { bits, custom }),
+        mic_e: Some(MicEStatus { bits, custom, device }),
         weather: None,
         comment: comment.trim(),
     })

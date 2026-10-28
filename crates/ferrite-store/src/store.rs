@@ -1579,7 +1579,7 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
             s.via = r.via;
         }
         if missing & DET_COURSE != 0 {
-            (s.course, s.alt_m) = (r.course, r.alt_m);
+            (s.course, s.alt_m, s.device) = (r.course, r.alt_m, r.device);
         }
         if missing & DET_COMMENT != 0 {
             s.comment = r.comment;

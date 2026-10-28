@@ -85,6 +85,8 @@ struct Det {
     via: Buf<10>,
     course: Option<(u16, u16)>,
     alt_m: Option<i32>,
+    /// APRS-5.2: the radio its Mic-E codes named (with the course: a position report's).
+    device: Option<u8>,
     comment: Buf<40>,
     /// APRS-44: its last frame came as FX.25: the bytes corrected + 1 (0: plain AX.25).
     fx25: u8,
@@ -389,6 +391,7 @@ impl AprsLive {
             msg: Buf::new(),
             msg_min: None,
             fx25: d.filter(|_| known & DET_FX25 != 0).and_then(|d| d.fx25.checked_sub(1)),
+            device: d.filter(|_| known & DET_COURSE != 0).and_then(|d| d.device),
         })
     }
 
@@ -419,7 +422,7 @@ impl AprsLive {
         let old = self.det.iter().position(|c| c.get().is_some_and(|o| o.call == d.call));
         if let Some(o) = old.and_then(|i| self.det[i].get()) {
             if d.known & DET_COURSE == 0 && o.known & DET_COURSE != 0 {
-                (d.course, d.alt_m) = (o.course, o.alt_m);
+                (d.course, d.alt_m, d.device) = (o.course, o.alt_m, o.device);
             }
             if d.known & DET_COMMENT == 0 && o.known & DET_COMMENT != 0 {
                 d.comment = o.comment;
@@ -622,12 +625,16 @@ impl AprsLive {
         }
         let direct = if via.is_empty() { HEARD_DIRECT } else { 0 };
         let mut h = Heard { call, sym: Sym::Ht, pos: None, at_s: now_s, times: 1, row_at: NO_ROW, row_key: 0, seq: NO_SEQ, flags: HEARD_NOW | direct };
-        let mut d = Det { call, known: DET_VIA | DET_FX25, via, course: None, alt_m: None, comment: Buf::new(), fx25: 0 };
+        let mut d = Det { call, known: DET_VIA | DET_FX25, via, course: None, alt_m: None, device: None, comment: Buf::new(), fx25: 0 };
         let mut dest = [0u8; 6];
         let dc = f.dest.call();
         dest[..dc.len()].copy_from_slice(dc);
         match parse::parse(&dest[..dc.len()], f.info) {
-            Ok(Packet::Position { pos, comment, .. } | Packet::Object { pos, comment, .. } | Packet::Item { pos, comment, .. }) => {
+            Ok(p @ (Packet::Position { pos, comment, .. } | Packet::Object { pos, comment, .. } | Packet::Item { pos, comment, .. })) => {
+                d.device = match p {
+                    Packet::Position { mic_e: Some(m), .. } => m.device,
+                    _ => None,
+                };
                 h.pos = Some(Pos { lat: pos.lat.saturating_mul(10), lon: pos.lon.saturating_mul(10) });
                 h.sym = sym(pos.table, pos.code);
                 d.course = pos.course.map(|c| (c, pos.speed.map_or(0, |k| (k as u32 * 1852 / 1000) as u16)));
@@ -1287,6 +1294,21 @@ mod tests {
         assert_eq!(a.station(0).unwrap().times, 2);
         assert!(a.station(0).unwrap().pos.is_some(), "a status keeps the last position");
         assert_eq!(a.stations(), HEARD_MAX);
+    }
+
+    /// APRS-5.2: a Mic-E frame's device codes leave the heard comment and name the radio; a later frame without a
+    /// position keeps it.
+    #[test]
+    fn mic_e_device_heard() {
+        let a = AprsLive::new();
+        let (f, n) = frame(b"VE7LSE-9", b"S4QVYV", &[], b"`.4&l-/k/`146.520[1");
+        a.receive(&f[..n], 0, b"VE3XYZ", &AprsCfg::DEFAULT);
+        let s = a.station(0).unwrap();
+        assert_eq!((s.comment.as_bytes(), s.device), (&b"146.520"[..], Some(25)));
+        assert_eq!(uaprs::parse::MIC_E_DEVICES[25].1, "APRSdroid");
+        let (f, n) = frame(b"VE7LSE-9", b"APRS", &[], b">QRT");
+        a.receive(&f[..n], 30, b"VE3XYZ", &AprsCfg::DEFAULT);
+        assert_eq!(a.station(0).unwrap().device, Some(25));
     }
 
     /// APRS-44: a frame that came as FX.25 marks its station with the bytes corrected (the station screen's Path
@@ -2038,6 +2060,7 @@ mod tests {
             msg: Buf::new(),
             msg_min: None,
             fx25: None,
+            device: None,
         };
         a.restore(&old(b"VE3JLH", AGO_UNKNOWN), 17, 50);
         a.restore(&old(b"VA3RTX", AGO_UNKNOWN), 18, 50); // heard since: left as it is
