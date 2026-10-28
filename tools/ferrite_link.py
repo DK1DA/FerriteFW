@@ -28,6 +28,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT msg-send CALL "TEXT"       # queue an APRS message as compose does (LINK-45)
     python3 tools/ferrite_link.py PORT subscribe [heard,msgs,ui] [--seconds N] [--screen]   # print pushed events
     python3 tools/ferrite_link.py PORT audio [SECONDS [FILE.wav]]   # receive audio over the cable to a WAV (LINK-13.4)
+    python3 tools/ferrite_link.py PORT audio SECONDS FILE.wav --raw [12000|16000]   # bench builds: the decoders' samples, 12-bit PCM (LINK-13.9)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
 PORT is a serial device (the programming cable, 115200 8N1), tcp:HOST:PORT for the simulator
@@ -90,6 +91,7 @@ Z = 0x7D  # LINK-51: a compressed frame (| 0x80 for an answer): the inner type, 
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND, MSG_STOP = 0x50, 0x51, 0x52, 0x53, 0x54, 0x55  # LINK-43 - LINK-49
 AUDIO, AUDIO_DATA = 0x56, 0x57  # LINK-13.4: receive audio (the cable only)
+AUDIO_RAW = 0x58  # LINK-13.9: the bench's raw stream
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
 CONTACT = 6  # APRS-42
 ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
@@ -312,6 +314,7 @@ class Link:
         self.lz = None  # (up encoder, down decoder, [up count, down count]) while on
         self.events = []  # EVENT frames (LINK-46) as they arrive: (event counter, payload)
         self.audio = []  # AUDIO_DATA payloads (LINK-13.4) as they arrive
+        self.raw = []  # AUDIO_RAW payloads (LINK-13.9) as they arrive
         # Ctrl-C closes the terminal if it has the cable (TERM-2; nothing otherwise); its goodbye text is dropped.
         self.p.write(b"\x03")
         time.sleep(0.3)
@@ -357,6 +360,9 @@ class Link:
                 continue
             if f[0] == AUDIO_DATA:  # LINK-13.4: pushed, plain, outside compression's window and count
                 self.audio.append(bytes(f[2:-2]))
+                continue
+            if f[0] == AUDIO_RAW:  # LINK-13.9: likewise
+                self.raw.append(bytes(f[2:-2]))
                 continue
             if self.lz and f[0] != HELLO | 0x80:
                 _, down, n = self.lz
@@ -1113,6 +1119,8 @@ def main():
     ap.add_argument("--pin", help="the radio's PIN, for Bluetooth while a PIN lock is on (LINK-30)")
     ap.add_argument("--long", action="store_true", help="keys: every key a long press")
     ap.add_argument("--screen", action="store_true", help="subscribe ui: redraw the screen's text on each update")
+    ap.add_argument("--raw", type=int, nargs="?", const=12000, metavar="RATE",
+                    help="audio: the decoders' samples as 12-bit PCM at 12000 (default) or 16000 Hz (LINK-13.9, bench builds)")
     a = ap.parse_args()
     port = Port(a.port)
     try:
@@ -1192,6 +1200,79 @@ def audio(link, seconds, path):
     print(f"{blocks} blocks ({block} samples each), {keep} keep-alives, {lost} lost; {nbytes} bytes in {el:.1f} s "
           f"({nbytes / el:.0f} B/s); {len(samples) / rate:.1f} s of audio to {path}")
     return 0
+
+
+def raw_audio(link, seconds, path, rate):
+    """LINK-13.9 (decision 307), a bench build's only: the decoders' own samples, stepped from 24 kHz to RATE (12000,
+    or 16000 for sweeps to 6 kHz) as 12-bit PCM, every block whatever the squelch, into a 16-bit WAV at RATE. The cable
+    goes to 230400 for 12 kHz (19.1 KB/s), 460800 for 16 kHz (25.5 KB/s), and back to 115200 at the end. Reports
+    frames lost on the cable (gaps in seq) and samples missing (gaps in the first sample's index: the radio's drops
+    too; filled with silence, so the file keeps time), clipped blocks and the rate achieved."""
+    import wave
+    mode = {12000: 2, 16000: 3}.get(rate)
+    if mode is None:
+        sys.exit("--raw takes 12000 or 16000")
+    baud = 230_400 if rate == 12000 else 460_800
+    p = link.p
+    fast = getattr(p, "ser", None) is not None  # the cable; the simulator's TCP has no rate
+    if fast:
+        link.ok(BAUD, struct.pack("<I", baud))
+        time.sleep(0.05)
+        p.baud(baud)
+        link.hello()  # within 1 s, or the radio goes back (LINK-11)
+    s, rest = link.ask(AUDIO, bytes([mode]))
+    if s != 0:
+        sys.exit(f"audio --raw: {why(s, rest)} (a bench build's only: tx-bench, bringup)")
+    got_rate, block = struct.unpack("<HH", rest[:4])
+    t0 = time.time()
+    samples, blocks, lost_frames, missing, clipped, nbytes, last, renew = [], 0, 0, 0, 0, 0, None, t0
+    t_first = None
+    try:
+        while time.time() - t0 < seconds:
+            link.answers()
+            while link.raw:
+                pl = link.raw.pop(0)
+                nbytes += len(pl) + 7  # type, seq, CRC, COBS's byte and the delimiter
+                seq, first, slot, flags = struct.unpack("<HIBB", pl[:8])
+                if t_first is None:
+                    t_first = time.time()
+                if last is not None:
+                    ls, lf, ln = last
+                    lost_frames += (seq - ls - 1) & 0xFFFF
+                    gap = (first - lf - ln) & 0xFFFFFFFF
+                    if gap < 1 << 31:
+                        missing += gap
+                        samples.extend([0] * gap)
+                body = pl[8:]
+                for i in range(0, len(body) - 2, 3):
+                    w = body[i] | body[i + 1] << 8 | body[i + 2] << 16
+                    for v in (w & 0xFFF, w >> 12 & 0xFFF):
+                        samples.append((v - 0x1000 if v & 0x800 else v) << 4)
+                blocks += 1
+                clipped += bool(flags & 0x80)
+                last = (seq, first, (len(body) // 3) * 2)
+            if time.time() - renew >= 3.0:
+                link.send(AUDIO, bytes([mode]))  # keeps the session active (LINK-13.5)
+                renew = time.time()
+            time.sleep(0.002)
+    finally:
+        link.ok(AUDIO, b"\x00")
+        if fast:
+            link.ok(BAUD, struct.pack("<I", 115_200))
+            time.sleep(0.05)
+            p.baud(115_200)
+            link.hello()
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(got_rate)
+        w.writeframes(struct.pack(f"<{len(samples)}h", *samples))
+    el = time.time() - (t_first or t0)
+    print(f"raw {got_rate} Hz, 12-bit, at {baud if fast else 'tcp'}: {blocks} blocks ({block} samples each), "
+          f"{lost_frames} frames lost on the cable, {missing} samples missing, {clipped} clipped blocks; "
+          f"{len(samples) - missing} samples in {el:.1f} s ({(len(samples) - missing) / el:.0f} Hz), "
+          f"{nbytes / el:.0f} B/s; {len(samples) / got_rate:.1f} s of audio to {path}")
+    return 1 if lost_frames or missing else 0
 
 
 BENCH_BIT = 0x80  # LINK-35: bit 7 of the build byte marks a bench build (decision 151: tx-dry is 0x82)
@@ -1407,6 +1488,8 @@ def run(link, a):
     elif a.cmd == "subscribe":
         what = (a.args[0] if a.args else "heard,msgs,ui").split(",")
         return subscribe(link, what, a.seconds if a.seconds != 5.0 else 3600, a.screen)
+    elif a.cmd == "audio" and a.raw:
+        return raw_audio(link, float(a.args[0]) if a.args else 10.0, a.args[1] if len(a.args) > 1 else "rx-raw.wav", a.raw)
     elif a.cmd == "audio":
         return audio(link, float(a.args[0]) if a.args else 10.0, a.args[1] if len(a.args) > 1 else "rx-audio.wav")
     elif a.cmd == "reboot":

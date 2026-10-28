@@ -103,17 +103,12 @@ impl AudioOut {
 
     /// One whole frame into `TERM_OUT`, or nothing (`false`).
     fn put(&mut self, src: u16, blk: Option<&ferrite_core::rxaudio::Block>) -> bool {
-        use crate::chan::{TERM_OUT, TERM_OUT_LOCK};
         let (slot, flags) = ferrite_core::rxaudio::unpack_source(src);
         let mut w = [0u8; ferrite_core::link::MAX_WIRE];
         let Some(k) = ferrite_core::rxaudio::frame(self.seq, slot, flags, blk, &mut w) else { return false };
-        if crate::bringup::ON.load(Relaxed) || TERM_OUT_LOCK.load(core::sync::atomic::Ordering::SeqCst) || (TERM_OUT.room() as usize) < k {
+        if !to_cable(&w[..k]) {
             return false;
         }
-        for &b in &w[..k] {
-            TERM_OUT.put(b);
-        }
-        crate::hal::uart::tx_ring(crate::report::UART_CPS, &TERM_OUT);
         self.seq = self.seq.wrapping_add(1);
         true
     }
@@ -152,6 +147,97 @@ impl AudioOut {
         }
     }
 }
+/// A whole link frame into the cable's send ring (decision 290), or nothing (`false`): not while the bring-up log has
+/// the cable, a thread-mode writer is mid-frame, or the ring lacks room.
+fn to_cable(w: &[u8]) -> bool {
+    use crate::chan::{TERM_OUT, TERM_OUT_LOCK};
+    if crate::bringup::ON.load(Relaxed) || TERM_OUT_LOCK.load(core::sync::atomic::Ordering::SeqCst) || (TERM_OUT.room() as usize) < w.len() {
+        return false;
+    }
+    for &b in w {
+        TERM_OUT.put(b);
+    }
+    crate::hal::uart::tx_ring(crate::report::UART_CPS, &TERM_OUT);
+    true
+}
+
+/// LINK-13.9 (decision 307): blocks of the bench's raw stream waiting for room in `TERM_OUT`, at most this many
+/// (38 ms at 12 kHz, 28 ms at 16 kHz; the ring itself holds four more).
+#[cfg(feature = "bench")]
+const RAW_QUEUE: usize = 3;
+
+/// LINK-13.9: the bench's raw receive audio, framed and sent by this task as the ADPCM stream is: every block,
+/// whatever the squelch; the oldest dropped when the queue is full (the PC sees the gap in the sample index).
+#[cfg(feature = "bench")]
+struct RawOut {
+    pack: ferrite_core::rawaudio::Packer,
+    q: [(ferrite_core::rawaudio::Block, u16); RAW_QUEUE],
+    head: u8,
+    n: u8,
+    seq: u16,
+}
+
+#[cfg(feature = "bench")]
+impl RawOut {
+    fn new(mode: u8) -> Self {
+        let p = ferrite_core::rawaudio::Packer::new(mode);
+        let blank = ferrite_core::rawaudio::Block { first: 0, clipped: false, bytes: [0; ferrite_core::rawaudio::BLOCK_BYTES] };
+        RawOut { pack: p, q: [(blank, 0); RAW_QUEUE], head: 0, n: 0, seq: 0 }
+    }
+
+    /// A chunk of decoder samples in; the blocks made queued, and as many as fit sent.
+    fn chunk(&mut self, x: &[i16]) {
+        let (q, head, n) = (&mut self.q, &mut self.head, &mut self.n);
+        for &s in x {
+            self.pack.push(s, |b| {
+                AUDIO_MADE.fetch_add(1, Relaxed);
+                if *n as usize == RAW_QUEUE {
+                    AUDIO_DROPS.fetch_add(1, Relaxed);
+                    *head = (*head + 1) % RAW_QUEUE as u8;
+                    *n -= 1;
+                }
+                q[(*head + *n) as usize % RAW_QUEUE] = (*b, crate::chan::AUDIO_SRC.load(Relaxed));
+                *n += 1;
+            });
+        }
+        while self.n > 0 {
+            let (b, src) = &self.q[self.head as usize];
+            let (slot, flags) = ferrite_core::rxaudio::unpack_source(*src);
+            let mut w = [0u8; ferrite_core::link::MAX_WIRE];
+            let Some(k) = ferrite_core::rawaudio::frame(self.seq, slot, flags, b, &mut w) else { return };
+            if !to_cable(&w[..k]) {
+                AUDIO_WAITS.fetch_add(1, Relaxed);
+                return;
+            }
+            self.seq = self.seq.wrapping_add(1);
+            self.head = (self.head + 1) % RAW_QUEUE as u8;
+            self.n -= 1;
+        }
+    }
+}
+
+/// LINK-13.4, LINK-13.9: the stream to the PC. One place in the task's future for either: the raw stream's coder
+/// and queue sit where the ADPCM stream's do (24 bytes more in a bench build). Boxing a variant isn't an option
+/// here: the room is the task's static future, held whichever runs.
+#[allow(clippy::large_enum_variant)]
+enum Stream {
+    Off,
+    Adpcm { pack: ferrite_core::rxaudio::Packer, sender: AudioOut, agc: ferrite_core::rxlevel::Agc },
+    #[cfg(feature = "bench")]
+    Raw(RawOut),
+}
+
+impl Stream {
+    fn new(mode: u8) -> Self {
+        match mode {
+            0 => Stream::Off,
+            #[cfg(feature = "bench")]
+            m if ferrite_core::rawaudio::rate(m).is_some() => Stream::Raw(RawOut::new(m)),
+            _ => Stream::Adpcm { pack: ferrite_core::rxaudio::Packer::new(), sender: AudioOut::new(), agc: ferrite_core::rxlevel::Agc::new() },
+        }
+    }
+}
+
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
 pub static FRAMES: AtomicU32 = AtomicU32::new(0);
 pub static DROPPED: AtomicU32 = AtomicU32::new(0);
@@ -165,12 +251,11 @@ pub async fn task() {
     let mut capturing = false;
     // What each side asks for, and what runs (DEC-18).
     let (mut aprs, mut pager, mut running) = (DecoderKind::Off, false, DecoderKind::Off);
-    // LINK-13.4: receive audio for the PC, coded from the same samples the decoder gets.
-    let mut listen = false;
-    let mut pack = ferrite_core::rxaudio::Packer::new();
-    let mut sender = AudioOut::new();
-    // LINK-13.8: the stream's gain, ahead of the coder only (the decoders take the samples as they are).
-    let mut agc = ferrite_core::rxlevel::Agc::new();
+    // LINK-13.4: receive audio for the PC, coded from the same samples the decoder gets (the `AUDIO` mode: 0 none, 1
+    // ADPCM, 2 or 3 the bench's raw stream, LINK-13.9). LINK-13.8: the ADPCM stream's gain is its own, ahead of its
+    // coder only (the decoders take the samples as they are).
+    let mut listen = 0u8;
+    let mut stream = Stream::Off;
     let mut peak = 0i32;
     let mut halves = 0u32;
     loop {
@@ -184,13 +269,11 @@ pub async fn task() {
                 match cmd {
                     DspCmd::Decoder(k) => aprs = k,
                     DspCmd::Pager(on) => pager = on,
-                    DspCmd::Audio(on) => {
-                        if on && !listen {
-                            pack = ferrite_core::rxaudio::Packer::new();
-                            sender = AudioOut::new();
-                            agc = ferrite_core::rxlevel::Agc::new();
+                    DspCmd::Audio(mode) => {
+                        if mode != listen {
+                            stream = Stream::new(mode);
                         }
-                        listen = on;
+                        listen = mode;
                     }
                     _ => {}
                 }
@@ -207,7 +290,7 @@ pub async fn task() {
                         DecoderKind::Dsc => Decoder::dsc(),
                     };
                 }
-                let want = kind != DecoderKind::Off || listen;
+                let want = kind != DecoderKind::Off || listen != 0;
                 if want && !capturing {
                     clock::for_audio().await; // PWR-26.4: the speed first, never under a running capture
                     adc::init();
@@ -252,18 +335,24 @@ pub async fn task() {
                     AUDIO_PEAK.store(peak as u32, Relaxed);
                     peak = 0;
                 }
-                if listen {
-                    // LINK-13.8: scaled for the PC only, held while nothing is heard
-                    let open = ferrite_core::rxaudio::unpack_source(crate::chan::AUDIO_SRC.load(Relaxed)).1 & ferrite_core::rxaudio::SQ_OPEN != 0;
-                    let mut y = out;
-                    agc.chunk(&mut y[..n], open);
-                    AUDIO_GAIN.store(agc.gain() as u32, Relaxed);
-                    for &x in &y[..n] {
-                        pack.push(x, |b| {
-                            AUDIO_MADE.fetch_add(1, Relaxed);
-                            sender.block(b);
-                        });
+                match &mut stream {
+                    Stream::Off => {}
+                    Stream::Adpcm { pack, sender, agc } => {
+                        // LINK-13.8: scaled for the PC only, held while nothing is heard
+                        let open = ferrite_core::rxaudio::unpack_source(crate::chan::AUDIO_SRC.load(Relaxed)).1 & ferrite_core::rxaudio::SQ_OPEN != 0;
+                        let mut y = out;
+                        agc.chunk(&mut y[..n], open);
+                        AUDIO_GAIN.store(agc.gain() as u32, Relaxed);
+                        for &x in &y[..n] {
+                            pack.push(x, |b| {
+                                AUDIO_MADE.fetch_add(1, Relaxed);
+                                sender.block(b);
+                            });
+                        }
                     }
+                    // LINK-13.9: the decoders' samples as they are (no gain)
+                    #[cfg(feature = "bench")]
+                    Stream::Raw(r) => r.chunk(&out[..n]),
                 }
                 slot.push(&out[..n], |f| match f {
                     Found::Frame(b) => {

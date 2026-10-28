@@ -468,12 +468,12 @@ fn receive_audio_cable_only_and_opt_in() {
     use ferrite_core::rxaudio::{self, Block, State, BLOCK_BYTES, NO_SLOT, SQ_OPEN};
     let mut r = Rig::new();
     assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
-    assert!(!r.p.audio_wanted(r.now), "off until asked");
+    assert_eq!(r.p.audio_wanted(r.now), 0, "off until asked");
     assert_eq!(r.ask(Port::Bt, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
     assert_eq!(r.ask(Port::Bt, msg::AUDIO, &[1]), Status::Refused as u8, "Bluetooth can't carry it");
     let (s, rest) = r.ask_full(Port::Cable, msg::AUDIO, &[1]);
     assert_eq!((s, rest), (0, std::vec![0x40, 0x1F, 0, 1]), "8000 Hz, 256 samples a block");
-    assert!(r.p.audio_wanted(r.now));
+    assert_eq!(r.p.audio_wanted(r.now), 1);
     let blk = Block { start: State { pred: -5, index: 9 }, codes: [0x37; BLOCK_BYTES] };
     let frames = |o: &mut Out| -> Vec<Vec<u8>> {
         let mut v = Vec::new();
@@ -497,7 +497,32 @@ fn receive_audio_cable_only_and_opt_in() {
     let (seq, slot, fl, st, codes) = rxaudio::get(&b[0]).unwrap();
     assert_eq!((seq, slot, fl, st, codes), (1, 1, SQ_OPEN, blk.start, &blk.codes[..]), "the block, slot B heard");
     assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
-    assert!(!r.p.audio_wanted(r.now), "a HELLO ends it");
+    assert_eq!(r.p.audio_wanted(r.now), 0, "a HELLO ends it");
     assert_eq!(r.ask(Port::Cable, msg::AUDIO, &[1]), 0);
-    assert!(!r.p.audio_wanted(r.now + link::ACTIVE_MS + 10), "a quiet session ends it");
+    assert_eq!(r.p.audio_wanted(r.now + link::ACTIVE_MS + 10), 0, "a quiet session ends it");
+}
+
+/// LINK-13.9: the raw stream (`AUDIO` 2, 12 kHz; 3, 16 kHz) is a bench build's only: a user build refuses it and
+/// keeps not listening; a bench build answers its rate and block and listens in that mode, which the ADPCM path
+/// ([`Ports::audio`]) leaves to the DSP task.
+#[test]
+fn raw_audio_bench_only() {
+    use ferrite_core::rawaudio::{BLOCK, MODE_12K, MODE_16K};
+    let mut r = Rig::new();
+    assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
+    for (m, hz) in [(MODE_12K, 12_000u16), (MODE_16K, 16_000)] {
+        let (s, rest) = r.ask_full(Port::Cable, msg::AUDIO, &[m]);
+        if cfg!(feature = "bench") {
+            let mut want = hz.to_le_bytes().to_vec();
+            want.extend_from_slice(&(BLOCK as u16).to_le_bytes());
+            assert_eq!((s, rest), (0, want));
+            assert_eq!(r.p.audio_wanted(r.now), m);
+            r.p.audio(&ferrite_core::rxaudio::Block { start: Default::default(), codes: [0; ferrite_core::rxaudio::BLOCK_BYTES] }, &LiveAll::default(), r.now + 2000, &mut r.cable);
+            assert!(r.cable.0.is_empty(), "no ADPCM keep-alive in a raw mode");
+        } else {
+            assert_eq!(s, Status::Refused as u8);
+            assert_eq!(r.p.audio_wanted(r.now), 0);
+        }
+    }
+    assert_eq!(r.ask(Port::Cable, msg::AUDIO, &[4]), Status::BadArg as u8);
 }

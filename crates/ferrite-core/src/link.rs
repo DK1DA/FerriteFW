@@ -158,7 +158,8 @@ pub mod msg {
     /// Stop sending one of our APRS messages (LINK-49, APRS-13.1): to (length, text), the message (length, text);
     /// the newest of ours to that station with that text still being tried stops, kept as cancelled.
     pub const MSG_STOP: u8 = 0x55;
-    /// Receive audio to the PC (LINK-13.1, LINK-13.4): the cable only; payload one byte, 1 to listen, 0 to stop.
+    /// Receive audio to the PC (LINK-13.1, LINK-13.4): the cable only; payload one byte, 1 to listen, 0 to stop
+    /// (2 or 3: the bench's raw stream at 12 or 16 kHz, LINK-13.9).
     /// The answer carries the stream's rate (u16) and a block's samples (u16). Listening ends with the session
     /// (a `HELLO`, the session going quiet, a new connection): never on by itself (LINK-13.5).
     pub const AUDIO: u8 = 0x56;
@@ -166,6 +167,10 @@ pub mod msg {
     /// (0xFF none), flags (1: squelch open), the coder's state at the block's start (pred i16, index), then the
     /// codes; with no codes, a keep-alive while nothing is heard. Never compressed (LINK-51), nor counted there.
     pub const AUDIO_DATA: u8 = 0x57;
+    /// A block of the bench's raw receive audio (LINK-13.9, `AUDIO` 2 or 3 in a bench build; [`crate::rawaudio`]):
+    /// seq (u16), the first sample's index (u32), the slot heard, flags, then 152 samples of 12 bits, two in three
+    /// bytes. Pushed unasked, every block whatever the squelch; never compressed, as `AUDIO_DATA`.
+    pub const AUDIO_RAW: u8 = 0x58;
     /// The way back to stock (BACKUP-7, LINK-4, LINK-8; [`crate::restore`]): the cable only. `START` stops the radio
     /// and hands the cable to the restore until it resets; erase, program and CRC requests follow, then `FINISH`.
     pub const STOCK_RESTORE: u8 = 0x60;

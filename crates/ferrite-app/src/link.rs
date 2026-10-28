@@ -90,9 +90,9 @@ pub struct Session {
     pub lz: bool,
     /// Events pushed to this session (LINK-46).
     sub: sub::Sub,
-    /// LINK-13.4: this session asked for receive audio (the cable only; never on by itself, LINK-13.5), and the
-    /// blocks' counter.
-    audio: bool,
+    /// LINK-13.4: the receive audio this session asked for (the cable only; never on by itself, LINK-13.5): 0 none,
+    /// 1 the ADPCM stream, 2 or 3 the bench's raw stream (LINK-13.9); and the blocks' counter.
+    audio: u8,
     audio_seq: u16,
 }
 
@@ -162,7 +162,7 @@ impl Session {
             lz_free: false,
             lz: false,
             sub: sub::Sub::new(),
-            audio: false,
+            audio: 0,
             audio_seq: 0,
         }
     }
@@ -185,7 +185,7 @@ impl Session {
         self.run = Run::Off;
         self.many = None;
         self.lz = false; // LINK-51: the shared block goes back
-        self.audio = false; // LINK-13.5: listening ends with the connection
+        self.audio = 0; // LINK-13.5: listening ends with the connection
         self.unsubscribe(); // LINK-46: events end with the connection
     }
 
@@ -238,13 +238,14 @@ impl Session {
 
     /// LINK-13.4: this session asked for receive audio.
     pub fn listening(&self) -> bool {
-        self.audio
+        self.audio != 0
     }
 
-    /// LINK-13.4, LINK-13.5: this session listens: it asked, and it is still active (a quiet session stops it).
-    pub fn audio_on(&mut self, now: u32) -> bool {
-        if self.audio && !self.active(now) {
-            self.audio = false;
+    /// LINK-13.4, LINK-13.5: what this session listens to (the `AUDIO` mode, 0 none): it asked, and it is still
+    /// active (a quiet session stops it).
+    pub fn audio_on(&mut self, now: u32) -> u8 {
+        if self.audio != 0 && !self.active(now) {
+            self.audio = 0;
         }
         self.audio
     }
@@ -558,11 +559,21 @@ impl Session {
             msg::AUDIO if self.by != crate::remote::BY_CABLE => Status::Refused,
             msg::AUDIO => match p.first() {
                 Some(&on @ (0 | 1)) => {
-                    self.audio = on == 1;
+                    self.audio = on;
                     o.put(&(ferrite_core::rxaudio::RATE_HZ as u16).to_le_bytes());
                     o.put(&(ferrite_core::rxaudio::BLOCK as u16).to_le_bytes());
                     Status::Ok
                 }
+                // LINK-13.9: the raw stream, a bench build's only (decision 151)
+                #[cfg(feature = "bench")]
+                Some(&m @ (ferrite_core::rawaudio::MODE_12K | ferrite_core::rawaudio::MODE_16K)) => {
+                    self.audio = m;
+                    o.put(&(ferrite_core::rawaudio::rate(m).unwrap_or(0) as u16).to_le_bytes());
+                    o.put(&(ferrite_core::rawaudio::BLOCK as u16).to_le_bytes());
+                    Status::Ok
+                }
+                #[cfg(not(feature = "bench"))]
+                Some(&(ferrite_core::rawaudio::MODE_12K | ferrite_core::rawaudio::MODE_16K)) => Status::Refused,
                 _ => Status::BadArg,
             },
             _ => Status::UnknownType,
@@ -670,7 +681,7 @@ impl Session {
         self.hellos = self.hellos.wrapping_add(1);
         // LINK-51: the first reserved byte's bit 0 asks for compression; granted while the shared block is free
         self.lz = p.get(1).is_some_and(|b| b & 1 != 0) && self.lz_free;
-        self.audio = false; // LINK-13.5: listening ends with the session
+        self.audio = 0; // LINK-13.5: listening ends with the session
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48

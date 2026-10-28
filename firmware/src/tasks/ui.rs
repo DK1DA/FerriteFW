@@ -460,7 +460,7 @@ pub async fn task() {
     // PWR-26.3: when the governor last had a reason for the build's speed.
     let mut clock_high_at = 0u32;
     // LINK-13.4: the DSP task codes receive audio for the PC (the cable's session listens).
-    let mut listening = false;
+    let mut listening = 0u8;
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {

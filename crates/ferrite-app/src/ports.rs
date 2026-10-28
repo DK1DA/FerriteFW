@@ -122,9 +122,9 @@ impl Ports {
         self.links[0].listening()
     }
 
-    /// LINK-13.4, LINK-13.5: the cable's session listens to receive audio (asked for, and still active): the
-    /// caller runs the capture and hands its blocks to [`Ports::audio`] only while this holds.
-    pub fn audio_wanted(&mut self, now: u32) -> bool {
+    /// LINK-13.4, LINK-13.5: what the cable's session listens to (the `AUDIO` mode: 0 nothing; asked for, and still
+    /// active): the caller runs the capture and hands its ADPCM blocks to [`Ports::audio`] only while this isn't 0.
+    pub fn audio_wanted(&mut self, now: u32) -> u8 {
         self.links[0].audio_on(now)
     }
 
@@ -132,8 +132,8 @@ impl Ports {
     /// (with the slot heard), else only a keep-alive each [`AUDIO_KEEPALIVE_MS`]; nothing unless it listens.
     pub fn audio(&mut self, blk: &ferrite_core::rxaudio::Block, live: &LiveAll, now: u32, cable: &mut impl Sink) {
         use ferrite_core::rxaudio::{NO_SLOT, SQ_OPEN};
-        if !self.links[0].audio_on(now) {
-            return;
+        if self.links[0].audio_on(now) != 1 {
+            return; // LINK-13.9: the raw stream is the DSP task's alone
         }
         match live.slots.iter().position(|s| s.squelch_open) {
             Some(slot) => {

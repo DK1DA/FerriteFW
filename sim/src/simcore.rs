@@ -624,7 +624,7 @@ impl SimCore {
             dev.bt = self.ports.bt_connected(app, now);
             self.ports.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
             // LINK-13.4: receive audio while the cable's session listens (the fake radio's: a tone)
-            if self.ports.audio_wanted(now) {
+            if self.ports.audio_wanted(now) != 0 {
                 let mut blocks = std::vec::Vec::new();
                 while self.audio_ms < now {
                     for k in 0..24u32 {
