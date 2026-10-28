@@ -1543,7 +1543,7 @@ fn debug_txtest() {
         ("txtest AFSK-BK 150", Signal::AfskBk, Filters::Voice, 150),
     ] {
         r.cmd(line);
-        assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal, filters, level })))], "{line}");
+        assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal, filters, level, ..Arm::new(signal) })))], "{line}");
         let raw = r.raw();
         assert!(raw.contains(&std::format!("txtest: {} at {level} % armed for the next PTT key-up", signal.name())), "{raw}");
         let want = match filters {
@@ -1567,9 +1567,59 @@ fn debug_txtest() {
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     r.cmd("txtest 4fsk");
-    assert_eq!(r.serve(4, |_| DebugAns::Refused("the receive-only build has no transmit")), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal: Signal::Fsk4, filters: Filters::Data, level: 100 })))]);
+    assert_eq!(r.serve(4, |_| DebugAns::Refused("the receive-only build has no transmit")), vec![DebugReq::TxTest(Ask::Set(Some(Arm::new(Signal::Fsk4))))]);
     assert!(r.raw().contains("refused: the receive-only build has no transmit"), "{}", r.raw());
     assert!(!super::cmd::writes(b"txtest") && super::cmd::writes(b"txtest 4fsk") && super::cmd::writes(b"txtest off"));
+}
+
+#[cfg(feature = "bench")]
+/// TERM-33.15, TERM-33.16, TERM-33.17 (decision 308): `fsk BAUD [rc]`, `gmsk BAUD` and `g3ruh` arm the data
+/// signals (BAUD 300 to 9600, required for fsk and gmsk; `rc` fsk's only, before FILTERS); `bypass` and `eq`/`eq8`
+/// follow FILTERS in any order, once each, never with `voice`; LEVEL stays last. The armed answer names the baud,
+/// and a third line the bypass and the equaliser's back-off and gain stages.
+#[test]
+fn debug_txtest_data() {
+    use ferrite_core::txtest::{Arm, Ask, Eq, Filters, Signal};
+    let mut r = Rig::main();
+    let a = |s| Arm::new(s);
+    for (line, arm) in [
+        ("txtest fsk 1200", Arm { baud: 1200, ..a(Signal::Fsk) }),
+        ("txtest FSK 9600 rc", Arm { baud: 9600, shaped: true, ..a(Signal::Fsk) }),
+        ("txtest fsk 300 rc flat bypass eq 150", Arm { baud: 300, shaped: true, filters: Filters::Flat, bypass: true, eq: Eq::Eq, level: 150, ..a(Signal::Fsk) }),
+        ("txtest gmsk 4800 data eq8 bypass", Arm { baud: 4800, eq: Eq::Eq8, bypass: true, ..a(Signal::Gmsk) }),
+        ("txtest g3ruh", Arm { baud: 9600, shaped: true, ..a(Signal::G3ruh) }),
+        ("txtest g3ruh bypass 80", Arm { baud: 9600, shaped: true, bypass: true, level: 80, ..a(Signal::G3ruh) }),
+        ("txtest sweep data bypass eq", Arm { bypass: true, eq: Eq::Eq, ..a(Signal::Sweep) }),
+        ("txtest sweep bypass", Arm { bypass: true, ..a(Signal::Sweep) }),
+        ("txtest 4fsk eq", Arm { eq: Eq::Eq, ..a(Signal::Fsk4) }),
+    ] {
+        let n0 = r.vt.raw.len();
+        r.cmd(line);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(arm)))], "{line}");
+        let raw: std::string::String = std::string::String::from_utf8_lossy(&r.vt.raw[n0..]).into();
+        let title = if arm.signal.takes_baud() {
+            std::format!("txtest: {} {}{} at {} % armed", arm.signal.name(), arm.baud, if arm.shaped { " rc" } else { "" }, arm.level)
+        } else {
+            std::format!("txtest: {} at {} % armed", arm.signal.name(), arm.level)
+        };
+        assert!(raw.contains(&title), "{line}: {raw}");
+        assert_eq!(raw.contains("bypass: all AF TX filters off (REG_47 0 = 1), soft limiter off"), arm.bypass, "{line}: {raw}");
+        match arm.eq {
+            Eq::Eq => assert!(raw.contains("eq: flat 100 Hz-5 kHz, 79 taps, back-off 5.0 dB won back by REG_7D +10 steps, REG_40 0x50A"), "{raw}"),
+            Eq::Eq8 => assert!(raw.contains("eq8: flat 100 Hz-8 kHz, 95 taps, back-off 14.0 dB won back by REG_7D +11 steps, REG_40 0xD77"), "{raw}"),
+            Eq::Off => assert!(!raw.contains("taps, back-off"), "{raw}"),
+        }
+        r.send(b"\r");
+    }
+    for bad in [
+        "txtest fsk", "txtest fsk 299", "txtest fsk 9601", "txtest gmsk", "txtest gmsk 4800 rc", "txtest g3ruh 9600", "txtest g3ruh rc",
+        "txtest fsk 1200 data rc", "txtest sweep voice bypass", "txtest sweep voice eq", "txtest sweep bypass bypass", "txtest sweep eq eq8",
+        "txtest sweep bypass data", "txtest sweep eq 100 bypass", "txtest afsk-bk bypass", "txtest suite eq", "txtest sweep eq5",
+    ] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("txtest 4fsk|sweep|afsk"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
 }
 
 #[cfg(feature = "bench")]
@@ -1580,7 +1630,7 @@ fn debug_txtest() {
 fn debug_txtest_suite() {
     use ferrite_core::txtest::{Arm, Ask, Filters, Signal};
     let mut r = Rig::main();
-    let arm = Arm { signal: Signal::Suite, filters: Filters::Data, level: 100 };
+    let arm = Arm { filters: Filters::Data, ..Arm::new(Signal::Suite) };
     r.cmd("txtest suite");
     assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(arm)))]);
     let raw = r.raw();

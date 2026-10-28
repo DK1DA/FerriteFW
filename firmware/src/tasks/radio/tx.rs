@@ -194,6 +194,13 @@ impl Radio {
         if let Some(f) = filters {
             self.tx.test_regs = Some((n, radio_chip::tx_test_filters(&mut self.chip(n), f)));
         }
+        // TERM-33.15, TERM-33.16: a test's `bypass` (REG_47<0>, the soft limiter off) and its equaliser's back-off
+        // won back (REG_7D, REG_40), over the set-up just made; put back at the unkey before it.
+        #[cfg(feature = "bench")]
+        if let Some(t) = test.filter(|t| filters.is_some() && (t.bypass || t.eq != ferrite_core::txeq::Eq::Off)) {
+            let dev = (t.eq != ferrite_core::txeq::Eq::Off).then(|| t.eq.deviation());
+            self.tx.test_extra = Some((n, radio_chip::tx_test_extra(&mut self.chip(n), t.bypass, t.eq.mic_steps(), dev)));
+        }
         self.tx.pa = pa;
         self.tx.fault = false;
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice, ptt_stuck: self.live.tx.ptt_stuck };
@@ -222,9 +229,9 @@ impl Radio {
             self.tx.test = None;
             if t.signal == ferrite_core::txtest::Signal::Suite {
                 self.suite_start(n, &setup);
-            } else if let Some(g) = ferrite_core::txtest::Gen::new(t.signal, t.level) {
+            } else if let Some(g) = ferrite_core::txtest::Gen::from_arm(&t) {
                 self.tx.test_playing = true;
-                crate::tasks::dsp::TXTEST.signal(Some(g));
+                crate::tasks::dsp::TXTEST.signal(Some((g, t.eq)));
             } else {
                 self.afsk_bk_start(n, t.level);
             }
@@ -406,6 +413,10 @@ impl Radio {
         // TERM-33: a test's audio off and the `flat` or `data` registers back (an APRS burst's too), on the chip
         // that was keyed.
         self.test_audio_off();
+        #[cfg(feature = "bench")]
+        if let Some((n, r)) = self.tx.test_extra.take().filter(|(n, _)| self.has(*n)) {
+            radio_chip::tx_test_extra_restore(&mut self.chip(n), &r);
+        }
         if let Some((n, r)) = self.tx.test_regs.take().filter(|(n, _)| self.has(*n)) {
             radio_chip::tx_test_restore(&mut self.chip(n), &r);
         }

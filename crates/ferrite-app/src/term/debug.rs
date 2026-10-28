@@ -451,10 +451,29 @@ impl Job {
             }
             #[cfg(feature = "bench")]
             (Kind::TxTest(_), DebugAns::TxTest(Some(a))) => {
+                use ferrite_core::txtest::{Eq, Signal};
                 if self.line == 0 {
-                    put!(out, "  txtest: {} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.level);
+                    let rc = if a.shaped && a.signal == Signal::Fsk { " rc" } else { "" };
+                    if a.signal.takes_baud() {
+                        put!(out, "  txtest: {} {}{} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.baud, rc, a.level);
+                    } else {
+                        put!(out, "  txtest: {} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.level);
+                    }
+                } else if self.line == 2 {
+                    // TERM-33.15, TERM-33.16
+                    if a.bypass {
+                        out.push(b"  bypass: all AF TX filters off (REG_47 0 = 1), soft limiter off (REG_2F 7:5 = 000);");
+                    }
+                    if a.eq != Eq::Off {
+                        out.push(if a.bypass { b" " } else { b"  " });
+                        put!(out, "{}: flat 100 Hz-{} kHz, {} taps, back-off {}.{} dB won back by REG_7D +{} steps, REG_40 0x", a.eq.name(), a.eq.top_hz() / 1000, a.eq.taps().len(), a.eq.back_off_cdb() / 100, a.eq.back_off_cdb() / 10 % 10, a.eq.mic_steps());
+                        hex(a.eq.deviation() as u32, 3, out);
+                        out.push(b";");
+                    }
+                    out.push(b" put back at unkey");
+                    self.st = St::Over;
                 } else {
-                    use ferrite_core::txtest::{bk_gain, Filters, Signal};
+                    use ferrite_core::txtest::{bk_gain, Filters};
                     if a.signal == Signal::Suite {
                         put!(out, "  suite: 7 sections, {} s, each after a marker tone (400-700 Hz); then 1 kHz until release; registers put back", ferrite_core::txsuite::SUITE_MS.div_ceil(1000));
                         self.st = St::Over;
@@ -472,7 +491,9 @@ impl Job {
                         Filters::Data => b"  data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey (as an APRS burst)",
                         Filters::Voice => b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34",
                     });
-                    self.st = St::Over;
+                    if !a.bypass && a.eq == Eq::Off {
+                        self.st = St::Over;
+                    }
                 }
                 self.line += 1;
                 Step::Line

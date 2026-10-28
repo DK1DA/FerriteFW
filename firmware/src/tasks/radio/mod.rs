@@ -476,6 +476,9 @@ struct Tx {
     #[cfg(feature = "bench")]
     test: Option<ferrite_core::txtest::Arm>,
     test_regs: Option<(u8, radio_chip::TestRegs)>,
+    /// TERM-33.15, TERM-33.16: what `bypass` and an equaliser changed on the keyed chip (and what was there).
+    #[cfg(feature = "bench")]
+    test_extra: Option<(u8, radio_chip::ExtraRegs)>,
     #[cfg(feature = "bench")]
     test_playing: bool,
     /// TERM-33 `afsk-bk` while it plays (`afskbk`).
@@ -805,6 +808,8 @@ pub async fn task() {
             #[cfg(feature = "bench")]
             test: None,
             test_regs: None,
+            #[cfg(feature = "bench")]
+            test_extra: None,
             #[cfg(feature = "bench")]
             test_playing: false,
             #[cfg(feature = "bench")]

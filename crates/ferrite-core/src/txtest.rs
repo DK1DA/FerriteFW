@@ -21,9 +21,24 @@
 //!   (LerwinB/uv-k6v3-aprs, Apache-2.0: App/app/aprs.c `APRS_SendNrziBit`, App/driver/bk4829.c
 //!   `BK4819_AFSK_BeginTx`/`SetTone`), adapted: the registers are checked against our driver and stock's tone path.
 //!
-//! Each is at its nominal level times the arming's [`Arm::level`] percent ([`LEVEL_MIN`] to [`LEVEL_MAX`]).
+//! - **2-level FSK** (`fsk BAUD [rc]`, [`Nrz`], TERM-33.17): PRBS9 bits as NRZ at any BAUD from [`BAUD_MIN`] to
+//!   [`BAUD_MAX`], +-3 kHz ([`FSK2_DEV_HZ`]); hard edges, or with `rc` each edge a half cosine one bit long (a
+//!   raised-cosine transition centred on the bit boundary: the bit centres still reach the full level).
+//! - **GMSK** (`gmsk BAUD`, TERM-33.17): the same bits through a Gaussian of BT 0.5 ([`GAUSS`]), at h 0.5 (deviation
+//!   BAUD / 4: 1.2 kHz at 4800).
+//! - **G3RUH** (`g3ruh`, TERM-33.17): 9600 Bd packet's line signal: the PRBS9 bits through G3RUH's scrambler
+//!   ([`Scrambler`], x^17 + x^12 + 1), raised-cosine edges as `fsk rc`, +-3 kHz.
+//!
+//! The three are negated as 4FSK is (the DAC-to-air chain inverts), so a 1 goes out as positive deviation. Their
+//! deviations are nominal: [`dev_amp`] takes the sweep's 1 kHz tone (SWEEP_AMP: about 3.0 kHz in `data`, bench
+//! Oct 27, 2026) as the scale, which `tools/bench-blade/txdata.py` checks on the air and the level trims.
+//!
+//! Each is at its nominal level times the arming's [`Arm::level`] percent ([`LEVEL_MIN`] to [`LEVEL_MAX`]). With
+//! `eq` or `eq8` (TERM-33.16) the DSP task runs the samples through [`crate::txeq`]; with `bypass` (TERM-33.15) the
+//! keyed chip's AF TX filters are bypassed (REG_47<0>) and its soft limiter off (REG_2F<7:5> = 000).
 
 use crate::audio::{AFSK_AMP, DAC_HZ};
+pub use crate::txeq::Eq;
 /// The TX audio set-ups, shared with the APRS burst (every build): [`crate::txfilters::Filters`].
 pub use crate::txfilters::Filters;
 use udsp::trig::{ccos, cos_sin_phase, csin, phase_step};
@@ -68,10 +83,16 @@ pub enum Signal {
     /// TERM-34: every test above and more in one key-up, in a fixed order ([`crate::txsuite`]); the Radio task
     /// runs it, asking DAC1 for its DAC parts.
     Suite,
+    /// TERM-33.17: 2-level NRZ PRBS9 at the arming's baud.
+    Fsk,
+    /// TERM-33.17: GMSK, BT 0.5, h 0.5, at the arming's baud.
+    Gmsk,
+    /// TERM-33.17: 9600 Bd G3RUH (scrambled PRBS9).
+    G3ruh,
 }
 
 impl Signal {
-    pub const ALL: [Signal; 5] = [Signal::Fsk4, Signal::Sweep, Signal::Afsk, Signal::AfskBk, Signal::Suite];
+    pub const ALL: [Signal; 8] = [Signal::Fsk4, Signal::Sweep, Signal::Afsk, Signal::AfskBk, Signal::Suite, Signal::Fsk, Signal::Gmsk, Signal::G3ruh];
 
     /// The terminal's word for it.
     pub fn name(self) -> &'static str {
@@ -81,6 +102,25 @@ impl Signal {
             Signal::Afsk => "afsk",
             Signal::AfskBk => "afsk-bk",
             Signal::Suite => "suite",
+            Signal::Fsk => "fsk",
+            Signal::Gmsk => "gmsk",
+            Signal::G3ruh => "g3ruh",
+        }
+    }
+
+    /// Takes a BAUD (`fsk`, `gmsk`: [`BAUD_MIN`] to [`BAUD_MAX`]).
+    pub fn takes_baud(self) -> bool {
+        matches!(self, Signal::Fsk | Signal::Gmsk)
+    }
+
+    /// The baud an arming without one gets: `g3ruh`'s fixed 9600; `fsk` 1200, `gmsk` 4800 (the terminal always
+    /// names one); 0 for the rest.
+    pub fn default_baud(self) -> u16 {
+        match self {
+            Signal::Fsk => 1200,
+            Signal::Gmsk => 4800,
+            Signal::G3ruh => G3RUH_BAUD,
+            _ => 0,
         }
     }
 
@@ -125,12 +165,25 @@ pub const LEVEL_MAX: u8 = 150;
 pub const LEVEL_DEFAULT: u8 = 100;
 
 /// A test armed for the next PTT key-up: the signal, the chip's TX audio set-up for it, and its level in percent
-/// of the nominal ([`LEVEL_MIN`] to [`LEVEL_MAX`]).
+/// of the nominal ([`LEVEL_MIN`] to [`LEVEL_MAX`]); for `fsk` and `gmsk` the baud (and `fsk`'s raised-cosine
+/// edges); the equaliser the samples go through (TERM-33.16) and the AF TX filter bypass (TERM-33.15).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Arm {
     pub signal: Signal,
     pub filters: Filters,
     pub level: u8,
+    pub baud: u16,
+    pub shaped: bool,
+    pub eq: Eq,
+    pub bypass: bool,
+}
+
+impl Arm {
+    /// `signal` with its defaults: its filters, level 100, its baud, hard edges (`g3ruh`: raised-cosine), no
+    /// equaliser, no bypass.
+    pub fn new(signal: Signal) -> Arm {
+        Arm { signal, filters: signal.default_filters(), level: LEVEL_DEFAULT, baud: signal.default_baud(), shaped: signal == Signal::G3ruh, eq: Eq::Off, bypass: false }
+    }
 }
 
 /// `amp` at `level` percent.
@@ -517,6 +570,193 @@ impl BkFlags {
     }
 }
 
+/// `fsk` and `gmsk`'s baud range (TERM-33.17) and `g3ruh`'s.
+pub const BAUD_MIN: u16 = 300;
+pub const BAUD_MAX: u16 = 9600;
+pub const G3RUH_BAUD: u16 = 9600;
+/// `fsk` and `g3ruh`'s deviation at 100 %.
+pub const FSK2_DEV_HZ: i32 = 3000;
+
+/// The DAC amplitude for `hz` of deviation: the sweep's 1 kHz tone ([`SWEEP_AMP`]) as about 3.0 kHz (`data`, bench
+/// Oct 27, 2026). Nominal: the NRZ signals' low end and the other set-ups don't follow a 1 kHz tone exactly.
+pub const fn dev_amp(hz: i32) -> i32 {
+    hz * SWEEP_AMP / 3000
+}
+
+/// G3RUH's scrambler, x^17 + x^12 + 1, self-synchronising: each bit out is the bit in XOR the bits sent 12 and 17
+/// before. The receiver's [`descramble`] undoes it from the received bits alone.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Scrambler(u32);
+
+impl Scrambler {
+    pub fn scramble(&mut self, b: u8) -> u8 {
+        let o = (b ^ (self.0 >> 11) as u8 ^ (self.0 >> 16) as u8) & 1;
+        self.0 = ((self.0 << 1) | o as u32) & 0x1_FFFF;
+        o
+    }
+}
+
+/// The receiver's half of [`Scrambler`] (the PC's analysis does the same; here for the tests): the bit in XOR the
+/// bits received 12 and 17 before.
+pub fn descramble(state: &mut u32, b: u8) -> u8 {
+    let o = (b ^ (*state >> 11) as u8 ^ (*state >> 16) as u8) & 1;
+    *state = ((*state << 1) | (b & 1) as u32) & 0x1_FFFF;
+    o
+}
+
+/// The bits the NRZ signals carry.
+#[derive(Clone, Copy, Debug)]
+pub struct Bits {
+    prbs: Prbs9,
+    scr: Option<Scrambler>,
+}
+
+impl Bits {
+    /// PRBS9, or (`g3ruh`) PRBS9 through G3RUH's scrambler.
+    pub fn new(scrambled: bool) -> Self {
+        Bits { prbs: Prbs9::default(), scr: scrambled.then(Scrambler::default) }
+    }
+
+    pub fn bit(&mut self) -> u8 {
+        let b = self.prbs.bit();
+        match &mut self.scr {
+            Some(s) => s.scramble(b),
+            None => b,
+        }
+    }
+}
+
+/// Edges of the NRZ signals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    Hard,
+    /// A half cosine one bit long, centred on the boundary.
+    RaisedCosine,
+    /// GMSK's Gaussian, BT 0.5 ([`GAUSS`]).
+    Gauss,
+}
+
+/// GMSK's BT.
+pub const GAUSS_BT: f64 = 0.5;
+/// [`GAUSS`]'s points a bit; it spans 3 bits (the pulse of one bit, from 1.5 bits before its centre to 1.5 after).
+pub const GAUSS_RES: usize = 64;
+const GAUSS_LEN: usize = 3 * GAUSS_RES + 1;
+
+/// erf, for the table (a series to |x| 4.5; beyond, 1 to within 2e-10).
+const fn cerf(x: f64) -> f64 {
+    if x > 4.5 {
+        return 1.0;
+    }
+    if x < -4.5 {
+        return -1.0;
+    }
+    // 2 / sqrt(pi) * sum (-1)^n x^(2n+1) / (n! (2n+1))
+    let mut term = x; // (-1)^n x^(2n+1) / n!
+    let mut sum = x;
+    let mut n = 1;
+    while n < 120 {
+        term = -term * x * x / n as f64;
+        sum += term / (2 * n + 1) as f64;
+        n += 1;
+    }
+    sum * core::f64::consts::FRAC_2_SQRT_PI
+}
+
+const fn gauss_table() -> [i16; GAUSS_LEN] {
+    // A bit's frequency pulse: a unit rectangle one bit wide through a Gaussian of BT: 0.5 (erf((u + 1/2) / s) -
+    // erf((u - 1/2) / s)), s = sqrt(2) sigma = sqrt(2 ln 2) / (2 pi BT), u in bits from the bit's centre.
+    let s = 1.177_410_022_515_474_7 / (2.0 * core::f64::consts::PI * GAUSS_BT);
+    let mut t = [0i16; GAUSS_LEN];
+    let mut j = 0;
+    while j < GAUSS_LEN {
+        let u = j as f64 / GAUSS_RES as f64 - 1.5;
+        let p = 0.5 * (cerf((u + 0.5) / s) - cerf((u - 0.5) / s));
+        t[j] = (p * 32767.0 + 0.5) as i16;
+        j += 1;
+    }
+    t
+}
+
+/// GMSK's bit pulse, Q15 (32767 for a long run of one bit), from 1.5 bits before the bit's centre to 1.5 after,
+/// [`GAUSS_RES`] points a bit. A `static`: read per sample by the DSP task (fast flash).
+pub static GAUSS: [i16; GAUSS_LEN] = gauss_table();
+
+/// `fsk`, `gmsk` and `g3ruh`: NRZ bits at any baud, a sample at a time.
+#[derive(Clone, Copy, Debug)]
+pub struct Nrz {
+    bits: Bits,
+    /// The bit before, this bit, the bit after, +-1.
+    prev: i8,
+    cur: i8,
+    next: i8,
+    /// Position in this bit (2^32 a bit) and the step a sample.
+    phase: u32,
+    step: u32,
+    shape: Shape,
+    amp: i32,
+}
+
+impl Nrz {
+    /// `baud` bits a second of `bits`, edges `shape`, a 1 at +`amp` (before the inversion).
+    pub fn new(bits: Bits, baud: u16, shape: Shape, amp: i32) -> Self {
+        let mut n = Nrz { bits, prev: 0, cur: 0, next: 0, phase: 0, step: phase_step(baud as u64 * 1000, RATE_HZ as u64 * 1000), shape, amp };
+        // The first bit before the start reads as the first bit (no edge at the start).
+        n.next = n.take();
+        n.cur = n.next;
+        n.prev = n.cur;
+        n.next = n.take();
+        n
+    }
+
+    /// The bits in the order sent ([`Nrz::new`] has taken the first two).
+    fn take(&mut self) -> i8 {
+        if self.bits.bit() == 1 { 1 } else { -1 }
+    }
+
+    /// The level now, +-32767 for +-1.
+    fn level(&self) -> i32 {
+        let frac = self.phase;
+        match self.shape {
+            Shape::Hard => self.cur as i32 * 32767,
+            Shape::RaisedCosine => {
+                // sin(pi frac): the first half-bit meets the edge before, the second the edge after.
+                let (_, s) = cos_sin_phase(frac >> 1);
+                let o = if frac < 1 << 31 { self.prev } else { self.next } as i32;
+                let c = self.cur as i32;
+                ((c + o) * 32767 + (c - o) * s) / 2
+            }
+            Shape::Gauss => {
+                // The pulses of the bit after, this bit and the bit before, each at its offset in the table.
+                let i = (frac >> 26) as usize; // GAUSS_RES = 64 points a bit
+                let f = ((frac >> 10) & 0xFFFF) as i32;
+                let at = |k: usize| {
+                    let (a, b) = (GAUSS[k] as i32, GAUSS[k + 1] as i32);
+                    a + (((b - a) * f) >> 16)
+                };
+                self.next as i32 * at(i) + self.cur as i32 * at(i + GAUSS_RES) + self.prev as i32 * at(i + 2 * GAUSS_RES)
+            }
+        }
+    }
+
+    pub fn sample(&mut self) -> i16 {
+        let v = self.level();
+        let before = self.phase;
+        self.phase = self.phase.wrapping_add(self.step);
+        if self.phase < before {
+            self.prev = self.cur;
+            self.cur = self.next;
+            self.next = self.take();
+        }
+        // Negated: the DAC-to-air chain inverts, so a 1 goes out as positive deviation.
+        (-((v * self.amp) >> 15)).clamp(-32767, 32767) as i16
+    }
+
+    /// The bit now, as sent (+-1), for the tests.
+    pub fn bit_now(&self) -> i8 {
+        self.cur
+    }
+}
+
 /// One of the DAC signals, for the DSP task: a `txtest` mode's, or a step of the suite's (TERM-34).
 #[derive(Clone, Copy, Debug)]
 pub enum Gen {
@@ -524,15 +764,27 @@ pub enum Gen {
     Sweep(Sweep),
     Afsk(Afsk),
     Tone(Tone),
+    Nrz(Nrz),
 }
 
 impl Gen {
-    /// `s` at `level` percent of its nominal; None for `afsk-bk` (not a DAC signal).
+    /// `s` at `level` percent of its nominal (its default baud); None for `afsk-bk` (not a DAC signal) and `suite`.
     pub fn new(s: Signal, level: u8) -> Option<Gen> {
-        Some(match s {
+        Gen::from_arm(&Arm { level, ..Arm::new(s) })
+    }
+
+    /// The arming's signal: its level, baud and edges.
+    pub fn from_arm(a: &Arm) -> Option<Gen> {
+        let level = a.level;
+        let baud = a.baud.clamp(BAUD_MIN, BAUD_MAX);
+        let rc = if a.shaped { Shape::RaisedCosine } else { Shape::Hard };
+        Some(match a.signal {
             Signal::Fsk4 => Gen::Fsk4(Fsk4::new(level)),
             Signal::Sweep => Gen::Sweep(Sweep::new(level)),
             Signal::Afsk => Gen::Afsk(Afsk::new(level)),
+            Signal::Fsk => Gen::Nrz(Nrz::new(Bits::new(false), baud, rc, scaled(dev_amp(FSK2_DEV_HZ), level))),
+            Signal::Gmsk => Gen::Nrz(Nrz::new(Bits::new(false), baud, Shape::Gauss, scaled(dev_amp(baud as i32 / 4), level))),
+            Signal::G3ruh => Gen::Nrz(Nrz::new(Bits::new(true), G3RUH_BAUD, Shape::RaisedCosine, scaled(dev_amp(FSK2_DEV_HZ), level))),
             Signal::AfskBk | Signal::Suite => return None,
         })
     }
@@ -544,6 +796,7 @@ impl Gen {
             Gen::Sweep(g) => g.sample(),
             Gen::Afsk(g) => g.sample(),
             Gen::Tone(g) => g.sample(),
+            Gen::Nrz(g) => g.sample(),
         }
     }
 }
@@ -683,16 +936,19 @@ mod tests {
             assert_eq!(Signal::parse(s.name().as_bytes()), Some(s));
         }
         assert_eq!(Signal::parse(b"SWEEP"), Some(Signal::Sweep));
-        assert_eq!(Signal::parse(b"fsk"), None);
+        assert_eq!(Signal::parse(b"fsk"), Some(Signal::Fsk));
+        assert_eq!(Signal::parse(b"2fsk"), None);
         for f in Filters::ALL {
             assert_eq!(Filters::parse(f.name().to_ascii_uppercase().as_bytes()), Some(f));
         }
         assert_eq!(Filters::parse(b"loud"), None);
-        assert_eq!(Signal::ALL.map(Signal::default_filters), [Filters::Data, Filters::Data, Filters::Data, Filters::Voice, Filters::Data]);
+        assert_eq!(Signal::ALL.map(Signal::default_filters)[..5], [Filters::Data, Filters::Data, Filters::Data, Filters::Voice, Filters::Data]);
+        assert!(Signal::ALL[5..].iter().all(|s| s.default_filters() == Filters::Data && s.dac() && s.takes_level()));
+        assert_eq!(Signal::ALL.map(Signal::takes_baud)[5..], [true, true, false]);
         assert_eq!(Signal::parse(b"AFSK-BK"), Some(Signal::AfskBk));
         assert_eq!(Signal::parse(b"Suite"), Some(Signal::Suite));
-        assert_eq!(Signal::ALL.map(Signal::dac), [true, true, true, false, false]);
-        assert_eq!(Signal::ALL.map(Signal::takes_level), [true, true, true, true, false]);
+        assert_eq!(Signal::ALL.map(Signal::dac)[..5], [true, true, true, false, false]);
+        assert_eq!(Signal::ALL.map(Signal::takes_level)[..5], [true, true, true, true, false]);
         assert!(Gen::new(Signal::AfskBk, 100).is_none(), "the DSP task never plays afsk-bk");
         assert!(Gen::new(Signal::Suite, 100).is_none(), "the suite's DAC parts come step by step");
     }
@@ -836,7 +1092,7 @@ mod tests {
     /// data key-up never plays a test); a test key-up its filters, none for `voice` or `afsk-bk`; a voice key-up none.
     #[test]
     fn key_up_set_up() {
-        let arm = |signal, filters| Some(Arm { signal, filters, level: 100 });
+        let arm = |signal, filters| Some(Arm { filters, ..Arm::new(signal) });
         assert_eq!(key_up_filters(true, None), Some(Filters::Data));
         assert_eq!(key_up_filters(true, arm(Signal::Fsk4, Filters::Flat)), Some(Filters::Data));
         assert_eq!(key_up_filters(false, None), None);
@@ -846,5 +1102,101 @@ mod tests {
         assert_eq!(key_up_filters(false, arm(Signal::AfskBk, Filters::Voice)), None);
         assert_eq!(key_up_filters(false, arm(Signal::AfskBk, Filters::Data)), None, "afsk-bk never changes the filters");
         assert_eq!(key_up_filters(false, arm(Signal::Suite, Filters::Data)), None, "the suite sets its own per step");
+    }
+
+    /// PRBS9's first `n` bits.
+    fn prbs(n: usize) -> Vec<u8> {
+        let mut p = Prbs9::default();
+        (0..n).map(|_| p.bit()).collect()
+    }
+
+    /// TERM-33.17 `fsk BAUD [rc]`: at any baud from 300 to 9600 (whole samples a bit or not), the signal sampled
+    /// mid-bit is PRBS9 bit for bit, a 1 negative at the DAC (the chain inverts: positive deviation on the air) at
+    /// +-3 kHz's amplitude; `rc`'s edges are a half cosine (mid-way at the boundary, the full level mid-bit, no
+    /// jump), the hard edges a step; the level scales it.
+    #[test]
+    fn fsk_bits() {
+        let amp = dev_amp(FSK2_DEV_HZ);
+        assert_eq!(amp, SWEEP_AMP);
+        for baud in [300u16, 1200, 2000, 2400, 4800, 7000, 9600] {
+            for shaped in [false, true] {
+                let a = Arm { baud, shaped, ..Arm::new(Signal::Fsk) };
+                let Some(Gen::Nrz(mut g)) = Gen::from_arm(&a) else { panic!() };
+                let spb = RATE_HZ as f64 / baud as f64;
+                let n = 600;
+                let x: Vec<i16> = (0..(n as f64 * spb) as usize).map(|_| g.sample()).collect();
+                let want = prbs(n);
+                for (k, &b) in want.iter().enumerate().take(n - 2) {
+                    let v = x[((k as f64 + 0.5) * spb) as usize] as i32;
+                    let lim = if shaped && spb < 8.0 { amp * 80 / 100 } else { amp * 97 / 100 };
+                    assert!(if b == 1 { v < -lim } else { v > lim }, "{baud} {shaped} bit {k}: {v}");
+                }
+                assert!(x.iter().all(|v| (v.unsigned_abs() as i32) <= amp + 1));
+                if shaped {
+                    let max_jump = x.windows(2).map(|w| (w[1] as i32 - w[0] as i32).abs()).max().unwrap();
+                    assert!(max_jump as f64 <= 2.0 * amp as f64 * (core::f64::consts::PI / 2.0 / spb).sin() * 1.05 + 4.0, "{baud}: jump {max_jump}");
+                }
+            }
+        }
+        let Some(Gen::Nrz(mut g)) = Gen::from_arm(&Arm { level: 50, ..Arm::new(Signal::Fsk) }) else { panic!() };
+        assert!((0..4800).map(|_| g.sample().unsigned_abs() as i32).max().unwrap() == SWEEP_AMP / 2);
+        assert_eq!(Arm::new(Signal::Fsk).baud, 1200);
+    }
+
+    /// TERM-33.17 `gmsk BAUD`: the Gaussian bit pulse (BT 0.5) is symmetric, sums to one over its shifts (a run of
+    /// one bit at the full level), and peaks under one; the signal mid-bit has PRBS9's sign, a 1 negative at the
+    /// DAC; the deviation is BAUD / 4 (h 0.5) at 100 %: a 0101 run peaks lower than a long run (the Gaussian's ISI).
+    #[test]
+    fn gmsk_bits() {
+        for j in 0..GAUSS.len() {
+            assert_eq!(GAUSS[j], GAUSS[GAUSS.len() - 1 - j]);
+        }
+        for i in 0..GAUSS_RES {
+            let sum: i32 = (0..3).map(|d| GAUSS[i + d * GAUSS_RES] as i32).sum();
+            assert!((sum - 32767).abs() <= 3, "offset {i}: {sum}");
+        }
+        assert!(GAUSS[0] < 10 && GAUSS[GAUSS_RES * 3 / 2] < 32767 && GAUSS[GAUSS_RES * 3 / 2] > 25000);
+        for baud in [1200u16, 2400, 4800, 9600] {
+            let a = Arm { baud, ..Arm::new(Signal::Gmsk) };
+            let Some(Gen::Nrz(mut g)) = Gen::from_arm(&a) else { panic!() };
+            let amp = dev_amp(baud as i32 / 4);
+            let spb = RATE_HZ as f64 / baud as f64;
+            let n = 600;
+            let x: Vec<i16> = (0..(n as f64 * spb) as usize).map(|_| g.sample()).collect();
+            for (k, &b) in prbs(n).iter().enumerate().take(n - 2) {
+                let v = x[((k as f64 + 0.5) * spb) as usize] as i32;
+                assert!(if b == 1 { v < -amp / 3 } else { v > amp / 3 }, "{baud} bit {k}: {v}");
+            }
+            assert!(x.iter().all(|v| (v.unsigned_abs() as i32) <= amp + 1));
+        }
+        assert_eq!(dev_amp(4800 / 4), 1600);
+    }
+
+    /// TERM-33.17 `g3ruh`: G3RUH's scrambler is x^17 + x^12 + 1 (each bit out the bit in XOR the bits out 12 and 17
+    /// before), and the receiver's descrambler gives PRBS9 back from the bits on the air alone; the generator sends
+    /// the scrambled bits at 9600 Bd, raised-cosine edges, +-3 kHz.
+    #[test]
+    fn g3ruh_scrambler() {
+        let data = prbs(3000);
+        let mut s = Scrambler::default();
+        let air: Vec<u8> = data.iter().map(|&b| s.scramble(b)).collect();
+        for n in 0..air.len() {
+            let back = |k: usize| if n >= k { air[n - k] } else { 0 };
+            assert_eq!(air[n], data[n] ^ back(12) ^ back(17), "bit {n}");
+        }
+        assert_ne!(air, data);
+        // The descrambler, started anywhere: right after 17 bits.
+        let mut st = 0u32;
+        let got: Vec<u8> = air[100..].iter().map(|&b| descramble(&mut st, b)).collect();
+        assert_eq!(got[17..], data[117..]);
+        // The generator: the scrambled bits, mid-bit (5 samples a bit), a 1 negative at the DAC.
+        let a = Arm::new(Signal::G3ruh);
+        assert_eq!((a.baud, a.shaped), (9600, true));
+        let Some(Gen::Nrz(mut g)) = Gen::from_arm(&a) else { panic!() };
+        let x: Vec<i16> = (0..5 * 600).map(|_| g.sample()).collect();
+        for k in 0..598 {
+            let v = x[k * 5 + 2] as i32;
+            assert!(if air[k] == 1 { v < -SWEEP_AMP / 2 } else { v > SWEEP_AMP / 2 }, "bit {k}: {v}");
+        }
     }
 }
