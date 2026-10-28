@@ -165,4 +165,56 @@ mod tests {
         assert_eq!(ask(&mut f, &[7]).0, Status::BadArg as u8);
         assert_eq!(f.erases.iter().sum::<u32>(), 0, "nothing erased");
     }
+
+    /// A chip that reports busy `busy` times after each start, and fails everything once `dead`.
+    struct Slow {
+        f: SimFlash,
+        busy: u32,
+        left: u32,
+        polls: u32,
+        dead: bool,
+    }
+
+    impl Nor for Slow {
+        fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result {
+            if self.dead { Err(crate::NorError) } else { self.f.read(addr, buf) }
+        }
+        fn start_program(&mut self, addr: u32, data: &[u8]) -> Result {
+            self.left = self.busy;
+            if self.dead { Err(crate::NorError) } else { self.f.start_program(addr, data) }
+        }
+        fn start_erase(&mut self, addr: u32) -> Result {
+            self.left = self.busy;
+            if self.dead { Err(crate::NorError) } else { self.f.start_erase(addr) }
+        }
+        fn busy(&mut self) -> Result<bool> {
+            self.polls += 1;
+            if self.left == 0 {
+                return Ok(false);
+            }
+            self.left -= 1;
+            Ok(true)
+        }
+        async fn pause() {}
+    }
+
+    /// BACKUP-7: an erase or program is answered only once the chip is done; a chip that fails answers `busy` to
+    /// START (no calibration CRC to give) and `refused` to each request, and nothing panics.
+    #[test]
+    fn restore_waits_for_the_chip_and_reports_a_failed_one() {
+        let mut out = [0u8; 240];
+        let mut chip = Slow { f: SimFlash::new(), busy: 3, left: 0, polls: 0, dead: false };
+        let at = SETTINGS.start;
+        let (n, _) = block(serve(&mut chip, 4 << 20, &WRITABLE, UID, &req(r::ERASE, at, &[]), &mut out));
+        assert_eq!((n, out[0], chip.polls), (1, Status::Ok as u8, 4), "three polls busy, the fourth done");
+        block(serve(&mut chip, 4 << 20, &WRITABLE, UID, &req(r::PROGRAM, at, &[0x42; r::CHUNK]), &mut out));
+        assert_eq!((out[0], chip.f.mem[at as usize], chip.polls), (Status::Ok as u8, 0x42, 8));
+        chip.dead = true;
+        let n = block(start(&mut chip, 4 << 20, &WRITABLE, UID, &mut out));
+        assert_eq!((n, out[0]), (1, Status::Busy as u8));
+        for p in [req(r::ERASE, at, &[]), req(r::PROGRAM, at, &[0; r::CHUNK]), req(r::CRC, at, &16u32.to_le_bytes())] {
+            let (n, after) = block(serve(&mut chip, 4 << 20, &WRITABLE, UID, &p, &mut out));
+            assert_eq!((n, out[0], after), (1, Status::Refused as u8, After::Next), "request {}", p[0]);
+        }
+    }
 }

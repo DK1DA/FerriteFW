@@ -21,11 +21,13 @@ struct Flaky {
     f: SimFlash,
     calls: u64,
     fail_at: Option<u64>,
+    /// The writes' calls (programs, erases and the busy polls after them), by number.
+    writes: Vec<u64>,
 }
 
 impl Flaky {
     fn new(f: SimFlash) -> Self {
-        Flaky { f, calls: 0, fail_at: None }
+        Flaky { f, calls: 0, fail_at: None, writes: vec![] }
     }
 
     fn call(&mut self) -> bool {
@@ -42,18 +44,21 @@ impl Nor for Flaky {
         self.f.read(addr, buf)
     }
     fn start_program(&mut self, addr: u32, data: &[u8]) -> ferrite_store::Result {
+        self.writes.push(self.calls + 1);
         if !self.call() {
             return Err(NorError);
         }
         self.f.start_program(addr, data)
     }
     fn start_erase(&mut self, addr: u32) -> ferrite_store::Result {
+        self.writes.push(self.calls + 1);
         if !self.call() {
             return Err(NorError);
         }
         self.f.start_erase(addr)
     }
     fn busy(&mut self) -> ferrite_store::Result<bool> {
+        self.writes.push(self.calls + 1);
         if !self.call() {
             return Err(NorError);
         }
@@ -201,7 +206,7 @@ fn mount_with_the_chip_gone_at_every_call() {
     assert!(want.aprs.f5k == 28_878 && want.aprs.ssid == 9 && &want.aprs.comment[..4] == b"Hi!\0");
     let mut failed = 0;
     for k in 0..calls {
-        let s = FlashStore::new(Flaky { f: f.clone(), calls: 0, fail_at: Some(k) }, Tasks);
+        let s = FlashStore::new(Flaky { f: f.clone(), calls: 0, fail_at: Some(k), writes: vec![] }, Tasks);
         block(s.mount_async());
         if s.mounted() == Mounted::Failed {
             failed += 1;
@@ -346,4 +351,94 @@ fn log_and_aprs_changes_with_the_chip_gone() {
     sweep("quick", true, &|s| s.request(Op::Quick(0, Some(Buf::from(b"CQ")))));
     sweep("aprs settings", true, &|s| s.request(Op::AprsCfg(AprsCfg { beacon: 1, ..s.aprs_cfg() })) && block(s.run(Job::AprsSave)));
     sweep("wipe", true, &|s| s.request(Op::Wipe));
+}
+
+/// Where to lose the chip in a long run of `calls` calls that started after call `from` (relative to its start):
+/// at each write, and at a read now and then (sweeping every read of a format would take minutes).
+fn points(writes: &[u64], from: u64, calls: u64) -> Vec<u64> {
+    let mut p: Vec<u64> = writes.iter().filter(|&&c| c > from && c <= from + calls).map(|&c| c - from - 1).chain((0..calls).step_by(53)).collect();
+    p.sort();
+    p.dedup();
+    p
+}
+
+/// A first boot's format (a foreign chip) with the chip gone at any write, or at a read now and then: Failed, and
+/// the next mount formats again, a first boot with nothing stored.
+#[test]
+fn a_format_with_the_chip_gone() {
+    use ferrite_core::layout::{CHANNELS, EVENT_LOG, LAYOUT_HEADER};
+    let mut f = SimFlash::new();
+    for a in [CHANNELS.start, EVENT_LOG.start + 4096, LAYOUT_HEADER.start] {
+        f.mem[a as usize..a as usize + 64].fill(0);
+    }
+    let s = mount(f.clone());
+    assert_eq!(s.mounted(), Mounted::FirstBoot);
+    let calls = s.nor().calls;
+    let writes = s.nor().writes.clone();
+    for at in points(&writes, 0, calls) {
+        let s = FlashStore::new(Flaky { f: f.clone(), calls: 0, fail_at: Some(at), writes: vec![] }, Tasks);
+        block(s.mount_async());
+        assert_eq!(s.mounted(), Mounted::Failed, "call {at}");
+        let again = mount(unmount(s));
+        assert_eq!((again.mounted(), again.count(), again.events()), (Mounted::FirstBoot, 0, 0), "call {at}");
+    }
+}
+
+/// CAL-7: the calibration check with the chip gone at any call can't tell (Unknown); once the chip answers again
+/// it records the CRC, or finds the one it recorded the same.
+#[test]
+fn the_calibration_check_with_the_chip_gone() {
+    use ferrite_core::txcal::CalCrc;
+    let f = populated();
+    let s = mount(f.clone());
+    let n0 = s.nor().calls;
+    assert_eq!(block(s.check_cal()), CalCrc::Recorded);
+    let calls = s.nor().calls - n0;
+    assert_eq!(block(s.check_cal()), CalCrc::Same);
+    for k in 0..calls {
+        let s = mount(f.clone());
+        let at = s.nor().calls + k;
+        s.nor().fail_at = Some(at);
+        assert_eq!(block(s.check_cal()), CalCrc::Unknown, "call {k}");
+        let s = mount(unmount(s));
+        assert!(matches!(block(s.check_cal()), CalCrc::Recorded | CalCrc::Same), "call {k}");
+    }
+}
+
+fn fake_patch() -> (ferrite_core::ssb::Patch, Vec<u8>) {
+    let p: Vec<u8> = (0..1979 * 8).map(|i| if i % 8 == 0 { if i % 80 == 0 { 0x15 } else { 0x16 } } else { (i * 13 + 5) as u8 }).collect();
+    (ferrite_core::ssb::Patch { len: p.len() as u32, sha: ferrite_core::sha256::sha256(&p) }, p)
+}
+
+/// HF-18, HF-20: an install with the chip gone at any write (or a read now and then) is refused and never leaves a
+/// patch that checks unless it is the whole one; the next install completes. A stored patch whose records don't
+/// look like a patch download doesn't check.
+#[test]
+fn ssb_patch_with_the_chip_gone() {
+    use ferrite_core::layout::SSB_PATCH;
+    use ferrite_core::ssb::HEADER;
+    let (p, patch) = fake_patch();
+    let base = unmount(mount(SimFlash::new()));
+    let s = mount(base.clone());
+    let n0 = s.nor().calls;
+    assert_eq!(block(s.ssb_install(p, &patch, 1)), Ok(true));
+    let calls = s.nor().calls - n0;
+    let writes = s.nor().writes.clone();
+    let good = unmount(s);
+    for k in points(&writes, n0, calls) {
+        let s = mount(base.clone());
+        let at = s.nor().calls + k;
+        s.nor().fail_at = Some(at);
+        assert!(block(s.ssb_install(p, &patch, 1)).is_err(), "call {k}");
+        let s = mount(unmount(s));
+        let c = s.ssb_check().unwrap();
+        assert!(c.is_none() || c == Some(p), "call {k}: a half patch never checks");
+        assert!(block(s.ssb_install(p, &patch, 1)).is_ok());
+        assert_eq!(s.ssb_check(), Ok(Some(p)), "call {k}: the next install completes");
+    }
+    for (off, v) in [(0, 0x16), (8 * 100, 0x00)] {
+        let mut g = good.clone();
+        g.mem[SSB_PATCH.start as usize + HEADER + off] = v;
+        assert_eq!(mount(g).ssb_check(), Ok(None), "record byte {off} damaged");
+    }
 }
