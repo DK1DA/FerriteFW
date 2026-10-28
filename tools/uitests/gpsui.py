@@ -164,12 +164,16 @@ def compose_stops_at_67(t):
         while n < 65:
             u = t.keys("2 HASH", settle=0.05)
             n = int(u["compose"]["count"].split("/")[0])
-        while n < 67:
-            u = t.keys("2", settle=0.05)
+        # Different keys from here: in multi-tap (the radio may be left there, TEXT-10) the same key again within
+        # a second changes the last letter (KEY-12) and adds nothing, so a second "2" was never refused.
+        for k in ("3", "4"):
+            if n >= 67:
+                break
+            u = t.keys(k, settle=0.05)
             n = int(t.ui()["compose"]["count"].split("/")[0])
         u = t.ui()
         t.eq(u["compose"]["count"], "67/67", "full")
-        t.keys("2", settle=0)
+        t.keys("5", settle=0)
         # the radio's readback can come before the toast (a pass of the UI task): wait for it
         u = t.wait(lambda u: u.toast is not None, timeout=1.0, what="the refusal's toast")
         t.eq(u.toast, {"head": "67 characters", "body": "the APRS limit"}, "the next key: refused, saying why")

@@ -890,6 +890,78 @@ fn quick_messages_on_an_empty_message() {
     assert_eq!(t.s.message(0).unwrap().text.as_bytes(), b"On my way");
 }
 
+fn hint_keys(t: &T) -> std::vec::Vec<(&'static str, &'static str)> {
+    t.app.screen().hints(&t.app).as_slice().to_vec()
+}
+
+/// TEXT-6.1, TEXT-11.1: # ("Write" in the hint bar) puts the quick list away for an empty editor; the knob
+/// brings it back; a letter key also puts it away, and it stays away when the text is deleted again.
+#[test]
+fn quick_list_put_away() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    t.draw();
+    assert!(hint_keys(&t).contains(&("#", "Write")), "{:?}", hint_keys(&t));
+    t.tap(Key::Hash);
+    t.draw();
+    assert_eq!(text(&t), "", "# on the list adds no space");
+    assert!(hint_keys(&t).contains(&("1", "Mark")), "the editor's hints: {:?}", hint_keys(&t));
+    t.tap(Key::Menu);
+    assert_eq!(text(&t), "", "OK puts no quick message in");
+    assert_eq!(t.name(), "Compose message", "and sends nothing");
+    t.app.knob(1, t.t, &t.s);
+    t.draw();
+    assert!(hint_keys(&t).contains(&("#", "Write")), "the knob brings the list back");
+    // a letter key starts the message and puts the list away; deleting it all leaves an empty editor
+    keys(&mut t, "ok");
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "Ok ");
+    for _ in 0..3 {
+        t.tap(Key::Exit);
+    }
+    t.draw();
+    assert_eq!((text(&t).as_str(), t.name()), ("", "Compose message"));
+    assert!(hint_keys(&t).contains(&("1", "Mark")), "{:?}", hint_keys(&t));
+}
+
+/// TEXT-2.1: 1 cycles . , ? ! ' / - @ : (and round again), the same marks as multi-tap's 1 (KEY-12); on an
+/// empty message too.
+#[test]
+fn marks_cycle() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    t.tap(Key::Digit(1));
+    assert_eq!(text(&t), ".");
+    let mut seen = std::string::String::new();
+    for _ in 0..9 {
+        seen.push(text(&t).chars().last().unwrap());
+        t.tap(Key::Digit(1));
+        t.draw();
+    }
+    assert_eq!(seen, ".,?!'/-@:");
+    assert_eq!(text(&t), ".", "round again");
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(1));
+    assert_eq!(text(&t), ".", "after BACK, 1 starts a new mark");
+    // multi-tap: the same marks, then the digit
+    t.hold(Key::Star);
+    t.tap(Key::Hash);
+    let mut seen = std::string::String::new();
+    for _ in 0..10 {
+        t.tap(Key::Digit(1));
+        seen.push(text(&t).chars().last().unwrap());
+    }
+    assert_eq!(seen, ".,?!'/-@:1");
+}
+
+/// TEXT-13: compose types printable ASCII only, never APRS's | ~ {.
+#[test]
+fn compose_marks_aprs_legal() {
+    let legal = |c: &u8| (b' '..=b'~').contains(c) && !b"|~{".contains(c);
+    assert!(crate::screens::msgs::marks().iter().all(legal));
+    assert!(crate::screens::msgs::taps().iter().all(|k| k.iter().all(legal)));
+}
+
 /// TEXT-7: the quick messages are edited from the Messages options; # puts the factory text back.
 #[test]
 fn quick_messages_edited() {
