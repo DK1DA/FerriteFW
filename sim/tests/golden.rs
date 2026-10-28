@@ -133,6 +133,34 @@ fn home_layouts_and_themes_match_their_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// No text on the goldens' screens is cut off unasked (ferrite-ui's `clipcheck`): every screen of the jump
+/// list and home in each layout and theme, all the cuts listed at once. (Every [`Radio`] also checks its own when
+/// dropped, so each journey checks the screens it passes through.)
+#[test]
+fn no_text_is_cut_off() {
+    let mut all = Vec::new();
+    for (i, n) in jump_names().enumerate() {
+        let mut r = Radio::new();
+        r.sim.jump(i);
+        r.wait(1000);
+        all.extend(ferrite_ui::clipcheck::take().into_iter().map(|c| format!("{n}: {c}")));
+    }
+    for layout in 0..3u8 {
+        for theme in 0..4u8 {
+            let mut r = Radio::new();
+            r.sim.app_mut().settings_mut().theme = theme;
+            for _ in 0..layout {
+                r.event(Event::Layout);
+            }
+            r.home();
+            r.wait(1000);
+            all.extend(ferrite_ui::clipcheck::take().into_iter().map(|c| format!("home layout {layout} theme {theme}: {c}")));
+        }
+    }
+    all.dedup();
+    assert!(all.is_empty(), "{} texts cut off:\n{}", all.len(), all.join("\n"));
+}
+
 /// HELP-1 to HELP-5, SELF-9: About's pages, ▶ by ▶ from About: System, the manual's QR code and the key card pages.
 #[test]
 fn help_pages_match_their_goldens() {

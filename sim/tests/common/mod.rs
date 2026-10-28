@@ -49,6 +49,7 @@ impl Radio {
         sim.set_clock(1_791_400_000); // a fixed clock: Oct 8, 2026, 19:06 UTC
         sim.log_cmds(true);
         let mut r = Radio { sim, t: 0, rec: None };
+        ferrite_ui::clipcheck::start(); // text cut off fails the test (Drop below)
         r.wait(3000);
         r
     }
@@ -58,6 +59,7 @@ impl Radio {
         let end = self.t + ms;
         while self.t < end {
             self.t += FRAME;
+            ferrite_ui::clipcheck::context(self.sim.screen_name());
             self.sim.step(self.t);
             if let Some(rec) = &mut self.rec {
                 rec(&self.sim);
@@ -221,6 +223,17 @@ impl Radio {
             }
         }
         self
+    }
+}
+
+/// No text the radio drew was cut off without a [`ferrite_ui::widgets::fit`] asking for it (ferrite-ui's
+/// `clipcheck`): every journey is also a check of the screens it passes through.
+impl Drop for Radio {
+    fn drop(&mut self) {
+        let clips = ferrite_ui::clipcheck::take();
+        if !clips.is_empty() && !std::thread::panicking() {
+            panic!("text cut off (shorten it, widen its field, or w::fit it when the cut is meant):\n{}", ferrite_ui::clipcheck::report(&clips));
+        }
     }
 }
 

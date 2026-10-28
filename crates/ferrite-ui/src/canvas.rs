@@ -107,6 +107,12 @@ impl Panel for Band<'_> {
     }
 
     fn text_hint(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, s: &[u8]) {
+        // the host's pass for text hints knows its region: a text crossing its left or right edge lost that part (its
+        // line box may pass the top or bottom: the font's room above and below the ink)
+        #[cfg(feature = "clipcheck")]
+        if !self.thru && self.fwd.is_some() && self.w > 0 && (x0 < self.x || x1 >= self.x + self.w) {
+            crate::clipcheck::note("region", s, self.w, x1 - x0 + 1);
+        }
         if let Some(p) = &mut self.fwd {
             p.text_hint(x0, y0, x1, y1, s);
         }
@@ -510,6 +516,16 @@ pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mu
     region(lcd, x, y, w, h, bg, &mut draw);
 }
 
+/// [`banded`] for part of the screen drawn again (a box gone, the screen under it repainted): the drawing covers
+/// more than the region, and is meant to be cut at its edges. The same as [`banded`] on the radio; the host's
+/// `clipcheck` doesn't count those cuts.
+#[inline]
+pub fn banded_part<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: impl FnMut(&mut Band)) {
+    #[cfg(feature = "clipcheck")]
+    let _part = crate::clipcheck::PartCut::new();
+    banded(lcd, x, y, w, h, bg, draw);
+}
+
 /// [`banded`]'s body, one copy for every caller: generic, it was copied into each call site, and DISP-29's recording
 /// branch made those copies 18 KB of slow flash (Oct 23, 2026).
 #[inline(never)]
@@ -607,7 +623,7 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
     crate::prof::add(crate::prof::BANDS, tb);
     if cfg!(feature = "std") {
         // the text hints: windows and hints to the panel, pixels nowhere
-        let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
+        let mut band = Band { buf: &mut [], x, y, w, h, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
         match &mut src {
             Src::Rec(r) => replay(r, &mut band, false, &mut RleCache::default()),
             Src::Draw(d) => d(&mut band),
@@ -803,7 +819,7 @@ fn band_over(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, draw: &mut dyn
         by += bh;
     }
     if cfg!(feature = "std") {
-        let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
+        let mut band = Band { buf: &mut [], x, y, w, h, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
         draw(&mut band);
     }
 }

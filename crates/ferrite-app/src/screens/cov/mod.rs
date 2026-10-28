@@ -64,6 +64,7 @@ impl T {
         let mut app = App::new(crate::tests::set(), crate::tests::alert());
         while app.pop_cmd().is_some() {}
         let dev = Device { gps: GpsState::Fix, sats: 9, clock_min: Some(14 * 60 + 32), battery_pct: 80, ..Default::default() };
+        ferrite_ui::clipcheck::start(); // text cut off fails the test (Drop below)
         T { app, t: 1000, s: Sample::new(), fb: FrameBuffer::new(), live: LiveAll::default(), dev }
     }
 
@@ -165,6 +166,7 @@ impl T {
 
     /// Draws, as the UI task does after every input (renders must never panic).
     pub fn draw(&mut self) {
+        ferrite_ui::clipcheck::context(self.name());
         self.app.render(&mut self.fb, &self.live, &self.dev, &self.s);
     }
 
@@ -247,6 +249,17 @@ impl T {
     /// Pixels of colour `c` drawn between rows `y0` and `y1`.
     pub fn px(&self, y0: i32, y1: i32, c: u16) -> usize {
         (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| self.fb.at(x, y) == c).count()
+    }
+}
+
+/// No text drawn was cut off without a `w::fit` asking for it (ferrite-ui's `clipcheck`): every coverage test is
+/// also a check of the screens and states it draws.
+impl Drop for T {
+    fn drop(&mut self) {
+        let clips = ferrite_ui::clipcheck::take();
+        if !clips.is_empty() && !std::thread::panicking() {
+            panic!("text cut off (shorten it, widen its field, or w::fit it when the cut is meant):\n{}", ferrite_ui::clipcheck::report(&clips));
+        }
     }
 }
 
