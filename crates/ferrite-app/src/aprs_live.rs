@@ -285,6 +285,89 @@ pub struct Tick {
     pub changed: bool,
 }
 
+/// APRS-53: the beacons the Sent page keeps, and the digipeaters kept for each.
+pub const SENT_MAX: usize = 20;
+const SENT_BY: usize = 2;
+
+/// One sent beacon: the second it went out and who repeated it (calls zero-padded, an empty one unused).
+#[derive(Clone, Copy, Default)]
+struct SentRaw {
+    at_s: u32,
+    by: [[u8; 10]; SENT_BY],
+}
+
+/// APRS-53: the last [`SENT_MAX`] beacons we sent, in RAM only (lost at power-off): a ring of 24-byte entries.
+/// The APRS task's and the simulator's.
+pub struct SentLog {
+    ring: [Cell<SentRaw>; SENT_MAX],
+    /// The next slot to write, and how many are used.
+    at: Cell<u8>,
+    n: Cell<u8>,
+}
+
+impl Default for SentLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SentLog {
+    pub const fn new() -> Self {
+        SentLog { ring: [const { Cell::new(SentRaw { at_s: 0, by: [[0; 10]; SENT_BY] }) }; SENT_MAX], at: Cell::new(0), n: Cell::new(0) }
+    }
+
+    /// APRS-53: a beacon went out at `now_s`; the oldest drops off a full ring.
+    pub fn push(&self, now_s: u32) {
+        let i = self.at.get() as usize;
+        self.ring[i].set(SentRaw { at_s: now_s, ..SentRaw::default() });
+        self.at.set(((i + 1) % SENT_MAX) as u8);
+        self.n.set((self.n.get() + 1).min(SENT_MAX as u8));
+    }
+
+    /// APRS-53.1: the newest beacon heard back through `call`: kept unless it is there already or the entry has
+    /// [`SENT_BY`]. True when it was added.
+    pub fn heard_by(&self, call: &[u8]) -> bool {
+        if self.n.get() == 0 || call.is_empty() || call.len() > 10 {
+            return false;
+        }
+        let i = (self.at.get() as usize + SENT_MAX - 1) % SENT_MAX;
+        let mut e = self.ring[i].get();
+        if e.by.iter().any(|b| padded(b) == call) {
+            return false;
+        }
+        let Some(slot) = e.by.iter_mut().find(|b| b[0] == 0) else { return false };
+        slot[..call.len()].copy_from_slice(call);
+        self.ring[i].set(e);
+        true
+    }
+
+    pub fn len(&self) -> u16 {
+        self.n.get() as u16
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.n.get() == 0
+    }
+
+    /// Entry `i`, newest first, its age against `now_s`.
+    pub fn get(&self, i: u16, now_s: u32) -> Option<crate::data::SentBeacon> {
+        if i >= self.len() {
+            return None;
+        }
+        let e = self.ring[(self.at.get() as usize + SENT_MAX - 1 - i as usize) % SENT_MAX].get();
+        let mut s = crate::data::SentBeacon { ago_s: now_s.wrapping_sub(e.at_s), ..Default::default() };
+        for (b, raw) in s.by.iter_mut().zip(e.by.iter()) {
+            b.set(padded(raw));
+        }
+        Some(s)
+    }
+}
+
+/// A call kept zero-padded, as its bytes.
+fn padded(b: &[u8; 10]) -> &[u8] {
+    &b[..b.iter().position(|&c| c == 0).unwrap_or(10)]
+}
+
 /// The APRS task's state: the heard list ([`HEARD_MAX`] stations of about 40 bytes, and the details of the
 /// [`DET`] heard most recently, APRS-4.5), our messages and acks, the digipeater's waiting frame.
 pub struct AprsLive {
@@ -319,6 +402,9 @@ pub struct AprsLive {
     /// APRS-36: a frame of ours went out and hasn't been heard back yet; who repeated the last one heard back.
     echo: Cell<bool>,
     echo_by: Cell<Buf<10>>,
+    /// APRS-53: the beacons sent, and the last beacon's information field (CRC-16), to know its copies.
+    sent: SentLog,
+    sent_key: Cell<u16>,
     /// What the last turn allowed (APRS-10.1): a frame heard is queued to digipeat only while everything may go.
     sending: Cell<Sending>,
 }
@@ -357,6 +443,8 @@ impl AprsLive {
             now_s: Cell::new(0),
             echo: Cell::new(false),
             echo_by: Cell::new(Buf::new()),
+            sent: SentLog::new(),
+            sent_key: Cell::new(0),
             sending: Cell::new(Sending::Nothing),
         }
     }
@@ -578,6 +666,21 @@ impl AprsLive {
         Beacon { waiting: self.waiting.get(), next_s: next_s.filter(|_| self.on_since.get().is_some()), digi: self.echo_by.get() }
     }
 
+    /// APRS-53: the beacon framed last went out (the APRS task calls this as it plays it): a Sent entry.
+    pub fn beacon_sent(&self, now_s: u32) {
+        self.now_s.set(now_s);
+        self.sent.push(now_s);
+    }
+
+    /// APRS-53: the Sent page's entries, newest first.
+    pub fn beacons_sent(&self) -> u16 {
+        self.sent.len()
+    }
+
+    pub fn sent_beacon(&self, i: u16) -> Option<crate::data::SentBeacon> {
+        self.sent.get(i, self.now_s.get())
+    }
+
     // ---- receive ----
 
     /// A frame from the decoder. `me` is our callsign (empty: none set, nothing is acked or digipeated, APRS-8);
@@ -594,11 +697,18 @@ impl AprsLive {
             // APRS-36: our own, digipeated back: the first time after a transmission, who repeated it
             let used = || f.digis().iter().rev().filter(|d| d.repeated);
             let station = used().find(|d| !d.call().starts_with(b"WIDE")).or_else(|| used().next());
-            if let Some(d) = station.filter(|_| self.echo.get()) {
-                let mut by = Buf::<10>::new();
+            let mut by = Buf::<10>::new();
+            if let Some(d) = station {
                 d.emit(&mut |c| {
                     by.push(&[c]);
                 });
+            }
+            // APRS-53.1: a copy of our last beacon (its information field, unchanged by digipeaters): every
+            // digipeater heard repeating it is kept with its Sent entry
+            if station.is_some() && f.info.iter().fold(0xFFFF, |h, &b| crc16(h, b)) == self.sent_key.get() {
+                rx.changed |= self.sent.heard_by(by.as_bytes());
+            }
+            if station.is_some() && self.echo.get() {
                 self.echo.set(false);
                 self.echo_by.set(by);
                 rx.echo = Some(by);
@@ -1064,6 +1174,9 @@ impl AprsLive {
         let dest = Address::from_text(dest).unwrap_or(me);
         let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
         self.echo.set(self.echo.get() || len > 0);
+        if what == "Beacon" && len > 0 {
+            self.sent_key.set(info.iter().fold(0xFFFF, |h, &b| crc16(h, b))); // APRS-53.1
+        }
         Tick { len, what, ..t }
     }
 }
@@ -1373,6 +1486,46 @@ mod tests {
         assert!(a.receive(&f[..n], 22, me, &AprsCfg::DEFAULT).echo.is_none(), "once per transmission");
         assert_eq!(a.stations(), 0, "not a station heard");
         assert_eq!(a.beacon(&AprsCfg::DEFAULT).digi.as_bytes(), b"VE3RSB-1");
+    }
+
+    /// APRS-53, APRS-53.1: a beacon that goes out is a Sent entry, newest first, its age from the APRS clock; every
+    /// digipeater heard repeating it is added once, two at most, while APRS-36's toast is still the first copy's
+    /// alone. Our message heard back isn't a beacon's copy; the ring keeps the newest 20.
+    #[test]
+    fn sent_beacons_and_who_repeated_them() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let me = b"VE3XYZ-7";
+        assert_eq!(a.beacons_sent(), 0);
+        a.beacon_now();
+        let t = a.tick(20, Sending::All, true, me, Some(fix()), &AprsCfg::DEFAULT, &mut out);
+        assert_eq!(t.what, "Beacon");
+        assert_eq!(a.beacons_sent(), 0, "framed, not yet sent");
+        a.beacon_sent(21);
+        let info = Frame::parse(&out[..t.len]).unwrap().info.to_vec();
+        let copy = |via: &[&[u8]]| frame(me, b"APZFER", via, &info);
+        let (f, n) = copy(&[b"VE3RSB-1*", b"WIDE2-1"]);
+        let rx = a.receive(&f[..n], 22, me, &AprsCfg::DEFAULT);
+        assert!(rx.echo.is_some() && rx.changed);
+        let (f, n) = copy(&[b"VE3RSB-1*", b"VE3OTW-10*"]);
+        let rx = a.receive(&f[..n], 23, me, &AprsCfg::DEFAULT);
+        assert!(rx.echo.is_none() && rx.changed, "a second digipeater: no toast, but kept");
+        let (f, n) = copy(&[b"VE3RSB-1*", b"WIDE2*"]);
+        assert!(!a.receive(&f[..n], 24, me, &AprsCfg::DEFAULT).changed, "VE3RSB-1 again: once");
+        let (f, n) = copy(&[b"VA3ABC-2*"]);
+        assert!(!a.receive(&f[..n], 25, me, &AprsCfg::DEFAULT).changed, "two kept at most");
+        let (f, n) = frame(me, b"APZFER", &[b"VA3MSG*"], b":VE3RSB-1 :hello{1");
+        assert!(!a.receive(&f[..n], 26, me, &AprsCfg::DEFAULT).changed, "a message heard back isn't the beacon's");
+        let e = a.sent_beacon(0).unwrap();
+        assert_eq!((e.ago_s, e.by[0].as_bytes(), e.by[1].as_bytes()), (5, &b"VE3RSB-1"[..], &b"VE3OTW-10"[..]));
+        for s in 0..SENT_MAX as u32 + 3 {
+            a.beacon_sent(100 + s);
+        }
+        assert_eq!(a.beacons_sent(), SENT_MAX as u16);
+        assert_eq!(a.sent_beacon(0).unwrap().ago_s, 0, "newest first");
+        assert_eq!(a.sent_beacon(SENT_MAX as u16 - 1).unwrap().ago_s, SENT_MAX as u32 - 1);
+        assert!(a.sent_beacon(SENT_MAX as u16).is_none());
+        assert!(a.sent_beacon(0).unwrap().by.iter().all(|b| b.is_empty()), "a new entry: not heard back");
     }
 
     /// APRS-25: a frame's information field is at most 256 bytes: 256 is taken whole, 257 is dropped.

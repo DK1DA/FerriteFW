@@ -5,7 +5,8 @@
 //! second try; anyone else never does, so the message ends failed. Nothing here is in the firmware.
 
 use crate::aprs::{beacon_due, retry_wait, AprsCfg, LastBeacon, TRIES};
-use crate::data::{Beacon, Fix, Message, MsgState, Pos, Station, Sym};
+use crate::aprs_live::SentLog;
+use crate::data::{Beacon, Fix, Message, MsgState, Pos, SentBeacon, Station, Sym};
 use core::cell::Cell;
 use ferrite_ui::text::Buf;
 
@@ -77,7 +78,13 @@ pub(super) struct AprsSim {
     beacon_now: Cell<bool>,
     waiting: Cell<bool>,
     last_auto: Cell<Option<u32>>,
+    /// APRS-53: our beacons (three made up from before start), and when the last one is heard back.
+    sent: SentLog,
+    echo_s: Cell<Option<u32>>,
 }
+
+/// A sent beacon heard back through the iGate this long after it went out.
+const ECHO_AFTER_S: u32 = 2;
 
 impl AprsSim {
     pub fn new() -> Self {
@@ -95,7 +102,18 @@ impl AprsSim {
             beacon_now: Cell::new(false),
             waiting: Cell::new(false),
             last_auto: Cell::new(None),
+            sent: sample_sent(),
+            echo_s: Cell::new(None),
         }
+    }
+
+    /// APRS-53: the Sent page's entries.
+    pub fn beacons_sent(&self) -> u16 {
+        self.sent.len()
+    }
+
+    pub fn sent_beacon(&self, i: u16) -> Option<SentBeacon> {
+        self.sent.get(i, self.now_s())
     }
 
     pub fn now_s(&self) -> u32 {
@@ -220,6 +238,11 @@ impl AprsSim {
     pub fn tick(&self, now_s: u32, on: bool, relay_ok: bool, known: &dyn Fn(&[u8]) -> bool, fix: Option<Fix>) -> AprsNews {
         self.now_s.set(now_s);
         let mut news = AprsNews::default();
+        // APRS-53.1: the last beacon heard back through the iGate
+        if self.echo_s.get().is_some_and(|t| now_s >= t) {
+            self.echo_s.set(None);
+            news.changed |= self.sent.heard_by(b"VE3OTW-10");
+        }
         if !on {
             self.on_since.set(None);
             news.changed = self.waiting.replace(false);
@@ -299,7 +322,22 @@ impl AprsSim {
             self.last_auto.set(Some(now_s));
             news.tx = Some("Beacon");
             news.changed = true;
+            self.sent.push(now_s);
+            self.echo_s.set(Some(now_s + ECHO_AFTER_S));
         }
         news
     }
+}
+
+/// APRS-53: three beacons from before start (31, 21 and 11 minutes before it): one heard back through two
+/// digipeaters, one not heard back, one through one.
+fn sample_sent() -> SentLog {
+    let l = SentLog::new();
+    for (ago, by) in [(31 * 60, &[&b"VE3RSB-1"[..], b"VE3OTW-10"][..]), (21 * 60, &[]), (11 * 60, &[&b"VE3RSB-1"[..]])] {
+        l.push(0u32.wrapping_sub(ago));
+        for b in by {
+            l.heard_by(b);
+        }
+    }
+    l
 }

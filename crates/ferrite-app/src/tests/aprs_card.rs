@@ -250,14 +250,15 @@ fn kiss_suspends_the_radios_own_aprs() {
 }
 
 /// APRS-17.7, APRS-17.3, MENU-25 (decision 257): one APRS list in one order from the APRS slot and from the heard
-/// list (1 Messages, 2 Heard, 3 Beacon now, 4 Beacon on/off, 5 Event log, 6 Clear the heard list, 7 APRS settings);
+/// list (1 Messages, 2 Heard, 3 Sent (APRS-53), 4 Beacon now, 5 Beacon on/off, 6 Event log, 7 Clear the heard list,
+/// 8 APRS settings);
 /// OK 1 on C reads the messages; hold MENU on C opens the same list on the same row as OK; a digit on a row that
 /// does something only moves to it.
 #[test]
 fn one_aprs_list_from_c_and_heard() {
     use crate::screens::opts::{rows, Of};
     let names: Vec<&str> = rows(Of::AprsCard).iter().map(|r| r.0).collect();
-    assert_eq!(names, ["Messages", "Heard", "Beacon now", "Beacon on/off", "Event log", "Clear the heard list", "APRS settings"]);
+    assert_eq!(names, ["Messages", "Heard", "Sent", "Beacon now", "Beacon on/off", "Event log", "Clear the heard list", "APRS settings"]);
     assert!(core::ptr::eq(rows(Of::AprsCard), rows(Of::Heard)), "one list");
     let mut a = A::new();
     a.app.set_aprs_mode(true);
@@ -269,8 +270,8 @@ fn one_aprs_list_from_c_and_heard() {
     a.press(Key::Exit, 800);
     a.press(Key::Menu, 800);
     assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::AprsCard && o.row == crate::screens::opts::APRS_ROW_HEARD), "hold MENU: as OK");
-    a.press(Key::Digit(3), 100);
-    assert!(matches!(a.app.screen(), Screen::Options(o) if o.row == 2), "3: on Beacon now, nothing sent");
+    a.press(Key::Digit(4), 100);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.row == 3), "4: on Beacon now, nothing sent");
     // From the heard list: the same list; its Heard row returns to it.
     a.press(Key::Digit(2), 100);
     assert!(matches!(a.app.screen(), Screen::Aprs(_)), "2: the heard list");
@@ -349,4 +350,52 @@ fn aprs_paused_shows_on_the_card() {
     a.live.dropped = 0;
     a.tick();
     assert!(!a.card_line().contains("state=\"paused\""));
+}
+
+/// APRS-53, APRS-53.2, APRS-53.3: the APRS list's 3 opens the Sent page: our beacons newest first, each with its
+/// age and who repeated it, "not heard back" in amber (grey in the readback); a beacon sent shows at the top, and
+/// the digipeater heard repeating it is added to its row.
+#[test]
+fn sent_page_lists_our_beacons() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.tick();
+    a.c_active();
+    a.press(Key::Menu, 100);
+    a.press(Key::Digit(3), 100);
+    assert!(matches!(a.app.screen(), Screen::AprsSent(_)), "3: the Sent page, not {}", a.app.screen().name());
+    let rows = |a: &A| {
+        let dev = Device::default();
+        let mut l = crate::term::cmd::Line::new();
+        (0..).map_while(|i| crate::uistate::line(&a.app, &a.s, &dev, &a.live, i, &mut l).then(|| String::from_utf8_lossy(l.as_bytes()).into_owned())).filter(|l| l.starts_with("row ")).collect::<Vec<_>>()
+    };
+    let r = rows(&a);
+    assert_eq!(r.len(), 3, "{r:?}");
+    assert!(r[0].starts_with("row 0 \"11 min ago\" \"by VE3RSB-1\" sel"), "newest first: {r:?}");
+    assert!(r[1].starts_with("row 0 \"21 min ago\" \"not heard back\"") && r[1].ends_with("grey"), "{r:?}");
+    assert!(r[2].starts_with("row 0 \"31 min ago\" \"by VE3RSB-1, VE3OTW-10\""), "{r:?}");
+    // APRS-53.2: the second row's line in amber
+    let fb = a.fb();
+    let y = crate::screens::lists::LIST_Y + crate::screens::lists::ROW2_H;
+    assert!(count(&fb, 8, y + 18, 200, 13, AMBER) > 20, "not heard back in amber");
+    assert_eq!(count(&fb, 8, y - crate::screens::lists::ROW2_H + 18, 200, 13, AMBER), 0, "heard back: not amber");
+    // A beacon sent: at the top, not heard back; two seconds on, the iGate repeats it.
+    a.s.request(crate::data::Op::BeaconNow);
+    assert_eq!(a.s.aprs_tick(100, true, true).tx, Some("Beacon"));
+    assert_eq!(a.s.beacons_sent(), 4);
+    assert!(a.s.beacon_sent(0).unwrap().by.iter().all(|b| b.is_empty()));
+    a.s.aprs_tick(102, true, true);
+    assert_eq!(a.s.beacon_sent(0).unwrap().by[0].as_bytes(), b"VE3OTW-10");
+    a.press(Key::Exit, 100);
+    assert!(!matches!(a.app.screen(), Screen::AprsSent(_)), "BACK leaves it");
+}
+
+/// SQL-19, SQL-19.4: the APRS squelch's counts in the card's readback.
+#[test]
+fn aprs_squelch_counts_in_the_readback() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.live.aprs_sq = ferrite_core::aprssq::Counts { opens: 3, short: 1, spikes: 2, settle: 4 };
+    a.tick();
+    assert!(a.card_line().contains(" sq=3/1/2/4"), "{}", a.card_line());
 }

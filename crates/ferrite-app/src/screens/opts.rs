@@ -113,10 +113,11 @@ const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, s
 /// heard list (hold MENU). OK on the APRS slot opens it on its "Heard" row (APRS mode, KISS) or its "Beacon now"
 /// row (beacons alone hold C); a digit opens a row that opens a screen (MENU-25), so OK 1 reads the messages.
 pub(crate) const APRS_ROW_HEARD: u8 = 1;
-pub(crate) const APRS_ROW_BEACON_NOW: u8 = 2;
-const APRS: [Opt; 7] = [
+pub(crate) const APRS_ROW_BEACON_NOW: u8 = 3;
+const APRS: [Opt; 8] = [
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
     ("Heard", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
+    ("Sent", Act::Open(Dest::AprsSent), "Your beacons and who repeated them"),
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
     ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"),

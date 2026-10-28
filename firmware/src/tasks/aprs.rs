@@ -42,8 +42,8 @@ enum Tx {
     Idle,
     /// [`Aprs::frame`] (a `what`) waits for a clear moment (APRS-10, APRS-29).
     Clearing { what: &'static str },
-    /// Keyed for [`Aprs::frame`], waiting for the Radio task.
-    Keying { at_ms: u32 },
+    /// Keyed for [`Aprs::frame`], waiting for the Radio task; whether it is a beacon (APRS-53's Sent page).
+    Keying { at_ms: u32, beacon: bool },
     Playing { at_ms: u32 },
 }
 
@@ -195,7 +195,7 @@ impl Aprs {
                 match self.clear.poll(now_ms, busy, r) {
                     Clear::Wait => {}
                     Clear::Send => {
-                        self.tx = if transmit::data_key(app, SLOT_C, extra.cfg().power, what.as_bytes()) { Tx::Keying { at_ms: now_ms } } else { Tx::Idle };
+                        self.tx = if transmit::data_key(app, SLOT_C, extra.cfg().power, what.as_bytes()) { Tx::Keying { at_ms: now_ms, beacon: what == "Beacon" } } else { Tx::Idle };
                     }
                     Clear::GiveUp => {
                         let w = what.as_bytes();
@@ -205,11 +205,15 @@ impl Aprs {
                     }
                 }
             }
-            Tx::Keying { at_ms } => {
+            &Tx::Keying { at_ms, beacon } => {
                 if live.tx.keyed && live.tx.slot == SLOT_C {
                     AFSK_TX.signal(self.frame);
+                    if beacon {
+                        extra.aprs.beacon_sent(now_s); // APRS-53: on the Sent page
+                        extra.changed();
+                    }
                     self.tx = Tx::Playing { at_ms: now_ms };
-                } else if now_ms.wrapping_sub(*at_ms) > KEY_WAIT_MS {
+                } else if now_ms.wrapping_sub(at_ms) > KEY_WAIT_MS {
                     transmit::data_unkey(app, SLOT_C); // refused by the Radio task (its toast says why)
                     self.tx = Tx::Idle;
                 }
@@ -231,7 +235,7 @@ impl Aprs {
                     self.frame = self.kiss_q.take().unwrap();
                     if transmit::data_key(app, SLOT_C, extra.cfg().power, b"KISS") {
                         extra.kiss_sent(); // APRS-17.2
-                        self.tx = Tx::Keying { at_ms: now_ms };
+                        self.tx = Tx::Keying { at_ms: now_ms, beacon: false };
                     }
                 }
             }

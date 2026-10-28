@@ -157,6 +157,14 @@ pub struct Beacon {
     pub digi: Buf<10>,
 }
 
+/// APRS-53: one of our beacons on the Sent page: how long ago it went out, and the digipeaters heard repeating
+/// it, first heard first (both empty: not heard back).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SentBeacon {
+    pub ago_s: u32,
+    pub by: [Buf<10>; 2],
+}
+
 /// The message being written: it lives with the APRS task's outgoing message (which holds it for retries),
 /// so the App keeps no text buffer of its own.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -440,6 +448,13 @@ pub trait Data {
     /// The beacon's state, for the APRS card (APRS-17, APRS-20).
     fn beacon(&self) -> Beacon {
         Beacon::default()
+    }
+    /// APRS-53: our beacons since power-on (the last [`crate::aprs_live::SENT_MAX`], RAM only), newest first.
+    fn beacons_sent(&self) -> u16 {
+        0
+    }
+    fn beacon_sent(&self, _i: u16) -> Option<SentBeacon> {
+        None
     }
     /// KISS frames since power-on (APRS-17's KISS card: "Sent 3 · Heard 14"): sent from the client, and heard
     /// (decoded and passed to it). RAM only.

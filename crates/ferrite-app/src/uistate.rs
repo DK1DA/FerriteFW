@@ -855,6 +855,16 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 }
             }
         }
+        // APRS-53: the Sent page's rows on the page: `row 0 "4 min ago" "by VE3RSB-1"`, `grey` when not heard back
+        Screen::AprsSent(st) => {
+            let data = cx.store.data();
+            st.cur.rows(data.beacons_sent(), screens::lists::ROWS2, &|_| true, |_, i| {
+                if let Some(e) = data.beacon_sent(i) {
+                    let (ago, by, heard) = aprs::sent_row(&e);
+                    row(d, 0, ago.as_bytes(), by.as_bytes(), i == st.cur.sel, false, !heard);
+                }
+            });
+        }
         _ => {}
     }
 }
@@ -1117,6 +1127,9 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
                 // LINK-19.4: which count the small card shows now (APRS-17.2: "14 heard", 1 "3 /hr")
                 crate::aprs::Holder::Mode => kn(l, "turn", app.now / crate::aprs_card::COUNT_FLIP_MS % 2),
             }
+            // SQL-19.4: the APRS squelch's counts since power-on: opens, short ones, spikes, opens while settling
+            let q = cx.live.aprs_sq;
+            let _ = uwrite!(l, " sq={}/{}/{}/{}", q.opens, q.short, q.spikes, q.settle);
             if app.aprs_shared().is_some() {
                 // "VHF: APRS" (1, APRS first) or "VHF: voice" (2, Voice first) in the header (APRS-17, WATCH-17.3)
                 kn(l, "shared", 1 + (app.settings().aprs_share != 0) as u32);
@@ -1204,6 +1217,7 @@ pub fn id(s: Screen) -> &'static str {
         Screen::Log(_) => "Log",
         Screen::Options(_) => "Options",
         Screen::Aprs(_) => "Aprs",
+        Screen::AprsSent(_) => "AprsSent",
         Screen::Msgs(_) => "Msgs",
         Screen::Compose(_) => "Compose",
         Screen::QuickMsgs(_) => "QuickMsgs",

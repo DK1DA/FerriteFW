@@ -115,6 +115,14 @@ impl Data for RadioData {
         self.aprs.beacon(&self.cfg.get())
     }
 
+    fn beacons_sent(&self) -> u16 {
+        self.aprs.beacons_sent()
+    }
+
+    fn beacon_sent(&self, i: u16) -> Option<crate::data::SentBeacon> {
+        self.aprs.sent_beacon(i)
+    }
+
     fn kiss_counts(&self) -> (u16, u16) {
         self.kiss.get()
     }

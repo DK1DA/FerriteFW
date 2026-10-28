@@ -4,6 +4,9 @@
 //! "no position" and a dash (APRS-5).
 //!
 //! On the station: OK writes it a message, # saves it as a waypoint, ▲▼ step through the list.
+//!
+//! Sent (the APRS list's 3; APRS-53): our beacons since power-on, newest first, each with its age and the
+//! digipeaters heard repeating it (C3a).
 
 use super::lists::*;
 use super::nav::Dest;
@@ -12,7 +15,7 @@ use super::shared::*;
 use super::table::{Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
-use crate::data::{Data, Draft, Op, Station};
+use crate::data::{Data, Draft, Op, SentBeacon, Station};
 use crate::keys::{KeyEvent, Press};
 use crate::{App, Screen};
 use ferrite_core::keys::Key;
@@ -168,6 +171,82 @@ impl View for Aprs {
         } else {
             Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("Hold MENU", "More")])
         }
+    }
+}
+
+/// C3a: our beacons (APRS-53).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Sent {
+    pub cur: Cursor,
+}
+
+/// APRS-53: a Sent row's text: the age ("4 min ago"), who repeated it ("by VE3RSB-1, VE3OTW-10", or "not heard
+/// back"), and whether anyone did. The screen and the readback both say it this way.
+pub(crate) fn sent_row(e: &SentBeacon) -> (Buf<16>, Buf<32>, bool) {
+    let (mut age, mut ago, mut by) = (Buf::<12>::new(), Buf::<16>::new(), Buf::<32>::new());
+    age_text(e.ago_s, &mut age);
+    let _ = uwrite!(ago, "{} ago", Txt(age.as_bytes()));
+    for (k, c) in e.by.iter().filter(|c| !c.is_empty()).enumerate() {
+        by.push(if k == 0 { b"by ".as_slice() } else { b", " });
+        by.push(c.as_bytes());
+    }
+    let heard = !by.is_empty();
+    if !heard {
+        by.set(b"not heard back");
+    }
+    (ago, by, heard)
+}
+
+impl View for Sent {
+    fn name(self) -> &'static str {
+        "APRS sent"
+    }
+
+    fn title(self, _: &App, b: &mut Buf<10>) {
+        b.set(b"Sent");
+    }
+
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
+        use Press::*;
+        match (e.key, e.press) {
+            (Key::Up | Key::Down, Short | Repeat) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
+            (Key::Exit, Short) => app.back(),
+            _ => {}
+        }
+    }
+
+    fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
+        let cur = self.cur.step(d, store.data().beacons_sent(), ROWS2, &ALL);
+        app.screen = Screen::AprsSent(Sent { cur });
+    }
+
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        let data = cx.store.data();
+        app.page(lcd, ());
+        if !app.gate((self, data.version(), cx.dev.clock_min)) {
+            return;
+        }
+        let n = data.beacons_sent();
+        let mut l = Buf::<16>::new();
+        let _ = uwrite!(l, "{} sent", n);
+        app.list_head(lcd, l.as_bytes(), b"newest first");
+        let rows = self.cur.rows(n, ROWS2, &ALL, |row, i| {
+            if let Some(e) = data.beacon_sent(i) {
+                let (ago, by, heard) = sent_row(&e);
+                // APRS-53.2: one not heard back in amber
+                let r = Row2 { title: ago.as_bytes(), sub: by.as_bytes(), sub_c: if heard { 0 } else { AMBER }, selected: i == self.cur.sel, ..Row2::default() };
+                app.row2(lcd, row, &r);
+            }
+        });
+        app.rows_end(lcd, rows, ROWS2, ROW2_H);
+        app.list_cue(lcd, self.cur, n, ROWS2, ROW2_H, rows, &ALL);
+        if n == 0 {
+            app.empty(lcd, b"No beacons sent since power-on", b"Beacons show here as they go");
+        }
+    }
+
+    fn hints(self, _: &App) -> Hints {
+        Hints::new(&[(ARROWS_UD, "Move"), ("BACK", "Back")])
     }
 }
 

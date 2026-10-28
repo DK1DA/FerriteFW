@@ -254,6 +254,7 @@ const BUDGET: &[(&str, u64)] = &[
     ("C1 Event log", 90000),
     ("C2 Event detail", 333000),
     ("C3 APRS heard", 90000),
+    ("C3a APRS sent", 75000),
     ("C4 APRS station", 293000),
     ("C5 APRS messages", 87000),
     ("C5a Contacts", 9300),

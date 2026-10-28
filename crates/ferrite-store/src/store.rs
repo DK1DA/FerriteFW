@@ -1598,6 +1598,12 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn beacon(&self) -> Beacon {
         self.extra.beacon()
     }
+    fn beacons_sent(&self) -> u16 {
+        self.extra.beacons_sent()
+    }
+    fn beacon_sent(&self, i: u16) -> Option<ferrite_app::data::SentBeacon> {
+        self.extra.beacon_sent(i)
+    }
     fn messages(&self) -> u16 {
         self.msgs.len()
     }
