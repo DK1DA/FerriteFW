@@ -12,6 +12,7 @@ use std::string::String;
 use std::vec::Vec;
 
 mod setup;
+mod transmit;
 
 /// An app on the sample records, a clock, a quiet radio and a panel.
 pub(super) struct T {
@@ -58,6 +59,45 @@ impl T {
 
     pub fn hold(&mut self, k: Key) {
         self.press(k, 800);
+    }
+
+    /// A key down (or up) alone, then a tick.
+    pub fn down(&mut self, k: Key, down: bool) {
+        if down {
+            self.app.key_down(k, self.t, &self.s);
+        } else {
+            self.app.key_up(k, self.t, &self.s);
+        }
+        self.t += 50;
+        self.app.tick(self.t, &self.live, &self.s);
+        self.apply();
+        self.draw();
+    }
+
+    /// The active PTT down or up.
+    pub fn ptt(&mut self, down: bool) {
+        self.down(Key::PTT, down);
+    }
+
+    /// An app that can transmit (the tx build, the US region).
+    pub fn ready() -> Self {
+        let mut t = T::new();
+        t.app.radio.tx_built = true;
+        t.dev.tx_built = true;
+        t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
+        t
+    }
+
+    /// Tune the active slot's VFO.
+    pub fn tune(&mut self, f: ferrite_core::freq::Freq10) {
+        let a = self.app.active as usize;
+        self.app.slots[a].vfo = f;
+        self.app.slots[a].vfo_mode = true;
+    }
+
+    /// The toast's head and body, or "".
+    pub fn toast(&self) -> String {
+        self.app.toast.map(|x| std::format!("{} / {}", String::from_utf8_lossy(x.head.as_bytes()), String::from_utf8_lossy(x.body.as_bytes()))).unwrap_or_default()
     }
 
     pub fn knob(&mut self, d: i8) {
