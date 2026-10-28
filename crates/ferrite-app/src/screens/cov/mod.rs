@@ -29,6 +29,7 @@ mod scan;
 mod scope;
 mod setup;
 mod status;
+mod text;
 mod tones;
 mod transmit;
 mod xb;
