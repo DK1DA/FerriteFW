@@ -11,6 +11,7 @@ use ferrite_ui::fb::FrameBuffer;
 use std::string::String;
 use std::vec::Vec;
 
+mod aprs;
 mod browse;
 mod chedit;
 mod coming;
