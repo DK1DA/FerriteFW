@@ -279,8 +279,9 @@ impl View for Tones {
                     let mut b = Buf::<16>::new();
                     text(t, &mut b);
                     w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
-                    w::field(lcd, 84, 70, y + 2, y + 30, y + 21, Align::Left, b.as_bytes(), &UI_12B, TEXT, bg);
-                    w::field(lcd, 154, 72, y + 2, y + 30, y + 21, Align::Right, kind(t).as_bytes(), &UI_12, SUB, bg);
+                    // the value is 49 px at most ("T 123.4"); the kind takes the rest: "CTCSS custom" is 84 px
+                    w::field(lcd, 84, 54, y + 2, y + 30, y + 21, Align::Left, b.as_bytes(), &UI_12B, TEXT, bg);
+                    w::field(lcd, 138, 88, y + 2, y + 30, y + 21, Align::Right, kind(t).as_bytes(), &UI_12, SUB, bg);
                     if f {
                         w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
                     }
