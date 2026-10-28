@@ -80,8 +80,35 @@ packet_mark: 7.7V 24C 0.5W
 packet_note: THE BEACON, AS A MAP OR ANOTHER RADIO SHOWS IT
 packet_at: 8.6
 ---
-title: Messages
+title: FX.25, both ways
 layout: left
+left: Forward error correction around each packet, so one with a few bad bits still decodes. Ferrite hears FX.25 beside plain AX.25 and sends its own packets with it: on by default, 16 check bytes (0 5 9 5).
+right: Radios without FX.25 still decode them as plain packets. A station's page says when it came as FX.25, and how many bytes were fixed. || APRS without compromise: error correction usually left to a PC TNC, built into the radio.
+# All four of the simulator's live stations heard (the second, VA3MBK-9, comes as FX.25: sample/aprs.rs), so it is
+# third in the heard list.
+setup: home; wait 15s
+script:
+  wait 600ms
+  menu 0 5 9 5
+  wait 700ms
+  knob 1
+  wait 700ms
+  knob 1
+  wait 700ms
+  knob 1
+  wait 700ms
+  knob -3
+  wait 600ms
+  menu 0 5 1
+  wait 500ms
+  press DOWN
+  press DOWN
+  press OK
+  wait 2000ms
+hold: 2
+---
+title: Messages
+layout: right
 left: OK 1 on the APRS card: your messages and where each stands, new, pending, acked, retrying or failed.
 right: # writes one. Predictive text, quick messages and punctuation on 1: Hello, see you!
 # Typing reads better quicker than menu steps.
@@ -117,8 +144,8 @@ script:
 hold: 2
 ---
 title: And more
-layout: right
-left: Mic-E beacons with a status (0 5 5 7), FX.25 error correction (0 5 9 5), a digipeater, and a KISS TNC over Bluetooth or the cable.
+layout: left
+left: Mic-E beacons with a status (0 5 5 7), a digipeater, and a KISS TNC over Bluetooth or the cable.
 right: It answers station queries, and sends a beacon after you talk if you want one.
 setup: home
 script:
@@ -126,8 +153,6 @@ script:
   menu 0 5 5 7
   wait 700ms
   knob 2
-  wait 1500ms
-  menu 0 5 9
   wait 2500ms
 ---
 kind: intro
