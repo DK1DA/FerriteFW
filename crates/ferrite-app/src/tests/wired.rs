@@ -1,10 +1,10 @@
-//! The settings that showed a value but did nothing until decision 243: menu timeout, pause time, lock covers,
-//! busy lockout default, S-meter, channel display, scan direction and return, and the APRS symbol, TX delay and
+//! The settings that showed a value but did nothing until decision 243: menu timeout, pause time, the lock's
+//! modes (chosen at the lock since decision 304), busy lockout default, S-meter, channel display, scan direction and return, and the APRS symbol, TX delay and
 //! TX level.
 
 use super::*;
 use crate::screens::groups::change;
-use crate::settings::{Lock, LOCK_MODES};
+use crate::settings::Lock;
 
 /// MENU-28: 0 7 9 sets how long an idle menu stays up; Off keeps it.
 #[test]
@@ -32,28 +32,84 @@ fn pause_time_follows_its_setting() {
     assert!(t.cmds().contains(&RadioCmd::PauseWatch(300)));
 }
 
-/// KEY-14.1, KEY-14.2, KEY-14.3, TX-18: with Lock covers "All" (0 9 1 2) a locked radio doesn't key; "Keypad" and
-/// "All but PTT" let PTT through.
+/// Hold # (KEY-13), then * for All or 0 for All but PTT, or nothing for Keypad.
+fn lock_in(t: &mut T, m: Lock) {
+    t.hold(Key::Hash);
+    match m {
+        Lock::Keypad => {}
+        Lock::AllButPtt => t.tap(Key::Digit(0)),
+        Lock::All => t.tap(Key::Star),
+    }
+    assert_eq!(t.app.lock_mode(), Some(m));
+}
+
+/// KEY-13, KEY-14.5: hold # locks the keypad at once, and the popup offers the wider modes for 3 s: * locks All, 0
+/// All but PTT, neither doing anything else; after that * and 0 are locked keys. The mode isn't a setting.
+#[test]
+fn lock_mode_chosen_at_the_lock() {
+    let mut t = T::new();
+    t.hold(Key::Hash);
+    assert_eq!(t.app.lock_mode(), Some(Lock::Keypad), "locked at once, the keypad");
+    let p = t.app.toast.expect("the lock's popup");
+    assert!(p.center && p.head.as_bytes() == b"Keypad locked" && p.body.as_bytes() == crate::LOCK_ASK);
+    assert!(ferrite_ui::widgets::popup_fits(b"Keypad locked", crate::LOCK_ASK), "the popup's lines fit");
+    for (head, body) in [(&b"All keys locked"[..], &b"PTT works"[..]), (b"All keys locked", b"PTT too")] {
+        assert!(ferrite_ui::widgets::popup_fits(head, body));
+    }
+    // releasing # and doing nothing leaves Keypad: the popup goes, * is then a locked key
+    t.wait(3_100);
+    assert!(t.app.toast.is_none());
+    t.cmds();
+    t.tap(Key::Star);
+    assert_eq!(t.app.lock_mode(), Some(Lock::Keypad));
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Locked:"), "KEY-14.4");
+    t.hold(Key::Hash);
+    assert!(!t.app.locked());
+    // * within the 3 s: All, confirmed; the key does nothing else (no mute, HOME-15)
+    t.hold(Key::Hash);
+    t.wait(2_000);
+    t.cmds();
+    t.tap(Key::Star);
+    assert_eq!(t.app.lock_mode(), Some(Lock::All));
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"All keys locked" && x.body.as_bytes() == b"PTT too"));
+    let c = t.cmds();
+    assert!(c.iter().all(|c| matches!(c, RadioCmd::Activity | RadioCmd::Beep { .. })), "* consumed: {c:?}");
+    t.tap(Key::Digit(0));
+    assert_eq!(t.app.lock_mode(), Some(Lock::All), "chosen once: 0 is a locked key now");
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Locked:"));
+    // hold # unlocks from any mode; 0 within the time: All but PTT
+    t.hold(Key::Hash);
+    assert_eq!(t.app.lock_mode(), None);
+    t.hold(Key::Hash);
+    t.tap(Key::Digit(0));
+    assert_eq!(t.app.lock_mode(), Some(Lock::AllButPtt));
+    assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"PTT works"));
+    assert_eq!(t.app.screen(), Screen::Home, "0 consumed (no home channel, HOME-8)");
+    assert_eq!(t.app.set, T::new().app.set, "KEY-14.5: no setting changed");
+}
+
+/// KEY-14.1, KEY-14.2, KEY-14.3, TX-18: locked in "All" a radio doesn't key; "Keypad" and "All but PTT" let PTT
+/// through.
 #[test]
 fn lock_covers_ptt() {
     let mut t = T::new();
     t.app.radio.tx_built = true;
     t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
-    t.hold(Key::Hash);
-    assert!(t.app.locked());
     let s = store();
-    let mut at = t.t;
-    for (i, keys) in [(0, true), (1, true), (2, false)] {
-        if i > 0 {
-            assert!(change(&mut t.app, &[9, 1, 2], 1), "the menu's next choice");
-        }
+    for (m, keys) in [(Lock::Keypad, true), (Lock::AllButPtt, true), (Lock::All, false)] {
+        lock_in(&mut t, m);
+        t.wait(3_100);
+        let at = t.t;
         t.app.key_down(Key::PTT, at, &s);
-        assert_eq!(matches!(t.app.screen(), Screen::Transmit(_)), keys, "{}", LOCK_MODES[i]);
+        assert_eq!(matches!(t.app.screen(), Screen::Transmit(_)), keys, "{}", m.name());
         assert_eq!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Locked:"), !keys);
         t.app.key_up(Key::PTT, at + 300, &s);
-        at += 400;
+        t.t = at + 400;
         let bar = t.app.status_bar(&t.live, &ferrite_core::msg::Device::default());
         assert_eq!((bar.locked, bar.lock_ptt), (true, !keys), "KEY-14.3: the padlock red when PTT is locked too");
+        t.wait(500);
+        t.hold(Key::Hash);
+        assert!(!t.app.locked());
     }
 }
 
@@ -63,9 +119,7 @@ fn lock_covers_ptt() {
 fn lock_modes_and_the_side_keys() {
     let mut t = T::new();
     let s = store();
-    assert_eq!(t.app.set.lock(), Lock::Keypad, "the default");
-    t.hold(Key::Hash);
-    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Keypad locked"), "KEY-13: the toast names it");
+    lock_in(&mut t, Lock::Keypad);
     t.cmds();
     t.tap(Key::Side(2));
     assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: true }), "keypad lock: SIDE2 scans");
@@ -79,8 +133,7 @@ fn lock_modes_and_the_side_keys() {
     assert_eq!(t.freq(), f);
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Scan { .. })), "KEY-14.4: no scan at the release");
     t.hold(Key::Hash);
-    t.app.set.lock_mode = Lock::stored(1); // All but PTT
-    t.hold(Key::Hash);
+    lock_in(&mut t, Lock::AllButPtt);
     assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"All keys locked" && x.body.as_bytes() == b"PTT works"));
     t.cmds();
     t.tap(Key::Side(2));

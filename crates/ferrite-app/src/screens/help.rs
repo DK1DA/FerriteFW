@@ -96,7 +96,7 @@ fn rows(lcd: &mut impl Panel, head: &[u8], rows: impl Iterator<Item = Row>) {
     }
 }
 
-/// HELP-4: the ten hold digits, from the table the shortcut list (MENU 0 9 1 4) runs.
+/// HELP-4: the ten hold digits, from the table the shortcut list (MENU 0 9 1 3) runs.
 const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 /// HELP-4: the two holds that aren't digit shortcuts, after the ten (HOME-17, KEY-13).

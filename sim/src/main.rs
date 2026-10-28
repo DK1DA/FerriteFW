@@ -208,7 +208,7 @@ fn main() {
     app.key_up(D(2), t, &store);
     run(&mut app, &mut fb, t + 1500, &mut t);
     save(&fb, "hold-popup-gone", scale);
-    app.open(ferrite_app::screens::nav::Dest::ShortcutMap); // the reference page, MENU 0 9 1 4
+    app.open(ferrite_app::screens::nav::Dest::ShortcutMap); // the reference page, MENU 0 9 1 3
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "shortcut-map", scale);
     tap(&mut app, &mut t, &[Exit]);

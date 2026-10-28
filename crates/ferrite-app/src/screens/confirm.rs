@@ -289,7 +289,7 @@ pub(crate) fn reset_settings(app: &mut App) {
     app.bsave = 1;
     app.recent = [None; 3];
     app.undo = None;
-    app.locked = false;
+    app.unlock();
     for s in app.slots.iter_mut() {
         let n = Slot::new(s.vfo);
         (s.cfg, s.mem) = (n.cfg, n.mem);

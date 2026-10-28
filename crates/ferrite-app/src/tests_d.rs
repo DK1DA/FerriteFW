@@ -243,7 +243,7 @@ fn pin_at_power_on() {
 #[test]
 fn key_test() {
     let mut t = T::new();
-    menu0(&mut t, &[9, 1, 3]);
+    menu0(&mut t, &[9, 1, 2]);
     assert!(matches!(t.app.screen(), Screen::KeyTest(_)));
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::KeyTest(_)), "short BACK is tested");

@@ -68,6 +68,8 @@ pub const TOAST_MS: u32 = 3000;
 pub const STUCK_AFTER_MS: u32 = 2000;
 /// A hold-digit shortcut's popup (HOME-8).
 pub const POPUP_MS: u32 = 1200;
+/// KEY-13: the Keypad lock's popup offers the wider modes.
+pub const LOCK_ASK: &[u8] = "* all · 0 all but PTT".as_bytes();
 pub const UNDO_MS: u32 = 5000;
 /// [`App`]'s VOX flags (`vox_bits`).
 const VOX_REFUSED: u8 = 1;
@@ -271,7 +273,12 @@ pub struct App {
     pub(crate) watch_on: u8,
     /// Battery Save: 0 off, 1-3.
     bsave: u8,
-    locked: bool,
+    /// The key lock: what it covers (KEY-14), chosen as it locked (KEY-13); `None` unlocked. Not stored (KEY-14.5).
+    pub(crate) lock: Option<settings::Lock>,
+    /// KEY-13: when the lock came on (the time's low 16 bits, bit 0 set; 0 none): for [`TOAST_MS`] after it * and 0
+    /// choose the lock's mode (All, All but PTT) instead of being locked keys; cleared after that
+    /// ([`App::lock_asking`]).
+    lock_ask: u16,
     /// MENU-24: each group's (and third-level list's) last item, a nibble each ([`screens::groups::memo`]), for
     /// this visit to the menu: going home forgets them, so the menu starts on row 1 again.
     pub(crate) group_rows: [u8; screens::groups::MEMO_BYTES],
@@ -424,7 +431,8 @@ impl App {
             watch: 1,
             watch_on: 1,
             bsave: 1,
-            locked: false,
+            lock: None,
+            lock_ask: 0,
             group_rows: [0; screens::groups::MEMO_BYTES],
             inbox: 0,
             log_unread: 0,
@@ -525,7 +533,30 @@ impl App {
     }
 
     pub fn locked(&self) -> bool {
-        self.locked
+        self.lock.is_some()
+    }
+
+    /// What the lock covers while locked (KEY-14), else `None`.
+    pub fn lock_mode(&self) -> Option<settings::Lock> {
+        self.lock
+    }
+
+    /// Locks the keys in Keypad mode (KEY-13; auto lock, KEY-20); `ask` keeps * and 0 for choosing a wider mode for
+    /// the popup's time.
+    pub(crate) fn lock_keys(&mut self, ask: bool) {
+        self.lock = Some(settings::Lock::Keypad);
+        self.lock_ask = if ask { self.now as u16 | 1 } else { 0 };
+    }
+
+    /// For the lock popup's time * and 0 choose the lock's mode (KEY-13).
+    fn lock_asking(&self) -> bool {
+        self.lock_ask != 0 && ((self.now as u16).wrapping_sub(self.lock_ask & !1) as u32) < TOAST_MS
+    }
+
+    /// Unlocks the keys (KEY-13, KEY-16).
+    pub(crate) fn unlock(&mut self) {
+        self.lock = None;
+        self.lock_ask = 0;
     }
 
     /// Off, A+B, A+B+C.
@@ -1089,8 +1120,8 @@ impl App {
             if self.ptt_block & screens::qmenu::ptt_bit(k) != 0 {
                 return;
             }
-            // KEY-14.3: with Lock covers "All" (0 9 1 2) a locked radio doesn't key either
-            if self.locked && self.set.lock() == settings::Lock::All {
+            // KEY-14.3: locked in "All" a radio doesn't key either
+            if self.lock_mode() == Some(settings::Lock::All) {
                 return self.locked_toast();
             }
             // KEY-7: from any screen; works locked too (KEY-14.1, KEY-14.2). Each screen says what PTT does there. PTT B keys
@@ -1133,7 +1164,7 @@ impl App {
         match self.keys.release(key, now) {
             Some(e) if e.press == Press::Short => self.on_key(e, store),
             // The release after a long press: only the screen hears it (the shortcut map runs its shortcut).
-            Some(e) if !self.locked || self.lock_sides() && matches!(e.key, Key::Side(_)) => self.screen.key(self, e, store),
+            Some(e) if !self.locked() || self.lock_sides() && matches!(e.key, Key::Side(_)) => self.screen.key(self, e, store),
             _ => {}
         }
         self.reconcile_mode(); // MODE-2: PTT up, or what the key did
@@ -1149,7 +1180,7 @@ impl App {
         self.pressed = now;
         self.out.push(RadioCmd::Activity);
         self.sweep_hold();
-        if self.locked && !(self.lock_sides() && self.side1_squelch()) {
+        if self.locked() && !(self.lock_sides() && self.side1_squelch()) {
             return self.locked_toast(); // KEY-14; with the keypad's lock SIDE1 + knob, the squelch, works (SQL-11)
         }
         if screens::qmenu::knob(self, d as i32) {
@@ -1210,6 +1241,9 @@ impl App {
         if let Some(t) = self.toast.filter(|t| after(now, t.until)) {
             self.toast = None;
             self.drawn.popup_gone |= t.center;
+        }
+        if !self.lock_asking() {
+            self.lock_ask = 0; // KEY-13: before the 16-bit time comes round again
         }
         self.ptt_stuck_notice(live.tx.ptt_stuck);
         if self.alert & ALERT_WAIT != 0 && !screens::xb::running(self) && self.radio.keyed.is_none() {
@@ -1301,23 +1335,34 @@ impl App {
             // BOOT-14: the armed reset's hold # is the reset's, not the key lock
             (Key::Hash, Long) if matches!(self.screen, Screen::Confirm(c) if c.ask == screens::confirm::Ask::Reset { armed: true }) => return,
             (Key::Hash, Long) if self.set.chan_only => return self.leave_chan_only(), // PIN-5
-            (Key::Hash, Long) if self.locked && self.set.pin_mode == 2 => {
+            (Key::Hash, Long) if self.locked() && self.set.pin_mode == 2 => {
                 // KEY-16: unlocking asks for the PIN
                 return self.open(Dest::Pin);
             }
+            (Key::Hash, Long) if self.locked() => {
+                self.unlock();
+                return self.show_toast(b"Keys unlocked", b"", false);
+            }
             (Key::Hash, Long) => {
-                self.locked = !self.locked;
+                self.lock_keys(true);
                 return self.lock_toast();
             }
             _ => {}
         }
-        if self.locked {
+        if self.locked() {
             // KEY-14, SQL-11: PTT goes through key_down/key_up. The keypad's lock (KEY-14.1) lets the side keys
             // through (SIDE1 monitor, SIDE2 scan and counter: the screen's own) and SIDE1 + ▲▼ (squelch, as SIDE1 +
             // knob: [`App::knob`]); SIDE1 + ◀▶ (the clarifier, a retune) and SIDE2 + ▲▼ (a tuning step) stay locked.
             let sides = self.lock_sides();
+            let asking = self.lock_asking();
             match (e.key, e.press) {
                 (Key::Ptt(_), _) => {}
+                // KEY-13: for the lock popup's time * locks All, 0 All but PTT; the key does nothing else
+                (Key::Star | Key::Digit(0), _) if asking => {
+                    self.lock = Some(if e.key == Key::Star { settings::Lock::All } else { settings::Lock::AllButPtt });
+                    self.lock_ask = 0;
+                    self.lock_toast();
+                }
                 (Key::Side(_), _) if sides => self.screen.key(self, e, store),
                 (Key::Up | Key::Down, Short | Repeat) if sides && self.side1_squelch() => self.screen.key(self, e, store),
                 _ => self.locked_toast(),
@@ -1398,20 +1443,24 @@ impl App {
         self.keys.is_held(Key::Side(1)) && matches!(self.screen, Screen::Home | Screen::Squelch(_))
     }
 
-    /// KEY-13: the lock's toast names what it covers, and whether PTT still works.
-    pub(crate) fn lock_toast(&mut self) {
-        let (head, body): (&[u8], &[u8]) = match (self.locked, self.set.lock()) {
-            (false, _) => (b"Keys unlocked", b""),
-            (true, settings::Lock::Keypad) => (b"Keypad locked", b"PTT, side keys work"),
-            (true, settings::Lock::AllButPtt) => (b"All keys locked", b"PTT works"),
-            (true, settings::Lock::All) => (b"All keys locked", b"PTT too"),
-        };
-        self.show_toast(head, body, false);
+    /// KEY-13: the lock's popup in the middle of the screen names what it covers: Keypad's offers the wider modes for
+    /// as long as * and 0 choose them ([`App::lock_keys`]), the others say whether PTT still works.
+    fn lock_toast(&mut self) {
+        match self.lock.unwrap_or(settings::Lock::Keypad) {
+            settings::Lock::Keypad => {
+                self.show_popup(b"Keypad locked", LOCK_ASK);
+                if let Some(t) = &mut self.toast {
+                    t.until = self.now.wrapping_add(TOAST_MS);
+                }
+            }
+            settings::Lock::AllButPtt => self.show_popup(b"All keys locked", b"PTT works"),
+            settings::Lock::All => self.show_popup(b"All keys locked", b"PTT too"),
+        }
     }
 
     /// Locked with the keypad's lock (KEY-14.1): the side keys still work.
     fn lock_sides(&self) -> bool {
-        self.set.lock() == settings::Lock::Keypad
+        self.lock == Some(settings::Lock::Keypad)
     }
 
     fn locked_toast(&mut self) {

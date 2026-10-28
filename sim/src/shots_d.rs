@@ -198,8 +198,8 @@ pub fn run(scale: u32) {
     s.save("dtmf-memories");
     s.home();
 
-    // The key test after a few keys; MENU 0 9 1 3.
-    s.menu0(&[9, 1, 3]);
+    // The key test after a few keys; MENU 0 9 1 2.
+    s.menu0(&[9, 1, 2]);
     s.keys(&[Key::Up, D(5), Key::Exit]);
     s.app.knob(1, s.t, &store);
     s.press(Key::Star, 900);

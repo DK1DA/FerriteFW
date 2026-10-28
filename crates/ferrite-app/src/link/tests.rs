@@ -976,8 +976,8 @@ fn remote_keys_drive_the_menus() {
     assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 21]).0, Status::Invalid as u8, "20 at most");
 }
 
-/// LINK-19, KEY-3, KEY-14.4: a long press is held to the long-press time and let go by the radio (keys answer
-/// `busy` meanwhile); hold # locks; a locked keypad takes remote keys as it takes the radio's (the toast, nothing
+/// LINK-19, KEY-3, KEY-13, KEY-14.4: a long press is held to the long-press time and let go by the radio (keys
+/// answer `busy` meanwhile); hold # locks, and 0 then chooses All but PTT (the readback's `lockmode=`); a locked radio takes remote keys as it takes the radio's (the toast, nothing
 /// else); down and up hold a key, and a session that moves port lets go of what it held.
 #[test]
 fn remote_long_press_lock_and_hold() {
@@ -987,6 +987,9 @@ fn remote_long_press_lock_and_hold() {
     assert!(!pc.app.locked(), "not before 700 ms");
     pc.pass(800, &LiveAll::default());
     assert!(pc.app.locked() && pc.ui().contains("state ") && pc.ui().contains(" locked=1"));
+    assert!(pc.ui().contains("bar lock=1 lockmode=keypad ") && pc.ui().contains("popup \"Keypad locked\""), "KEY-13");
+    pc.keys("0");
+    assert!(pc.ui().contains("bar lock=1 lockmode=allbutptt "), "KEY-13: a remote 0 chooses as the radio's");
     pc.keys("MENU");
     assert_eq!(pc.app.screen(), Screen::Home, "KEY-14.4: locked");
     assert!(pc.ui().contains("toast \"Locked:\""), "{}", pc.ui());
@@ -1206,7 +1209,7 @@ fn a_radio_key_stops_a_remote_repeater() {
         assert!(pc.xb_running());
         pc.app.take_xb_log();
         if locked {
-            pc.app.locked = true;
+            pc.app.lock = Some(crate::settings::Lock::Keypad);
         }
         if dark {
             pc.app.set.backlight = 1;
@@ -1225,7 +1228,7 @@ fn a_radio_key_stops_a_remote_repeater() {
         assert_eq!(pc.app.take_xb_log(), Some(XbLog { on: false, by: BY_KEYS, why: XB_KEY }));
         assert!(matches!(pc.app.screen(), Screen::Crossband(_)), "the press did nothing else: {:?}", pc.app.screen());
         assert!(!pc.app.dark(), "and woke the screen");
-        pc.app.locked = false;
+        pc.app.lock = None;
         pc.app.set.backlight = 0;
     }
 }

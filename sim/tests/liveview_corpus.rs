@@ -81,6 +81,8 @@ const SCRIPTS: &[(&str, &str)] = &[
     ("tone hint", "event tonehint; wait 1s"),
     ("low battery", "event battery; wait 1s"),
     ("monitor held", "down SIDE1; wait 1s"),
+    ("key lock, choosing", "hold #; wait 500ms"),
+    ("key lock, all but PTT", "hold #; press 0; wait 500ms"),
 ];
 
 /// LINK-19.4: the corpus Console's Live View completeness check reads (every screen's drawn texts and readback).

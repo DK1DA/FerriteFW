@@ -162,7 +162,7 @@ pub enum Dest {
     About,
     /// D8: calibration, read only (MENU 0 9 9 2).
     Calibration,
-    /// D9: key test (MENU 0 9 1 3).
+    /// D9: key test (MENU 0 9 1 2).
     KeyTest,
     /// D10: advanced squelch per band (MENU 0 9 9 1).
     AdvSquelch,
@@ -351,8 +351,8 @@ pub const MENU0: [(&[u8], Dest); 52] = [
     (&[8, 5, 2], Dest::DtmfMemories),
     (&[8, 6], Dest::Sub(8, 6)),
     (&[9, 1], Dest::Sub(9, 1)),
-    (&[9, 1, 3], Dest::KeyTest),
-    (&[9, 1, 4], Dest::ShortcutMap),
+    (&[9, 1, 2], Dest::KeyTest),
+    (&[9, 1, 3], Dest::ShortcutMap),
     (&[9, 3, 3], Dest::Pin),
     (&[9, 2], Dest::Sub(9, 2)),
     (&[9, 2, 2], Dest::LinkStatus),
@@ -437,7 +437,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Sub(g, m) => Screen::Group(super::groups::Group { g, sub: m, row: 0 }),
         Dest::Setup => Screen::Setup(super::setup::Setup::new(false)),
         Dest::ExtendTx => Screen::ExtendTx(super::setup::ExtendTx),
-        Dest::Pin if app.locked => Screen::Pin(super::pin::Pin::unlock()),
+        Dest::Pin if app.locked() => Screen::Pin(super::pin::Pin::unlock()),
         Dest::Pin => Screen::Pin(super::pin::Pin::change(app)), // 0 9 3 3 Change PIN
         Dest::About => Screen::Info(Info { page: Page::About }),
         Dest::Calibration => Screen::Info(Info { page: Page::Calibration }),

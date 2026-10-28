@@ -307,15 +307,19 @@ fn fm_broadcast() {
     r.run("menu 0 3 1; expect screen \"FM broadcast\"; expect text \"MHz\"; expect text \"Signal\"");
 }
 
-/// Hold # locks the keys and shows it; locked, OK does nothing; hold # unlocks (KEY-13, KEY-14.1, KEY-14.4).
+/// Hold # locks the keypad and offers * and 0; locked, OK does nothing; hold # unlocks; * in the popup's time locks
+/// All (KEY-13, KEY-14.1, KEY-14.3, KEY-14.4).
 #[test]
 fn key_lock() {
     let mut r = Radio::new();
-    r.run("hold HASH; expect text \"Keypad locked\"");
+    r.run("hold HASH; expect text \"Keypad locked\"; expect text \"* all · 0 all but PTT\"");
     assert!(r.sim.app().locked());
     r.run("press OK; expect screen \"Home\"; expect text \"hold # to unlock\"");
     r.run("hold HASH; expect text \"Keys unlocked\"");
     assert!(!r.sim.app().locked());
+    r.run("hold HASH; press STAR; expect text \"All keys locked\"; expect text \"PTT too\"");
+    assert_eq!(r.sim.app().lock_mode(), Some(ferrite_app::settings::Lock::All));
+    r.run("hold HASH; expect text \"Keys unlocked\"");
 }
 
 /// Setting a PIN starts with "New PIN" (PIN-10, PIN-2).

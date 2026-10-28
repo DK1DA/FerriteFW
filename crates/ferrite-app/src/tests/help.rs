@@ -120,7 +120,7 @@ fn key_rows_fit_one_line() {
     }
 }
 
-/// HELP-1, HELP-4: the Holds page lists the hold digits from the shortcut list's own table (MENU 0 9 1 4, KEY-21),
+/// HELP-1, HELP-4: the Holds page lists the hold digits from the shortcut list's own table (MENU 0 9 1 3, KEY-21),
 /// then hold * and hold #, one row each; its name fits the status bar unshortened.
 #[test]
 fn help_digits_are_the_shortcut_table() {

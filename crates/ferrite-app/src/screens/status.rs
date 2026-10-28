@@ -182,11 +182,13 @@ const ROWS: [(&str, Val<()>); 20] = [
     }),
     // KEY-14: locked, what the lock covers
     ("Key lock", |c, b| {
-        if !c.app.locked {
-            return on_off(b, false);
+        match c.app.lock_mode() {
+            None => on_off(b, false),
+            Some(m) => {
+                b.set(m.name().as_bytes());
+                TEXT
+            }
         }
-        b.set(crate::settings::LOCK_MODES[crate::settings::Lock::index(c.app.set.lock_mode) as usize].as_bytes());
-        TEXT
     }),
     // VOX-1: VOX shows here when on.
     ("VOX", |c, b| on_off(b, c.app.set.vox)),

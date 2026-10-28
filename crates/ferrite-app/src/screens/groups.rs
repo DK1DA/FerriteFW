@@ -128,7 +128,7 @@ const G8: [Entry; 8] = [
     Entry("Advanced||Subtone level, tail, Extend TX, Dry TX."),
 ];
 const G9: [Entry; 9] = [
-    Entry("Keys and lock|No auto lock|Auto lock, lock covers, key test, shortcuts."),
+    Entry("Keys and lock|No auto lock|Auto lock, key test, shortcuts."),
     Entry("Connections|BT off|Bluetooth, link status, cable port."),
     Entry("PIN and lock|Off|PIN lock, channel-only mode, PIN."),
     Entry("Region|Not set|Your amateur bands and defaults."),
@@ -253,7 +253,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((9, 1), &[
         Entry("Auto lock|Off|Lock the keys after a time."),
-        Entry("Lock covers|Keypad|Keypad, all but PTT, or all."),
         Entry("Key test||Each key's code, name and press."),
         Entry("Shortcuts||What holding each digit on home does."),
     ]),
@@ -421,7 +420,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 96] = [
+static SETTINGS: [Setting; 95] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -513,15 +512,6 @@ static SETTINGS: [Setting; 96] = [
     field!([8, 8, 2], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
     field!([8, 8, 3], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
     field!([9, 1, 1], auto_lock: u8, Kind::Round(AUTO_LOCK_TIMES.len() as u8, auto_lock_text), Nothing), // KEY-20
-    // KEY-14: the menu's order isn't the stored byte's (an old "Keys and PTT" is 1, now All, last)
-    Setting {
-        path: [9, 1, 2],
-        term: true,
-        kind: Kind::Pick(&LOCK_MODES),
-        get: |s| Lock::index(s.lock_mode),
-        set: |s, v| s.lock_mode = Lock::stored(v),
-        tell: Tell::Nothing,
-    },
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
     field!([9, 5, 0], sq_chip: bool, Kind::Flip(&["Software", "Chip"]), Nothing), // SQL-18.3

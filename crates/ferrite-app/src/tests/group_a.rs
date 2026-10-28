@@ -562,7 +562,7 @@ fn pin_at_unlock() {
 }
 
 /// HOME-8: holding a digit runs its shortcut at the long press, while held, with a popup in the middle; the
-/// release does nothing. The map is a reference page at MENU 0 9 1 4.
+/// release does nothing. The map is a reference page at MENU 0 9 1 3.
 #[test]
 fn shortcut_map() {
     let mut t = T::new();
@@ -592,12 +592,12 @@ fn shortcut_map() {
     assert!(matches!(t.app.screen(), Screen::Scope(_)), "the release stays");
     // The reference page.
     t.app.go_home();
-    t.app.open(crate::screens::nav::menu0(&[9, 1, 4]).expect("0 9 1 4"));
+    t.app.open(crate::screens::nav::menu0(&[9, 1, 3]).expect("0 9 1 3"));
     assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
     // KEY-21: OK runs the row from home (nicFW's function menu): 5 opens the tone picker, with its popup.
-    t.app.open(crate::screens::nav::menu0(&[9, 1, 4]).expect("0 9 1 4"));
+    t.app.open(crate::screens::nav::menu0(&[9, 1, 3]).expect("0 9 1 3"));
     t.tap(Key::Down);
     t.tap(Key::Digit(5));
     t.tap(Key::Menu);

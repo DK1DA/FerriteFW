@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     lpm, lpm_below, spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, lock_mode, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx, aprs_share });
+} bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, spare_lock, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx, aprs_share });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -306,21 +306,19 @@ mod tests {
         assert_eq!(c.hf, Settings::DEFAULT.hf);
     }
 
-    /// KEY-14.5: 0 9 1 2's stored byte is the old bool's: "Keys" (0) loads as Keypad, "Keys and PTT" (1) as All, in
-    /// the same place; the record keeps its length.
+    /// KEY-14.5: the byte that held 0 9 1 2's Lock covers (decision 302) stays where it was, so the record keeps
+    /// its length; a stored choice loads into the spare and changes nothing (the mode is chosen at each lock).
     #[test]
-    fn lock_covers_old_values() {
-        use crate::settings::Lock;
+    fn old_lock_covers_is_ignored() {
         let mut v = Vec2(std::vec::Vec::new());
         Settings::DEFAULT.save(&mut v);
         let at = v.0.len() - AFTER_SPARE + 4; // mic gain, TX timeout, menu timeout, pause time, then it
-        for (stored, lock, index) in [(0, Lock::Keypad, 0), (1, Lock::All, 2), (2, Lock::AllButPtt, 1)] {
+        for stored in [1, 2] {
             let mut w = v.0.clone();
             w[at] = stored;
             let mut b = Settings::DEFAULT;
             b.load(&mut SliceSource(&w));
-            assert_eq!((b.lock(), Lock::index(b.lock_mode)), (lock, index));
-            assert_eq!(Lock::stored(index), stored);
+            assert_eq!(Settings { spare_lock: 0, ..b }, Settings::DEFAULT);
             let mut x = Vec2(std::vec::Vec::new());
             b.save(&mut x);
             assert_eq!(x.0, w, "saved back as read, the same length");

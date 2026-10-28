@@ -188,8 +188,8 @@ impl App {
         let n = if hf || self.radio.keyed.is_some() || !here { 0 } else { m.count_ones() as u8 };
         StatusBar {
             name,
-            locked: self.locked,
-            lock_ptt: self.locked && self.set.lock() == crate::settings::Lock::All,
+            locked: self.locked(),
+            lock_ptt: self.lock_mode() == Some(crate::settings::Lock::All),
             // SBAR-11: the bar shows what changes what a key does, so SCN is the active slot scanning; a
             // watched slot's scan shows on its card.
             scan: !hf && live.slots[self.active as usize].scanning,

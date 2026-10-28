@@ -1,6 +1,6 @@
 //! The placeholder for every screen not built yet: its name, "coming", and where the manual describes it, so
 //! each way in ([`super::nav`]) can be tried in the simulator. Settings groups and third-level lists follow
-//! their MENU 0 paths with the digits (MENU-5), so a path like MENU 0 9 1 3 lands on the key test's
+//! their MENU 0 paths with the digits (MENU-5), so a path like MENU 0 9 1 2 lands on the key test's
 //! placeholder. BACK returns where it was opened from.
 
 use super::nav::{self, Dest};

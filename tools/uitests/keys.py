@@ -5,7 +5,7 @@ from .core import test
 
 # Screens to walk for the hint bar and the status bar's name (keys from home).
 WALK = ["MENU", "MENU 0", "MENU 0 1", "MENU 0 7", "MENU 0 7 5", "MENU 0 9 1", "MENU 0 0", "MENU 0 9 8",
-        "MENU 0 9 8 RIGHT", "MENU 0 9 8 RIGHT RIGHT", "MENU 0 9 8 RIGHT RIGHT RIGHT", "MENU 0 9 1 4", "1 4",
+        "MENU 0 9 8 RIGHT", "MENU 0 9 8 RIGHT RIGHT", "MENU 0 9 8 RIGHT RIGHT RIGHT", "MENU 0 9 1 3", "1 4",
         "SLOT:long", "MENU 0 3 1", "MENU 0 3 5", "MENU 0 6 6 MENU", "MENU 4 MENU", "MENU MENU", "9:long",
         "1:long", "SIDE2:long", "VM:long"]
 
@@ -74,14 +74,14 @@ def monitor_while_locked(t):
 
 @test("KEY-13", "KEY-14.4", "SBAR-11", smoke=True, pages=("Home", "Quick"))
 def key_lock(t):
-    """Hold # locks (padlock in the bar, toast); locked, keys and the knob give "Locked: hold # to unlock" and
+    """Hold # locks (padlock in the bar, popup); locked, keys and the knob give "Locked: hold # to unlock" and
     do nothing, hold * gives no quick menu; hold # unlocks."""
     was_muted = t.unmute()
     f0 = t.ui().active["freq"]
     u = t.press("HASH", long=True)
     t.eq(u.bar["lock"], 1, "the padlock")
     t.eq(u.state["locked"], 1, "locked")
-    t.check(u.toast and "locked" in u.toast["head"].lower(), "the toast", u.toast)
+    t.check(u.popup and u.popup["head"] == "Keypad locked", "the popup", u.popup)
     t.eq(u.hints, [("#", "Hold: unlock")], "the hint bar")
     for k in ("MENU", "5", "SLOT", "UP"):
         u = t.keys(k)
@@ -102,27 +102,35 @@ def key_lock(t):
         t.keys("STAR")
 
 
-@test("KEY-14.1", "KEY-14.2", "KEY-13", pages=("Home",))
+@test("KEY-14.1", "KEY-14.2", "KEY-14.3", "KEY-13", pages=("Home",))
 def lock_modes(t):
-    """Lock covers (0 9 1 2): Keypad lets SIDE2 scan; All but PTT locks SIDE2 too. Each lock's toast names it."""
+    """Hold # locks the keypad and its popup offers * (All) and 0 (All but PTT): Keypad lets SIDE2 scan; All but
+    PTT locks SIDE2 too; * gives All. The popup names each, as the bar's lockmode does."""
+    t.home()
     try:
-        t.set("0 9 1 2", "Keypad")
-        t.home()
         u = t.press("HASH", long=True)
-        t.check(u.toast and u.toast["head"] == "Keypad locked", "the keypad's toast", u.toast)
+        t.check(u.popup and u.popup["head"] == "Keypad locked", "the keypad's popup", u.popup)
+        t.eq(u.bar.get("lockmode"), "keypad", "bar lockmode")
+        t.wait(lambda u: not u.popup, timeout=5, what="the popup gone")
         u = t.keys("SIDE2")
         t.check(not (u.toast and u.toast["head"].startswith("Locked")), "keypad lock: SIDE2 works", u.toast)
         t.keys("SIDE2")
         t.press("HASH", long=True)
-        t.set("0 9 1 2", "All but PTT")
-        t.home()
-        u = t.press("HASH", long=True)
-        t.check(u.toast and u.toast["head"] == "All keys locked", "all but PTT's toast", u.toast)
+        t.press("HASH", long=True)
+        u = t.keys("0")
+        t.check(u.popup and u.popup["head"] == "All keys locked" and u.popup["body"] == "PTT works",
+                "0: all but PTT's popup", u.popup)
+        t.eq(u.bar.get("lockmode"), "allbutptt", "bar lockmode")
         u = t.keys("SIDE2")
         t.check(u.toast and u.toast["head"].startswith("Locked"), "all but PTT: SIDE2 locked", u.toast)
         t.press("HASH", long=True)
+        t.press("HASH", long=True)
+        u = t.keys("STAR")
+        t.check(u.popup and u.popup["body"] == "PTT too", "*: all's popup", u.popup)
+        t.eq(u.bar.get("lockmode"), "all", "bar lockmode")
     finally:
-        t.set("0 9 1 2", "Keypad")
+        if t.ui().bar.get("lock") == 1:
+            t.press("HASH", long=True)
 
 
 @test("KEY-20", "KEY-15", slow=True, pages=("Home",))
@@ -153,9 +161,9 @@ def digit_shortcuts_on_a_channel(t):
 
 @test("KEY-21", "HOME-8", pages=("Home", "Shortcut"))
 def shortcut_list_runs_a_row(t):
-    """MENU 0 9 1 4: the shortcut list; a digit picks a row and OK runs it from home with its popup."""
-    u = t.keys("MENU 0 9 1 4")
-    t.eq(u.id, "Shortcut", "MENU 0 9 1 4")
+    """MENU 0 9 1 3: the shortcut list; a digit picks a row and OK runs it from home with its popup."""
+    u = t.keys("MENU 0 9 1 3")
+    t.eq(u.id, "Shortcut", "MENU 0 9 1 3")
     p0 = t.slot("A")
     u = t.keys("4 MENU")
     t.eq(u.id, "Home", "OK runs it from home")

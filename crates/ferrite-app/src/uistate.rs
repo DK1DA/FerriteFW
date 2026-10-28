@@ -11,7 +11,8 @@
 //!   remote PTT, the exclusive mode running (MODE-1: off, scope, strip, tone, counter, fm, hf, xb) and whether
 //!   broadcast FM plays.
 //! - `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=fix bt_on=1 bt=0 battery=80 low=0 cutoff=0 dry=0 clock=14:32 utc=0 call=""`: the status bar
-//!   (`call` the callsign drawn in the clock's place with no time, SBAR-2).
+//!   (`call` the callsign drawn in the clock's place with no time, SBAR-2); while locked `lockmode=keypad`,
+//!   `allbutptt` or `all` follows `lock=1` (KEY-14).
 //! - `toast "head" "body"` or `popup "head" "body"` while one shows; `qmenu "PTT A" "Reverse" "off"` per row of the
 //!   quick menu while it is up.
 //! - The screen's own lines: home's `card` per slot (a broadcast card followed by its `bcast` report: the RDS
@@ -388,7 +389,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "frame", app.frames);
         kn(l, "ago", app.now.wrapping_sub(app.drawn_at));
         kn(l, "dark", app.dark() as u32);
-        kn(l, "locked", app.locked as u32);
+        kn(l, "locked", app.locked() as u32);
         let _ = uwrite!(l, " active={}", letter(app.active) as char);
         keyed_remote_mode(app, cx.live, l);
         kn(l, "fm", app.radio.fm_on as u32);
@@ -412,6 +413,14 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         let b = app.status_bar(cx.live, cx.dev);
         l.push(b"bar");
         kn(l, "lock", b.locked as u32);
+        // KEY-14: what the lock covers, while locked (`lock=` stays 0/1)
+        if let Some(m) = app.lock_mode() {
+            l.push(match m {
+                crate::settings::Lock::Keypad => b" lockmode=keypad".as_slice(),
+                crate::settings::Lock::AllButPtt => b" lockmode=allbutptt",
+                crate::settings::Lock::All => b" lockmode=all",
+            });
+        }
         kn(l, "scan", b.scan as u32);
         kn(l, "watch", b.watch as u32);
         kn(l, "inbox", b.inbox as u32);

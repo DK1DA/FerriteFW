@@ -179,7 +179,7 @@ impl Pin {
             app.set.pin_misses = 0;
             match self.purpose {
                 UNLOCK => {
-                    app.locked = false;
+                    app.unlock();
                     app.back();
                     app.show_toast(b"Keys unlocked", b"", false);
                 }

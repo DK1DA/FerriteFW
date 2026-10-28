@@ -213,8 +213,8 @@ impl App {
         }
         // KEY-20: keys and the knob only (receiving doesn't keep the keys unlocked).
         let lock = AUTO_LOCK_TIMES[self.set.auto_lock as usize % AUTO_LOCK_TIMES.len()] as u32 * 1000;
-        if lock != 0 && !self.locked && now.wrapping_sub(self.last_input) >= lock {
-            self.locked = true;
+        if lock != 0 && !self.locked() && now.wrapping_sub(self.last_input) >= lock {
+            self.lock_keys(false); // always Keypad, with no toast
         }
         let off = AUTO_OFF_TIMES[self.set.auto_off as usize % AUTO_OFF_TIMES.len()] as u32 * 60_000;
         let idle = now.wrapping_sub(if after(self.awake, self.seen) { self.awake } else { self.seen });

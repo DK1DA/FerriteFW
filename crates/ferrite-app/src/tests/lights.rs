@@ -100,7 +100,7 @@ fn led_heartbeat() {
 }
 
 /// KEY-20 (and KEY-15, which names it): the keys lock after the set time without a key; receiving doesn't
-/// hold it off.
+/// hold it off. Auto lock is always Keypad, with no popup: * is a locked key at once.
 #[test]
 fn auto_key_lock() {
     let mut t = T::new();
@@ -111,7 +111,10 @@ fn auto_key_lock() {
     t.wait(29_000);
     assert!(!t.app.locked());
     t.wait(2_000);
-    assert!(t.app.locked());
+    assert_eq!(t.app.lock_mode(), Some(crate::settings::Lock::Keypad));
+    assert!(t.app.toast.is_none(), "no popup");
+    t.tap(Key::Star);
+    assert_eq!(t.app.lock_mode(), Some(crate::settings::Lock::Keypad), "* doesn't choose");
     t.hold(Key::Hash);
     assert!(!t.app.locked(), "hold # unlocks");
 }

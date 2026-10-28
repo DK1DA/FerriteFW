@@ -372,7 +372,7 @@ impl View for Home {
     }
 
     fn hints(self, app: &App) -> Hints {
-        if app.locked {
+        if app.locked() {
             return Hints::new(&[("#", "Hold: unlock")]);
         }
         let group = if app.slots[app.active as usize].on_channel() { "Zone" } else { "Band" };

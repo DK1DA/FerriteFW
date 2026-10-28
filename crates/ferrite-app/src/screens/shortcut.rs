@@ -1,4 +1,4 @@
-//! The shortcut map (MENU 0 9 1 4; manual chapter 7, HOME-8, KEY-11, KEY-21): the ten hold-digit shortcuts
+//! The shortcut map (MENU 0 9 1 3; manual chapter 7, HOME-8, KEY-11, KEY-21): the ten hold-digit shortcuts
 //! with what each would do now. Holding a digit on home runs its shortcut at once ([`super::nav::hold_digit`]);
 //! here ▲▼ (or the knob, or a digit) pick one and OK runs it on home, as nicFW's function menu does, while the
 //! help line names the digit to hold next time.

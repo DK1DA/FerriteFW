@@ -1,4 +1,4 @@
-//! The key test (D9; MENU 0 9 1 3; manual chapters 7 and 36): the last key's name, code and press type, and a
+//! The key test (D9; MENU 0 9 1 2; manual chapters 7 and 36): the last key's name, code and press type, and a
 //! map of every key, lit once seen. Codes come from [`App::raw_key`], which the firmware calls for every
 //! matrix code, mapped or not, so the test is how the unmapped keys get their names (KEY-2). Short BACK and PTT
 //! are tested like any key here: hold BACK leaves, and PTT does not transmit from this screen.
