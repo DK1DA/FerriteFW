@@ -187,7 +187,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("Mode|Off|Manual, timed or smart."),
         Entry("After voice TX|Off|Beacon after you talk."),
         Entry("Power|Low|Beacon and message power."),
-        Entry("Telemetry|Off|Battery, MCU temperature and power after a beacon."),
+        Entry("Telemetry|Off|Battery, temperature, power in the comment."),
     ]),
     ((5, 7), &[
         Entry("Digipeat|Off|Relay others' packets."),

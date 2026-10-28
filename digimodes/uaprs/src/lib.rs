@@ -6,7 +6,7 @@
 //! - [`ax25`]: UI frames: addresses, digipeater paths, building frames, TNC2 text (`SRC>DEST,PATH:info`).
 //! - [`parse`]: APRS packets: positions (plain, compressed, Mic-E, NMEA), messages and acks, objects, items,
 //!   status, weather, third-party traffic.
-//! - [`build`]: position reports, messages and acks, telemetry to send.
+//! - [`build`]: position reports, messages and acks to send.
 //! - [`kiss`]: the KISS TNC protocol, for a PC or phone over serial or Bluetooth.
 //! - [`beacon`]: smart beaconing; [`geo`]: distance and bearing between positions.
 

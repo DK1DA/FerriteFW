@@ -67,7 +67,7 @@ pub struct AprsCfg {
     /// Mic-E (0 5 5 7, APRS-52): 0 off (the uncompressed report), else the standard status sent, an index into
     /// [`MIC_E_NAMES`] (Off duty to Priority; Emergency isn't offered).
     pub mic_e: u8,
-    /// APRS-54: telemetry (0 5 6 4): battery, MCU temperature and beacon power after a beacon now and then.
+    /// APRS-54: telemetry (0 5 6 4): the battery, MCU temperature and beacon power after our position comment.
     pub telemetry: bool,
 }
 

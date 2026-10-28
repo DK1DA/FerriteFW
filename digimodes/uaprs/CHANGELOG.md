@@ -8,8 +8,8 @@ First prototype.
 - APRS parsing, zero copy: plain, compressed, Mic-E and NMEA positions; DAO; messages, acks, rejections and
   reply-acks; objects and items; status; weather (with and without position, Ultimeter); capabilities;
   telemetry; third-party traffic.
-- Building position reports (plain and compressed), messages, acks and rejections; telemetry reports and
-  their definitions (PARM, UNIT, EQNS, BITS).
+- Building position reports (plain and compressed), messages, acks and rejections. (The telemetry report and
+  definition builders were removed Oct 27, 2026: Ferrite puts its values in the position comment.)
 - KISS encoder and decoder; smart beaconing; distance and bearing.
 - Agrees with Ham::APRS::FAP field by field on 926 of 934 packets.
 - Review fixes: no integer overflow on hostile packets (Mic-E altitude, Ultimeter, long NMEA numbers); NMEA

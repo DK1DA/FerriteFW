@@ -12,6 +12,7 @@
 use crate::aprs::{beacon_due, retry_wait, AprsCfg, LastBeacon, HEARD_MAX, INFO_MAX, TRIES};
 use crate::data::{Beacon, Fix, MsgState, Pos, Station, Sym, AGO_UNKNOWN};
 use core::cell::Cell;
+use ferrite_core::freq::Freq10;
 use ferrite_core::liveview::{fnv, FNV0};
 use ferrite_ui::text::Buf;
 use ufmt::uwrite;
@@ -53,18 +54,16 @@ const DIGI_GAP_S: u32 = 5;
 const FIX_WAIT_S: u32 = 120;
 /// The destination ("tocall") that names the software: APZ is experimental, FER for Ferrite.
 const TOCALL: [u8; 6] = *b"APZFER";
-/// APRS-54.2: a telemetry report follows a beacon at most this often.
-pub const TELEM_GAP_S: u32 = 600;
-/// APRS-54.4: the definitions go with the first report and then every this many.
-pub const TELEM_DEFS_EVERY: u16 = 10;
-/// APRS-54.4: the definitions' fields: names, units, equations (battery in 0.05 V, the MCU in degrees C less
-/// 50, power 0 Low to 2 High), the bits (none used) and the project's title.
-const TELEM_DEFS: [(uaprs::build::TelemDef, &[&[u8]]); 4] = [
-    (uaprs::build::TelemDef::Parm, &[b"Battery", b"Temp", b"Power"]),
-    (uaprs::build::TelemDef::Unit, &[b"Volts", b"deg.C", b"Level"]),
-    (uaprs::build::TelemDef::Eqns, &[b"0", b"0.05", b"0", b"0", b"1", b"-50", b"0", b"1", b"0"]),
-    (uaprs::build::TelemDef::Bits, &[b"00000000", b"Ferrite"]),
-];
+/// APRS-54.3: an uncompressed position report (APRS 1.0.1 chapter 8) has at most this many characters after its
+/// symbol code: the course and speed, the altitude and the comment together.
+pub const POSITION_TAIL_MAX: usize = 43;
+/// What comes before them in ours (no timestamp): `=`, the latitude, the table, the longitude, the code.
+const POSITION_HEAD: usize = 20;
+/// APRS-54.4: the beacon power in tenths of a watt, Low, Mid and High, as measured (`research/tx-power-oct16.md`,
+/// the black radio into an inline meter): on 2 m 0.46, 2.46 and 9.0 W; on 70 cm 0.98, 4.9 and 9.8 W, Alex's
+/// nominal 1, 5 and 10 W. 1.25 m keys Low only (TX-9) and has no trusted measurement: the nominal 1 W.
+const WATTS10_VHF: [u8; 3] = [5, 25, 90];
+const WATTS10_NOMINAL: [u8; 3] = [10, 50, 100];
 
 /// A station heard, as the heard list keeps it in RAM (APRS-4.5): what the list and its counts need. The rest
 /// (path, course, altitude, comment, FX.25) is in [`Det`] for the stations heard most recently, else in the
@@ -233,7 +232,7 @@ impl Sending {
     pub fn may_send(self, what: &str) -> bool {
         match self {
             Sending::All => true,
-            Sending::Beacons => what == "Beacon" || what == "Telemetry", // APRS-54.5
+            Sending::Beacons => what == "Beacon",
             Sending::Nothing => false,
         }
     }
@@ -419,12 +418,9 @@ pub struct AprsLive {
     sent_key: Cell<u16>,
     /// What the last turn allowed (APRS-10.1): a frame heard is queued to digipeat only while everything may go.
     sending: Cell<Sending>,
-    /// APRS-54: the battery (mV) and MCU temperature (whole degrees C) the reports carry, the next report's
-    /// number, the beacon the last followed, and what is waiting: 0 nothing, 1 the report, 2-5 a definition.
-    telem_in: Cell<(u16, Option<i8>)>,
-    telem_seq: Cell<u16>,
-    telem_last: Cell<Option<u32>>,
-    telem_q: Cell<u8>,
+    /// APRS-54: what our position reports' values come from: the battery (mV, 0 not read yet), the MCU's
+    /// temperature (whole degrees C) and the APRS frequency (for the beacon power's watts).
+    readings: Cell<Readings>,
 }
 
 impl Default for AprsLive {
@@ -464,10 +460,7 @@ impl AprsLive {
             sent: SentLog::new(),
             sent_key: Cell::new(0),
             sending: Cell::new(Sending::Nothing),
-            telem_in: Cell::new((0, None)),
-            telem_seq: Cell::new(0),
-            telem_last: Cell::new(None),
-            telem_q: Cell::new(0),
+            readings: Cell::new((0, None, 0)),
         }
     }
 
@@ -609,7 +602,6 @@ impl AprsLive {
         self.after_voice.set(false);
         self.fix_wait.set(None);
         self.digi.set(None);
-        self.telem_q.set(0);
     }
 
     /// A station heard now (`h`, with the details its frame gave in `d`): to the front, its old entry (if any)
@@ -675,10 +667,10 @@ impl AprsLive {
         self.beacon_now.set(true);
     }
 
-    /// APRS-54.3: the battery in millivolts and the MCU's temperature in whole degrees (None: not read yet) for
-    /// the next telemetry report (the firmware's each turn).
-    pub fn readings(&self, battery_mv: u16, mcu_c: Option<i8>) {
-        self.telem_in.set((battery_mv, mcu_c));
+    /// APRS-54: the battery in millivolts (0: not read yet), the MCU's temperature in whole degrees (None: not
+    /// read yet) and the APRS frequency, for the values in our position reports (the firmware's each turn).
+    pub fn readings(&self, battery_mv: u16, mcu_c: Option<i8>, aprs_f: Freq10) {
+        self.readings.set((battery_mv, mcu_c, aprs_f));
     }
 
     /// A voice transmission ended (APRS-27): a beacon at the next turn that APRS-9's spacing allows.
@@ -737,8 +729,7 @@ impl AprsLive {
             if station.is_some() && f.info.iter().fold(0xFFFF, |h, &b| crc16(h, b)) == self.sent_key.get() {
                 rx.changed |= self.sent.heard_by(by.as_bytes());
             }
-            // APRS-54.6: our telemetry heard back is neither toasted nor logged
-            if station.is_some() && self.echo.get() && !own_telemetry(f.info) {
+            if station.is_some() && self.echo.get() {
                 self.echo.set(false);
                 self.echo_by.set(by);
                 rx.echo = Some(by);
@@ -1044,12 +1035,6 @@ impl AprsLive {
         if self.general.get().is_some_and(|g| now_s > g.due_s + QUERY_TTL_S) {
             self.general.set(None);
         }
-        if !cfg.telemetry {
-            // APRS-54.4: off, nothing waits; turned on again, it starts at report 000 with the definitions
-            self.telem_q.set(0);
-            self.telem_seq.set(0);
-            self.telem_last.set(None);
-        }
         if send == Sending::Beacons {
             // APRS-29: beacons alone answer nothing: acks owed and a digipeat waiting are dropped.
             self.acks.iter().for_each(|a| a.set(None));
@@ -1063,7 +1048,6 @@ impl AprsLive {
             self.digi.set(None);
             self.beacon_now.set(false);
             self.after_voice.set(false);
-            self.telem_q.set(0);
             self.on_since.set(None);
             self.fix_wait.set(None);
             t.changed = self.waiting.replace(false);
@@ -1150,7 +1134,7 @@ impl AprsLive {
         if all && auto_ok {
             if let Some(q) = self.query.take() {
                 let n = match q.answer {
-                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, cfg, &mut info, &mut dest)),
+                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, cfg, self.readings.get(), &mut info, &mut dest)),
                     Answer::Status => status_info(&mut info),
                     Answer::Text(b) => uaprs::build::message(q.to.as_bytes(), b.as_bytes(), None, &mut info),
                 };
@@ -1162,7 +1146,7 @@ impl AprsLive {
             if let Some(g) = self.general.get().filter(|g| now_s >= g.due_s) {
                 self.general.set(None);
                 let f = fresh(fix, cfg).filter(|f| g.foot.is_none_or(|(c, r)| within(c, (f.pos.lat / 10, f.pos.lon / 10), r)));
-                if let Some(n) = f.and_then(|f| position_info(&f, cfg, &mut info, &mut dest)) {
+                if let Some(n) = f.and_then(|f| position_info(&f, cfg, self.readings.get(), &mut info, &mut dest)) {
                     self.last_auto.set(Some(now_s));
                     self.last_general.set(Some(now_s));
                     return self.framed(my, &dest, &info[..n], "Query reply", cfg, out, t);
@@ -1193,41 +1177,12 @@ impl AprsLive {
             self.beacon_now.set(false);
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
-            if let Some(n) = position_info(&f, cfg, &mut info, &mut dest) {
-                // APRS-54.2: a telemetry report after it, if the last beacon that had one was 10 minutes ago or more
-                if cfg.telemetry && self.telem_q.get() == 0 && self.telem_last.get().is_none_or(|l| now_s.wrapping_sub(l) >= TELEM_GAP_S) {
-                    self.telem_q.set(1);
-                    self.telem_last.set(Some(now_s));
-                }
+            if let Some(n) = position_info(&f, cfg, self.readings.get(), &mut info, &mut dest) {
                 t.changed = true;
                 return self.framed(my, &dest, &info[..n], "Beacon", cfg, out, t);
             }
         }
-        // APRS-54: the report, then any definitions, one per turn at APRS-9's spacing.
-        if auto_ok && self.telem_q.get() > 0 {
-            if let Some(n) = self.telemetry(me, cfg, &mut info) {
-                self.last_auto.set(Some(now_s));
-                return self.framed(my, &TOCALL, &info[..n], "Telemetry", cfg, out, t);
-            }
-        }
         t
-    }
-
-    /// APRS-54: the waiting telemetry frame's information field, and what waits after it. The report
-    /// (`T#000,148,083,000,000,000,00000000`) numbers 000-999 round; the definitions follow every
-    /// [`TELEM_DEFS_EVERY`]th, from the first.
-    fn telemetry(&self, me: &[u8], cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
-        let q = self.telem_q.get();
-        if q == 1 {
-            let seq = self.telem_seq.get();
-            let (mv, temp) = self.telem_in.get();
-            self.telem_seq.set((seq + 1) % 1000);
-            self.telem_q.set(if seq.is_multiple_of(TELEM_DEFS_EVERY) { 2 } else { 0 });
-            return uaprs::build::telemetry(seq, &telem_values(mv, temp, cfg.power), 0, info);
-        }
-        let (def, fields) = TELEM_DEFS[(q as usize - 2).min(TELEM_DEFS.len() - 1)];
-        self.telem_q.set(if q as usize > TELEM_DEFS.len() { 0 } else { q + 1 });
-        uaprs::build::telemetry_def(me, def, fields, info)
     }
 
     /// Our frame with 0 5 9 1's path (APRS-26).
@@ -1239,7 +1194,7 @@ impl AprsLive {
         }
         let dest = Address::from_text(dest).unwrap_or(me);
         let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
-        self.echo.set(self.echo.get() || len > 0 && what != "Telemetry"); // APRS-54.6
+        self.echo.set(self.echo.get() || len > 0);
         if what == "Beacon" && len > 0 {
             self.sent_key.set(info.iter().fold(0xFFFF, |h, &b| crc16(h, b))); // APRS-53.1
         }
@@ -1247,15 +1202,43 @@ impl AprsLive {
     }
 }
 
-/// APRS-54.6: a telemetry report or definition of ours (`T#...`, or `:CALL     :PARM.` and the others).
-fn own_telemetry(info: &[u8]) -> bool {
-    info.starts_with(b"T#") || info.get(10..16).is_some_and(|h| h[0] == b':' && matches!(&h[1..], b"PARM." | b"UNIT." | b"EQNS." | b"BITS."))
+/// APRS-54: what our position reports' values come from ([`AprsLive::readings`]).
+type Readings = (u16, Option<i8>, Freq10);
+
+/// APRS-54.4: the beacon power that really keys on the APRS frequency `f` (TX-9: 1.25 m keys Low whatever is
+/// chosen, `band_power`), in tenths of a watt.
+pub fn beacon_watts10(f: Freq10, power: u8) -> u8 {
+    let level = ferrite_core::txcal::band_power(f, power).min(2) as usize;
+    if f < ferrite_core::freq::mhz(200) { WATTS10_VHF[level] } else { WATTS10_NOMINAL[level] }
 }
 
-/// APRS-54.3: the report's analog values: the battery in 0.05 V (up to 12.75 V), the MCU's temperature plus 50
-/// (-50 to 205 degrees; 0, -50, before its first reading), the beacon power (0 Low, 1 Mid, 2 High), two unused.
-pub fn telem_values(battery_mv: u16, mcu_c: Option<i8>, power: u8) -> [u8; 5] {
-    [((battery_mv as u32 + 25) / 50).min(255) as u8, mcu_c.map_or(0, |c| (c as i16 + 50).max(0) as u8), power.min(2), 0, 0]
+/// APRS-54.2: the values our position reports carry with 0 5 6 4 on, in order, space-separated (`7.8V 31C 9W`):
+/// the battery to 0.1 V (none before its first reading), the MCU in whole degrees C (none before its first
+/// reading, SBAR-20), the beacon power in watts. With where each value ends, so whole values can be dropped
+/// from the end.
+fn comment_values(r: Readings, power: u8) -> (Buf<24>, [usize; 3], usize) {
+    let (mv, mcu_c, f) = r;
+    let mut v = Buf::<24>::new();
+    let mut ends = [0usize; 3];
+    let mut k = 0;
+    let mut next = |v: &mut Buf<24>| {
+        ends[k] = v.len();
+        k += 1;
+    };
+    if mv > 0 {
+        let d = (mv as u32 + 50) / 100;
+        let _ = uwrite!(v, "{}.{}V", d / 10, d % 10);
+        next(&mut v);
+    }
+    if let Some(c) = mcu_c {
+        let _ = uwrite!(v, "{}{}C", if v.is_empty() { "" } else { " " }, c);
+        next(&mut v);
+    }
+    let w = beacon_watts10(f, power);
+    let sp = if v.is_empty() { "" } else { " " };
+    let _ = if w.is_multiple_of(10) { uwrite!(v, "{}{}W", sp, w / 10) } else { uwrite!(v, "{}{}.{}W", sp, w / 10, w % 10) };
+    next(&mut v);
+    (v, ends, k)
 }
 
 /// GPS-33: the fix a beacon (or a query's answer, APRS-33) may send: never one older than the beacon interval as
@@ -1267,7 +1250,29 @@ fn fresh(fix: Option<Fix>, cfg: &AprsCfg) -> Option<Fix> {
 
 /// Our position report: the beacon's, and a position query's answer (APRS-33), with 0 5 5 3's comment and
 /// 0 5 5 6's ambiguity; with 0 5 5 7 on, a Mic-E report (APRS-52), its latitude in `dest` in place of the tocall.
-fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8], dest: &mut [u8; 6]) -> Option<usize> {
+/// With 0 5 6 4 on, the values (APRS-54) follow the comment, a space between: in the uncompressed form only as
+/// many whole values as keep the report within [`POSITION_TAIL_MAX`] after its symbol (dropped from the end, the
+/// comment itself never cut); Mic-E's comment has no limit but the frame's, so there all of them.
+fn position_info(f: &Fix, cfg: &AprsCfg, rd: Readings, info: &mut [u8], dest: &mut [u8; 6]) -> Option<usize> {
+    let (vals, ends, mut k) = if cfg.telemetry { comment_values(rd, cfg.power) } else { (Buf::new(), [0; 3], 0) };
+    loop {
+        let mut c = Buf::<{ crate::aprs::COMMENT_LEN + 25 }>::from(cfg.comment_text());
+        if k > 0 {
+            if !c.is_empty() {
+                c.push(b" ");
+            }
+            c.push(&vals.as_bytes()[..ends[k - 1]]);
+        }
+        let n = position_with(f, cfg, c.as_bytes(), info, dest)?;
+        if k == 0 || cfg.mic_e != 0 || n <= POSITION_HEAD + POSITION_TAIL_MAX {
+            return Some(n);
+        }
+        k -= 1;
+    }
+}
+
+/// [`position_info`] with the comment given.
+fn position_with(f: &Fix, cfg: &AprsCfg, comment: &[u8], info: &mut [u8], dest: &mut [u8; 6]) -> Option<usize> {
     let (table, code) = cfg.symbol_chars(); // APRS-47
     let r = uaprs::build::Report {
         lat: f.pos.lat / 10,
@@ -1278,7 +1283,7 @@ fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8], dest: &mut [u8; 6]) ->
         altitude: f.three_d.then_some(f.alt_m * 10_000 / 3048),
         messaging: true,
         timestamp: None,
-        comment: cfg.comment_text(), // APRS-50
+        comment, // APRS-50, APRS-54
         ambiguity: cfg.ambiguity,    // APRS-51: the uncompressed form carries it
     };
     if cfg.mic_e == 0 {
@@ -1950,103 +1955,107 @@ mod tests {
         Frame::parse(&out[..t.len]).unwrap().info.to_vec()
     }
 
-    /// APRS-54, APRS-54.2 - APRS-54.4: with telemetry on, a beacon is followed by a report at APRS-9's spacing,
-    /// then (with the first report, and every tenth) the four definitions to our own callsign, one a turn; the
-    /// next beacon has one only 10 minutes after the last that had one.
+    /// APRS-54, APRS-54.2: with 0 5 6 4 on, every position report (the beacon and a query's answer, plain or
+    /// Mic-E) carries the battery, the MCU's temperature and the beacon power after the comment, a space between;
+    /// a value not read yet is left out; off, the comment alone.
     #[test]
-    fn telemetry_follows_a_beacon() {
+    fn values_follow_the_comment() {
         let a = AprsLive::new();
         let mut out = [0u8; FRAME_MAX];
-        let cfg = AprsCfg { beacon: 5, power: 1, telemetry: true, ..AprsCfg::DEFAULT }; // every 10 min, Mid
-        a.readings(7_400, Some(33));
-        let mut at = |s: u32| {
-            let t = a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
-            (t.what, if t.len > 0 { std::string::String::from_utf8(sent(&out, &t)).unwrap() } else { std::string::String::new() })
+        let mut cfg = AprsCfg { beacon: 1, power: 2, telemetry: true, ..AprsCfg::DEFAULT };
+        cfg.comment[..7].copy_from_slice(b"Ferrite");
+        let rd = (7_840, Some(31), 14_439_000);
+        let mut info = [0u8; INFO_MAX];
+        let n = position_info(&fix(), &cfg, rd, &mut info, &mut [0; 6]).unwrap();
+        assert_eq!(&info[..n], b"=4525.51N/07541.41W[Ferrite 7.8V 31C 9W");
+        // the beacon itself, Beacon now
+        a.readings(7_840, Some(31), 14_439_000);
+        a.beacon_now();
+        let t = a.tick(0, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!((t.what, sent(&out, &t)), ("Beacon", b"=4525.51N/07541.41W[Ferrite 7.8V 31C 9W".to_vec()));
+        // no comment: the values are the comment; below zero; not read yet: left out
+        let bare = AprsCfg { comment: [0; crate::aprs::COMMENT_LEN], power: 0, ..cfg };
+        let n = position_info(&fix(), &bare, (6_960, Some(-5), 14_439_000), &mut info, &mut [0; 6]).unwrap();
+        assert_eq!(&info[..n], b"=4525.51N/07541.41W[7.0V -5C 0.5W");
+        let n = position_info(&fix(), &bare, (0, None, 14_439_000), &mut info, &mut [0; 6]).unwrap();
+        assert_eq!(&info[..n], b"=4525.51N/07541.41W[0.5W");
+        // off: the comment alone
+        let n = position_info(&fix(), &AprsCfg { telemetry: false, ..cfg }, rd, &mut info, &mut [0; 6]).unwrap();
+        assert_eq!(&info[..n], b"=4525.51N/07541.41W[Ferrite");
+        // Mic-E: the same values after its comment, read back as the comment
+        let mic = AprsCfg { mic_e: 2, power: 1, ..cfg };
+        let mut d = [0u8; 6];
+        let n = position_info(&fix(), &mic, rd, &mut info, &mut d).unwrap();
+        let Ok(Packet::Position { comment, .. }) = parse::parse(&d, &info[..n]) else { panic!("{:?}", &info[..n]) };
+        assert!(comment.bytes().eq(b"Ferrite 7.8V 31C 2.5W".iter().copied()));
+        assert!(info[..n].ends_with(b"Ferrite 7.8V 31C 2.5W"));
+    }
+
+    /// APRS-54.3: the uncompressed report keeps to APRS 1.0.1's 43 characters after the symbol (course and speed,
+    /// altitude and comment): only whole values that fit, dropped from the end, the comment never cut; Mic-E has
+    /// no such limit and takes them all.
+    #[test]
+    fn values_within_the_limit() {
+        let moving = Fix { three_d: true, alt_m: 120, speed_kmh: 40, heading: 90, ..fix() }; // CSE/SPD 7 + /A= 9
+        let rd = (8_120, Some(24), 14_439_000);
+        let mut info = [0u8; INFO_MAX];
+        let tail = |cfg: &AprsCfg, f: &Fix, info: &mut [u8; INFO_MAX]| {
+            let n = position_info(f, cfg, rd, info, &mut [0; 6]).unwrap();
+            std::string::String::from_utf8(info[POSITION_HEAD..n].to_vec()).unwrap()
         };
-        assert_eq!(at(100).0, "Beacon");
-        assert_eq!(at(110).1, "", "APRS-9's 30 s");
-        assert_eq!(at(130), ("Telemetry", "T#000,148,083,001,000,000,00000000".into()));
-        assert_eq!(at(160).1, ":VE3XYZ-7 :PARM.Battery,Temp,Power");
-        assert_eq!(at(190).1, ":VE3XYZ-7 :UNIT.Volts,deg.C,Level");
-        assert_eq!(at(220).1, ":VE3XYZ-7 :EQNS.0,0.05,0,0,1,-50,0,1,0");
-        assert_eq!(at(250).1, ":VE3XYZ-7 :BITS.00000000,Ferrite");
-        assert_eq!(at(280).1, "", "nothing more");
-        assert_eq!(at(700).0, "Beacon");
-        assert_eq!(at(730).1, "T#001,148,083,001,000,000,00000000", "no definitions with the second");
-        assert_eq!(at(760).1, "");
-        // reports 2-9 without definitions, the tenth (number 010) with them
-        for k in 2..=10u32 {
-            assert_eq!(at(100 + 600 * k).0, "Beacon");
-            assert!(at(130 + 600 * k).1.starts_with(&std::format!("T#{:03},", k)));
-            assert_eq!(at(160 + 600 * k).1.contains("PARM."), k == 10);
+        let mut cfg = AprsCfg { beacon: 1, power: 2, telemetry: true, ..AprsCfg::DEFAULT };
+        // 20 characters: 16 + 20 + " 8.1V" is 41; " 24C" would make 45
+        cfg.comment[..20].copy_from_slice(&[b'x'; 20]);
+        assert_eq!(tail(&cfg, &moving, &mut info), std::format!("090/021/A=000393{} 8.1V", "x".repeat(20)));
+        // standing still: all three fit (20 + 13 = 33)
+        assert_eq!(tail(&cfg, &fix(), &mut info), std::format!("{} 8.1V 24C 9W", "x".repeat(20)));
+        // 30 characters while moving: 46 already, none added, the comment as typed
+        cfg.comment[..30].copy_from_slice(&[b'x'; 30]);
+        assert_eq!(tail(&cfg, &moving, &mut info), std::format!("090/021/A=000393{}", "x".repeat(30)));
+        // 34 standing still: " 8.1V" makes 39, " 24C" 43 (just fits), " 9W" 46 doesn't
+        cfg.comment[..34].copy_from_slice(&[b'x'; 34]);
+        assert_eq!(tail(&cfg, &fix(), &mut info), std::format!("{} 8.1V 24C", "x".repeat(34)));
+        assert!(tail(&cfg, &fix(), &mut info).len() <= POSITION_TAIL_MAX);
+        // Mic-E: the longest comment, moving, all three
+        cfg.comment = [b'x'; crate::aprs::COMMENT_LEN];
+        let n = position_info(&moving, &AprsCfg { mic_e: 1, ..cfg }, rd, &mut info, &mut [0; 6]).unwrap();
+        assert!(info[..n].ends_with(std::format!("{} 8.1V 24C 9W", "x".repeat(40)).as_bytes()));
+    }
+
+    /// APRS-54.4: the power is in watts as the radio really keys on the APRS frequency: 2 m as measured (0.5,
+    /// 2.5, 9 W), 1.25 m Low whatever is chosen (TX-9), 70 cm 1, 5 and 10 W.
+    #[test]
+    fn watts_per_band() {
+        let w = |f: Freq10| [0, 1, 2].map(|p| beacon_watts10(f, p));
+        assert_eq!(w(14_439_000), [5, 25, 90], "2 m");
+        assert_eq!(w(14_480_000), [5, 25, 90]);
+        assert_eq!(w(22_350_000), [10, 10, 10], "1.25 m: Low only");
+        assert_eq!(w(44_647_500), [10, 50, 100], "70 cm");
+        let (v, _, k) = comment_values((7_400, Some(33), 22_350_000), 2);
+        assert_eq!((v.as_bytes(), k), (&b"7.4V 33C 1W"[..], 3));
+    }
+
+    /// APRS-54.5: no telemetry frame is ever sent: with 0 5 6 4 on, timed beacons for an hour are beacons only,
+    /// nothing `T#` and no definitions; with beacons alone (APRS-29) only beacons may go.
+    #[test]
+    fn no_telemetry_frames() {
+        assert!(!Sending::Beacons.may_send("Telemetry") && Sending::Beacons.may_send("Beacon"));
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { beacon: 5, power: 1, telemetry: true, ..AprsCfg::DEFAULT }; // every 10 min
+        a.readings(7_400, Some(33), 14_439_000);
+        let mut beacons = 0;
+        for s in 100..3_700 {
+            let t = a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+            if t.len > 0 {
+                let info = sent(&out, &t);
+                assert_eq!(t.what, "Beacon");
+                assert!(!info.starts_with(b"T#") && !info.starts_with(b":"), "{info:?}");
+                assert!(info.ends_with(b" 7.4V 33C 2.5W") || info.ends_with(b"[7.4V 33C 2.5W"));
+                beacons += 1;
+            }
         }
-    }
-
-    /// APRS-54.2: no more often than every 10 minutes, whatever the beacons do (a manual beacon, Beacon now,
-    /// after 5 min has none); off sends none and starts again at 000 with the definitions.
-    #[test]
-    fn telemetry_at_most_every_ten_minutes() {
-        let a = AprsLive::new();
-        let mut out = [0u8; FRAME_MAX];
-        let mut cfg = AprsCfg { beacon: 1, telemetry: true, ..AprsCfg::DEFAULT }; // manual
-        let me: &[u8] = b"VE3XYZ";
-        a.beacon_now();
-        assert_eq!(a.tick(100, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
-        assert_eq!(a.tick(130, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Telemetry");
-        a.beacon_now();
-        assert_eq!(a.tick(400, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
-        for s in (430..700).step_by(30) {
-            let t = a.tick(s, Sending::All, true, me, Some(fix()), &cfg, &mut out);
-            assert!(t.len == 0 || !sent(&out, &t).starts_with(b"T#"), "5 min after the last: no report");
-        }
-        cfg.telemetry = false;
-        a.beacon_now();
-        assert_eq!(a.tick(1000, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
-        assert_eq!(a.tick(1030, Sending::All, true, me, Some(fix()), &cfg, &mut out).len, 0, "off: none");
-        cfg.telemetry = true;
-        a.beacon_now();
-        assert_eq!(a.tick(1100, Sending::All, true, me, Some(fix()), &cfg, &mut out).what, "Beacon");
-        let t = a.tick(1130, Sending::All, true, me, Some(fix()), &cfg, &mut out);
-        assert!(sent(&out, &t).starts_with(b"T#000,"), "on again: from 000");
-    }
-
-    /// APRS-54.5: telemetry goes with beacons alone (APRS-29) too; with nothing allowed what waits is dropped
-    /// (APRS-10.1).
-    #[test]
-    fn telemetry_with_beacons_alone_and_dropped_when_off() {
-        assert!(Sending::Beacons.may_send("Telemetry") && !Sending::Nothing.may_send("Telemetry"));
-        let a = AprsLive::new();
-        let mut out = [0u8; FRAME_MAX];
-        let cfg = AprsCfg { beacon: 5, telemetry: true, ..AprsCfg::DEFAULT };
-        assert_eq!(a.tick(100, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
-        assert_eq!(a.tick(130, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Telemetry");
-        a.tick(140, Sending::Nothing, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
-        assert_eq!(a.tick(170, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "the definitions dropped");
-    }
-
-    /// APRS-54.3: the analog values: battery in 0.05 V to 12.75 V, the MCU's degrees plus 50 (000 before its
-    /// first reading), the power 0-2.
-    #[test]
-    fn telemetry_values() {
-        assert_eq!(telem_values(7_400, Some(33), 1), [148, 83, 1, 0, 0]);
-        assert_eq!(telem_values(8_424, Some(-20), 2), [168, 30, 2, 0, 0]);
-        assert_eq!(telem_values(20_000, Some(127), 9), [255, 177, 2, 0, 0]);
-        assert_eq!(telem_values(0, None, 0), [0, 0, 0, 0, 0]);
-    }
-
-    /// APRS-54.6: our telemetry heard back from a digipeater neither toasts nor logs; our beacon still does.
-    #[test]
-    fn own_telemetry_heard_back_is_quiet() {
-        let a = AprsLive::new();
-        let mut out = [0u8; FRAME_MAX];
-        let cfg = AprsCfg { beacon: 5, telemetry: true, ..AprsCfg::DEFAULT };
-        assert_eq!(a.tick(100, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
-        let (f, n) = frame(b"VE3XYZ", b"APZFER", &[b"VE3RSB-1*"], b"T#000,148,083,000,000,000,00000000");
-        assert!(a.receive(&f[..n], 101, b"VE3XYZ", &cfg).echo.is_none());
-        let (f, n) = frame(b"VE3XYZ", b"APZFER", &[b"VE3RSB-1*"], b":VE3XYZ   :PARM.Battery,Temp,Power");
-        assert!(a.receive(&f[..n], 102, b"VE3XYZ", &cfg).echo.is_none());
-        let (f, n) = frame(b"VE3XYZ", b"APZFER", &[b"VE3RSB-1*"], b":VE3RSB   :hello");
-        assert!(a.receive(&f[..n], 103, b"VE3XYZ", &cfg).echo.is_some(), "a message of ours still does");
+        assert_eq!(beacons, 6);
     }
 
     /// APRS-32: a message to us heard again (the sender's retries, a second digipeater's copy) is acked every
@@ -2114,9 +2123,9 @@ mod tests {
         let mut cfg = AprsCfg { beacon: 1, ambiguity: 2, ..AprsCfg::DEFAULT };
         cfg.comment[..13].copy_from_slice(b"Ferrite, 73!!");
         let mut info = [0u8; INFO_MAX];
-        let n = position_info(&fix(), &cfg, &mut info, &mut [0; 6]).unwrap();
+        let n = position_info(&fix(), &cfg, (0, None, 0), &mut info, &mut [0; 6]).unwrap();
         assert_eq!(&info[..n], b"=4525.  N/07541.  W[Ferrite, 73!!");
-        let n = position_info(&fix(), &AprsCfg::DEFAULT, &mut info, &mut [0; 6]).unwrap();
+        let n = position_info(&fix(), &AprsCfg::DEFAULT, (0, None, 0), &mut info, &mut [0; 6]).unwrap();
         assert_eq!(&info[..n], b"=4525.51N/07541.41W[");
         // the beacon itself, and the longest comment with course, speed and altitude: within the frame
         let a = AprsLive::new();
@@ -2127,7 +2136,7 @@ mod tests {
         assert!(Frame::parse(&out[..t.len]).unwrap().info.ends_with(b"[Ferrite, 73!!"));
         cfg.comment = [b'x'; crate::aprs::COMMENT_LEN];
         let moving = Fix { three_d: true, alt_m: 120, speed_kmh: 40, heading: 90, ..fix() };
-        let n = position_info(&moving, &cfg, &mut info, &mut [0; 6]).unwrap();
+        let n = position_info(&moving, &cfg, (0, None, 0), &mut info, &mut [0; 6]).unwrap();
         assert!(info[..n].ends_with(&[b'x'; 40]) && n < INFO_MAX);
     }
 
@@ -2181,7 +2190,7 @@ mod tests {
             let mut cfg = AprsCfg { mic_e: 1, ..AprsCfg::DEFAULT };
             cfg.comment[..c.len()].copy_from_slice(c);
             let mut dest = TOCALL;
-            let n = position_info(&fix(), &cfg, &mut info, &mut dest).unwrap();
+            let n = position_info(&fix(), &cfg, (0, None, 0), &mut info, &mut dest).unwrap();
             assert_eq!(&info[9..n], [&b"  "[..pad], c].concat().as_slice());
             let Ok(uaprs::parse::Packet::Position { pos, comment, .. }) = uaprs::parse::parse(&dest, &info[..n]) else { panic!() };
             assert!(comment.bytes().eq(c.iter().copied()) && pos.altitude.is_none());
