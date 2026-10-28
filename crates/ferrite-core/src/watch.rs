@@ -1172,5 +1172,16 @@ mod sim {
         // a watched slot's scan (not the active one's) changes nothing
         assert_eq!(rate(0b011, 0b010, 0).0, plain);
     }
+
+    /// WATCH-17.3: APRS first is the default; the UI task's setting reads back. (The hop itself takes it in its
+    /// `Cfg`, so no other test here reads this flag.)
+    #[test]
+    fn aprs_first_setting() {
+        assert!(aprs_first());
+        set_aprs_first(false);
+        assert!(!aprs_first());
+        set_aprs_first(true);
+        assert!(aprs_first());
+    }
 }
 
