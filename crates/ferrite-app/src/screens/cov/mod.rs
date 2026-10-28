@@ -17,6 +17,7 @@ mod chedit;
 mod coming;
 mod confirm;
 mod entry;
+mod fm;
 mod gps;
 mod hf;
 mod home;
