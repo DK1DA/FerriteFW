@@ -70,6 +70,10 @@ pub const HOLD_MS: u32 = 2_000;
 /// active slot's card flickered to Muted on every hop back; to confirm on the bench).
 pub const REACQUIRE_MS: u32 = 60;
 
+/// APRS-21.3 (decision 300): after a data frame from the APRS slot, it keeps its chip and the receive path this
+/// long, no looks at the other slots, for the digipeat or ack that follows.
+pub const AFTER_TX_MS: u32 = 1_000;
+
 /// What the engine is told each tick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cfg {
@@ -144,7 +148,7 @@ pub fn dwell(slot: Option<u8>, active: u8, prio: u8, beside: bool, first: bool) 
     }
 }
 
-/// The engine (48 bytes).
+/// The engine (56 bytes).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Watch {
     on: [Option<u8>; 2],
@@ -160,6 +164,8 @@ pub struct Watch {
     got: [u32; 2],
     /// WATCH-17.3: the last slot other than the priority one that looked on each chip (APRS first goes on from it).
     last: [u8; 2],
+    /// APRS-21.3: when the APRS slot's last data frame ended ([`Watch::after_tx`]).
+    after_tx: Option<u32>,
 }
 
 fn after(now: u32, t: u32) -> bool {
@@ -168,10 +174,15 @@ fn after(now: u32, t: u32) -> bool {
 
 impl Watch {
     pub const fn new() -> Self {
-        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None, listening: [false; 2], got: [0; 2], last: [0; 2] }
+        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None, listening: [false; 2], got: [0; 2], last: [0; 2], after_tx: None }
     }
 
     /// Pause for `secs` (WATCH-6, WATCH-16); 0 resumes now.
+    /// APRS-21.3: a data frame from the APRS slot just ended at `now`: it keeps the chip [`AFTER_TX_MS`].
+    pub fn after_tx(&mut self, now: u32) {
+        self.after_tx = Some(now);
+    }
+
     pub fn pause(&mut self, now: u32, secs: u16) {
         self.pause_until = (secs > 0).then(|| now.wrapping_add(secs as u32 * 1000));
     }
@@ -239,6 +250,10 @@ impl Watch {
         out.dropped = watched & !set;
         self.open &= set;
         let prio = c.prio & set;
+        let after = !keyed && self.after_tx.is_some_and(|t| now.wrapping_sub(t) < AFTER_TX_MS);
+        if !after && !keyed {
+            self.after_tx = None;
+        }
         out.prio = prio;
         // APRS-21.2: slots on the listened APRS slot's frequency take no turns (a latched monitor keeps its own).
         let to = (0..SLOTS as u8).find(|&x| c.aprs & set & 1 << x != 0);
@@ -270,6 +285,8 @@ impl Watch {
                 }
             }
             let next = match cur {
+                // APRS-21.3: just after our own frame the priority slot has the chip, whatever was on it
+                _ if after && p.is_some() => p,
                 // APRS-21.1: an open priority slot keeps its chip until it closes, muted or not (its decoder).
                 Some(s) if p == Some(s) && open & 1 << s != 0 => Some(s),
                 // APRS-21.1: a slot open on the priority slot's frequency hands it the carrier.
@@ -317,7 +334,9 @@ impl Watch {
         out.first = c.first;
         out.scan = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| s == active && c.scan & 1 << s != 0));
         let open = self.open | c.held & set;
-        out.hold = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| prio & open & 1 << s != 0));
+        // APRS-21.3: held as if open while the window lasts, so the path stays on it and its decoder hears it
+        let holding = open | if after { prio } else { 0 };
+        out.hold = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| prio & holding & 1 << s != 0));
         let heard = |s: u8| open & 1 << s != 0 && c.muted & 1 << s == 0;
         // APRS-21.2: a deferring slot heard plays the APRS slot's chip.
         let via = |s: u8| if defer & 1 << s != 0 { to.unwrap_or(s) } else { s };
@@ -545,6 +564,29 @@ mod tests {
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
         Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false }
+    }
+
+    /// APRS-21.3: after our own data frame the APRS slot keeps the shared chip and the path (held) for
+    /// AFTER_TX_MS with no looks at the others; then the turns go on.
+    #[test]
+    fn aprs_slot_held_after_its_frame() {
+        let mut w = Watch::new();
+        let c = Cfg { set: 0b101, freq: [mhz(146) + 52_000, mhz(443), mhz(144) + 39_000], aprs: 0b100, prio: 0b100, first: true, ..cfg() };
+        // into the turns until A has a look
+        let mut t = 0;
+        while w.tick(t, &c, [false; 2], false).chip[0] != Some(0) {
+            t += 10;
+            assert!(t < 5_000);
+        }
+        w.tick(t + 10, &c, [false; 2], true); // keyed (our frame)
+        let end = t + 500;
+        w.after_tx(end);
+        for k in (end..end + AFTER_TX_MS).step_by(10) {
+            let o = w.tick(k, &c, [false; 2], false);
+            assert_eq!((o.chip[0], o.hold), (Some(2), Some(0)), "{} ms after", k - end);
+        }
+        let looked = (end + AFTER_TX_MS..end + AFTER_TX_MS + 2_000).step_by(10).any(|k| w.tick(k, &c, [false; 2], false).chip[0] == Some(0));
+        assert!(looked, "the turns go on after the window");
     }
 
     /// WATCH-16.1: a pause keeps the APRS slot listening, on its own chip or taking its turns beside the active

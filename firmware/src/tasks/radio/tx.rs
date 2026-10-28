@@ -95,6 +95,9 @@ impl Radio {
             let cfg = self.tx_cfg();
             self.tx.seq.release(&cfg, &mut self.path, now, &mut st);
             self.run(&st).await;
+            if self.tx.data.is_some() && self.aprs_slots & 1 << slot != 0 {
+                self.watcher.after_tx(now_ms() as u32); // APRS-21.3: listen for its digipeat or ack
+            }
             self.unkeyed();
             return;
         }
