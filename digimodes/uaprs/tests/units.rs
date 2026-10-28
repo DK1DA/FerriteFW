@@ -275,12 +275,15 @@ fn edge_values() {
     // Mic-E altitude at its maximum, Ultimeter extremes, overlong NMEA numbers, NMEA out of range.
     assert!(matches!(parse(b"S32U6T", b"`d(((((>/{{{}"), Ok(Packet::Position { .. }) | Err(_)));
     assert!(parse(b"APRS", b"$ULTW7FFF80007FFF80007FFF80007FFF80007FFF80007FFF80007FFF").is_ok());
-    // An absurd speed loses the speed, not the position.
-    let Ok(Packet::Position { pos, .. }) = parse(b"APRS", b"$GPRMC,013244,A,4903.50,N,07201.75,W,4294967296,088.0,240512,,") else { panic!() };
-    assert_eq!(pos.speed, None);
-    let Ok(Packet::Position { pos, .. }) = parse(b"APRS", b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,99999999999.5,M,46.9,M,,") else { panic!() };
-    assert_eq!(pos.altitude, None);
-    assert!(parse(b"APRS", b"$GPGLL,9903.50,N,99901.75,W,225444,A").is_err());
+    // An absurd speed loses the speed, not the position (raw NMEA is a feature: the radio builds without it).
+    #[cfg(feature = "nmea")]
+    {
+        let Ok(Packet::Position { pos, .. }) = parse(b"APRS", b"$GPRMC,013244,A,4903.50,N,07201.75,W,4294967296,088.0,240512,,") else { panic!() };
+        assert_eq!(pos.speed, None);
+        let Ok(Packet::Position { pos, .. }) = parse(b"APRS", b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,99999999999.5,M,46.9,M,,") else { panic!() };
+        assert_eq!(pos.altitude, None);
+        assert!(parse(b"APRS", b"$GPGLL,9903.50,N,99901.75,W,225444,A").is_err());
+    }
     // Weather with a sign on a field that cannot be negative.
     let Ok(Packet::Weather { weather, .. }) = parse(b"APRS", b"_10090556c-12s004t-05") else { panic!() };
     assert_eq!(weather.wind_dir, None);
@@ -425,4 +428,422 @@ fn kiss_hardware_commands_do_nothing() {
         assert_eq!(p.apply(&r), Command::Hardware(sub));
     }
     assert_eq!(p, before);
+}
+
+fn position_of(dest: &[u8], info: &[u8]) -> uaprs::parse::Position {
+    match parse(dest, info) {
+        Ok(Packet::Position { pos, .. }) => pos,
+        other => panic!("{:?}: {other:?}", core::str::from_utf8(info)),
+    }
+}
+
+fn comment_of(info: &[u8]) -> Vec<u8> {
+    match parse(b"APRS", info) {
+        Ok(Packet::Position { comment, .. }) => comment.bytes().collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn comment_length_after_cuts() {
+    // The altitude is cut out of the comment; its length counts what is left.
+    let Ok(Packet::Position { pos, comment, .. }) = parse(b"APRS", b"!4903.50N/07201.75W>/A=001234 hello") else { panic!() };
+    assert_eq!(pos.altitude, Some(1234));
+    assert_eq!((comment.len(), comment.is_empty()), (5, false));
+    assert_eq!(comment.raw(), b"hello");
+    let Ok(Packet::Position { comment, .. }) = parse(b"APRS", b"!4903.50N/07201.75W>") else { panic!() };
+    assert_eq!((comment.len(), comment.is_empty()), (0, true));
+}
+
+#[test]
+fn compressed_position_out_of_range() {
+    use uaprs::parse::Error;
+    // y and x at their base-91 maximum: 90.02 S, 180.03 E.
+    assert_eq!(parse(b"APRS", b"!/{{{{!!!!>   "), Err(Error::Position));
+    assert_eq!(parse(b"APRS", b"!/!!!!{{{{>   "), Err(Error::Position));
+    // The corners themselves are fine.
+    let p = position_of(b"APRS", b"!/!!!!!!!!>   ");
+    assert_eq!((p.lat, p.lon), (90_000_000, -180_000_000));
+}
+
+#[test]
+fn data_extensions_unknown_course_and_phgr() {
+    // Course and speed sent as dots: unknown, and not left in the comment.
+    let Ok(Packet::Position { pos, comment, .. }) = parse(b"APRS", b"!4903.50N/07201.75W>.../...moving") else { panic!() };
+    assert_eq!((pos.course, pos.speed), (None, None));
+    assert_eq!(comment.bytes().collect::<Vec<_>>(), b"moving");
+    // PHGR (APRS 1.2): PHG with a beacon-rate character, then '/'.
+    let Ok(Packet::Position { pos, comment, .. }) = parse(b"APRS", b"!4903.50N/07201.75W#PHG5132A/digi") else { panic!() };
+    assert_eq!(pos.phg, Some(*b"5132"));
+    assert_eq!(comment.bytes().collect::<Vec<_>>(), b"digi");
+}
+
+#[test]
+fn dao_base91_and_datum_only() {
+    // Base 91 (`!w"#!`): (x - 33) / 91 hundredths of a minute: 1/91 and 2/91, so 2 and 4 millionths of a degree,
+    // north and east added.
+    let p = position_of(b"APRS", b"!4903.50N/07201.75E>!w\"#!");
+    assert_eq!((p.lat, p.lon), (49_058_333 + 2, 72_029_167 + 4));
+    assert!(comment_of(b"!4903.50N/07201.75E>!w\"#!").is_empty());
+    // A datum alone (`!W  !`): the position as sent, the extension cut from the comment.
+    let p = position_of(b"APRS", b"!4903.50N/07201.75E>Comment !W  !");
+    assert_eq!((p.lat, p.lon), (49_058_333, 72_029_167));
+    assert_eq!(comment_of(b"!4903.50N/07201.75E>Comment !W  !"), b"Comment");
+}
+
+#[test]
+fn weather_luminosity_and_unknown_fields() {
+    use uaprs::parse::Weather;
+    // L is luminosity under 1000 W/m², l 1000 and up; `#` (raw rain counter) is skipped; a `v` without digits
+    // ends the fields.
+    let Ok(Packet::Weather { timestamp, weather, comment }) = parse(b"APRS", b"_10090556c220s004g005t077L123l045#010h50b10132vXYZ") else { panic!() };
+    assert_eq!(timestamp, Some(Timestamp::MonthDayHourMin { month: 10, day: 9, hour: 5, min: 56 }));
+    let want = Weather {
+        wind_dir: Some(220),
+        wind_speed: Some(4),
+        wind_gust: Some(5),
+        temp: Some(77),
+        humidity: Some(50),
+        pressure: Some(10132),
+        luminosity: Some(1045),
+        ..Weather::default()
+    };
+    assert_eq!((weather, comment), (want, &b"vXYZ"[..]));
+    let Ok(Packet::Weather { weather, .. }) = parse(b"APRS", b"_10090556c220L999") else { panic!() };
+    assert_eq!(weather.luminosity, Some(999));
+    // A weather station's position with its wind unknown (dots).
+    let Ok(Packet::Position { weather: Some(w), .. }) = parse(b"APRS", b"!4903.50N/07201.75W_.../...g005t077") else { panic!() };
+    assert_eq!((w.wind_dir, w.wind_speed, w.wind_gust, w.temp), (None, None, Some(5), Some(77)));
+}
+
+#[test]
+fn mic_e_custom_messages_and_bad_fields() {
+    use uaprs::parse::{Error, MicEStatus};
+    let info = b"`(_fn\"Oj/";
+    assert!(parse(b"S32UVT", info).is_ok());
+    // Custom message bits (A-K in the first three characters); K is a custom 1 that also blanks its digit.
+    let Ok(Packet::Position { mic_e, .. }) = parse(b"C32UVT", info) else { panic!() };
+    assert_eq!(mic_e, Some(MicEStatus { bits: 0b100, custom: true }));
+    let Ok(Packet::Position { pos, mic_e, .. }) = parse(b"A2KLLL", info) else { panic!() };
+    assert_eq!(mic_e, Some(MicEStatus { bits: 0b101, custom: true }));
+    assert_eq!((pos.ambiguity, pos.lat), (4, -2_500_000), "2 30 S, to the degree");
+    for (dest, info, err) in [
+        (&b"S32UVT"[..], &b"`(_fn\"O"[..], Error::Short),    // information field too short
+        (b"S32U-T", info, Error::MicE),                      // not a Mic-E character
+        (b"S3LUVT", info, Error::MicE),                      // a digit after a blank
+        (b"S32CVT", info, Error::MicE),                      // A-K past the message bits
+        (b"SA2UVT", info, Error::MicE),                      // standard and custom bits mixed
+        (b"S32UVT", b"`(_\x80n\"Oj/", Error::MicE),          // longitude hundredths 100
+        (b"S32UVT", b"`(_f\x10\"Oj/", Error::MicE),          // speed byte below 28
+        (b"S32UVT", b"`(_fn\"Oj?", Error::Symbol),           // no such symbol table
+    ] {
+        assert_eq!(parse(dest, info), Err(err), "{:?} {:?}", core::str::from_utf8(dest), info);
+    }
+    // A `}` at the altitude's place without base-91 characters before it: no altitude, all comment.
+    let Ok(Packet::Position { pos, comment, .. }) = parse(b"S32UVT", b"`(_fn\"Oj/||}}hi") else { panic!() };
+    assert_eq!(pos.altitude, None);
+    assert_eq!(comment.bytes().collect::<Vec<_>>(), b"||}}hi");
+}
+
+#[test]
+fn message_needs_an_addressee() {
+    assert_eq!(parse(b"APRS", b":         :hello"), Err(uaprs::parse::Error::Message));
+}
+
+#[cfg(feature = "nmea")]
+#[test]
+fn nmea_fix_status_rounding_and_altitude() {
+    use uaprs::parse::Error;
+    assert_eq!(parse(b"APRS", b"$GPGLL,4916.45,N,12311.12,W,225444,V"), Err(Error::Nmea), "GLL without a fix");
+    // Speed rounds on the next digit; course 0 is north.
+    let p = position_of(b"APRS", b"$GPRMC,013244,A,4903.50,N,07201.75,W,036.7,000.0,240512,,");
+    assert_eq!((p.speed, p.course), (Some(37), Some(360)));
+    let p = position_of(b"APRS", b"$GPRMC,013244,A,4903.50,N,07201.75,W,036.x,088.4,240512,,");
+    assert_eq!((p.speed, p.course), (None, Some(88)), "a speed that is not a number is dropped");
+    // Below sea level: -12.5 m is -41 feet (to the foot).
+    let p = position_of(b"APRS", b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,-12.5,M,46.9,M,,");
+    assert!((p.altitude.unwrap() + 41).abs() <= 1, "{:?}", p.altitude);
+    // Nine digits fit, but not in tenths of a metre: no altitude.
+    let p = position_of(b"APRS", b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,999999999.5,M,46.9,M,,");
+    assert_eq!(p.altitude, None);
+}
+
+#[cfg(feature = "nmea")]
+#[test]
+fn nmea_symbol_from_the_destination() {
+    // APRS 1.0.1 appendix 2: GPS, SPC or SYM, then a two-character symbol and an optional overlay; or GPSCnn
+    // (primary table) and GPSEnn (alternate) by number. Anything else is the primary table's dot.
+    let gga = b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,";
+    for (dest, want) in [
+        (&b"APRS"[..], (b'/', b'/')),
+        (b"GP", (b'/', b'/')),
+        (b"GPSC43", (b'/', b'K')),
+        (b"GPSE01", (b'\\', b'!')),
+        (b"GPSC00", (b'/', b'/')),
+        (b"GPSC", (b'/', b'/')),
+        (b"GPSBB", (b'/', b'!')),
+        (b"SPCOBA", (b'A', b'!')),
+        (b"SYMOB", (b'\\', b'!')),
+        (b"GPSPA", (b'/', b'A')),
+        (b"GPSA5", (b'\\', b'5')),
+        (b"GPSMR", (b'/', b':')),
+        (b"GPSNX", (b'\\', b'@')),
+        (b"GPSHS", (b'/', b'[')),
+        (b"GPSDX", (b'\\', b'`')),
+        (b"GPSLA", (b'/', b'a')),
+        (b"GPSSZ", (b'\\', b'z')),
+        (b"GPSJ1", (b'/', b'{')),
+        (b"GPSQ4", (b'\\', b'~')),
+        (b"GPSZZ", (b'/', b'/')),
+    ] {
+        let p = position_of(dest, gga);
+        assert_eq!((p.table, p.code), want, "{:?}", core::str::from_utf8(dest));
+    }
+}
+
+/// Every builder writes nothing past the buffer: each buffer shorter than the packet gives None.
+#[test]
+fn builders_refuse_short_buffers() {
+    let r = Report {
+        lat: -33_850_000,
+        lon: 151_200_000,
+        table: b'/',
+        code: b'>',
+        course_speed: Some((88, 36)),
+        altitude: Some(-100),
+        messaging: false,
+        timestamp: Some(Timestamp::HourMinSec { hour: 12, min: 34, sec: 56 }),
+        comment: b"comment",
+        ambiguity: 0,
+    };
+    let local = Report { timestamp: Some(Timestamp::DayHourMin { day: 9, hour: 23, min: 45, utc: false }), messaging: true, ..r };
+    let quiet = Report { course_speed: None, altitude: None, timestamp: None, comment: b"/looks like data", ..r };
+    let mic = Report { altitude: Some(200), ..r };
+    let mic_quiet = Report { altitude: None, comment: b"abc}", ..r };
+    type Build = Box<dyn Fn(&mut [u8]) -> Option<usize>>;
+    let cases: Vec<(&str, Build)> = vec![
+        ("position", Box::new(move |o| build::position(&r, o))),
+        ("position local", Box::new(move |o| build::position(&local, o))),
+        ("position quiet", Box::new(move |o| build::position(&quiet, o))),
+        ("compressed", Box::new(move |o| build::compressed(&r, o))),
+        ("compressed quiet", Box::new(move |o| build::compressed(&quiet, o))),
+        ("message", Box::new(|o| build::message(b"N0CALL", b"hello", Some(b"12"), o))),
+        ("ack", Box::new(|o| build::ack(b"N0CALL", b"12", o))),
+        ("rej", Box::new(|o| build::rej(b"N0CALL", b"12", o))),
+        ("mic_e", Box::new(move |o| build::mic_e(&mic, build::MIC_E_EN_ROUTE, &mut [0; 6], o))),
+        ("mic_e quiet", Box::new(move |o| build::mic_e(&mic_quiet, build::MIC_E_EN_ROUTE, &mut [0; 6], o))),
+    ];
+    for (name, f) in &cases {
+        let mut buf = [0u8; 128];
+        let n = f(&mut buf).unwrap_or_else(|| panic!("{name}"));
+        for short in 0..n {
+            let mut small = vec![0u8; short];
+            assert_eq!(f(&mut small), None, "{name} in {short} bytes");
+        }
+    }
+}
+
+#[test]
+fn builder_timestamps_rounding_and_limits() {
+    let base = Report {
+        lat: 49_999_999,
+        lon: -72_029_167,
+        table: b'/',
+        code: b'>',
+        course_speed: None,
+        altitude: Some(-100),
+        messaging: false,
+        timestamp: Some(Timestamp::HourMinSec { hour: 12, min: 34, sec: 56 }),
+        comment: b"",
+        ambiguity: 0,
+    };
+    let mut buf = [0u8; 128];
+    // 49 59.99994 rounds up to 50 00.00; HHMMSSh; a negative altitude as -nnnnn.
+    let n = build::position(&base, &mut buf).unwrap();
+    assert_eq!(&buf[..n], b"/123456h5000.00N/07201.75W>/A=-00100");
+    let Packet::Position { timestamp, pos, .. } = reparse(&buf[..n]) else { panic!() };
+    assert_eq!((timestamp, pos.altitude), (base.timestamp, Some(-100)));
+    // Local day/hour/minute ends in '/'.
+    let local = Report { timestamp: Some(Timestamp::DayHourMin { day: 9, hour: 23, min: 45, utc: false }), ..base };
+    let n = build::position(&local, &mut buf).unwrap();
+    assert!(buf[..n].starts_with(b"/092345/"));
+    let Packet::Position { timestamp, .. } = reparse(&buf[..n]) else { panic!() };
+    assert_eq!(timestamp, local.timestamp);
+    // What can't be sent: a weather-only timestamp, a position off the globe, an altitude past six digits.
+    let mdhm = Report { timestamp: Some(Timestamp::MonthDayHourMin { month: 1, day: 2, hour: 3, min: 4 }), ..base };
+    assert_eq!(build::position(&mdhm, &mut buf), None);
+    assert_eq!(build::position(&Report { lat: 90_000_001, ..base }, &mut buf), None);
+    assert_eq!(build::compressed(&Report { lon: -180_000_001, ..base }, &mut buf), None);
+    assert_eq!(build::position(&Report { altitude: Some(1_000_000), ..base }, &mut buf), None);
+    assert_eq!(build::mic_e(&base, 8, &mut [0; 6], &mut buf), None, "no such status");
+    assert_eq!(build::mic_e(&Report { lon: 180_000_001, ..base }, 0, &mut [0; 6], &mut buf), None);
+    // Messages: empty or long addressees and ids, and the characters message text may not carry.
+    assert_eq!(build::ack(b"", b"1", &mut buf), None);
+    assert_eq!(build::rej(b"N0CALL", b"123456", &mut buf), None);
+    assert_eq!(build::message(b"N0CALL", b"a{b", None, &mut buf), None);
+    assert_eq!(build::message(b"N0CALL", b"hi", Some(b""), &mut buf), None);
+}
+
+#[test]
+fn address_and_frame_rejects() {
+    // A character outside A-Z, 0-9 in a callsign of the right length.
+    assert!(Address::from_text(b"N0_CAL").is_none());
+    // Fields: too short, all spaces.
+    assert!(Address::from_field(&[0x9C, 0x60, 0x86]).is_none());
+    assert!(Address::from_field(&[0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x61]).is_none());
+    assert_eq!(format!("{:?}", a("N6EX-5*")), "N6EX-5*");
+    assert_eq!(format!("{:?}", a("N6EX")), "N6EX");
+
+    let path: Vec<Address> = (1..=8).map(|i| a(&format!("WIDE{i}"))).collect();
+    let f = Frame::new(a("N0CALL"), a("APRS"), &path, b">hi").unwrap();
+    assert!(!f.is_empty());
+    let mut buf = [0u8; 200];
+    let n = f.write(&mut buf).unwrap();
+    assert!(Frame::parse(&buf[..n]).is_some());
+    let bad = |edit: &dyn Fn(&mut Vec<u8>)| {
+        let mut b = buf[..n].to_vec();
+        edit(&mut b);
+        Frame::parse(&b).is_none()
+    };
+    assert!(bad(&|b| b[6] |= 1), "the destination marked last");
+    assert!(bad(&|b| b[7] |= 1), "a source with the extension bit inside its callsign");
+    assert!(bad(&|b| b.truncate(14 + 7 * 3 + 3)), "cut inside a digipeater");
+    assert!(bad(&|b| b[14 + 7 * 8 + 1] = 0xCF), "not PID 0xF0");
+    // A ninth digipeater: the eighth not marked last, then another address.
+    assert!(bad(&|b| {
+        b[14 + 7 * 8 - 1] &= !1;
+        let extra = a("WIDE9").to_field(true);
+        b.splice(14 + 7 * 8..14 + 7 * 8, extra);
+    }));
+}
+
+#[test]
+fn display_passes_formatter_errors_on() {
+    use std::fmt::{self, Write};
+    /// Takes `room` bytes, then fails.
+    struct Full {
+        room: usize,
+    }
+    impl Write for Full {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            self.room = self.room.checked_sub(s.len()).ok_or(fmt::Error)?;
+            Ok(())
+        }
+    }
+    let f = Frame::new(a("N0CALL-9"), a("APRS"), &[a("WIDE1-1*")], b"hi\x01").unwrap();
+    let full = f.to_string().len();
+    for room in 0..full {
+        assert!(write!(Full { room }, "{f}").is_err(), "room {room}");
+    }
+    assert!(write!(Full { room: full }, "{f}").is_ok());
+}
+
+/// KISS-11: command 5 sets full duplex (and back); a default decoder is a new one.
+#[test]
+fn kiss_full_duplex_and_default_decoder() {
+    use kiss::{Command, Params, Received};
+    let mut p = Params::default();
+    assert_eq!(p.apply(&Received { port: 0, command: 5, data: &[1] }), Command::Set);
+    assert!(p.full_duplex);
+    assert_eq!(p.apply(&Received { port: 0, command: 5, data: &[0] }), Command::Set);
+    assert!(!p.full_duplex);
+    let mut d: kiss::Decoder = kiss::Decoder::default();
+    let mut got = Vec::new();
+    for b in [kiss::FEND, 0, 7, 8, kiss::FEND] {
+        if let Some(r) = d.push(b) {
+            got.push(r.data.to_vec());
+        }
+    }
+    assert_eq!(got, vec![vec![7, 8]]);
+}
+
+#[test]
+fn geo_across_the_date_line_and_south_east() {
+    // 179.5 E to 179.5 W at the equator: one degree east, not 359 west.
+    let (d, b) = distance_bearing((0, 179_500_000), (0, -179_500_000));
+    assert!((d as i64 - 111_195).abs() < 600, "{d}");
+    assert_eq!(b, 90);
+    // And back the other way.
+    let (_, b) = distance_bearing((0, -179_500_000), (0, 179_500_000));
+    assert_eq!(b, 270);
+    // Due south-east.
+    let (_, b) = distance_bearing((0, 0), (-100_000, 100_000));
+    assert!((134..=136).contains(&b), "{b}");
+}
+
+#[cfg(feature = "ultimeter")]
+#[test]
+fn ultimeter_fields() {
+    use uaprs::parse::{Error, Weather};
+    // Gust 10.0 km/h (6 mph), direction 128/256 (180 degrees), 80.0 F, long-term rain unknown, 1019.2 hPa, change
+    // unknown, two calibration words, humidity unknown; no date, time, rain today or one-minute wind.
+    let Ok(Packet::Weather { timestamp: None, weather, comment }) = parse(b"APRS", b"$ULTW006400800320----27D0----00000000----") else { panic!() };
+    let want = Weather { wind_gust: Some(6), wind_dir: Some(180), temp: Some(80), pressure: Some(10192), ..Weather::default() };
+    assert_eq!((weather, comment), (want, &b""[..]));
+    // A temperature below zero (-10.0 F), and the optional fields present: rain today 0.12 in, wind 10.0 km/h.
+    let Ok(Packet::Weather { weather, .. }) = parse(b"APRS", b"$ULTW----0080FF9C----27D0----0000000003E8--------000C0064") else { panic!() };
+    assert_eq!((weather.temp, weather.humidity, weather.rain_midnight, weather.wind_speed), (Some(-10), Some(100), Some(12), Some(6)));
+    // Too short for the nine fields every report has, or not hexadecimal.
+    let full = b"$ULTW006400800320----27D0----00000000----";
+    for fields in 0..9 {
+        assert_eq!(parse(b"APRS", &full[..5 + 4 * fields]), Err(Error::Short), "{fields} fields");
+    }
+    assert_eq!(parse(b"APRS", b"$ULTW00G400800320----27D0----00000000----"), Err(Error::Short));
+}
+
+#[cfg(feature = "nmea")]
+#[test]
+fn nmea_symbol_needs_two_characters() {
+    let p = position_of(b"GPS", b"$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,");
+    assert_eq!((p.table, p.code), (b'/', b'/'));
+}
+
+#[test]
+fn frame_without_control_and_pid() {
+    let f = Frame::new(a("N0CALL"), a("APRS"), &[], b">hi").unwrap();
+    let mut buf = [0u8; 64];
+    let n = f.write(&mut buf).unwrap();
+    assert!(Frame::parse(&buf[..n]).is_some());
+    assert!(Frame::parse(&buf[..15]).is_none(), "the address field and one byte");
+}
+
+#[test]
+fn builder_overlay_speed_rounding_and_plain_message() {
+    let r = Report {
+        lat: 49_058_333,
+        lon: -72_029_167,
+        table: b'5',
+        code: b'>',
+        course_speed: Some((88, 4)),
+        altitude: None,
+        messaging: false,
+        timestamp: None,
+        comment: b"",
+        ambiguity: 0,
+    };
+    // An overlay digit goes out as a letter (5 as f) and comes back as the digit. 4 knots is nearer 1.08^21 - 1
+    // (4.03) than 1.08^20 - 1 (3.66).
+    let mut buf = [0u8; 64];
+    let n = build::compressed(&r, &mut buf).unwrap();
+    assert_eq!(buf[1], b'f');
+    let Packet::Position { pos, .. } = reparse(&buf[..n]) else { panic!() };
+    assert_eq!((pos.table, pos.course, pos.speed), (b'5', Some(88), Some(4)));
+    assert_eq!((buf[11], buf[12]), (22 + 33, 21 + 33));
+    // 1 knot is nearer 1.08^9 - 1 (1.00) than 1.08^10 - 1; past 1.08^89 - 1 (942 knots) the scale ends.
+    for (knots, k) in [(1u16, 9u8), (999, 89)] {
+        let n = build::compressed(&Report { course_speed: Some((88, knots)), ..r }, &mut buf).unwrap();
+        assert_eq!(buf[12], k + 33, "{knots} knots");
+        assert!(n > 12);
+    }
+    // A message without a number.
+    let n = build::message(b"N0CALL", b"hi", None, &mut buf).unwrap();
+    assert_eq!(&buf[..n], b":N0CALL   :hi");
+    // APRS-52.3: a Mic-E comment that would read as a Kenwood radio type goes out behind a space.
+    let mut dest = [0u8; 6];
+    let kenwood = Report { comment: b">x", ..r };
+    let n = build::mic_e(&kenwood, build::MIC_E_EN_ROUTE, &mut dest, &mut buf).unwrap();
+    assert!(buf[..n].ends_with(b" >x"));
+    for short in 0..n {
+        assert_eq!(build::mic_e(&kenwood, build::MIC_E_EN_ROUTE, &mut dest, &mut buf[..short]), None);
+    }
 }
