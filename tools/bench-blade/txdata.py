@@ -15,12 +15,16 @@ centres, and the eye: the decisions' mean distance from 0 over their spread (abo
 opening (the 0.1 % worst bit of each side, as a share of the distance between the two levels; 100 % ideal,
 0 or less closed).
 
+`txdata.py --selftest` measures the analyser's own floor: the same signals made as IQ through the identified bypass
+channel, with and without the equalisers, at 55 dB over the floor.
+
 The sweep with an equaliser (`txtest sweep data bypass eq`) is sdrtx.py's: `sdrtx.py 0 --load CAP.u8 --sweep`.
 """
 import argparse, os, sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sdrtx  # noqa: E402
 
 C = 256  # bits per chunk: timing and pattern offset found in each
@@ -51,7 +55,7 @@ def mavg(x, n):
     return np.concatenate([np.full(n // 2, y[0]), y, np.full(n - 1 - n // 2, y[-1])])
 
 
-def analyse(soft, spb, scrambled, label):
+def analyse(soft, spb, scrambled, label, quiet=False):
     ref = prbs9(511)
     n = C - 17 if scrambled else C
     # every PRBS9 offset's next n bits, +-1: one matrix product scores them all
@@ -86,16 +90,72 @@ def analyse(soft, spb, scrambled, label):
         ones.extend(vv[h == 1])
         zeros.extend(vv[h == 0])
     if not bits:
-        print(f"  {label}: too short")
-        return
+        if not quiet:
+            print(f"  {label}: too short")
+        return None
     ones, zeros = np.array(ones), np.array(zeros)
     m1, m0 = ones.mean(), zeros.mean()
     opening = (np.percentile(ones, 0.1) - np.percentile(zeros, 99.9)) / (m1 - m0)
-    print(f"  {label:9s}: BER {errs / bits:.5f} ({errs} of {bits} bits), eye {np.median(eyes):.1f} (worst chunk {min(eyes):.1f}), "
-          f"opening {opening * 100:.0f} %, levels {m0:+.0f} / {m1:+.0f} Hz")
+    if not quiet:
+        print(f"  {label:9s}: BER {errs / bits:.5f} ({errs} of {bits} bits), eye {np.median(eyes):.1f} (worst chunk {min(eyes):.1f}), "
+              f"opening {opening * 100:.0f} %, levels {m0:+.0f} / {m1:+.0f} Hz")
+    return dict(ber=errs / bits, eye=float(np.median(eyes)), opening=float(opening), levels=(m0, m1))
+
+
+def iq(dev_hz, cnr_db, rng, lead=0.3):
+    """u8 IQ at 1.024 MS/s as bladecap.sh writes it: the FM signal 250 kHz below the centre, amplitude 100, white
+    noise for `cnr_db` of carrier over the floor in sdrtx.py's 20 kHz baseband (its "dB over the floor")."""
+    n = len(dev_hz)
+    m = int(round(n * sdrtx.FS / 48_000))
+    up = np.fft.irfft(np.fft.rfft(dev_hz), m) * m / n
+    ln = int(lead * sdrtx.FS)
+    f = np.concatenate([np.zeros(ln), up, np.zeros(ln)]) - sdrtx.OFF
+    amp = np.concatenate([np.zeros(ln), np.full(m, 100.0), np.zeros(ln)])
+    sigma = 100 / np.sqrt(2) * 10 ** (-cnr_db / 20) * np.sqrt(sdrtx.FS / 40_000)
+    x = amp * np.exp(2j * np.pi * np.cumsum(f) / sdrtx.FS) + rng.normal(0, sigma, len(f)) + 1j * rng.normal(0, sigma, len(f))
+    raw = np.empty(2 * len(x), np.uint8)
+    raw[0::2] = np.clip(np.round(x.real + 127.5), 0, 255)
+    raw[1::2] = np.clip(np.round(x.imag + 127.5), 0, 255)
+    return raw
+
+
+def selftest(cnr_db=55.0, seconds=4.0):
+    """The analyser's own floor (decision 311): txtest's signals (txident.py's gen) at the level each fits, with no
+    channel, through the identified bypass channel alone (txeq_design.py's model: the 168 Hz pole, the 35 Hz
+    coupling, the chip's roll-off), and through it with `eq` and `eq8` (the taps in txeq.rs), FM-modulated as IQ at
+    `cnr_db` over the floor and quantised to u8, then this script's demodulator and slicer."""
+    import txident, txeq_design as d
+    rng = np.random.default_rng(7)
+    sigs = [("fsk", 1200, False), ("fsk", 4800, True), ("gmsk", 4800, False), ("fsk", 9600, True), ("g3ruh", 9600, True)]
+    print(f"txdata selftest: {cnr_db:g} dB over the floor, {seconds:g} s each; BER, eye, opening, as `plain` reads them")
+    print(f"  {'signal':12s} {'no channel':>20s} {'bypass, no eq':>20s} {'bypass + eq':>20s} {'bypass + eq8':>20s}")
+    for kind, baud, rc in sigs:
+        cells = []
+        for case in ("clean", "chan", "eq", "eq8"):
+            g = None
+            if case in ("eq", "eq8"):
+                g = txident.taps(case)
+            x = txident.gen(kind, baud, rc, int(48_000 * seconds), 100)
+            if g is not None:
+                x = np.clip(np.convolve(x, g)[: len(x)], -32767, 32767)
+            if case != "clean":
+                fx = np.fft.rfftfreq(len(x), 1 / 48_000)
+                x = np.fft.irfft(np.fft.rfft(x) * d.channel(fx), len(x))
+            dev = x / np.sqrt(np.mean(x ** 2)) * 2000  # about 2 kHz rms deviation, as on the bench
+            raw = iq(dev, cnr_db, rng)
+            dd = sdrtx.demod(raw, 0, 16_000, quiet=True)
+            y, fs, _ = dd
+            y = y[int(0.1 * fs):]
+            spb = fs / baud
+            r = analyse(mavg(y, spb), spb, kind == "g3ruh", "", quiet=True)
+            cells.append(f"{r['ber'] * 100:6.2f} % {r['eye']:4.1f} {r['opening'] * 100:3.0f} %")
+        name = "g3ruh" if kind == "g3ruh" else f"{kind} {baud}{' rc' if rc else ''}"
+        print(f"  {name:12s} " + " ".join(f"{c:>20s}" for c in cells))
 
 
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     a = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     a.add_argument("cap")
     a.add_argument("kind", choices=["fsk", "gmsk", "g3ruh"])

@@ -1605,8 +1605,8 @@ fn debug_txtest_data() {
         assert!(raw.contains(&title), "{line}: {raw}");
         assert_eq!(raw.contains("bypass: all AF TX filters off (REG_47 0 = 1), soft limiter off"), arm.bypass, "{line}: {raw}");
         match arm.eq {
-            Eq::Eq => assert!(raw.contains("eq: flat 100 Hz-5 kHz, 79 taps, +1.3 dB at 1 kHz; REG_7D 0x3F, REG_40 0x50A;"), "{raw}"),
-            Eq::Eq8 => assert!(raw.contains("eq8: flat 100 Hz-8 kHz, 95 taps, -0.6 dB at 1 kHz; REG_7D 0x3F, REG_40 0x57A;"), "{raw}"),
+            Eq::Eq => assert!(raw.contains("eq: flat 100 Hz-5 kHz, 95 taps, +1.3 dB at 1 kHz; REG_7D 0x3F, REG_40 0x50A;"), "{raw}"),
+            Eq::Eq8 => assert!(raw.contains("eq8: flat 100 Hz-8 kHz, 127 taps, -0.6 dB at 1 kHz; REG_7D 0x3F, REG_40 0x57A;"), "{raw}"),
             Eq::Off => assert!(!raw.contains(" taps, "), "{raw}"),
         }
         r.send(b"\r");
