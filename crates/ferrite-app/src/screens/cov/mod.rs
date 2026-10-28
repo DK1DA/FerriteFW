@@ -18,6 +18,7 @@ mod layouts;
 mod lowpower;
 mod msgs;
 mod posentry;
+mod samecodes;
 mod scan;
 mod setup;
 mod transmit;
