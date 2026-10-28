@@ -178,7 +178,7 @@ def slot_cycles_cards_stay(t):
 
 @test("HOME-15", "HOME-15.1", "KEY-18", pages=("Home",))
 def star_quick_mute(t):
-    """* on home mutes the active slot (card says Muted, toast), * again turns it off (card says Off, toast), a
+    """* on home mutes the active slot (card says Muted, toast), * again turns off (card says Off, toast), a
     third * turns it back on; muted, the slot keeps receiving."""
     was = t.unmute()
     if was:

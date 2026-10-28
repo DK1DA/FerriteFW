@@ -8,7 +8,7 @@ fn mutes(t: &mut T) -> Vec<u8> {
     t.cmds().into_iter().filter_map(|c| if let RadioCmd::Mute(m) = c { Some(m) } else { None }).collect()
 }
 
-/// HOME-15, HOME-15.1: \* mutes the active slot, \* again turns it off and a third \* on again; the mask goes to
+/// HOME-15, HOME-15.1: \* mutes the active slot, \* again turns off and a third \* on again; the mask goes to
 /// the Radio task; the state word says Muted, or RX muted while it receives (its S-meter and squelch carry on); the
 /// mute stays with its slot across SLOT, each slot its own.
 #[test]

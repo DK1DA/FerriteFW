@@ -39,7 +39,7 @@ fn star_turns_a_slot_off_and_on() {
     t.tap(Key::Slot); // B active
     t.tap(Key::Side(1)); // monitor latched on B
     t.tap(Key::Star);
-    assert_eq!(toast(&t), ("Slot B muted".into(), "* again turns it off".into()));
+    assert_eq!(toast(&t), ("Slot B muted".into(), "* again turns off".into()));
     t.cmds();
     t.tap(Key::Star);
     let c = t.cmds();

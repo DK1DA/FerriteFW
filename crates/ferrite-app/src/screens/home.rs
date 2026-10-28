@@ -554,7 +554,7 @@ fn quick_mute(app: &mut App) {
     } else {
         app.mute ^= bit;
         if app.mute & bit != 0 {
-            (b" muted", if app.aprs_slot(a) { b"* again to hear it".as_slice() } else { b"* again turns it off" })
+            (b" muted", if app.aprs_slot(a) { b"* again to hear it".as_slice() } else { b"* again turns off" })
         } else {
             (b" unmuted", b"")
         }
