@@ -23,6 +23,7 @@ mod samecodes;
 mod scan;
 mod scope;
 mod setup;
+mod status;
 mod transmit;
 mod xb;
 
