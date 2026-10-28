@@ -21,6 +21,7 @@ mod msgs;
 mod posentry;
 mod samecodes;
 mod scan;
+mod scope;
 mod setup;
 mod transmit;
 mod xb;
