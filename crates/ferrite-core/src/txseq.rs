@@ -577,4 +577,18 @@ mod tests {
         assert!(path.keyed().is_none() && rep.from().is_none());
         assert_eq!(path.rx(Rx::Bk(Sel::rx(f[1])), Cause::Auto, now, &mut Steps::default()), Ok(()), "hopping resumes");
     }
+
+    /// XB-6: a crossband key-up with both sides on one chip passes the checks but not the path: refused as
+    /// RelayMismatch, nothing sent to a pin, nothing counted as keyed.
+    #[test]
+    fn crossband_on_one_chip_refused_by_the_path() {
+        let f = mhz(446) + 47_500;
+        let mut path = rx_on(f);
+        let mut t = TxSeq::new();
+        let r = Req { rx: mhz(440), person: false, power: 0, ..req(f) };
+        let mut s = Steps::default();
+        assert_eq!(t.key_xb(&r, &mut path, 0, &mut s), Err(Refusal::RelayMismatch));
+        assert!(s.is_empty() && path.keyed().is_none());
+        assert_eq!(t.check(&r, &path, 10), Ok(()), "not left keyed: the next key-up is checked afresh");
+    }
 }
