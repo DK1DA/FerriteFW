@@ -194,6 +194,98 @@ fn settings_page_keys() {
     assert_eq!(r.term.page(), Page::Main);
 }
 
+/// TERM-6, TERM-7, TERM-17: ◀▶ on every settings row answers: changed, not settable from here, left to the
+/// radio (the PIN, the region, Dry TX), greyed with the radio's reason, or open on the radio's menu.
+#[test]
+fn settings_rows_answer() {
+    use crate::screens::groups;
+    let mut r = Rig::main();
+    r.send(b"3");
+    let mut seen = std::collections::BTreeSet::new();
+    for g in 1..=GROUPS.len() as u8 {
+        let n = groups::items(g, 0).len() as u8;
+        for i in 1..=n {
+            let subs = groups::SUBS.iter().find(|(q, _)| *q == (g, i)).map(|(_, e)| e.len() as u8);
+            for k in 0..=subs.unwrap_or(0) {
+                if subs.is_some() && k == 0 {
+                    continue;
+                }
+                (r.term.g, r.term.sub, r.term.set_sel) = (g, if k == 0 { 0 } else { i }, if k == 0 { i - 1 } else { k - 1 });
+                r.term.note.clear();
+                r.term.settings_change(&mut r.app, 1);
+                let note = String::from_utf8_lossy(r.term.note.as_bytes()).into_owned();
+                assert!(!note.is_empty(), "0 {g} {i} {k}: no answer");
+                seen.insert(note);
+            }
+            // put the screen back: some rows open one or change the mode
+            r.app.go_home();
+            r.app.set_lpm_mode(0);
+        }
+    }
+    for want in ["Changed", "Not settable yet", "Change this one on the radio"] {
+        assert!(seen.contains(want), "{want}: {seen:?}");
+    }
+    // TERM-17: the row the radio's menu has highlighted
+    let mut r = Rig::main();
+    r.send(b"3");
+    r.app.open(crate::screens::nav::Dest::Group(7));
+    let crate::Screen::Group(gr) = r.app.screen() else { panic!("not a group") };
+    (r.term.g, r.term.sub, r.term.set_sel) = (7, 0, gr.row);
+    r.term.settings_change(&mut r.app, 1);
+    assert_eq!(r.term.note.as_bytes(), b"Open on the radio's menu: change it there");
+    // a greyed row says why (WX-3: SAME outside the US and Canada)
+    r.app.go_home();
+    r.app.set.region = 5;
+    if groups::greyed(&r.app, &[4, 5, 1]).is_some() {
+        (r.term.g, r.term.sub, r.term.set_sel) = (4, 5, 0);
+        r.term.settings_change(&mut r.app, 1);
+        assert_eq!(r.term.note.as_bytes(), b"US and Canada only");
+    }
+}
+
+/// TERM-6: Enter on a settings row changes it as ▶ does; Esc from a third-level list goes back to its row.
+#[test]
+fn settings_enter_and_up_from_a_list() {
+    let mut r = Rig::main();
+    r.send(b"3");
+    let (g, i) = crate::screens::groups::SUBS[0].0;
+    r.send(&[b'0' + g]);
+    r.term.set_sel = i - 1;
+    r.send(b"\r");
+    assert_eq!((r.term.g, r.term.sub), (g, i), "into the list");
+    r.send(b"\r");
+    assert!(!r.term.note.is_empty(), "Enter on a row answers as ▶ does");
+    r.send(b"\x1b");
+    r.now += 100;
+    r.poll();
+    assert_eq!((r.term.g, r.term.sub, r.term.set_sel), (g, 0, i - 1), "back on its row");
+}
+
+/// TERM-12: the command line: Backspace takes a character back; Up on an empty line brings the last command back;
+/// Esc leaves the line; a load's Ctrl-C stops it.
+#[test]
+fn command_line_editing() {
+    let mut r = Rig::main();
+    r.send(b":home 3x\x7f\r");
+    assert_eq!(r.app.set.home_ch, Some(2), "the x taken back");
+    r.app.set.home_ch = None;
+    r.send(b":\x1b[A\r");
+    for _ in 0..3 {
+        r.poll();
+    }
+    assert_eq!(r.app.set.home_ch, Some(2), "Up brought it back");
+    r.send(b":abc\x1b");
+    r.now += 100;
+    r.poll();
+    assert!(!r.term.cmd, "Esc left the line");
+    r.cmd("load");
+    r.send(b"\x03");
+    for _ in 0..4 {
+        r.poll();
+    }
+    assert!(matches!(r.term.con, Con::Done | Con::Off), "{:?}", r.term.con);
+}
+
 /// TERM-16: each page's help (`?`) is its own; Esc closes it.
 #[test]
 fn help_per_page() {
