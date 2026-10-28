@@ -92,7 +92,7 @@ fn count(fb: &FrameBuffer, x: i32, y: i32, w: i32, h: i32, c: u16) -> usize {
 
 /// APRS-17.1 – APRS-17.4 (decision 181): APRS mode's card: the header "APRS Mode · VHF" with the holder in C's colour, the
 /// stations heard right of the frequency, the last station at the bottom with the beacon power; OK leads to the
-/// heard list (the APRS page on its "Heard list" row: one more OK opens it). APRS-17.3: "Nothing since power-on"
+/// heard list (the APRS page on its "Heard list" row: one more OK opens it). APRS-17.10: "Nothing since power-on"
 /// while the list holds only restored stations.
 #[test]
 fn aprs_card_mode() {
@@ -107,7 +107,7 @@ fn aprs_card_mode() {
     assert!(hour > 0, "the sample has stations within the hour");
     assert_eq!(k.counts, Some((0, hour)));
     assert_eq!(k.right.as_bytes(), b"0 heard", "the small card's spot starts on the since-power-on count");
-    // APRS-17.3: the list isn't empty, only nothing since power-on.
+    // APRS-17.10: the list isn't empty, only nothing since power-on.
     assert_eq!(k.line.as_bytes(), b"Nothing since power-on");
     assert_eq!(k.power, "LOW");
     assert!(k.next.is_empty(), "beacons off: no countdown");

@@ -70,7 +70,7 @@ pub const HOLD_MS: u32 = 2_000;
 /// active slot's card flickered to Muted on every hop back; to confirm on the bench).
 pub const REACQUIRE_MS: u32 = 60;
 
-/// APRS-21.3 (decision 300): after a data frame from the APRS slot, it keeps its chip and the receive path this
+/// APRS-21.4 (decision 300): after a data frame from the APRS slot, it keeps its chip and the receive path this
 /// long, no looks at the other slots, for the digipeat or ack that follows.
 pub const AFTER_TX_MS: u32 = 1_000;
 
@@ -164,7 +164,7 @@ pub struct Watch {
     got: [u32; 2],
     /// WATCH-17.3: the last slot other than the priority one that looked on each chip (APRS first goes on from it).
     last: [u8; 2],
-    /// APRS-21.3: when the APRS slot's last data frame ended ([`Watch::after_tx`]).
+    /// APRS-21.4: when the APRS slot's last data frame ended ([`Watch::after_tx`]).
     after_tx: Option<u32>,
 }
 
@@ -178,7 +178,7 @@ impl Watch {
     }
 
     /// Pause for `secs` (WATCH-6, WATCH-16); 0 resumes now.
-    /// APRS-21.3: a data frame from the APRS slot just ended at `now`: it keeps the chip [`AFTER_TX_MS`].
+    /// APRS-21.4: a data frame from the APRS slot just ended at `now`: it keeps the chip [`AFTER_TX_MS`].
     pub fn after_tx(&mut self, now: u32) {
         self.after_tx = Some(now);
     }
@@ -285,7 +285,7 @@ impl Watch {
                 }
             }
             let next = match cur {
-                // APRS-21.3: just after our own frame the priority slot has the chip, whatever was on it
+                // APRS-21.4: just after our own frame the priority slot has the chip, whatever was on it
                 _ if after && p.is_some() => p,
                 // APRS-21.1: an open priority slot keeps its chip until it closes, muted or not (its decoder).
                 Some(s) if p == Some(s) && open & 1 << s != 0 => Some(s),
@@ -334,7 +334,7 @@ impl Watch {
         out.first = c.first;
         out.scan = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| s == active && c.scan & 1 << s != 0));
         let open = self.open | c.held & set;
-        // APRS-21.3: held as if open while the window lasts, so the path stays on it and its decoder hears it
+        // APRS-21.4: held as if open while the window lasts, so the path stays on it and its decoder hears it
         let holding = open | if after { prio } else { 0 };
         out.hold = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| prio & holding & 1 << s != 0));
         let heard = |s: u8| open & 1 << s != 0 && c.muted & 1 << s == 0;
@@ -566,7 +566,7 @@ mod tests {
         Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false }
     }
 
-    /// APRS-21.3: after our own data frame the APRS slot keeps the shared chip and the path (held) for
+    /// APRS-21.4: after our own data frame the APRS slot keeps the shared chip and the path (held) for
     /// AFTER_TX_MS with no looks at the others; then the turns go on.
     #[test]
     fn aprs_slot_held_after_its_frame() {
