@@ -159,3 +159,27 @@ pub fn cycles(f: impl FnOnce()) -> u32 {
         0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The plain complex dot product against 64-bit sums, and its 32-bit wrap at the extremes (as SMLAD's).
+    #[test]
+    fn cdot_plain_sums() {
+        let v = [[1000i16, -2000], [-32768, 32767], [7, 0], [0, -1]];
+        let h = [3i16, -4, 32767, 9];
+        let (mut re, mut im) = (0i64, 0i64);
+        for (x, &t) in v.iter().zip(&h) {
+            re += x[0] as i64 * t as i64;
+            im += x[1] as i64 * t as i64;
+        }
+        assert_eq!(cdot_plain(&v, &h), (re as i32, im as i32));
+        // Shorter taps than samples: only the pairs that exist count.
+        assert_eq!(cdot_plain(&v, &h[..1]), (3000, -6000));
+        assert_eq!(cdot_plain(&[], &h), (0, 0));
+        // Wrap, not saturate: 3 x (-32768 x -32768) = 3 x 2^30 = 2^31 + 2^30, which wraps negative.
+        let big = [[-32768i16, 0]; 3];
+        assert_eq!(cdot_plain(&big, &[-32768; 3]).0, (3i64 << 30) as i32);
+    }
+}

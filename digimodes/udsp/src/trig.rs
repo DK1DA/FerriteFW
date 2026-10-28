@@ -83,3 +83,38 @@ pub fn cos_sin_phase(phase: u32) -> (i32, i32) {
 pub const fn phase_step(f_mhz: u64, rate_mhz: u64) -> u32 {
     ((f_mhz << 32) / rate_mhz) as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The quarter-wave table builder run again at run time gives the flash table, within half a step of the true
+    /// sine, from 0 to full scale.
+    #[test]
+    fn table_matches_its_builder() {
+        let t = sin_table();
+        assert_eq!(t, SIN);
+        assert_eq!((t[0], t[1024]), (0, 32767));
+        assert_eq!(t[512], 23170); // sin(pi/4) = 0.70711
+        for k in 0..=1024 {
+            let want = (2.0 * core::f64::consts::PI * k as f64 / 4096.0).sin() * 32767.0;
+            assert!((t[k] as f64 - want).abs() <= 0.5, "k {k}: {} vs {want}", t[k]);
+        }
+    }
+
+    #[test]
+    fn quadrants_and_interpolation() {
+        assert_eq!(cos_sin(0), (32767, 0));
+        assert_eq!(cos_sin(1024), (0, 32767));
+        assert_eq!(cos_sin(2048), (-32767, 0));
+        assert_eq!(cos_sin(3072), (0, -32767));
+        assert_eq!(cos_sin(4096 + 1024), cos_sin(1024), "any k, modulo a turn");
+        // Half way between two table steps: the mean of the two.
+        let (c0, s0) = cos_sin(100);
+        let (c1, s1) = cos_sin(101);
+        let (c, s) = cos_sin_phase((100 << 20) + (1 << 19));
+        assert!((c - (c0 + c1) / 2).abs() <= 1 && (s - (s0 + s1) / 2).abs() <= 1);
+        // 1 kHz at 8 kHz is an eighth of a turn.
+        assert_eq!(phase_step(1_000_000, 8_000_000), 1 << 29);
+    }
+}

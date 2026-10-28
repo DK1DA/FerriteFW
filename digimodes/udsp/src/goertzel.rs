@@ -54,3 +54,50 @@ impl Goertzel {
         self.s2 = 0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `n` samples of an `f` hertz tone at 8000 samples a second (quarter scale, from the crate's own table) into
+    /// `g`; returns their energy.
+    fn tone(g: &mut Goertzel, f: u32, n: u32) -> u64 {
+        let mut energy = 0u64;
+        for i in 0..n {
+            let (_, s) = cos_sin_phase(phase_step((f as u64 * i as u64 % 8000) * 1000, 8_000_000));
+            let x = (s / 4) as i16;
+            g.push(x);
+            energy += (x as i64 * x as i64) as u64;
+        }
+        energy
+    }
+
+    /// DTMF row 697 Hz against column 1209 Hz over a 205-sample block, with a reset between blocks.
+    #[test]
+    fn dtmf_tones_and_reset() {
+        let n = 205;
+        let mut g = Goertzel::new(697_000, 8000);
+        let e = tone(&mut g, 697, n);
+        let on = g.fraction(n, e);
+        assert!((on as i64 - 65536).abs() < 65536 / 20, "on-frequency share {on}");
+        g.reset();
+        assert_eq!(g.power(), 0);
+        let e = tone(&mut g, 1209, n);
+        let off = g.fraction(n, e);
+        assert!(off < 65536 / 100, "off-frequency share {off}");
+        // After a reset the first block is repeated exactly.
+        g.reset();
+        let e = tone(&mut g, 697, n);
+        assert_eq!(g.fraction(n, e), on);
+    }
+
+    #[test]
+    fn silence_has_no_share() {
+        let mut g = Goertzel::new(1_000_000, 8000);
+        for _ in 0..100 {
+            g.push(0);
+        }
+        assert_eq!(g.power(), 0);
+        assert_eq!(g.fraction(100, 0), 0);
+    }
+}

@@ -40,3 +40,20 @@ const fn log2_table() -> [u16; 33] {
     }
     t
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The table builder run again at run time gives the flash table: log2(1 + j/32) in Q8, rounded.
+    #[test]
+    fn table_matches_its_builder() {
+        let t = log2_table();
+        assert_eq!(t, LOG2_TABLE);
+        assert_eq!((t[0], t[16], t[32]), (0, 150, 256)); // log2(1.5) = 0.585 = 149.8 / 256
+        for j in 0..=32 {
+            let want = (1.0 + j as f64 / 32.0).log2() * 256.0;
+            assert!((t[j] as f64 - want).abs() <= 0.5, "j {j}: {} vs {want}", t[j]);
+        }
+    }
+}
