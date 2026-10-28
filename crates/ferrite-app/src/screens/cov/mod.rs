@@ -14,6 +14,7 @@ use std::vec::Vec;
 mod coming;
 mod hf;
 mod home;
+mod lowpower;
 mod msgs;
 mod scan;
 mod setup;
