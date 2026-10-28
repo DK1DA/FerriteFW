@@ -54,9 +54,9 @@ fn beacon_line_by_mode() {
     assert_eq!(beacon_line(&t, &d), "Smart beacon");
     t.app.aprs.beacon = 2;
     d.beacon.next_s = Some(42);
-    assert_eq!(beacon_line(&t, &d), "Next beacon in 42 s");
+    assert_eq!(beacon_line(&t, &d), "Beacon in 42s");
     d.beacon.next_s = Some(181);
-    assert_eq!(beacon_line(&t, &d), "Next beacon in 4 min");
+    assert_eq!(beacon_line(&t, &d), "Beacon in 4m");
     d.beacon.next_s = None;
     assert_eq!(beacon_line(&t, &d), "Beacon soon");
 }

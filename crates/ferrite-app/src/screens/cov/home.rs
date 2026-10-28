@@ -133,7 +133,7 @@ fn aprs_card_large_rows() {
     t.app.set_aprs(AprsCfg { beacon: 5, ..t.app.aprs_cfg() });
     t.s.aprs_tick(10, true, true);
     t.wait(100);
-    t.shows("Next beacon in");
+    t.shows("Beacon in");
 }
 
 /// NAV-1: \u{25b2}\u{25bc} on a channel slot step the zone's channels; a zone with none does nothing.
