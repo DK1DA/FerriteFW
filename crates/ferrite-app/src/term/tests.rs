@@ -1303,7 +1303,8 @@ fn fsk_answer(a: ferrite_core::fskbench::Ask) -> ferrite_core::fskbench::Report 
 }
 
 /// TERM-42: `bk rxaf` asks the receive AF filter override, `bk rxaf HEX` sets REG_2B bits 10:8 (no other bit), `bk
-/// rxaf off` ends it; anything else is refused before anything is sent; `bk rxaf` alone only reads (TERM-25).
+/// rxaf off` ends it; anything else is refused before anything is sent; `bk rxaf` alone only reads (TERM-25). TERM-42.1:
+/// a top digit carries REG_47's receive route (9700).
 #[cfg(feature = "bench")]
 #[test]
 fn debug_bk_rxaf() {
@@ -1311,7 +1312,7 @@ fn debug_bk_rxaf() {
     r.cmd("bk rxaf");
     assert_eq!(r.serve(4, regs), vec![DebugReq::RxAf(None)]);
     assert!(r.raw().contains("bk rxaf: off"), "{}", r.raw());
-    for (cmd, want) in [("bk rxaf 700", Some(Some(0x0700))), ("BK RXAF 0x400", Some(Some(0x0400))), ("bk rxaf 0", Some(Some(0))), ("bk rxaf off", Some(None))] {
+    for (cmd, want) in [("bk rxaf 700", Some(Some(0x0700))), ("BK RXAF 0x400", Some(Some(0x0400))), ("bk rxaf 0", Some(Some(0))), ("bk rxaf 9700", Some(Some(0x9700))), ("bk rxaf off", Some(None))] {
         r.send(b"\r");
         r.cmd(cmd);
         assert_eq!(r.serve(4, regs), vec![DebugReq::RxAf(want)], "{cmd}");

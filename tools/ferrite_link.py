@@ -1121,6 +1121,7 @@ def main():
     ap.add_argument("--screen", action="store_true", help="subscribe ui: redraw the screen's text on each update")
     ap.add_argument("--raw", type=int, nargs="?", const=12000, metavar="RATE",
                     help="audio: the decoders' samples as 12-bit PCM at 12000 (default) or 16000 Hz (LINK-13.9, bench builds)")
+    ap.add_argument("--poke", metavar="REG=HEX,...", help="audio --raw on a bench build: rewrite chip 1's registers every 100 ms in the same session (the radio's tune and audio routing rewrite them), e.g. 47=6942")
     a = ap.parse_args()
     port = Port(a.port)
     try:
@@ -1202,7 +1203,7 @@ def audio(link, seconds, path):
     return 0
 
 
-def raw_audio(link, seconds, path, rate):
+def raw_audio(link, seconds, path, rate, poke=None):
     """LINK-13.9 (decision 307), a bench build's only: the decoders' own samples, stepped from 24 kHz to RATE (12000,
     or 16000 for sweeps to 6 kHz) as 12-bit PCM, every block whatever the squelch, into a 16-bit WAV at RATE. The cable
     goes to 230400 for 12 kHz (19.1 KB/s), 460800 for 16 kHz (25.5 KB/s), and back to 115200 at the end. Reports
@@ -1227,6 +1228,7 @@ def raw_audio(link, seconds, path, rate):
     t0 = time.time()
     samples, blocks, lost_frames, missing, clipped, nbytes, last, renew = [], 0, 0, 0, 0, 0, None, t0
     t_first = None
+    poked = 0.0
     try:
         while time.time() - t0 < seconds:
             link.answers()
@@ -1254,6 +1256,10 @@ def raw_audio(link, seconds, path, rate):
             if time.time() - renew >= 3.0:
                 link.send(AUDIO, bytes([mode]))  # keeps the session active (LINK-13.5)
                 renew = time.time()
+            if poke and time.time() - poked >= 0.1:
+                for reg, val in poke:
+                    link.ok(CMD, f"bk 1 {reg} {val}".encode())
+                poked = time.time()
             time.sleep(0.002)
     finally:
         link.ok(AUDIO, b"\x00")
@@ -1489,7 +1495,7 @@ def run(link, a):
         what = (a.args[0] if a.args else "heard,msgs,ui").split(",")
         return subscribe(link, what, a.seconds if a.seconds != 5.0 else 3600, a.screen)
     elif a.cmd == "audio" and a.raw:
-        return raw_audio(link, float(a.args[0]) if a.args else 10.0, a.args[1] if len(a.args) > 1 else "rx-raw.wav", a.raw)
+        return raw_audio(link, float(a.args[0]) if a.args else 10.0, a.args[1] if len(a.args) > 1 else "rx-raw.wav", a.raw, [x.split("=") for x in a.poke.split(",")] if a.poke else None)
     elif a.cmd == "audio":
         return audio(link, float(a.args[0]) if a.args else 10.0, a.args[1] if len(a.args) > 1 else "rx-audio.wav")
     elif a.cmd == "reboot":

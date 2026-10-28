@@ -324,7 +324,15 @@ impl Radio {
         let decode_chip = audio_chip.or(out.hold.filter(|_| self.si.mode().is_none()));
         for n in 0..2u8 {
             if self.tuned[n as usize].is_some() {
-                self.chip(n).af_out(if Some(n) == decode_chip { AfOut::Normal } else { AfOut::Mute });
+                // TERM-42.1: a bench `bk rxaf` route (its top nibble) in place of the normal one
+                #[cfg(feature = "bench")]
+                let normal = match self.rxaf.map(|b| (b >> 12) as u8) {
+                    Some(r @ 1..) => AfOut::Raw(r),
+                    _ => AfOut::Normal,
+                };
+                #[cfg(not(feature = "bench"))]
+                let normal = AfOut::Normal;
+                self.chip(n).af_out(if Some(n) == decode_chip { normal } else { AfOut::Mute });
             }
         }
         self.bcast_audio(now, audio_chip.is_some());

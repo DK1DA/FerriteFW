@@ -1608,13 +1608,14 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-42 (decision 305, a bench test): `bk rxaf` shows the receive AF filter override, `bk rxaf HEX` sets it (REG_2B
 /// bits 10:8 only: 400 the 300 Hz high-pass off, 200 the 3 kHz low-pass off, 100 de-emphasis off; 700 all three),
-/// written after every FM tune on either chip, `bk rxaf off` ends it. RAM only.
+/// written after every FM tune on either chip, `bk rxaf off` ends it. RAM only. TERM-42.1: a top nibble (e.g. 9700)
+/// also holds REG_47's receive route (bits 11:8; 9 Beken's bypass) wherever the receive tick sets the normal route.
 fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk rxaf [HEX|off]: REG_2B bits 10:8 after every FM tune (400 HPF off, 200 LPF off, 100 de-emphasis off; 700 all)";
+    const USAGE: &str = "bk rxaf [HEX|off]: REG_2B bits 10:8 after every FM tune (400 HPF off, 200 LPF off, 100 de-emphasis off; 700 all); a top digit is REG_47's receive route (9700: route 9, Beken's bypass)";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
-        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| v & !0x0700 == 0).ok_or_else(|| msg!("{}", USAGE))? as u16)),
+        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| v & !0xF700 == 0).ok_or_else(|| msg!("{}", USAGE))? as u16)),
         _ => return Err(msg!("{}", USAGE)),
     };
     if t.next()?.is_some() {

@@ -45,7 +45,7 @@ impl Radio {
     /// retune comes anyway), so it takes effect now.
     pub(super) fn rxaf_ask(&mut self, set: Option<Option<u16>>) -> DebugAns {
         if let Some(bits) = set {
-            self.rxaf = bits.map(|b| b & 0x0700);
+            self.rxaf = bits.map(|b| b & 0xF700);
             if self.path.keyed().is_none() {
                 for s in self.tuned.map(|t| t.map(|(s, _)| s)).into_iter().flatten().filter(|&s| (s as usize) < SLOTS) {
                     self.retune(s);
