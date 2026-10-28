@@ -161,6 +161,204 @@ fn errors_and_timeouts() {
     assert_eq!(si.revision(&mut MockDelay::default()).map(|r| r.0), Err(Error::Nack));
 }
 
+/// Passes through to `inner` until its writes or reads run out, then NACKs (a chip that drops off the bus part way).
+struct Flaky<I> {
+    inner: I,
+    writes: usize,
+    reads: usize,
+}
+
+impl<I: uradio_bus::I2c> uradio_bus::I2c for Flaky<I> {
+    fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), Nack> {
+        if self.writes == 0 {
+            return Err(Nack);
+        }
+        self.writes -= 1;
+        self.inner.write(addr, data)
+    }
+    fn read(&mut self, addr: u8, buf: &mut [u8]) -> Result<(), Nack> {
+        if self.reads == 0 {
+            return Err(Nack);
+        }
+        self.reads -= 1;
+        self.inner.read(addr, buf)
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn flaky(writes: usize, reads: usize) -> Flaky<MockI2c<impl FnMut(&[I2cTxn], &mut [u8]) -> Result<(), Nack>>> {
+    Flaky { inner: chip(0, 0, None), writes, reads }
+}
+
+/// GET_REV (AN332): part number in RESP1, firmware major and minor in RESP2-3, chip revision in RESP8.
+#[test]
+fn revision_volume_mute() {
+    let mut si = Si4732::new(chip(0, 0, None), ADDR);
+    let mut d = MockDelay::default();
+    assert_eq!(si.mode(), None);
+    assert_eq!(si.revision(&mut d), Ok((32, b'6', b'0', b'C')));
+    si.volume(80, &mut d).unwrap(); // held to 63
+    si.mute(true, &mut d).unwrap();
+    si.mute(false, &mut d).unwrap();
+    si.power_down(&mut d).unwrap();
+    assert_eq!(si.mode(), None);
+    let t = si.release().txns;
+    let w = writes(&t);
+    assert_eq!(w[0], vec![0x10]);
+    assert_eq!(w[1], vec![0x12, 0, 0x40, 0x00, 0, 63], "RX_VOLUME 63");
+    assert_eq!(w[2], vec![0x12, 0, 0x40, 0x01, 0, 3], "RX_HARD_MUTE both channels");
+    assert_eq!(w[3], vec![0x12, 0, 0x40, 0x01, 0, 0]);
+    assert_eq!(w[4], vec![0x11], "POWER_DOWN");
+    // GET_REV's reply is read whole (status and 8 bytes) once CTS is seen; the others have no reply read.
+    assert_eq!(t[1..3], [I2cTxn::Read(ADDR, 1), I2cTxn::Read(ADDR, 9)]);
+    assert_eq!(t.iter().filter(|t| matches!(t, I2cTxn::Read(_, n) if *n > 1)).count(), 1);
+}
+
+/// AM_TUNE_FREQ has ANTCAP (two bytes) after the frequency; SSB's ARG1 bits 7:6 pick the sideband (1 = LSB).
+#[test]
+fn am_and_lsb_tune_bytes() {
+    let mut si = Si4732::new(chip(0, 0, None), ADDR);
+    let mut d = MockDelay::default();
+    si.power_up_start(Mode::Am).unwrap();
+    assert_eq!(si.mode(), Some(Mode::Am));
+    si.tune_start(149, Sideband::Lsb, &mut d).unwrap();
+    si.tune_start(30000, Sideband::Usb, &mut d).unwrap();
+    si.power_down(&mut d).unwrap();
+    si.power_up_start(Mode::Ssb).unwrap();
+    si.tune_start(3700, Sideband::Lsb, &mut d).unwrap();
+    // FM band edges: 64.00 and 108.00 MHz in, just outside them out.
+    si.power_down(&mut d).unwrap();
+    si.power_up_start(Mode::Fm).unwrap();
+    assert_eq!(si.tune_start(6399, Sideband::Usb, &mut d), Err(Error::OutOfBand));
+    assert_eq!(si.tune_start(10801, Sideband::Usb, &mut d), Err(Error::OutOfBand));
+    si.tune_start(6400, Sideband::Usb, &mut d).unwrap();
+    si.tune_start(10800, Sideband::Usb, &mut d).unwrap();
+    let w = writes(&si.release().txns);
+    assert_eq!(w[1], vec![0x40, 0, 0, 149, 0, 0], "AM_TUNE_FREQ 149 kHz (sideband ignored)");
+    assert_eq!(w[2], vec![0x40, 0, 0x75, 0x30, 0, 0], "AM_TUNE_FREQ 30000 kHz");
+    assert_eq!(w[4], vec![0x01, 0x31, 0x05]);
+    assert_eq!(w[5], vec![0x40, 0x40, 0x0E, 0x74, 0, 0], "SSB_TUNE_FREQ 3700 kHz LSB");
+    assert_eq!(w[8], vec![0x20, 0, 0x19, 0x00, 0]);
+    assert_eq!(w[9], vec![0x20, 0, 0x2A, 0x30, 0]);
+    assert_eq!(w.len(), 10);
+}
+
+/// FM_SEEK_START has one argument (SEEKUP, WRAP); SSB can't seek; the AM seek band only in AM; SSB settings only
+/// in SSB; RDS only in FM.
+#[test]
+fn fm_seek_and_wrong_modes() {
+    let mut si = Si4732::new(chip(0, 0, None), ADDR);
+    let mut d = MockDelay::default();
+    let cfg = SsbConfig { audio_bw: 0, sideband_cutoff: 0, avc_divider: 0, avc: false, soft_mute_snr: false, afc_off: false };
+    assert_eq!(si.seek_start(true, true, &mut d), Err(Error::WrongMode));
+    assert_eq!(si.rsq(&mut d), Err(Error::WrongMode));
+    si.power_up_start(Mode::Fm).unwrap();
+    si.seek_start(false, true, &mut d).unwrap();
+    si.seek_start(true, false, &mut d).unwrap();
+    assert_eq!(si.am_seek_band(520, 1710, &mut d), Err(Error::WrongMode));
+    assert_eq!(si.ssb(cfg, 0, &mut d), Err(Error::WrongMode));
+    si.power_down(&mut d).unwrap();
+    si.power_up_start(Mode::Ssb).unwrap();
+    assert_eq!(si.seek_start(true, true, &mut d), Err(Error::WrongMode));
+    assert_eq!(si.rds_on(&mut d), Err(Error::WrongMode));
+    // SSB_MODE all fields at their widest: each masked to its 4 bits.
+    let all = SsbConfig { audio_bw: 0xFF, sideband_cutoff: 0xFF, avc_divider: 0xFF, avc: true, soft_mute_snr: true, afc_off: true };
+    assert_eq!(all.bits(), 0xBFFF);
+    assert_eq!(cfg.bits(), 0);
+    let w = writes(&si.release().txns);
+    assert_eq!(w[1], vec![0x21, 0x04], "FM_SEEK_START down, wrap");
+    assert_eq!(w[2], vec![0x21, 0x08], "FM_SEEK_START up, no wrap");
+    assert_eq!(w.len(), 5, "nothing sent for the refused calls");
+}
+
+/// FM_RDS_STATUS (AN332): STATUSONLY (0x04) asks without popping; an empty FIFO pops nothing. MTFIFO | INTACK
+/// (0x03) empties it.
+#[test]
+fn rds_empty_fifo_and_flush() {
+    let mut si = Si4732::new(MockI2c::new(|_, buf| {
+        buf.fill(0);
+        buf[0] = 0x80;
+        Ok(())
+    }), ADDR);
+    let mut d = MockDelay::default();
+    si.power_up_start(Mode::Fm).unwrap();
+    assert_eq!(si.rds_read(&mut d), Ok(None));
+    si.rds_flush(&mut d).unwrap();
+    let t = si.release().txns;
+    let w = writes(&t);
+    assert_eq!(w[1..], [vec![0x24, 0x04], vec![0x24, 0x03]]);
+    // The status-only reply is read as 4 bytes (status, RDSINT, sync, FIFO used); the flush's as a whole group.
+    assert!(t.contains(&I2cTxn::Read(ADDR, 4)) && t.contains(&I2cTxn::Read(ADDR, 13)));
+}
+
+/// ready() during power-up: not yet, then CTS; CTS with ERR is a rejected power-up.
+#[test]
+fn ready_reports_rejection() {
+    let mut si = Si4732::new(chip(1, 0, Some(0x01)), ADDR);
+    si.power_up_start(Mode::Fm).unwrap();
+    assert_eq!(si.ready(), Ok(false));
+    assert_eq!(si.ready(), Err(Error::Rejected));
+}
+
+/// A chip that stops answering part way: every call passes the NACK on, at whichever step it comes.
+#[test]
+fn nack_at_each_step() {
+    let mut d = MockDelay::default();
+    let cfg = SsbConfig { audio_bw: 1, sideband_cutoff: 1, avc_divider: 0, avc: true, soft_mute_snr: false, afc_off: true };
+    // Power-up not acknowledged: the mode is not taken.
+    let mut si = Si4732::new(flaky(0, 9), ADDR);
+    assert_eq!(si.power_up_start(Mode::Fm), Err(Error::Nack));
+    assert_eq!(si.mode(), None);
+    // The reply read after CTS.
+    let mut si = Si4732::new(flaky(9, 1), ADDR);
+    assert_eq!(si.revision(&mut d), Err(Error::Nack));
+    // Each of RDS's three properties.
+    for n in [1, 2, 3] {
+        let mut si = Si4732::new(flaky(n, 99), ADDR);
+        si.power_up_start(Mode::Fm).unwrap();
+        assert_eq!(si.rds_on(&mut d), Err(Error::Nack), "write {n}");
+    }
+    // RDS: the status-only ask, then the pop.
+    for n in [1, 2] {
+        let mut si = Si4732::new(flaky(n, 99), ADDR);
+        si.power_up_start(Mode::Fm).unwrap();
+        assert_eq!(si.rds_read(&mut d), Err(Error::Nack), "write {n}");
+    }
+    let mut si = Si4732::new(flaky(1, 99), ADDR);
+    si.power_up_start(Mode::Fm).unwrap();
+    assert_eq!(si.rsq(&mut d), Err(Error::Nack));
+    // SSB: SSB_MODE, then SSB_BFO.
+    for n in [1, 2] {
+        let mut si = Si4732::new(flaky(n, 99), ADDR);
+        si.power_up_start(Mode::Ssb).unwrap();
+        assert_eq!(si.ssb(cfg, 0, &mut d), Err(Error::Nack), "write {n}");
+    }
+    // AM seek band: bottom, then top.
+    for n in [1, 2] {
+        let mut si = Si4732::new(flaky(n, 99), ADDR);
+        si.power_up_start(Mode::Am).unwrap();
+        assert_eq!(si.am_seek_band(520, 1710, &mut d), Err(Error::Nack), "write {n}");
+    }
+    // Tune poll: GET_INT_STATUS, then TUNE_STATUS once STC is set; seek cancel.
+    for n in [1, 2] {
+        let mut si = Si4732::new(flaky(n, 99), ADDR);
+        si.power_up_start(Mode::Am).unwrap();
+        assert_eq!(si.tune_poll(&mut d), Err(Error::Nack), "write {n}");
+    }
+    let mut si = Si4732::new(flaky(1, 99), ADDR);
+    si.power_up_start(Mode::Am).unwrap();
+    assert_eq!(si.seek_cancel(&mut d), Err(Error::Nack));
+}
+
+/// STC set with the chip powered down (no mode): the result can't be asked for, and nothing more is sent.
+#[test]
+fn tune_poll_without_a_mode() {
+    let mut si = Si4732::new(chip(0, 0, None), ADDR);
+    let mut d = MockDelay::default();
+    assert_eq!(si.tune_poll(&mut d), Err(Error::WrongMode));
+    assert_eq!(writes(&si.release().txns), vec![vec![0x14]]);
+}
+
 /// HF-35, BCR-32 (decision 292): the gain override is FM_AGC_OVERRIDE (0x28) in FM and AM_AGC_OVERRIDE (0x48) in
 /// AM, AGC off with the index, or AGC on.
 #[test]
