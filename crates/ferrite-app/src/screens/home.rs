@@ -537,24 +537,31 @@ fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
 /// S-meter, the green LED), but its audio never reaches the speaker and never holds it from a watched slot. Off: no
 /// chip listens to it at all, so its watch turns go to the other slots. The APRS slot keeps Normal and Muted. RAM
 /// only; each stays with its slot until \* again.
+/// HOME-15.1: how quickly a second \* must follow the first to turn the slot off.
+const STAR_OFF_MS: u32 = 1000;
+
 fn quick_mute(app: &mut App) {
     let a = app.active;
     let bit = 1 << a;
+    // HOME-15.1: \* \* within a second turns a slot off; a later \* only unmutes
+    let quick = app.star_at != 0 && ((app.now as u16).wrapping_sub(app.star_at & !1) as u32) < STAR_OFF_MS;
+    app.star_at = 0;
     let (word, then): (&[u8], &[u8]) = if app.off & bit != 0 {
         app.off &= !bit;
         (b" on", b"")
-    } else if app.mute & bit != 0 && !app.aprs_slot(a) {
-        // HOME-15.1: muted to off; a latched monitor goes with it
+    } else if app.mute & bit != 0 && quick && !app.aprs_slot(a) {
+        // muted to off; a latched monitor goes with it
         (app.mute, app.off) = (app.mute & !bit, app.off | bit);
         if app.monitor & bit != 0 {
             app.monitor &= !bit;
             app.out.push(RadioCmd::Monitor { slot: a, on: false });
         }
-        (b" off", b"* again to turn on")
+        (b" off", b"* turns it back on")
     } else {
         app.mute ^= bit;
         if app.mute & bit != 0 {
-            (b" muted", if app.aprs_slot(a) { b"* again to hear it".as_slice() } else { b"* again turns off" })
+            app.star_at = app.now as u16 | 1;
+            (b" muted", if app.aprs_slot(a) { b"* again to hear it".as_slice() } else { b"* unmutes, ** off" })
         } else {
             (b" unmuted", b"")
         }

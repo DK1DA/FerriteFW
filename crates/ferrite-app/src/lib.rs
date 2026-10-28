@@ -384,9 +384,12 @@ pub struct App {
     pub(crate) monitor: u8,
     /// Quick mute (\* on home, HOME-15): slots received but never heard, a bit per slot. RAM only.
     pub(crate) mute: u8,
-    /// Slots turned off (\* on home cycles Normal, Muted, Off: HOME-15.1): not received or watched, a bit per slot.
-    /// Never with a mute bit. RAM only, as the mute.
+    /// Slots turned off (\* \* on home, HOME-15.1): not received or watched, a bit per slot. Never with a mute bit.
+    /// RAM only, as the mute.
     pub(crate) off: u8,
+    /// HOME-15.1: when \* last muted a slot (`now` as u16, low bit set; 0 none): a second \* within
+    /// a second (`STAR_OFF_MS` in home.rs) turns it off instead of unmuting.
+    pub(crate) star_at: u16,
     out: Outbox,
     /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
     /// the owner drains after every input.
@@ -490,6 +493,7 @@ impl App {
             monitor: 0,
             mute: ((set.aprs_mode && set.aprs_mute) as u8) << aprs::APRS_SLOT, // APRS-15.1: muted at power on in APRS mode
             off: 0,
+            star_at: 0,
             out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),

@@ -572,7 +572,7 @@ class Side:
         """The active slot unmuted (HOME-15's quick mute): True if it was."""
         u = self.home()
         if "muted" in str(u.active.get("state", "")).lower():
-            u = self.keys("STAR")  # HOME-15.1: muted, then off (but on the APRS slot), then on
+            u = self.keys("STAR")  # HOME-15.1: one STAR unmutes; Off only if it lands within 1 s of the muting one
             if str(u.active.get("state", "")) == "Off":
                 self.keys("STAR")
             return True

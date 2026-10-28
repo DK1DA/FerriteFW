@@ -1,5 +1,5 @@
-//! A slot turned off (HOME-15.1 – HOME-15.4): \* cycles the active slot Normal, Muted, Off; the off card; muted while
-//! receiving.
+//! A slot turned off (HOME-15.1 – HOME-15.4): \* mutes and unmutes the active slot, \* \* within a second turns it
+//! off; the off card; muted while receiving.
 
 use super::*;
 use crate::persist::{Persist, Sink};
@@ -29,7 +29,7 @@ fn toast(t: &T) -> (String, String) {
     (String::from_utf8_lossy(x.head.as_bytes()).into_owned(), String::from_utf8_lossy(x.body.as_bytes()).into_owned())
 }
 
-/// HOME-15.1, WATCH-2.1: \* on a muted slot turns it off: the off mask goes to the Radio task, the watch set loses it
+/// HOME-15.1, WATCH-2.1: a second \* within a second of the one that muted turns the slot off: the off mask goes to the Radio task, the watch set loses it
 /// (its turns go to the others), a toast says so and how to undo it; \* again turns it on, unmuted, and it is
 /// watched again. The readback's card state is "Off". A latched monitor goes off with it.
 #[test]
@@ -39,14 +39,14 @@ fn star_turns_a_slot_off_and_on() {
     t.tap(Key::Slot); // B active
     t.tap(Key::Side(1)); // monitor latched on B
     t.tap(Key::Star);
-    assert_eq!(toast(&t), ("Slot B muted".into(), "* again turns off".into()));
+    assert_eq!(toast(&t), ("Slot B muted".into(), "* unmutes, ** off".into()));
     t.cmds();
     t.tap(Key::Star);
     let c = t.cmds();
     assert!(c.contains(&RadioCmd::SlotOff(0b010)) && c.contains(&RadioCmd::Mute(0)), "{c:?}");
     assert!(c.contains(&RadioCmd::Watch(0b001)), "B out of the watch: {c:?}");
     assert!(c.contains(&RadioCmd::Monitor { slot: 1, on: false }), "{c:?}");
-    assert_eq!(toast(&t), ("Slot B off".into(), "* again to turn on".into()));
+    assert_eq!(toast(&t), ("Slot B off".into(), "* turns it back on".into()));
     assert_eq!(t.app.state(1, &t.live), ("Off", SUB));
     t.live.slots[1].squelch_open = true;
     t.wait(100);
@@ -57,6 +57,18 @@ fn star_turns_a_slot_off_and_on() {
     assert!(c.contains(&RadioCmd::SlotOff(0)) && c.contains(&RadioCmd::Mute(0)) && c.contains(&RadioCmd::Watch(0b011)), "{c:?}");
     assert_eq!(toast(&t).0, "Slot B on");
     assert_eq!(t.app.state(1, &t.live).0, "RX");
+}
+
+/// HOME-15.1: a \* more than a second after the one that muted only unmutes; the slot never goes off on its way.
+#[test]
+fn a_later_star_only_unmutes() {
+    let mut t = T::new();
+    t.tap(Key::Star);
+    assert_eq!(t.app.mute, 0b001);
+    t.wait(1500);
+    t.tap(Key::Star);
+    assert_eq!((t.app.mute, t.app.off), (0, 0));
+    assert_eq!(toast(&t).0, "Slot A unmuted");
 }
 
 /// HOME-15.1, APRS-2: the APRS slot keeps Normal and Muted: \* on C in APRS mode never turns it off.

@@ -178,8 +178,8 @@ def slot_cycles_cards_stay(t):
 
 @test("HOME-15", "HOME-15.1", "KEY-18", pages=("Home",))
 def star_quick_mute(t):
-    """* on home mutes the active slot (card says Muted, toast), * again turns off (card says Off, toast), a
-    third * turns it back on; muted, the slot keeps receiving."""
+    """* on home mutes the active slot (card says Muted, toast); * again a second later unmutes it; * * within a
+    second turns it off (card says Off, toast); * on an off slot turns it on; muted, the slot keeps receiving."""
     was = t.unmute()
     if was:
         t.note("slot A was muted at the start (put back)")
@@ -187,15 +187,16 @@ def star_quick_mute(t):
     try:
         t.check("muted" in u.active["state"].lower(), "the card says Muted", u.active["state"])
         t.check(u.toast and "muted" in u.toast["head"], "the toast", u.toast)
+        time.sleep(1.5)
         u = t.keys("STAR")
-        t.check(u.active["state"] == "Off", "* again: Off", u.active["state"])
+        t.check("muted" not in u.active["state"].lower() and u.active["state"] != "Off", "a later *: unmuted", u.active)
+        u = t.keys("STAR STAR")
+        t.check(u.active["state"] == "Off", "* * quickly: Off", u.active["state"])
         t.check(u.toast and u.toast["head"].endswith(" off"), "the off toast", u.toast)
     finally:
-        if u.active["state"] in ("Off", "Muted", "RX muted"):
+        if u.active["state"] == "Off" or "muted" in u.active["state"].lower():
             u = t.keys("STAR")
-        if "muted" in u.active["state"].lower():
-            u = t.keys("STAR")
-    t.check("muted" not in u.active["state"].lower() and u.active["state"] != "Off", "a third *: on", u.active)
+    t.check("muted" not in u.active["state"].lower() and u.active["state"] != "Off", "* on Off: on", u.active)
     if was:
         t.keys("STAR")
 
