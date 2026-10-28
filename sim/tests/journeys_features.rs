@@ -366,7 +366,7 @@ fn strip_off_while_broadcast() {
 }
 
 /// HOME-15, HOME-15.1, HOME-15.3: \* on home mutes the active slot: its card says Muted, then Muted with the RX tag
-/// while its carrier is on (the fake radio still opens its squelch and moves its meter); \* again turns it off (OFF
+/// while its carrier is on (the fake radio still opens its squelch and moves its meter); \* again turns off (OFF
 /// on its card) and a third \* back on, heard as before. On the broadcast slot \* keeps the broadcast off the speaker.
 #[test]
 fn quick_mute() {
