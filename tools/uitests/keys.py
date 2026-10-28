@@ -54,7 +54,7 @@ def back_is_one_level(t):
     t.eq(u.id, "Home", "and then home")
 
 
-@test("SQL-11", "KEY-14", pages=("Home",))
+@test("SQL-11", "KEY-14.1", pages=("Home",))
 def monitor_while_locked(t):
     """Locked, SIDE1 still opens the monitor (and again closes it)."""
     was_muted = t.unmute()
@@ -72,7 +72,7 @@ def monitor_while_locked(t):
             t.keys("STAR")
 
 
-@test("KEY-13", "KEY-14", "SBAR-11", smoke=True, pages=("Home", "Quick"))
+@test("KEY-13", "KEY-14.4", "SBAR-11", smoke=True, pages=("Home", "Quick"))
 def key_lock(t):
     """Hold # locks (padlock in the bar, toast); locked, keys and the knob give "Locked: hold # to unlock" and
     do nothing, hold * gives no quick menu; hold # unlocks."""
@@ -100,6 +100,29 @@ def key_lock(t):
     if was_muted:
         t.home()
         t.keys("STAR")
+
+
+@test("KEY-14.1", "KEY-14.2", "KEY-13", pages=("Home",))
+def lock_modes(t):
+    """Lock covers (0 9 1 2): Keypad lets SIDE2 scan; All but PTT locks SIDE2 too. Each lock's toast names it."""
+    try:
+        t.set("0 9 1 2", "Keypad")
+        t.home()
+        u = t.press("HASH", long=True)
+        t.check(u.toast and u.toast["head"] == "Keypad locked", "the keypad's toast", u.toast)
+        u = t.keys("SIDE2")
+        t.check(not (u.toast and u.toast["head"].startswith("Locked")), "keypad lock: SIDE2 works", u.toast)
+        t.keys("SIDE2")
+        t.press("HASH", long=True)
+        t.set("0 9 1 2", "All but PTT")
+        t.home()
+        u = t.press("HASH", long=True)
+        t.check(u.toast and u.toast["head"] == "All keys locked", "all but PTT's toast", u.toast)
+        u = t.keys("SIDE2")
+        t.check(u.toast and u.toast["head"].startswith("Locked"), "all but PTT: SIDE2 locked", u.toast)
+        t.press("HASH", long=True)
+    finally:
+        t.set("0 9 1 2", "Keypad")
 
 
 @test("KEY-20", "KEY-15", slow=True, pages=("Home",))

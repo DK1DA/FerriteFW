@@ -976,7 +976,7 @@ fn remote_keys_drive_the_menus() {
     assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 21]).0, Status::Invalid as u8, "20 at most");
 }
 
-/// LINK-19, KEY-3, KEY-14: a long press is held to the long-press time and let go by the radio (keys answer
+/// LINK-19, KEY-3, KEY-14.4: a long press is held to the long-press time and let go by the radio (keys answer
 /// `busy` meanwhile); hold # locks; a locked keypad takes remote keys as it takes the radio's (the toast, nothing
 /// else); down and up hold a key, and a session that moves port lets go of what it held.
 #[test]
@@ -988,7 +988,7 @@ fn remote_long_press_lock_and_hold() {
     pc.pass(800, &LiveAll::default());
     assert!(pc.app.locked() && pc.ui().contains("state ") && pc.ui().contains(" locked=1"));
     pc.keys("MENU");
-    assert_eq!(pc.app.screen(), Screen::Home, "KEY-14: locked");
+    assert_eq!(pc.app.screen(), Screen::Home, "KEY-14.4: locked");
     assert!(pc.ui().contains("toast \"Locked:\""), "{}", pc.ui());
     assert_eq!(pc.press("HASH", key::LONG).0, 0);
     pc.pass(800, &LiveAll::default());

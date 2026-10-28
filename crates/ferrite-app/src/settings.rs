@@ -279,8 +279,10 @@ pub struct Settings {
     pub menu_timeout: u8,
     /// 0 1 6 1: how long # on home pauses watch ([`PAUSE_TIMES_S`]; WATCH-6).
     pub pause_time: u8,
-    /// 0 9 1 2: the key lock covers PTT too (KEY-14, TX-18).
-    pub lock_ptt: bool,
+    /// 0 9 1 2: what the key lock covers (KEY-14, TX-18): 0 the keypad, 1 everything (PTT too), 2 everything but
+    /// PTT. 0 and 1 are the old "Keys" and "Keys and PTT" (a bool's byte), so a stored choice keeps its meaning;
+    /// the menu's order is [`LOCK_MODES`] ([`Settings::lock`]).
+    pub lock_mode: u8,
     /// 0 8 7: busy lockout for new channels and the VFOs (TX-21.1).
     pub busy_default: bool,
     /// 0 7 3 1: the cards' S-meter as dBm instead of bars (SQL-12.3).
@@ -357,6 +359,35 @@ pub const LED_MODES: [&str; 3] = ["Off", "RX and TX", "RX, TX and heartbeat"];
 pub const AUTO_OFF_TIMES: [u16; 5] = [0, 30, 60, 120, 240];
 /// 0 9 1 1's values, seconds (0 off).
 pub const AUTO_LOCK_TIMES: [u16; 5] = [0, 30, 60, 120, 300];
+/// 0 9 1 2's values, in the menu's order (KEY-14); [`Lock`] in the same order.
+pub const LOCK_MODES: [&str; 3] = ["Keypad", "All but PTT", "All"];
+
+/// What the key lock covers (KEY-14).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lock {
+    /// KEY-14.1: the front keys and the tuning knob; PTT and the side keys work.
+    Keypad,
+    /// KEY-14.2: every key and the knob, the side keys too; PTT works.
+    AllButPtt,
+    /// KEY-14.3: PTT too.
+    All,
+}
+
+impl Lock {
+    /// The stored byte (`Settings::lock_mode`) as the menu's index: 1 (All, the old "Keys and PTT") is last.
+    pub fn index(stored: u8) -> u8 {
+        match stored {
+            1 => 2,
+            2 => 1,
+            _ => 0,
+        }
+    }
+
+    /// The menu's index as the stored byte ([`Lock::index`] the other way).
+    pub fn stored(index: u8) -> u8 {
+        Self::index(index)
+    }
+}
 
 
 /// 0 3 2 1's values (SCOPE-9).
@@ -480,7 +511,7 @@ impl Settings {
         arrival: 0,
         menu_timeout: 3,
         pause_time: 1,
-        lock_ptt: false,
+        lock_mode: 0,
         busy_default: false,
         smeter_dbm: false,
         ch_display: 0,
@@ -570,6 +601,11 @@ impl Settings {
 
     pub fn set_region(&mut self, r: Option<Region>) {
         self.region = r.and_then(|r| Region::ALL.iter().position(|&x| x == r)).map_or(0, |i| i as u8 + 1);
+    }
+
+    /// What the key lock covers (0 9 1 2, KEY-14).
+    pub fn lock(&self) -> Lock {
+        [Lock::Keypad, Lock::AllButPtt, Lock::All][Lock::index(self.lock_mode) as usize]
     }
 
     /// Weather radio and SAME exist only in the US and Canada (WX-3).

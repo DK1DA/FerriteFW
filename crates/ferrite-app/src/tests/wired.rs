@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::screens::groups::change;
+use crate::settings::{Lock, LOCK_MODES};
 
 /// MENU-28: 0 7 9 sets how long an idle menu stays up; Off keeps it.
 #[test]
@@ -31,7 +32,8 @@ fn pause_time_follows_its_setting() {
     assert!(t.cmds().contains(&RadioCmd::PauseWatch(300)));
 }
 
-/// KEY-14, TX-18: with Lock covers "Keys and PTT" (0 9 1 2) a locked radio doesn't key; "Keys" lets PTT through.
+/// KEY-14.1, KEY-14.2, KEY-14.3, TX-18: with Lock covers "All" (0 9 1 2) a locked radio doesn't key; "Keypad" and
+/// "All but PTT" let PTT through.
 #[test]
 fn lock_covers_ptt() {
     let mut t = T::new();
@@ -39,16 +41,58 @@ fn lock_covers_ptt() {
     t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
     t.hold(Key::Hash);
     assert!(t.app.locked());
-    t.app.set.lock_ptt = true;
     let s = store();
-    t.app.key_down(Key::PTT, t.t, &s);
-    assert_eq!(t.app.screen(), Screen::Home, "keys and PTT: no transmit");
+    let mut at = t.t;
+    for (i, keys) in [(0, true), (1, true), (2, false)] {
+        if i > 0 {
+            assert!(change(&mut t.app, &[9, 1, 2], 1), "the menu's next choice");
+        }
+        t.app.key_down(Key::PTT, at, &s);
+        assert_eq!(matches!(t.app.screen(), Screen::Transmit(_)), keys, "{}", LOCK_MODES[i]);
+        assert_eq!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Locked:"), !keys);
+        t.app.key_up(Key::PTT, at + 300, &s);
+        at += 400;
+        let bar = t.app.status_bar(&t.live, &ferrite_core::msg::Device::default());
+        assert_eq!((bar.locked, bar.lock_ptt), (true, !keys), "KEY-14.3: the padlock red when PTT is locked too");
+    }
+}
+
+/// KEY-13, KEY-14.1, KEY-14.2, KEY-14.4: the keypad's lock lets SIDE2 scan (and SIDE1 monitor); All but PTT locks the side keys,
+/// SIDE1's squelch too.
+#[test]
+fn lock_modes_and_the_side_keys() {
+    let mut t = T::new();
+    let s = store();
+    assert_eq!(t.app.set.lock(), Lock::Keypad, "the default");
+    t.hold(Key::Hash);
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Keypad locked"), "KEY-13: the toast names it");
+    t.cmds();
+    t.tap(Key::Side(2));
+    assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: true }), "keypad lock: SIDE2 scans");
+    t.tap(Key::Side(2));
+    t.cmds();
+    // SIDE2 + ▲ (a big tuning step) stays locked, and SIDE2's release then does nothing
+    let f = t.freq();
+    t.app.key_down(Key::Side(2), t.t, &s);
+    t.tap(Key::Up);
+    t.app.key_up(Key::Side(2), t.t + 100, &s);
+    assert_eq!(t.freq(), f);
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Scan { .. })), "KEY-14.4: no scan at the release");
+    t.hold(Key::Hash);
+    t.app.set.lock_mode = Lock::stored(1); // All but PTT
+    t.hold(Key::Hash);
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"All keys locked" && x.body.as_bytes() == b"PTT works"));
+    t.cmds();
+    t.tap(Key::Side(2));
+    t.tap(Key::Side(1));
+    let sq = t.app.slot(0).cfg().squelch;
+    t.app.key_down(Key::Side(1), t.t, &s);
+    t.knob(1);
+    t.app.key_up(Key::Side(1), t.t + 100, &s);
+    let c = t.cmds();
+    assert!(!c.iter().any(|c| matches!(c, RadioCmd::Scan { .. } | RadioCmd::Monitor { .. })), "side keys locked: {c:?}");
+    assert_eq!(t.app.slot(0).cfg().squelch, sq, "no SIDE1 squelch");
     assert!(t.app.toast_up());
-    t.app.key_up(Key::PTT, t.t + 300, &s);
-    t.app.set.lock_ptt = false;
-    t.app.key_down(Key::PTT, t.t + 400, &s);
-    assert!(matches!(t.app.screen(), Screen::Transmit(_)), "keys only: PTT works locked");
-    t.app.key_up(Key::PTT, t.t + 700, &s);
 }
 
 /// TX-21.1: 0 8 7 sets the VFOs' busy lockout at once and a new repeater channel's.

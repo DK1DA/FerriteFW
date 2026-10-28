@@ -328,7 +328,7 @@ impl View for Pin {
     }
 
     fn ptt(self, app: &mut App, down: bool) {
-        // At power on PTT waits for the PIN too (PIN-1); otherwise PTT works as always (KEY-14).
+        // At power on PTT waits for the PIN too (PIN-1); otherwise PTT works as the lock allows (KEY-14).
         if down && !self.blocks() {
             super::nav::transmit(app);
         }

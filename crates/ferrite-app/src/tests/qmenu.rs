@@ -216,7 +216,7 @@ fn closes_after_5_s_idle() {
     assert_eq!(t.app.screen(), Screen::Home);
 }
 
-/// HOME-17, KEY-14: locked, hold \* does nothing but the lock toast; an auto lock closes the box.
+/// HOME-17, KEY-14.4: locked, hold \* does nothing but the lock toast; an auto lock closes the box.
 #[test]
 fn locked_hold_star_does_nothing() {
     let mut t = T::new();

@@ -506,12 +506,12 @@ fn key_lock() {
     t.tap(Key::Up);
     t.knob(3);
     t.tap(Key::Menu);
-    assert_eq!((t.freq(), t.app.screen()), (f, Screen::Home), "KEY-14: other keys do nothing");
+    assert_eq!((t.freq(), t.app.screen()), (f, Screen::Home), "KEY-14.1, KEY-14.4: other keys do nothing");
     t.hold(Key::Hash);
     assert!(!t.app.locked());
 }
 
-/// SQL-11, KEY-14: locked, SIDE1 still latches the monitor (and again releases it), and SIDE1 + knob or ▲▼
+/// SQL-11, KEY-14.1: locked (the keypad's lock), SIDE1 still latches the monitor (and again releases it), and SIDE1 + knob or ▲▼
 /// still set the squelch; SIDE1 + ◀▶ (the clarifier) and the knob alone stay locked.
 #[test]
 fn monitor_and_squelch_while_locked() {
@@ -611,7 +611,7 @@ fn shortcuts_and_menu_paths() {
     assert_eq!(t.app.screen(), Screen::Home);
 }
 
-/// KEY-7.3: PTT transmits from any screen, going home first; locked too (KEY-14).
+/// KEY-7.3: PTT transmits from any screen, going home first; locked too (KEY-14.1).
 #[test]
 fn ptt_from_any_screen() {
     let mut t = T::new();

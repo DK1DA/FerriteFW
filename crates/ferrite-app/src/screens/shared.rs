@@ -189,6 +189,7 @@ impl App {
         StatusBar {
             name,
             locked: self.locked,
+            lock_ptt: self.locked && self.set.lock() == crate::settings::Lock::All,
             // SBAR-11: the bar shows what changes what a key does, so SCN is the active slot scanning; a
             // watched slot's scan shows on its card.
             scan: !hf && live.slots[self.active as usize].scanning,

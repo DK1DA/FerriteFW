@@ -790,6 +790,8 @@ pub struct StatusBar {
     /// The screen's own name; empty on home (SBAR-5).
     pub name: Buf<10>,
     pub locked: bool,
+    /// The lock covers PTT too (KEY-14.3, SBAR-3): the padlock in red.
+    pub lock_ptt: bool,
     pub scan: bool,
     /// Watched slots: 3 = TW, 2 = DW, else nothing (SBAR-16).
     pub watch: u8,
@@ -822,8 +824,8 @@ pub struct StatusBar {
 
 impl StatusBar {
     fn left_eq(&self, o: &Self) -> bool {
-        (self.name, self.locked, self.scan, self.watch, self.inbox, self.alert, self.alerts_paused)
-            == (o.name, o.locked, o.scan, o.watch, o.inbox, o.alert, o.alerts_paused)
+        (self.name, self.locked, self.lock_ptt, self.scan, self.watch, self.inbox, self.alert, self.alerts_paused)
+            == (o.name, o.locked, o.lock_ptt, o.scan, o.watch, o.inbox, o.alert, o.alerts_paused)
     }
 
     fn right_eq(&self, o: &Self) -> bool {
@@ -880,7 +882,7 @@ impl StatusBar {
             x += gap;
         }
         if self.locked {
-            lcd.mask4(x, 2, &ICON_LOCK, SUB, None, BG);
+            lcd.mask4(x, 2, &ICON_LOCK, if self.lock_ptt { RED } else { SUB }, None, BG);
             lcd.fill(x, 16, 14, 3, BG);
             lcd.fill(x + 14, y0, gap, y1, BG);
             x += 14 + gap;

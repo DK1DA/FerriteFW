@@ -180,7 +180,14 @@ const ROWS: [(&str, Val<()>); 20] = [
         b.set(b"Not measured yet");
         SUB
     }),
-    ("Key lock", |c, b| on_off(b, c.app.locked)),
+    // KEY-14: locked, what the lock covers
+    ("Key lock", |c, b| {
+        if !c.app.locked {
+            return on_off(b, false);
+        }
+        b.set(crate::settings::LOCK_MODES[crate::settings::Lock::index(c.app.set.lock_mode) as usize].as_bytes());
+        TEXT
+    }),
     // VOX-1: VOX shows here when on.
     ("VOX", |c, b| on_off(b, c.app.set.vox)),
     // SBAR-18: paused in HF mode; WX-3: US and Canada only.
