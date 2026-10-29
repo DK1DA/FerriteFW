@@ -68,3 +68,24 @@ fn dry_tx_not_from_the_link() {
     assert!(groups::change(&mut t.app, &[8, 8, 5], 1));
     assert!(t.app.dry_tx());
 }
+
+/// MENU-14, TX-48: 8 8 5's two greyed reasons fit: on the help line with the row picked, in the toast a turn
+/// shows, and as its value with another row picked.
+#[test]
+fn dry_tx_reasons_fit() {
+    for (built, remote, why) in [(false, false, "not in this build"), (true, true, "on the radio only")] {
+        let mut t = T::ready();
+        t.dev.tx_built = built; // the app's copy follows the device's each tick
+        t.app.radio.tx_built = built;
+        t.app.remote_in = remote;
+        t.app.screen = Screen::Group(Group { g: 8, sub: 8, row: 4 });
+        t.draw();
+        t.shows(why);
+        t.knob(1);
+        assert!(t.toast().ends_with(why), "{}", t.toast());
+        t.draw();
+        t.app.screen = Screen::Group(Group { g: 8, sub: 8, row: 0 }); // another row picked: the reason as 5's value
+        t.draw();
+        t.shows(why);
+    }
+}

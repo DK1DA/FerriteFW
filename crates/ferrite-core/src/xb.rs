@@ -44,10 +44,10 @@ impl Stop {
 
     pub fn text(self) -> &'static str {
         match self {
-            Stop::Hf => "A side is on HF (needs the relay)",
+            Stop::Hf => "A side on HF needs the relay",
             Stop::OneChip => "Both sides on one chip",
-            Stop::Relay => "Relay set for HF: leave HF first",
-            Stop::NoTx => "Receive-only build: no transmit",
+            Stop::Relay => "Relay on HF: leave HF first",
+            Stop::NoTx => "No transmit in this build",
         }
     }
 }
@@ -492,7 +492,7 @@ mod tests {
         let texts = [Stop::Hf, Stop::OneChip, Stop::Relay, Stop::NoTx].map(Stop::text);
         assert_eq!(
             texts,
-            ["A side is on HF (needs the relay)", "Both sides on one chip", "Relay set for HF: leave HF first", "Receive-only build: no transmit"]
+            ["A side on HF needs the relay", "Both sides on one chip", "Relay on HF: leave HF first", "No transmit in this build"]
         );
     }
 

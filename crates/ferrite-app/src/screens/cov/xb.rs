@@ -141,3 +141,15 @@ fn log_words() {
     assert_eq!(text(XbLog { on: false, by: 0x21, why: xb::XB_REFUSED | 9 }), "stopped by cmd:bt: refused");
     assert_eq!(xb::by_word(0x20), "cmd:cable");
 }
+
+/// XB-2: the radio's own refusal to start shows its stop reason whole in the toast, for every reason.
+#[test]
+fn radio_refusals_fit() {
+    for c in 1..=4 {
+        let why = ferrite_core::xb::Stop::from_code(c).unwrap();
+        let mut t = running(XbLive { stopped: c, ..Default::default() });
+        assert!(!xb::running(&t.app), "{c}");
+        assert_eq!(t.toast(), std::format!(" / {}", why.text()));
+        t.draw();
+    }
+}

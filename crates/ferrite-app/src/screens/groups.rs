@@ -344,8 +344,8 @@ pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [4, 5, ..] if !app.set.wx_region() => Some("US/Canada only"), // WX-3
         [5, 3] | [5, 6, 1] if app.set.kiss_on() => app.kiss_holds_aprs(), // KISS-10
-        [8, 8, 5] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
-        [8, 8, 5] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
+        [8, 8, 5] if !app.radio.tx_built => Some("not in this build"), // TX-48
+        [8, 8, 5] if app.remote_in => Some("on the radio only"), // TX-48: never the link's (LINK-19)
         _ => None,
     }
 }

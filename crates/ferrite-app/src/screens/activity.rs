@@ -411,7 +411,8 @@ impl App {
                 self.radio.xb_on = false;
                 self.radio.xb_log = Some(super::xb::XbLog { on: false, by: super::xb::BY_KEYS, why: super::xb::XB_REFUSED | x.stopped });
                 self.reconcile_mode();
-                self.show_toast(b"Can't start:", why.text().as_bytes(), false);
+                // the reason alone, as the page's own refusals (`xb::try_start`): after "Can't start:" it was cut
+                self.show_toast(b"", why.text().as_bytes(), false);
             }
         }
         // MODE-3: the Radio task stopped the mode itself (the lease ran out): nothing runs; the reconciler starts
