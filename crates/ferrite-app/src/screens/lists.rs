@@ -564,7 +564,7 @@ pub fn clock_text(now_min: Option<u16>, ago_s: u32, b: &mut Buf<12>) {
     }
 }
 
-/// A position on one line in 0 6 3's format (GPS-15.3), compact to fit a list row: "45°25.290'N 75°41.832'W"
+/// A position on one line in 0 6 3's format (GPS-15.5), compact to fit a list row: "45°25.290'N 75°41.832'W"
 /// (DDM, the default), "45.42150°N 75.69720°W", "45°25'17"N 75°41'50"W" (DMS to the second), or the grid square
 /// ("FN25dk"). The GPS page shows each coordinate in full ([`coord`]).
 pub fn pos_text(p: Pos, fmt: u8, b: &mut Buf<32>) {
@@ -731,8 +731,10 @@ mod tests {
         }
     }
 
+    /// GPS-15.5: 0 6 3's four names, and a list row's one-line position in its format with the GPS page's symbols.
     #[test]
     fn texts() {
+        assert_eq!(crate::settings::COORD_FORMATS, ["Decimal", "DDM", "DMS", "Grid square"], "GPS-15.5");
         let mut b = Buf::<12>::new();
         let s = |b: &Buf<12>| std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap();
         dist_text(4200, &mut b);
@@ -749,7 +751,7 @@ mod tests {
         assert_eq!(s(&b), "14:10");
         let mut p = Buf::<32>::new();
         pos_text(HERE, 1, &mut p);
-        assert_eq!(p.as_bytes(), "45\u{b0}25.290'N 75\u{b0}41.832'W".as_bytes(), "GPS-15.3: DDM, with its symbols");
+        assert_eq!(p.as_bytes(), "45\u{b0}25.290'N 75\u{b0}41.832'W".as_bytes(), "GPS-15.5: DDM, with its symbols");
         pos_text(HERE, 0, &mut p);
         assert_eq!(p.as_bytes(), "45.42150\u{b0}N 75.69720\u{b0}W".as_bytes());
         pos_text(HERE, 2, &mut p);

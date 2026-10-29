@@ -2500,7 +2500,7 @@ fn timeout_beeps_after_the_unkey() {
     t.app.key_up(Key::PTT, t.t, &s);
 }
 
-/// APRS-2, APRS-15.1: 0 5 9 6 Mute speaker decides whether APRS mode mutes C; \* on C in APRS mode flips the
+/// APRS-2, APRS-15.2: 0 5 9 6 Mute speaker decides whether APRS mode mutes C; \* on C in APRS mode flips the
 /// setting, and the setting changed in the menu mutes or unmutes C at once. Without APRS mode \* on C is quick
 /// mute alone.
 #[test]

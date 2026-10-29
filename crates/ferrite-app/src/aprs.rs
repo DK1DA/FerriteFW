@@ -585,7 +585,7 @@ impl App {
         SlotCfg { mode: 0, narrow: false, power: self.aprs.power % 3, busy: 1, squelch: own.squelch, ..SlotCfg::default() }
     }
 
-    /// APRS-2, APRS-15.1: C's quick mute follows 0 5 9 6 while APRS mode is on, and is off without it.
+    /// APRS-2, APRS-15.2: C's quick mute follows 0 5 9 6 while APRS mode is on, and is off without it.
     pub(crate) fn aprs_mute_sync(&mut self) {
         let on = self.set.aprs_mode && self.set.aprs_mute;
         let m = if on { self.mute | 1 << APRS_SLOT } else { self.mute & !(1 << APRS_SLOT) };
@@ -599,7 +599,7 @@ impl App {
     pub(crate) fn set_aprs_mode(&mut self, on: bool) {
         self.set.aprs_mode = on;
         self.c_follow();
-        // APRS-15.1: C starts muted in APRS mode (packets decoded, not heard; \* unmutes) and is heard again after
+        // APRS-15.2: C starts muted in APRS mode (packets decoded, not heard; \* unmutes) and is heard again after
         self.aprs_mute_sync();
         if on {
             let mut f = Buf::<20>::new();

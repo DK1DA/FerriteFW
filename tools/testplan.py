@@ -515,7 +515,8 @@ def main():
     print("by How: " + ", ".join(f"{k} {v}" for k, v in hows.items())
           + (f", without How {len(no_how)}" if no_how else ""))
     print(f"wrote {a.docs / 'test-plan.md'}: {len(rules)} rules, {len(auto)} automated ({pct:.0f}%), "
-          f"{len(none)} without test or entry, {len(stale)} stale tags")
+          f"{len(none)} without test or entry, {len(stale)} stale tags"
+          + (f", {len(dups)} rule IDs used twice: {' '.join(dups)}" if dups else ""))
 
 
 # ---- Split rules: the parents and their roll-up ----

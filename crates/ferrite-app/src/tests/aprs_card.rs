@@ -219,7 +219,7 @@ fn aprs_card_beacon_and_mute() {
     a.c_active();
     a.s.aprs_tick(10, true, true);
     a.wait(1000);
-    // APRS-15.1: APRS mode muted C as it came on
+    // APRS-15.2: APRS mode muted C as it came on
     assert!(a.card_line().contains("state=\"Muted\""), "{}", a.card_line());
     let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
     let fb = a.fb();
@@ -264,7 +264,7 @@ fn aprs_card_header_priority() {
     let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
     assert_eq!(a.app.aprs_priority(), Some(("APRS first", false)));
     assert!(aprs_line(&a).contains("priority=\"APRS first\""), "{}", aprs_line(&a));
-    // muted (APRS-15.1): "APRS Mode", "APRS first" in grey, "Muted" in amber: all three fit
+    // muted (APRS-15.2): "APRS Mode", "APRS first" in grey, "Muted" in amber: all three fit
     let fb = a.fb();
     let muted_amber = ink(&fb, 186, y + 7, 40, 17, AMBER);
     assert!(muted_amber > 20, "Muted");
@@ -386,7 +386,7 @@ fn aprs_card_beacon_fate_and_countdown() {
     assert_eq!(f.as_bytes(), b"Last beacon 12 s ago");
 }
 
-/// APRS-15.1: APRS mode on mutes C (decoded, not heard), off unmutes it; a radio powered up in APRS mode starts
+/// APRS-15.2: APRS mode on mutes C (decoded, not heard), off unmutes it; a radio powered up in APRS mode starts
 /// with C muted.
 #[test]
 fn aprs_mode_mutes_c() {
