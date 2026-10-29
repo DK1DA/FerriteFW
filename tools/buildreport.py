@@ -12,7 +12,7 @@ saved by the caller: the counts come from those logs and the coverage from that 
 
 What it shows:
   - code coverage: lines the host tests run (cargo llvm-cov), per crate; the headline counts only code that ships on
-    the radio (the simulators are listed but left out); the firmware crate runs only on the radio and isn't measured;
+    the radio (the PC-only simulators are left out); the firmware crate runs only on the radio and isn't measured;
   - the build: version, commit (and whether the tree had changes), toolchain, image size, CRC-32 and SHA-256;
   - tests: host tests (workspace, and the drivers with their features), the sim UI tests from --ui (with the
     commit they ran on), and tools/slowcheck.py;
@@ -106,7 +106,7 @@ def ui_tests(path):
                 rules_xfail=by("xfail"))
 
 
-PC_ONLY = ("sim", "sim-web")  # host-only crates: listed, never in the headline
+PC_ONLY = ("sim", "sim-web")  # host-only crates: left out of the coverage section (kept in the JSON)
 
 
 def coverage(ran=False):
@@ -290,12 +290,12 @@ def page(r):
         pct = lambda c, n: f"{100 * c / n:.1f} %" if n else "-"
         out.append("<h2>Code coverage</h2>")
         out.append(f"<p class=sub>Lines the host tests run (cargo llvm-cov): {cov['radio_covered']:,} of {cov['radio_lines']:,} "
-                   f"({pct(cov['radio_covered'], cov['radio_lines'])}) in code that ships on the radio; "
-                   f"{pct(cov['all_covered'], cov['all_lines'])} with the simulators. The firmware crate (Radio task, HAL) "
+                   f"({pct(cov['radio_covered'], cov['radio_lines'])}) in code that ships on the radio (the PC-only simulators "
+                   "aren't counted or listed). The firmware crate (Radio task, HAL) "
                    "runs only on the radio and isn't measured: the sim UI and on-radio tests cover it.</p>")
         out.append("<div class=wrap><table><tr><th>Crate</th><th class=n>Lines</th><th class=n>Not run</th><th class=n>Covered</th><th></th></tr>")
-        for n, c in sorted(cov["crates"].items(), key=lambda x: -x[1]["lines"]):
-            out.append(f"<tr><td>{e(n)}{' (PC only)' if n in PC_ONLY else ''}</td><td class=n>{c['lines']:,}</td>"
+        for n, c in sorted(((n, c) for n, c in cov["crates"].items() if n not in PC_ONLY), key=lambda x: -x[1]["lines"]):
+            out.append(f"<tr><td>{e(n)}</td><td class=n>{c['lines']:,}</td>"
                        f"<td class=n>{c['lines'] - c['covered']:,}</td><td class=n>{pct(c['covered'], c['lines'])}</td>"
                        f"<td style='min-width:6rem'>{bar([(c['covered'] / c['lines'] if c['lines'] else 0, '--fast', 'covered')])}</td></tr>")
         out.append("</table></div>")
