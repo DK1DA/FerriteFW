@@ -45,7 +45,8 @@ fn refusals_name_what_was_wrong() {
         ("ui frobs", "ui, ui keys or ui status"),
         ("key MENU sideways", "key NAME [long|down|up]: ui keys lists the names"),
         ("xb dance", "xb, xb start or xb stop: the crossband repeater"),
-        ("gps now", "gps alone: query, nmea and standby need a bench build"),
+        // a bench build has the module commands, so it lists them instead (decision 151)
+        ("gps now", if cfg!(feature = "bench") { "gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (1-65535 s)" } else { "gps alone: query, nmea and standby need a bench build" }),
         ("clear zones", "clear channels N: deletes every channel"),
         ("set 0 5 5 3 this comment is far too long to fit in forty characters", "Comment: up to 40 characters (no #), or None"),
     ] {

@@ -1586,7 +1586,7 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
 
 #[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save; bk turns [reset]; bk rxaf; bk rxif; bk hold";
+    const USAGE: &str = "bk CHIP REG [VALUE] (hex; 0 VHF, 1 UHF/HF), bk CHIP dump, bk settle|save|turns|rxaf|rxif|hold";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
         b"1" => 1,
@@ -1622,7 +1622,7 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
 /// written after every FM tune on either chip, `bk rxaf off` ends it. RAM only. TERM-42.1: a top nibble (e.g. 9700)
 /// also holds REG_47's receive route (bits 11:8; 9 Beken's bypass) wherever the receive tick sets the normal route.
 fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk rxaf [HEX|off]: REG_2B bits 10:8 after every FM tune (400 HPF off, 200 LPF off, 100 de-emphasis off; 700 all); a top digit is REG_47's receive route (9700: route 9, Beken's bypass)";
+    const USAGE: &str = "bk rxaf [HEX|off]: REG_2B 10:8 after FM tunes (400 HPF, 200 LPF, 100 de-emph off); 9xxx: route 9";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
@@ -1640,7 +1640,7 @@ fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
 /// of REG_43: IF bandwidth strong and weak, TX LPF2, BW mode; stock's 25 kHz data mode is 5A20), written after every
 /// FM tune on either chip, `bk rxif off` ends it. RAM only.
 fn rxif(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk rxif [HEX|off]: REG_43 after every FM tune (bits 14:12 IF width, 11:9 its weak-signal width, 5:4 BW mode; 5A20 stock's 25 kHz data mode)";
+    const USAGE: &str = "bk rxif [HEX|off]: REG_43 after FM tunes (14:12 IF width, 11:9 weak, 5:4 BW; 5A20: 25 kHz data)";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
@@ -1658,7 +1658,7 @@ fn rxif(t: &mut Toks) -> Result<Done, Msg> {
 /// four; the same register again replaces it) on both chips after every FM tune, `bk hold off` ends them all. The
 /// raw write's refusals (`bk_write_refused`) apply. RAM only.
 fn hold(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk hold [REG VALUE|off]: hex register (not 00) and value, written on both chips after every FM tune; up to four";
+    const USAGE: &str = "bk hold [REG VALUE|off]: hex register (not 00) and value, both chips after FM tunes; up to four";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
@@ -1686,7 +1686,7 @@ fn hold(t: &mut Toks) -> Result<Done, Msg> {
 /// `ferrite_core::msg::PINS`, MODE 0 (driven low), 1 (driven high), u (input with pull-up) or d (input with pull-down).
 fn pin(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::msg::{PinMode, PINS};
-    const USAGE: &str = "pin pa15|pc12|pc9|pb8|pe1|pe4 0|1|u|d: an audio pin (u, d: an input with a pull), until the radio's next path step";
+    const USAGE: &str = "pin pa15|pc12|pc9|pb8|pe1|pe4 0|1|u|d (u, d: an input with a pull), until the next path step";
     let bad = || msg!("{}", USAGE);
     let which = match t.next()? {
         Some(Tok::Word(w)) => PINS.iter().position(|p| same(w, p.as_bytes())).ok_or_else(bad)? as u8,
@@ -1746,7 +1746,7 @@ fn synthfsk(t: &mut Toks) -> Result<Done, Msg> {
 /// TERM-44 (decision 315, a bench test): `meter` shows the receive level meter's bins, `meter on` zeroes and starts
 /// it, `meter off` stops it.
 fn meter(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "meter [on|off]: receive audio levels at 50 Hz-12.5 kHz from ADC1's 48 kHz samples, loudest 100 ms since meter on";
+    const USAGE: &str = "meter [on|off]: receive audio levels, 50 Hz-12.5 kHz from ADC1 at 48 kHz, loudest 100 ms";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"on") => Some(true),
@@ -1766,7 +1766,7 @@ fn meter(t: &mut Toks) -> Result<Done, Msg> {
 /// `nocrc` turns the chip's CRC off. Anything else is refused here, before anything is sent.
 fn fsk(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::fskbench::{Ask, Cfg, Speed, COUNT_MAX};
-    const USAGE: &str = "fsk [off], fsk rx SPEED [nocrc], fsk tx SPEED N [nocrc]: SPEED 1200, 2400 (300-9600), ffsk1800, ffsk2400; N 1-999";
+    const USAGE: &str = "fsk [off], fsk rx|tx SPEED [N] [nocrc]: SPEED 300-9600, ffsk1800 or ffsk2400; tx N 1-999";
     let bad = || msg!("{}", USAGE);
     fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
         match t.next()? {
@@ -1812,7 +1812,7 @@ fn fsk(t: &mut Toks) -> Result<Done, Msg> {
 /// anything is sent.
 fn txtest(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::txtest::{Arm, Ask, Eq, Filters, Signal, BAUD_MAX, BAUD_MIN, LEVEL_MAX, LEVEL_MIN};
-    const USAGE: &str = "txtest 4fsk|sweep|afsk|fsk BAUD [rc]|gmsk BAUD|g3ruh [voice|flat|data] [bypass] [eq|eq8] [10-150 %], txtest afsk-bk [10-150 %], txtest suite, txtest off; txtest alone shows what is armed";
+    const USAGE: &str = "txtest 4fsk|sweep|afsk[-bk]|fsk|gmsk B|g3ruh|suite|off [voice|flat|data] [bypass] [eq|eq8] [%]";
     let usage = || msg!("{}", USAGE);
     let level = |w: &[u8]| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(usage);
     let ask = match t.next()? {
@@ -1870,7 +1870,7 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
 /// 0), `bk save normal` gives the level back. RAM only.
 fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::rxsleep::{Cycle, LOW_POWER};
-    const USAGE: &str = "bk save [lp | normal | ON_MS OFF_MS [HOLD_S [RECENT_S]]]: on/off 10-5000 ms, hold and recent 0-3600 s";
+    const USAGE: &str = "bk save [lp|normal|ON_MS OFF_MS [HOLD_S [RECENT_S]]]: on/off 10-5000 ms, hold/recent 0-3600 s";
     let mut n = [None; 4];
     let mut word = None;
     for (i, slot) in n.iter_mut().enumerate() {
@@ -2032,7 +2032,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 fn gps(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::gpspower::{casic_refused, CAS_NMEA, CAS_QUERY, CAS_STANDBY};
-    const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (CAS12, 1-65535 s)";
+    const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (1-65535 s)";
     let mut quiet = false;
     let (id, arg) = match t.next()? {
         None => return Ok(Done::Debug(Job::new(Kind::Gga))),
@@ -2375,7 +2375,7 @@ const HELP_BENCH: &str = concat!(
 /// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing. T is
 /// one word (off, 100.0, D023N) or a mode and a value (ctcss 100.0, dcs-n 023, dcs-i 023; TONE-2.1).
 fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "slot A|B|C [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [offset off|+N|-N] [split TX] [active]";
+    const USAGE: &str = "slot A|B|C [vfo] [FREQ] [MODE] [POWER] [tone|rxtone|txtone T] [offset N] [split TX] [active]";
     let s = match t.next()? {
         None => return Ok(Done::List(List::Slots)),
         Some(Tok::Word(w)) if w.len() == 1 && (b'a'..=b'c').contains(&w[0].to_ascii_lowercase()) => w[0].to_ascii_lowercase() - b'a',

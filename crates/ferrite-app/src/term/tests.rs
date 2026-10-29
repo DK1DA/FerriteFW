@@ -1471,7 +1471,7 @@ fn debug_fsk() {
     r.send(b"\r");
     for bad in ["fsk rx", "fsk rx 299", "fsk rx 9601", "fsk rx ffsk", "fsk tx 2400", "fsk tx 2400 0", "fsk tx 2400 1000", "fsk rx 2400 crc", "fsk on", "fsk off 1"] {
         r.cmd(bad);
-        assert!(r.bottom().contains("fsk [off], fsk rx SPEED"), "{bad}: {}", r.bottom());
+        assert!(r.bottom().contains("fsk [off], fsk rx|tx SPEED"), "{bad}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     assert!(!super::cmd::writes(b"fsk") && super::cmd::writes(b"fsk off") && super::cmd::writes(b"fsk rx 2400"));
@@ -2620,3 +2620,18 @@ mod nav;
 mod list_more;
 /// The command line's refusals and rare answers (TERM-12).
 mod cmd_more;
+
+/// TERM-8: every command's usage text fits the answer it goes out in ([`super::cmd::Msg`], 96 characters), so a
+/// refusal is never cut off in the line-mode answer (`gps` lost its "35 s)" once, Oct 28, 2026).
+#[test]
+fn usage_texts_fit_the_answer() {
+    let mut full = super::cmd::Msg::new();
+    full.push(&[b'x'; 1000]); // a Buf keeps what fits
+    let cap = full.len();
+    for src in [include_str!("cmd.rs"), include_str!("debug.rs")] {
+        for l in src.lines().filter(|l| l.contains("const USAGE: &str = \"")) {
+            let text = l.split("= \"").nth(1).and_then(|t| t.rsplit_once("\";")).map(|t| t.0).unwrap();
+            assert!(text.len() <= cap, "{} characters, over {cap}: {text}", text.len());
+        }
+    }
+}

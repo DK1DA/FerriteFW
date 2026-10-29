@@ -1,0 +1,81 @@
+name: release
+# Runs only when a release is published (or by hand from the Actions tab), so the one worker isn't busy on every
+# push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. The images,
+# the build report and the UI results are attached to the release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# One at a time: a second release waits for the first rather than sharing the worker.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: docker
+    container:
+      image: node:20-bookworm # checkout needs node; the rest is installed below
+    timeout-minutes: 240
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Packages
+        run: |
+          apt-get update -q
+          # python3: the tools (stdlib only); binutils-arm-none-eabi: slowcheck and the build report;
+          # the X11/Wayland headers: the simulator's window library (minifb) builds against them, even headless.
+          apt-get install -y -q --no-install-recommends python3 binutils-arm-none-eabi pkg-config \
+            libx11-dev libxkbcommon-dev libwayland-dev libxcursor-dev libxrandr-dev libxi-dev
+      - name: Rust (the nightly pinned in rust-toolchain.toml)
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y -q --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" toolchain install # reads rust-toolchain.toml
+          "$HOME/.cargo/bin/cargo" install -q --locked cargo-llvm-cov # the build report's coverage
+
+      - name: Host tests
+        run: |
+          cargo test -q
+          cargo test -q --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench
+          cargo test -q -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea --all-features
+      - name: Lints
+        run: |
+          cargo clippy -q --all-targets -- -D warnings
+          cargo clippy -q --all-targets --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench -- -D warnings
+          cargo fw-clippy -q -- -D warnings
+          cargo fw-clippy -q --features tx -- -D warnings
+          cargo fw-clippy -q --features tx-bench -- -D warnings
+          cargo fw-clippy -q --features bench -- -D warnings
+      - name: Sim UI tests
+        run: python3 tools/uitest.py --sim auto -j "$(nproc)" --results target/ci-ui
+
+      - name: Images
+        run: |
+          tools/mkbtf.sh
+          tools/mkbtf.sh tx
+          tools/mkbtf.sh tx-bench
+          tools/mkbtf.sh reader
+      - name: Build report
+        run: |
+          ui=$(ls -t target/ci-ui/*/ui/results.json | head -1)
+          python3 tools/buildreport.py tx --ui "$ui"
+          cp "$ui" target/ui-results.json
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          # RELEASE_TOKEN (a repository secret with write access to releases) if set, else the run's own token.
+          TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets
+        run: |
+          cd target
+          sha256sum ferrite.btf ferrite-tx.btf ferrite-txbench.btf ferrite-reader.btf > SHA256SUMS
+          for f in ferrite.btf ferrite-tx.btf ferrite-txbench.btf ferrite-reader.btf SHA256SUMS \
+                   build-report-tx.html build-report-tx.json ui-results.json; do
+            curl -sSf -X POST -H "Authorization: token $TOKEN" -F "attachment=@$f" "$API?name=$f" > /dev/null
+            echo "attached $f"
+          done
