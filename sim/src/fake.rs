@@ -130,6 +130,8 @@ pub struct FakeRadio {
     scope_cfg: (u8, u8),
     /// Each slot's power level (0 Low, 1 Mid, 2 High; 3 = HF mode), for the duty limit's weighting (TX-38).
     power: [u8; 4],
+    /// Slots at squelch 0: the noise floor holds them open, as on the radio.
+    sq0: u8,
     #[cfg(feature = "bench")]
     /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
     bk: [[u16; 128]; 2],
@@ -210,6 +212,7 @@ impl FakeRadio {
             mode: Fake::Off,
             scope_cfg: (60, 10),
             power: [2; 4],
+            sq0: 0,
             #[cfg(feature = "bench")]
             bk: fake_bk(),
             #[cfg(feature = "bench")]
@@ -325,6 +328,9 @@ impl FakeRadio {
             RadioCmd::Awake(m) => self.prio = m,
             RadioCmd::AprsSlot(m) => self.aprs_slot = m,
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::RxTone, .. } => self.hint = self.hint.filter(|h| h.0 != slot),
+            RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Squelch, value } if slot < 3 => {
+                self.sq0 = self.sq0 & !(1 << slot) | u8::from(value == 0) << slot;
+            }
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Power, value } => self.power[slot as usize % 4] = value.clamp(0, 2) as u8,
             RadioCmd::PauseWatch(secs) => {
                 let now = self.ms();
@@ -633,12 +639,16 @@ impl FakeRadio {
         }
         // Carriers where each slot is tuned now.
         let quiet = self.quiet;
+        let sq0 = self.sq0;
         let carrier = |i: usize, s: &SlotLive| -> (bool, f32) {
             if quiet {
                 return (false, 0.0);
             }
             if s.scanning {
                 return (scan_carrier(s.freq), -79.0 + (t * 3.1).sin() * 5.0);
+            }
+            if sq0 & 1 << i != 0 {
+                return (true, -121.0 + (t * 0.9 + i as f32).sin() * 2.0);
             }
             match i {
                 0 => ((t % 10.0) > 6.0 && (t % 10.0) < 9.0, -85.0 + (t * 1.7).sin() * 6.0),
