@@ -277,6 +277,9 @@ pub enum DspCmd {
     /// raw stream (LINK-13.9, [`crate::rawaudio`]).
     Audio(u8),
     Beep { hz: u16, ms: u16 },
+    /// TERM-44 (decision 315, a bench test): the receive level meter on (zeroed) or off; the capture runs for it too.
+    /// Only a bench build sends it.
+    Meter(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -486,6 +489,19 @@ pub enum DebugReq {
     /// (`Some(Some(bits))`), off (`Some(None)`), or only asked (`None`). RAM only. Answered with [`DebugAns::RxAf`].
     RxAf(Option<Option<u16>>),
     #[cfg(feature = "bench")]
+    /// TERM-42.2 (decision 315, a bench test): the receive IF override, the whole of REG_43 after every FM tune
+    /// (`Some(Some(value))`), off (`Some(None)`), or only asked (`None`). RAM only. Answered with [`DebugAns::RxIf`].
+    RxIf(Option<Option<u16>>),
+    #[cfg(feature = "bench")]
+    /// TERM-42.3 (decision 316, a bench test): registers held after every FM tune on both chips: one added or
+    /// replaced (`Some(Some((reg, value)))`), all ended (`Some(None)`), or only asked (`None`). RAM only. Answered
+    /// with [`DebugAns::Hold`].
+    Hold(Option<Option<(u8, u16)>>),
+    #[cfg(feature = "bench")]
+    /// TERM-44 (decision 315, a bench test): the receive level meter on (zeroed), off, or only asked (`None`).
+    /// Answered with [`DebugAns::Meter`].
+    Meter(Option<bool>),
+    #[cfg(feature = "bench")]
     /// TERM-43 (decision 305, a bench test): the BK4829's FSK modem. Answered with [`DebugAns::Fsk`].
     Fsk(crate::fskbench::Ask),
 }
@@ -556,6 +572,8 @@ pub const GGA_MAX: usize = 80;
 /// The most memory one `DebugReq::Mem` reads (a bench build's).
 #[cfg(feature = "bench")]
 pub const DEBUG_MEM: usize = 64;
+/// TERM-42.3: how many registers `bk hold` keeps.
+pub const HOLDS: usize = 4;
 
 /// The answer to a [`DebugReq`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -610,6 +628,15 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-42: the receive AF filter override in force (REG_2B bits 10:8), None off.
     RxAf(Option<u16>),
+    #[cfg(feature = "bench")]
+    /// TERM-42.2: the receive IF override in force (REG_43), None off.
+    RxIf(Option<u16>),
+    #[cfg(feature = "bench")]
+    /// TERM-42.3: the registers held ([`HOLDS`] slots; register 0 an empty one).
+    Hold([(u8, u16); HOLDS]),
+    #[cfg(feature = "bench")]
+    /// TERM-44: the receive level meter's state and its bins.
+    Meter(crate::rxmeter::Report),
     #[cfg(feature = "bench")]
     /// TERM-43: the FSK modem test's state and counts.
     Fsk(crate::fskbench::Report),

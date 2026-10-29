@@ -138,6 +138,20 @@ impl Radio {
         if let Some(bits) = self.rxaf.filter(|_| !slot.am) {
             radio_chip::rx_af_override(&mut self.chip(n), bits);
         }
+        // TERM-42.2: the bench's receive IF override over the tune's REG_43 (`tx_setup` rewrites it; the unkey's
+        // retune puts it back).
+        #[cfg(feature = "bench")]
+        if let Some(v) = self.rxif.filter(|_| !slot.am) {
+            self.chip(n).write(bk4829::reg::RF_FILTER, v);
+        }
+        // TERM-42.3: the bench's held registers, last (over APRS-55's gate and AFC too).
+        #[cfg(feature = "bench")]
+        if !slot.am {
+            let holds = self.holds;
+            for (r, v) in holds.into_iter().filter(|h| h.0 != 0) {
+                self.chip(n).write(r, v);
+            }
+        }
         // SQL-1: stock's thresholds for this frequency and the slot's level (stock writes them at each receive
         // setup); only when they differ from what the chip has.
         let regs = self.sqcal.regs(f, slot.sq);

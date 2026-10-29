@@ -238,6 +238,37 @@ impl Stream {
     }
 }
 
+/// TERM-44 (decision 315): the receive level meter's last report, for the Radio task's answer.
+#[cfg(feature = "bench")]
+static METER: embassy_sync::blocking_mutex::Mutex<M, core::cell::Cell<ferrite_core::rxmeter::Report>> =
+    embassy_sync::blocking_mutex::Mutex::new(core::cell::Cell::new(ferrite_core::rxmeter::Report::OFF));
+
+/// TERM-44: `meter on` zeroes the report, `meter off` keeps its bins.
+#[cfg(feature = "bench")]
+pub fn meter_reset(on: bool) {
+    METER.lock(|m| {
+        let r = m.get();
+        m.set(if on { ferrite_core::rxmeter::FRESH.report } else { ferrite_core::rxmeter::Report { on: false, ..r } });
+    });
+}
+
+/// TERM-44: the meter's last report.
+#[cfg(feature = "bench")]
+pub fn meter_report() -> ferrite_core::rxmeter::Report {
+    METER.lock(|m| m.get())
+}
+
+/// Decision 316: the decimator for the listening mode: the data path (flat to 8 kHz) under the bench's raw stream
+/// (LINK-13.9), the decoders' own otherwise. The decoders take the same samples.
+fn decim(listen: u8) -> Decim {
+    #[cfg(feature = "bench")]
+    if ferrite_core::rawaudio::rate(listen).is_some() {
+        return Decim::wide();
+    }
+    let _ = listen;
+    Decim::new()
+}
+
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
 pub static FRAMES: AtomicU32 = AtomicU32::new(0);
 pub static DROPPED: AtomicU32 = AtomicU32::new(0);
@@ -258,6 +289,10 @@ pub async fn task() {
     let mut stream = Stream::Off;
     let mut peak = 0i32;
     let mut halves = 0u32;
+    // TERM-44 (decision 315): the bench's receive level meter, on ADC1's 48 kHz samples ahead of `dec`
+    let mut meter_on = false;
+    #[cfg(feature = "bench")]
+    let mut meter: Option<ferrite_core::rxmeter::Meter> = None;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
         #[cfg(all(feature = "tx", feature = "bench"))]
@@ -265,15 +300,23 @@ pub async fn task() {
         #[cfg(not(all(feature = "tx", feature = "bench")))]
         let test = core::future::pending::<Option<core::convert::Infallible>>();
         match select4(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait(), test).await {
-            Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_) | DspCmd::Audio(_))) => {
+            Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_) | DspCmd::Audio(_) | DspCmd::Meter(_))) => {
                 match cmd {
                     DspCmd::Decoder(k) => aprs = k,
                     DspCmd::Pager(on) => pager = on,
                     DspCmd::Audio(mode) => {
                         if mode != listen {
                             stream = Stream::new(mode);
+                            dec = decim(mode); // the raw stream takes the data path (decision 316)
                         }
                         listen = mode;
+                    }
+                    DspCmd::Meter(on) => {
+                        meter_on = on && cfg!(feature = "bench");
+                        #[cfg(feature = "bench")]
+                        {
+                            meter = on.then_some(ferrite_core::rxmeter::FRESH);
+                        }
                     }
                     _ => {}
                 }
@@ -290,11 +333,11 @@ pub async fn task() {
                         DecoderKind::Dsc => Decoder::dsc(),
                     };
                 }
-                let want = kind != DecoderKind::Off || listen != 0;
+                let want = kind != DecoderKind::Off || listen != 0 || meter_on;
                 if want && !capturing {
                     clock::for_audio().await; // PWR-26.4: the speed first, never under a running capture
                     adc::init();
-                    dec = Decim::new();
+                    dec = decim(listen);
                     audio::capture_start();
                 } else if !want && capturing {
                     audio::capture_stop();
@@ -309,7 +352,7 @@ pub async fn task() {
                 if halves.is_multiple_of(RECHECK_HALVES) && clock::is_low() && clock::AUDIO_RAISES.load(Relaxed) {
                     audio::capture_stop();
                     clock::for_audio().await;
-                    dec = Decim::new();
+                    dec = decim(listen);
                     audio::capture_start();
                     continue;
                 }
@@ -326,6 +369,15 @@ pub async fn task() {
                             n += 1;
                         }
                     });
+                }
+                #[cfg(feature = "bench")]
+                if let Some(m) = &mut meter {
+                    for s in &audio::ADC_BUF[base..base + BLOCK_IN] {
+                        if m.push(s.load(Relaxed)) {
+                            let r = m.report;
+                            METER.lock(|c| c.set(r));
+                        }
+                    }
                 }
                 if clips != 0 {
                     AUDIO_CLIPS.fetch_add(clips, Relaxed);
@@ -387,7 +439,7 @@ pub async fn task() {
                 play_test(g, eq).await;
                 if capturing {
                     clock::for_audio().await;
-                    dec = Decim::new();
+                    dec = decim(listen);
                     audio::capture_start();
                 }
             }
@@ -398,7 +450,7 @@ pub async fn task() {
                 play(&frame).await;
                 if capturing {
                     clock::for_audio().await;
-                    dec = Decim::new();
+                    dec = decim(listen);
                     audio::capture_start();
                 }
                 AFSK_DONE.signal(true);

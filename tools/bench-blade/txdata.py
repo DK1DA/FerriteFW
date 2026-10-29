@@ -4,6 +4,8 @@
   txdata.py CAP.u8 fsk BAUD        # `txtest fsk BAUD [rc] ...`
   txdata.py CAP.u8 gmsk BAUD       # `txtest gmsk BAUD ...`
   txdata.py CAP.u8 g3ruh           # `txtest g3ruh ...`: descrambled (x^17 + x^12 + 1) before counting
+  txdata.py CAP.u8 fsk4            # `txtest 4fsk ...`: M17's 4800 symbols; the deviation goes through rxdata.py's 4FSK
+                                   # analysis (RRC 0.5 matched filter, three thresholds), as CAP.u8.fsk4.wav
   [--skip S] [--seconds S]         # analyse from S s into the key-up, for S s (default: all of it)
 
 CAP.u8 is a bladecap.sh capture (u8 IQ at 1.024 MS/s, the signal 250 kHz below the centre, I/Q already swapped
@@ -158,12 +160,12 @@ def main():
         return selftest()
     a = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     a.add_argument("cap")
-    a.add_argument("kind", choices=["fsk", "gmsk", "g3ruh"])
+    a.add_argument("kind", choices=["fsk", "gmsk", "g3ruh", "fsk4"])
     a.add_argument("baud", type=float, nargs="?")
     a.add_argument("--skip", type=float, default=0.1, help="seconds into the keyed part to start (default 0.1)")
     a.add_argument("--seconds", type=float, help="seconds to analyse (default: to the end)")
     o = a.parse_args()
-    baud = 9600.0 if o.kind == "g3ruh" else o.baud
+    baud = {"g3ruh": 9600.0, "fsk4": 4800.0}.get(o.kind, o.baud)
     if not baud:
         a.error("fsk and gmsk need the BAUD")
     raw = np.fromfile(o.cap, np.uint8)
@@ -174,6 +176,16 @@ def main():
     dev = dev[int(o.skip * fs):]
     if o.seconds:
         dev = dev[: int(o.seconds * fs)]
+    if o.kind == "fsk4":
+        import subprocess, wave
+        print(f"fsk4 4800 sym: {len(dev) / fs:.1f} s; deviation 99.9 % {np.percentile(np.abs(dev), 99.9):.0f} Hz")
+        out = o.cap + ".fsk4.wav"
+        with wave.open(out, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(int(fs))
+            w.writeframes(np.clip(dev * 4, -32767, 32767).astype(np.int16).tobytes())
+        sys.stdout.flush()
+        subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "rxdata.py"), out, "fsk4", "4800"])
+        return
     spb = fs / baud
     print(f"{o.kind} {baud:g} Bd: {len(dev) / fs:.1f} s, {spb:.2f} samples a bit; deviation 99.9 % {np.percentile(np.abs(dev), 99.9):.0f} Hz")
     soft = mavg(dev, spb)  # a bit's samples averaged, centred: a bit's centre reads its whole span

@@ -1272,6 +1272,17 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::RxAf(set) => DebugAns::RxAf(set.flatten()),
         #[cfg(feature = "bench")]
+        DebugReq::RxIf(set) => DebugAns::RxIf(set.flatten()),
+        #[cfg(feature = "bench")]
+        DebugReq::Hold(set) => DebugAns::Hold([set.flatten().unwrap_or((0, 0)), (0, 0), (0, 0), (0, 0)]),
+        #[cfg(feature = "bench")]
+        DebugReq::Meter(set) => {
+            let mut r = ferrite_core::rxmeter::Report { on: set != Some(false), windows: 31, ..ferrite_core::rxmeter::Report::OFF };
+            r.db10[13] = -123;
+            r.db10[24] = -5;
+            DebugAns::Meter(r)
+        }
+        #[cfg(feature = "bench")]
         DebugReq::Fsk(a) => DebugAns::Fsk(fsk_answer(a)),
         #[cfg(feature = "bench")]
         DebugReq::Mic(_) => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
@@ -1310,6 +1321,62 @@ fn fsk_answer(a: ferrite_core::fskbench::Ask) -> ferrite_core::fskbench::Report 
 /// TERM-42: `bk rxaf` asks the receive AF filter override, `bk rxaf HEX` sets REG_2B bits 10:8 (no other bit), `bk
 /// rxaf off` ends it; anything else is refused before anything is sent; `bk rxaf` alone only reads (TERM-25). TERM-42.1:
 /// a top digit carries REG_47's receive route (9700).
+#[cfg(feature = "bench")]
+/// TERM-42.3: `bk hold` holds up to four registers. TERM-42.2: `bk rxif` asks the receive IF override, `bk rxif HEX` holds the whole of REG_43, `bk rxif off` ends it;
+/// anything else is refused before anything is sent. TERM-44: `meter` shows the bins (a head line and five lines of
+/// five), `meter on` and `meter off` set it; `bk rxif` and `meter` alone only read (TERM-25).
+#[test]
+fn debug_bk_rxif_and_meter() {
+    let mut r = Rig::main();
+    for (cmd, want) in [("bk rxif", None), ("bk rxif 5a20", Some(Some(0x5A20))), ("bk rxif off", Some(None))] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::RxIf(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("bk rxif 7e28");
+    r.serve(4, regs);
+    assert!(r.raw().contains("REG_43 = 0x7E28") && r.raw().contains("IF 7 / weak 7, x2 on"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bk rxif 10000", "bk rxif 5a20 1", "bk rxif on"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("bk rxif [HEX|off]"), "{bad}: {}", r.bottom());
+    }
+    for (cmd, want) in [("meter", None), ("meter on", Some(true)), ("METER off", Some(false))] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(8, regs), vec![DebugReq::Meter(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("meter");
+    r.serve(8, regs);
+    let raw = r.raw();
+    assert!(raw.contains("meter on: 31 windows"), "{raw}");
+    assert!(raw.contains("  1000  -12.3") && raw.contains(" 12500   -0.5") && raw.contains("    50   --.-"), "{raw}");
+    r.send(b"\r");
+    r.cmd("meter loud");
+    assert!(r.bottom().contains("meter [on|off]"), "{}", r.bottom());
+    assert!(!super::cmd::writes(b"bk rxif") && super::cmd::writes(b"bk rxif 5a20"));
+    assert!(!super::cmd::writes(b"meter") && super::cmd::writes(b"meter on"));
+    // TERM-42.3: `bk hold`
+    r.send(b"\r");
+    for (cmd, want) in [("bk hold", None), ("bk hold 73 4692", Some(Some((0x73, 0x4692)))), ("bk hold off", Some(None))] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::Hold(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("bk hold 28 0040");
+    r.serve(4, regs);
+    assert!(r.raw().contains("bk hold: REG_28 = 0x0040 after every FM tune"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bk hold 0 1", "bk hold 73", "bk hold 73 10000", "bk hold on"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("bk hold [REG VALUE|off]"), "{bad}: {}", r.bottom());
+    }
+    assert!(!super::cmd::writes(b"bk hold") && super::cmd::writes(b"bk hold 73 4692"));
+}
+
 #[cfg(feature = "bench")]
 #[test]
 fn debug_bk_rxaf() {
@@ -2010,12 +2077,12 @@ fn debug_no_answer_and_stop() {
 #[test]
 fn user_build_refuses_bench_commands() {
     let mut r = Rig::main();
-    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5"] {
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "meter", "meter on", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5"] {
         r.cmd(c);
         assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
     }
-    assert_eq!(super::cmd::BENCH_ONLY.len(), 12);
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 13);
     r.cmd("gps");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
     r.send(b"\r");

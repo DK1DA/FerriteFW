@@ -1336,8 +1336,9 @@ pub fn writes(line: &[u8]) -> bool {
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
-    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf")));
+    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf") || same(w, b"rxif") || same(w, b"hold")));
     let shows = shows || same(c, b"fsk") && rest == 0; // TERM-43: `fsk` alone shows the counts
+    let shows = shows || same(c, b"meter") && rest == 0; // TERM-44: `meter` alone shows the bins
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
     !(reads || shows)
 }
@@ -1397,6 +1398,8 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"bk") => bk(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"fsk") => fsk(&mut t),
+        #[cfg(feature = "bench")]
+        _ if same(c, b"meter") => meter(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"si") => si(&mut t),
         #[cfg(feature = "bench")]
@@ -1535,7 +1538,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 12] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk"];
+pub const BENCH_ONLY: [&str; 13] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
@@ -1579,7 +1582,7 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
 
 #[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save; bk turns [reset]; bk rxaf";
+    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save; bk turns [reset]; bk rxaf; bk rxif; bk hold";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
         b"1" => 1,
@@ -1587,6 +1590,8 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         w if same(w, b"save") => return bk_save(t),
         w if same(w, b"turns") => return turns(t),
         w if same(w, b"rxaf") => return rxaf(t),
+        w if same(w, b"rxif") => return rxif(t),
+        w if same(w, b"hold") => return hold(t),
         _ => return Err(msg!("{}", USAGE)),
     };
     let w = t.word(USAGE)?;
@@ -1624,6 +1629,69 @@ fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("{}", USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::RxAf(set))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-42.2 (decision 315, a bench test): `bk rxif` shows the receive IF override, `bk rxif HEX` sets it (the whole
+/// of REG_43: IF bandwidth strong and weak, TX LPF2, BW mode; stock's 25 kHz data mode is 5A20), written after every
+/// FM tune on either chip, `bk rxif off` ends it. RAM only.
+fn rxif(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bk rxif [HEX|off]: REG_43 after every FM tune (bits 14:12 IF width, 11:9 its weak-signal width, 5:4 BW mode; 5A20 stock's 25 kHz data mode)";
+    let set = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"off") => Some(None),
+        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))? as u16)),
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::RxIf(set))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-42.3 (decision 316, a bench test): `bk hold` shows the held registers, `bk hold REG VALUE` holds one (up to
+/// four; the same register again replaces it) on both chips after every FM tune, `bk hold off` ends them all. The
+/// raw write's refusals (`bk_write_refused`) apply. RAM only.
+fn hold(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bk hold [REG VALUE|off]: hex register (not 00) and value, written on both chips after every FM tune; up to four";
+    let set = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"off") => Some(None),
+        Some(Tok::Word(w)) => {
+            let reg = hexnum(w).filter(|r| (1..BK_REGS as u32).contains(r)).ok_or_else(|| msg!("{}", USAGE))? as u8;
+            let val = match t.next()? {
+                Some(Tok::Word(v)) => hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))? as u16,
+                _ => return Err(msg!("{}", USAGE)),
+            };
+            if let Some(why) = ferrite_core::msg::bk_write_refused(reg, val) {
+                return Err(msg!("refused: {}", why));
+            }
+            Some(Some((reg, val)))
+        }
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Hold(set))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-44 (decision 315, a bench test): `meter` shows the receive level meter's bins, `meter on` zeroes and starts
+/// it, `meter off` stops it.
+fn meter(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "meter [on|off]: receive audio levels at 50 Hz-12.5 kHz from ADC1's 48 kHz samples, loudest 100 ms since meter on";
+    let set = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"on") => Some(true),
+        Some(Tok::Word(w)) if same(w, b"off") => Some(false),
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Meter(set))))
 }
 
 #[cfg(feature = "bench")]
@@ -2221,6 +2289,9 @@ const HELP_BENCH: &str = concat!(
     "  txtest sweep data bypass eq   REG_47 bypass, limiter off; eq flat to 5 kHz, eq8 8 kHz\n",
     "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)\n",
     "  bk rxaf 700   bk rxaf off   bench test: REG_2B 10:8 after every FM tune (RX filters)\n",
+    "  bk rxif 5A20  bk rxif off   bench test: REG_43 after every FM tune (RX IF width)\n",
+    "  bk hold 73 4692   bk hold off   bench test: up to 4 registers after every FM tune\n",
+    "  meter on       meter        bench test: RX audio levels 50 Hz-12.5 kHz at 48 kHz\n",
     "  fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off\n",
     "  fsk tx 2400 20         20 test frames at the next PTT key-up (Dry TX only; ffsk1800 ...)\n",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",

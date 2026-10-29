@@ -44,8 +44,16 @@ const N_TAPS: usize = 31;
 /// radio's path: 992 -> 997 frames). A `static`: read per sample by the DSP task, and only named statics stay in
 /// the firmware's fast flash (unnamed constants go to the slow part: firmware/memory.x).
 static TAPS: [i32; N_TAPS] = [-4, 7, 46, 104, 135, 69, -150, -490, -788, -780, -199, 1070, 2877, 4799, 6275, 6826, 6275, 4799, 2877, 1070, -199, -780, -788, -490, -150, 69, 135, 104, 46, 7, -4];
+/// The data path's low-pass (decision 316): 31 taps, Kaiser-windowed sinc, beta 6, 11 kHz, Q15, summing to 1. Flat to
+/// 8 kHz (-0.01 dB), -2.1 dB at 10 kHz, -13 dB at 12 kHz; what folds back below 10 kHz (14 kHz and up) is 56 dB down or
+/// more. [`TAPS`] cut the receive audio from 4 kHz (-2.1 dB, -6 at 5 kHz, -16.6 at 6.3 kHz: bench log R16), which
+/// fast data needs (route 9 is -2.5 dB at 5 kHz, -8.9 at 8 kHz).
+static WIDE_TAPS: [i32; N_TAPS] = [
+    4, 27, -8, -104, -22, 256, 150, -489, -484, 780, 1211, -1070, -2876, 1285, 10214, 15020, 10214, 1285, -2876, -1070, 1211, 780, -484, -489, 150, 256, -22,
+    -104, -8, 27, 4,
+];
 
-/// The ADC side: DC removal, the low-pass and the 2:1 step, one block at a time. 68 bytes.
+/// The ADC side: DC removal, the low-pass and the 2:1 step, one block at a time. 72 bytes.
 pub struct Decim {
     /// The last [`TAPS`] inputs, centred, as a ring.
     hist: [i16; N_TAPS],
@@ -54,6 +62,8 @@ pub struct Decim {
     phase: u8,
     /// The running mean (DC), Q16 of an ADC count: a one-pole average over 2,048 samples (43 ms).
     dc_q16: i32,
+    /// [`TAPS`], or [`WIDE_TAPS`] for the data path.
+    taps: &'static [i32; N_TAPS],
 }
 
 impl Default for Decim {
@@ -64,7 +74,12 @@ impl Default for Decim {
 
 impl Decim {
     pub const fn new() -> Self {
-        Decim { hist: [0; N_TAPS], at: 0, phase: 0, dc_q16: 2048 << 16 }
+        Decim { hist: [0; N_TAPS], at: 0, phase: 0, dc_q16: 2048 << 16, taps: &TAPS }
+    }
+
+    /// The data path (decision 316): flat to 8 kHz, for fast data modes and the bench's raw stream.
+    pub const fn wide() -> Self {
+        Decim { taps: &WIDE_TAPS, ..Self::new() }
     }
 
     /// ADC counts (0-4095) in, decoder samples out through `out`, one in two. The ADC's 12 bits become
@@ -82,7 +97,7 @@ impl Decim {
             // The ring's oldest sample is at `at`.
             let mut acc = 0i32;
             let mut j = self.at as usize;
-            for &t in TAPS.iter() {
+            for &t in self.taps.iter() {
                 acc += t * self.hist[j] as i32;
                 j = if j + 1 == N_TAPS { 0 } else { j + 1 };
             }
@@ -170,6 +185,18 @@ mod tests {
         peak / (1000.0 * 16.0)
     }
 
+    /// The same by RMS (a tone near the output's Nyquist rate has few samples a cycle, so its peak misleads).
+    fn rms_gain(d: Decim, hz: f64) -> f64 {
+        let mut d = d;
+        let mut out = Vec::new();
+        for n in 0..48_000 {
+            let x = 2048.0 + 1000.0 * (2.0 * core::f64::consts::PI * hz * n as f64 / ADC_HZ as f64).sin();
+            d.push(x.round() as u16, |s| out.push(s as f64));
+        }
+        let tail = &out[out.len() / 2..];
+        (tail.iter().map(|s| s * s).sum::<f64>() / tail.len() as f64).sqrt() * core::f64::consts::SQRT_2 / (1000.0 * 16.0)
+    }
+
     #[test]
     fn decimator_passes_afsk_and_stops_aliases() {
         assert!(gain(1200.0) > 0.9 && gain(2200.0) > 0.85, "AFSK tones pass: {} {}", gain(1200.0), gain(2200.0));
@@ -190,6 +217,19 @@ mod tests {
         assert_eq!(n, 40_000 / DECIM);
         assert_eq!(DECIM, 2, "24 kHz from 48 kHz (decision 240)");
         assert!(last.abs() < 40, "DC removed: {last}");
+    }
+
+    /// Decision 316: the data path is flat to 8 kHz (fast data's tones and NRZ's top), and what folds back from above
+    /// 14 kHz stays out.
+    #[test]
+    fn wide_decimator_flat_to_8k() {
+        for hz in [300.0, 1000.0, 4000.0, 6300.0, 8000.0] {
+            let g = rms_gain(Decim::wide(), hz);
+            assert!((0.98..1.02).contains(&g), "{hz} Hz: {g}");
+        }
+        assert!(rms_gain(Decim::wide(), 10_000.0) > 0.75);
+        assert!(rms_gain(Decim::wide(), 16_000.0) < 0.002, "16 kHz folds onto 8 kHz");
+        assert!(rms_gain(Decim::wide(), 20_000.0) < 0.002, "20 kHz folds onto 4 kHz");
     }
 
     #[test]

@@ -1,0 +1,144 @@
+<main>
+  <header style="display:grid;gap:10px">
+    <span class="eyebrow">Ferrite bench · black radio · Oct 27, 2026</span>
+    <h1>RT-950 Pro audio limits: what data the radio can carry</h1>
+    <p class="sub">The RT-950 Pro's two Beken BK4829 transceivers shape every bit of audio that goes in and out: filters, emphasis, a limiter. That's right for voice and wrong for data. We measured both directions on the bench, found the registers that switch the shaping off, and corrected what the hardware leaves behind. Measured on one radio (black, its UHF chip, 446.475 MHz) with a bladeRF as the far end.</p>
+  </header>
+
+  <section>
+    <h2>What we found</h2>
+    <div class="verdicts">
+      <div class="verdict"><b>Transmit</b><span class="big">Flat, 50 Hz – 5 kHz</span><span class="sub">within about 1 dB of the 1 kHz level at full deviation, and to 8 kHz for data signals: the chip's filter bypass plus our own equaliser, which corrects level and phase. As set today: 185 Hz – 2.8 kHz and a wall at 3.1 kHz.</span></div>
+      <div class="verdict"><b>Receive</b><span class="big">Flat to 3.2 kHz</span><span class="sub">with the receive filters off and Beken's audio bypass route: within 2.5 dB from 800 Hz to 3.2 kHz, then a smooth slope (−5 dB at 4 kHz). As set today: 300 Hz – 1.5 kHz with a wall above 3.1 kHz.</span></div>
+      <div class="verdict"><b>9600 baud: transmit only</b><span class="big">0.3 % sent, no receive</span><span class="sub">G3RUH 9600 from the radio: 0.3 % bit errors through the bypass and the equaliser (36 % as set today); GMSK and FSK at 4800: 0.2–0.5 %. Receiving 9600 isn't possible today: see Receive.</span></div>
+      <div class="verdict"><b>Built-in FSK modem</b><span class="big">1200 and 2400 Bd</span><span class="sub">50 of 50 frames received at each, both ways clean; nothing at 4800 or 9600.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Transmit</h2>
+    <p>The radio's microcontroller feeds generated audio (APRS, test signals, future data modes) into the BK4829's audio input through a small resistor-capacitor network. Measured with the radio's own test signals (<code>txtest</code>): a third-octave tone sweep, the level of each tone against 1 kHz.</p>
+    <div class="chart">
+      <div class="chartbox"><svg id="chart-tx" viewBox="0 0 780 360" role="img" aria-label="Transmit audio response, selectable curves"></svg></div>
+      <div class="picks" id="picks-tx"></div>
+      <div class="btns"><button type="button" data-g="Transmit" data-act="best">Ideal and best</button><button type="button" data-g="Transmit" data-act="all">Show all</button></div>
+    </div>
+    <ul>
+      <li><b>As set today</b> (the <code>data</code> set-up that APRS bursts use): flat within 1 dB from 400 Hz to 2.5 kHz, then a wall: 3150 Hz −7 dB, 4 kHz −56 dB. Raising the TX low-pass (REG_43&lt;8:6&gt;) or switching off every REG_2B filter bit doesn't move it.</li>
+      <li><b>The filter bypass</b> (REG_47 bit 0, "bypass all AF TX filters") removes the wall. What's left is the injection network: a first-order roll-off near 170 Hz, about 6 dB an octave down across the band, which also delays the low tones relative to the high ones (a near-constant −90° of phase).</li>
+      <li><b>The equaliser</b> is a filter in our own DSP, between the generators and the DAC, designed from the measured channel: it boosts and re-times so that level and phase come out flat. <code>eq</code> covers 100 Hz–5 kHz at full deviation; <code>eq8</code> reaches 8 kHz for data signals (a full-level 8 kHz sine would clip the DAC, so its sweep runs at level 29). The level lost to the bypass is won back through the chip's mic sensitivity (REG_7D) and deviation (REG_40).</li>
+      <li><b>Level alone wasn't enough.</b> A first equaliser that fixed only the level made tones flat but left 9600 at 23 % bit errors: the network's phase still smeared each bit into the next. Measuring the channel's full response from captures of known bit patterns, and correcting phase too, brought it to 0.3 %.</li>
+    </ul>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Mode from the radio</th><th>As set today</th><th>Bypass + equaliser</th></tr></thead>
+      <tbody>
+        <tr><td>FSK 1200 ±2.2 kHz</td><td><span class="pill no">13 %</span></td><td><span class="pill ok">0 %</span> (eq)</td></tr>
+        <tr><td>FSK 2400 ±2.2 kHz</td><td><span class="pill maybe">3.8 %</span></td><td><span class="pill ok">0.6 %</span> (eq, level-only design)</td></tr>
+        <tr><td>FSK 4800, raised cosine</td><td class="num">not measured</td><td><span class="pill ok">0.23 %</span> (eq)</td></tr>
+        <tr><td>GMSK 4800</td><td><span class="pill maybe">2.8 %</span></td><td><span class="pill ok">0.45 %</span> (eq)</td></tr>
+        <tr><td>FSK 9600, raised cosine</td><td class="num">not measured</td><td><span class="pill ok">0.34 %</span> (eq8)</td></tr>
+        <tr><td>G3RUH 9600</td><td><span class="pill no">36 %</span></td><td><span class="pill ok">0.30 %</span> (eq8)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="sub">Bit errors against the known pattern, a plain slicer with no clock recovery or error correction (<code>txdata.py</code>). "As set today" from a low-power run, the equaliser figures under Dry TX; Dry TX's weak signal at the bladeRF (about 38 dB over its floor) bunches the remaining errors into a few bad stretches, so the true figures may be lower.</p>
+  </section>
+
+  <section>
+    <h2>Receive</h2>
+    <p>The bladeRF sends a flat-modulated FM tone sweep; the radio's audio comes to the PC as a raw, gain-free 12-bit capture of exactly what its decoders see (16 kHz for sweeps).</p>
+    <div class="chart">
+      <div class="chartbox"><svg id="chart-rx" viewBox="0 0 780 360" role="img" aria-label="Receive audio response, selectable curves"></svg></div>
+      <div class="picks" id="picks-rx"></div>
+      <div class="btns"><button type="button" data-g="Receive" data-act="best">Ideal and best</button><button type="button" data-g="Receive" data-act="all">Show all</button></div>
+    </div>
+    <ul>
+      <li><b>As set today:</b> a steep 300 Hz high-pass (−50 dB at 100 Hz) and de-emphasis, about 6 dB an octave down above 1 kHz (−8.5 dB at 2.5 kHz). Right for voice.</li>
+      <li><b>The three REG_2B receive filters off</b> (300 Hz high-pass, 3 kHz low-pass, de-emphasis): flat from 800 Hz to 2.5 kHz. Below that, the board's coupling between the chip and the microcontroller rolls off from about 600 Hz (de-emphasis had been hiding it); no register moves it. Above 3.1 kHz the chip keeps a fixed wall that the low-pass bit doesn't remove.</li>
+      <li><b>Route 9</b> (REG_47 bits 11:8 = 9, the routine Beken's BK4819 reference manual calls <code>RF_EnterBypass</code>, "for digital walkie-talkies") takes the audio from before that wall: 3150 Hz goes from −10 to −2.4 dB, 4 kHz from −33 to −5.4 dB. The rest is a smooth slope a decoder can correct. It's unfiltered on the speaker too, so it belongs on a muted data slot.</li>
+      <li>Channel width isn't the limit: narrow FM (12.5 kHz) measured worse both ways, and the walls stayed put.</li>
+      <li><b>9600 receive: not possible today, and unproven.</b> G3RUH 9600 needs the audio close to flat to about 4.8 kHz and down near DC. Even with route 9 the receive path is about −9 dB at 4.8 kHz and −24 dB at 6.3 kHz, and the board's coupling takes the low end from 600 Hz down. There is no 9600 decoder on the radio, the PC capture can't carry it (12–16 kHz is under two samples a bit), and the chip's own modem finds no sync above 2400. Whether a decoder with heavy equalisation could recover it is an open question, not a result.</li>
+    </ul>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Mode into the radio</th><th>Signal</th><th>As set today</th><th>Filters off</th><th>Route 9</th></tr></thead>
+      <tbody>
+        <tr><td>AFSK 1200 (APRS)</td><td class="num">1200/2200 Hz</td><td><span class="pill ok">0.01 %</span></td><td><span class="pill ok">0.66 %</span></td><td><span class="pill ok">0.98 %</span></td></tr>
+        <tr><td>AFSK 2400</td><td class="num">1200/2200 Hz</td><td><span class="pill no">17 %</span></td><td><span class="pill maybe">1.8 %</span></td><td><span class="pill ok">0.83 %</span></td></tr>
+        <tr><td>FSK (POCSAG style)</td><td class="num">512 Bd ±4.5 kHz</td><td><span class="pill no">25 %</span></td><td><span class="pill maybe">5.8 %</span></td><td><span class="pill maybe">6.5 %</span></td></tr>
+        <tr><td>FSK (POCSAG style)</td><td class="num">1200 Bd ±4.5 kHz</td><td><span class="pill no">24 %</span></td><td><span class="pill maybe">7.4 %</span></td><td><span class="pill maybe">7.1 % (3.5 % with the coupling undone)</span></td></tr>
+        <tr><td>FSK (POCSAG style)</td><td class="num">2400 Bd ±4.5 kHz</td><td><span class="pill no">22 %</span></td><td><span class="pill maybe">3.6 %</span></td><td><span class="pill maybe">2.6 %</span></td></tr>
+        <tr><td>GMSK BT 0.5</td><td class="num">2400 Bd ±600 Hz</td><td><span class="pill no">22 %</span></td><td><span class="pill maybe">1.9 %</span></td><td><span class="pill maybe">2.3 %</span></td></tr>
+        <tr><td>GMSK BT 0.5 (D-STAR's)</td><td class="num">4800 Bd ±1.2 kHz</td><td><span class="pill no">26 %</span></td><td><span class="pill no">8.3 %</span></td><td><span class="pill no">14 %</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="sub">8 s of a PRBS9 pattern per mode from the bladeRF, the radio's raw 12 kHz audio, a plain demodulator on the PC (timing found every 256 bits); the same analysis on the clean generated audio gives 0 errors. With the filters off, the bit errors fall three- to tenfold for the modes that put data straight on the carrier (FSK, GMSK), which the 300 Hz high-pass otherwise strips. AFSK 1200 stays clean either way. A real decoder with clock recovery, error correction (POCSAG fixes two bits a codeword) and a correction for the board's coupling would do better than this slicer; receive-side equalisation, as on transmit, is the next step. 9600 receive can't be judged through the PC: 12–16 kHz is under two samples a bit.</p>
+  </section>
+
+  <section>
+    <h2>The BK4829's own FSK modem</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Speed</th><th>Radio sends, bladeRF decodes</th><th>bladeRF sends, radio receives</th></tr></thead>
+      <tbody>
+        <tr><td class="num">FSK 1200</td><td><span class="pill ok">12 of 12 clean</span></td><td><span class="pill ok">50 of 50</span>, 0 bit errors</td></tr>
+        <tr><td class="num">FSK 2400</td><td><span class="pill ok">20 of 20 clean</span></td><td><span class="pill ok">50 of 50</span> with the chip's CRC good (8 lost in our FIFO read-out, a firmware fix)</td></tr>
+        <tr><td class="num">FFSK 1200/1800, 1200/2400</td><td><span class="pill maybe">not decoded yet</span></td><td class="num">not run</td></tr>
+        <tr><td class="num">FSK 4800, 9600</td><td class="num">not run</td><td><span class="pill no">no sync</span>: past the documented speeds</td></tr>
+      </tbody>
+    </table></div>
+    <p>The frame format, learned from the radio's own frames: MSB first, the FIFO's low byte first on air, and the chip's undocumented CRC is CRC-16/CCITT-FALSE, sent big-endian.</p>
+  </section>
+
+  <section>
+    <h2>The registers</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Register</th><th>What it does</th><th>What we found</th></tr></thead>
+      <tbody>
+        <tr><td class="num">REG_47&lt;0&gt;</td><td>Bypass all TX audio filters</td><td><span class="pill ok">key</span> removes the 3.1 kHz transmit wall</td></tr>
+        <tr><td class="num">REG_47&lt;11:8&gt; = 9</td><td>Receive audio route: Beken's bypass</td><td><span class="pill ok">key</span> lifts the receive wall above 3.1 kHz (normal route is 1)</td></tr>
+        <tr><td class="num">REG_2B&lt;10&gt;</td><td>RX 300 Hz high-pass off</td><td><span class="pill ok">key</span> the NRZ modes' low end</td></tr>
+        <tr><td class="num">REG_2B&lt;8&gt;</td><td>RX de-emphasis off</td><td>flattens the top; for APRS a small decode gain on recorded traffic</td></tr>
+        <tr><td class="num">REG_2B&lt;9&gt;</td><td>RX 3 kHz low-pass off</td><td>no change: the fixed wall is elsewhere</td></tr>
+        <tr><td class="num">REG_2B&lt;2:0&gt;</td><td>TX high-pass, low-pass 1, pre-emphasis off</td><td>high-pass off is the <code>data</code> set-up; the others don't move the wall</td></tr>
+        <tr><td class="num">REG_43&lt;8:6&gt;</td><td>TX low-pass 2 bandwidth</td><td>3 kHz on black; 5.5 kHz helps a little, the wall stays; the "3.5 kHz" code made it steeper</td></tr>
+        <tr><td class="num">REG_43&lt;5:4&gt;, &lt;14:12&gt;</td><td>Bandwidth mode, IF filter</td><td>narrow FM measured worse both ways</td></tr>
+        <tr><td class="num">REG_28&lt;11:9&gt;</td><td>RX DC filter</td><td>no change</td></tr>
+        <tr><td class="num">REG_28&lt;8&gt;</td><td>RX noise gate</td><td>on in the voice set-up; off for data (weak packets)</td></tr>
+        <tr><td class="num">REG_73&lt;4&gt;</td><td>AFC off</td><td>no clear change at a strong signal; off for data</td></tr>
+        <tr><td class="num">REG_2F&lt;7:5&gt;</td><td>TX soft limiter</td><td>off with the bypass</td></tr>
+        <tr><td class="num">REG_7D, REG_40</td><td>Mic sensitivity, deviation</td><td>win back the bypass's level loss; REG_40 is far from linear (deviation ≈ REG_40^2.76)</td></tr>
+        <tr><td class="num">REG_70</td><td>DTMF detection and the tone generator</td><td>shared: armed detection went out on air (below)</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>What Ferrite does with it</h2>
+    <ul>
+      <li><b>In the next release, APRS receive</b> (APRS-55): on the APRS slot the 300 Hz high-pass, de-emphasis, noise gate and AFC are off. On a corpus of recorded APRS traffic this decoded about 1 % more frames; the on-air check is pending.</li>
+      <li><b>A transmit bug, fixed:</b> DTMF detection and the tone generator share REG_70, and the key-up never disarmed detection. With APRS mode off, every voice transmission carried 1000 Hz and 3300 Hz tones at 1.2–1.5 kHz deviation. Now detection is off before every key-up (TX-49); verified clean on air.</li>
+      <li><b>On the bench, behind test commands:</b> the transmit bypass and equalisers, the receive route 9 and filter hold, the FSK modem test, and a raw receive capture. These become data-slot set-ups as decoders arrive, starting with POCSAG and GMSK 2400; 9600 would be transmit only unless receive is shown to work.</li>
+      <li><b>Unchanged:</b> voice keeps the chip's voice filters, and APRS 1200 transmit is already flat where its tones sit (1200 and 2200 Hz within 0.2 dB).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Next</h2>
+    <ol>
+      <li>Receive equalisation for route 9's top slope and the board's coupling, for the 2400–4800 Bd modes. 9600 receive would need a decoder on the radio before it can even be tried; until then 9600 is transmit only.</li>
+      <li>A low-power rerun of the 4800/9600 transmit modes, to see whether the remaining 0.2–0.5 % is the bench's weak signal.</li>
+      <li>Data-slot set-ups in the firmware: these registers per mode, not just on the bench.</li>
+      <li>The modem's FFSK modes and its FIFO read-out at 2400 Bd.</li>
+      <li>The same measurements on a second radio (clear), to see how much radios differ.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>How this was measured, and its limits</h2>
+    <ul>
+      <li>One radio (black, UHF chip), one frequency (446.475 MHz), wide FM. Transmit tests with Dry TX (the power amplifier at zero) except one low-power run; the bladeRF 1 on a nearby PC as receiver or transmitter (its lowest transmit gain). It tunes from 237.5 MHz up, so 2 m wasn't measured.</li>
+      <li>Receive audio is a raw capture of the decoders' samples (12 kHz, or 16 kHz for sweeps), with no gain stage.</li>
+      <li>Registers were changed live on the bench; the radio's normal settings are untouched unless stated.</li>
+      <li>Bit error rates use a deliberately plain demodulator, so they show the channel, not a decoder's cleverness.</li>
+      <li>Tools: <code>ferrite/tools/bench-blade/</code>. Every test and its verdict is in the log below.</li>
+    </ul>
+  </section>
+</main>

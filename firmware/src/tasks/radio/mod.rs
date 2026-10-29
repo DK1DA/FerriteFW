@@ -310,6 +310,12 @@ struct Radio {
     /// TERM-42 (decision 305): `bk rxaf`'s REG_2B bits 10:8, written after every FM tune; None off. RAM only.
     #[cfg(feature = "bench")]
     rxaf: Option<u16>,
+    /// TERM-42.2 (decision 315): `bk rxif`'s REG_43, written after every FM tune; None off. RAM only.
+    #[cfg(feature = "bench")]
+    rxif: Option<u16>,
+    /// TERM-42.3 (decision 316): `bk hold`'s registers, written after every FM tune; register 0 an empty slot.
+    #[cfg(feature = "bench")]
+    holds: [(u8, u16); ferrite_core::msg::HOLDS],
     /// TERM-43 (decision 305): the FSK modem test while it runs.
     #[cfg(feature = "bench")]
     fsk: Option<fskbench::FskRun>,
@@ -771,6 +777,10 @@ pub async fn task() {
         same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
         #[cfg(feature = "bench")]
         rxaf: None,
+        #[cfg(feature = "bench")]
+        rxif: None,
+        #[cfg(feature = "bench")]
+        holds: [(0, 0); ferrite_core::msg::HOLDS],
         #[cfg(feature = "bench")]
         fsk: None,
         #[cfg(feature = "tx")]

@@ -43,6 +43,7 @@ pub mod msg;
 pub mod name;
 pub mod path;
 pub mod rawaudio;
+pub mod rxmeter;
 pub mod reader;
 pub mod restore;
 pub mod rxaudio;

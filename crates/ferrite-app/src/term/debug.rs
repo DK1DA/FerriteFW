@@ -87,6 +87,15 @@ pub enum Kind {
     /// `bk rxaf [HEX|off]`: the receive AF filter override (TERM-42).
     RxAf(Option<Option<u16>>),
     #[cfg(feature = "bench")]
+    /// `bk rxif [HEX|off]`: the receive IF override (TERM-42.2).
+    RxIf(Option<Option<u16>>),
+    #[cfg(feature = "bench")]
+    /// `bk hold [REG VALUE|off]`: registers held after every FM tune (TERM-42.3).
+    Hold(Option<Option<(u8, u16)>>),
+    #[cfg(feature = "bench")]
+    /// `meter [on|off]`: the receive level meter (TERM-44).
+    Meter(Option<bool>),
+    #[cfg(feature = "bench")]
     /// `fsk ...`: the BK4829's FSK modem test (TERM-43).
     Fsk(ferrite_core::fskbench::Ask),
 }
@@ -180,6 +189,12 @@ impl Job {
             Kind::Turns { reset } => DebugReq::Turns { reset },
             #[cfg(feature = "bench")]
             Kind::RxAf(set) => DebugReq::RxAf(set),
+            #[cfg(feature = "bench")]
+            Kind::RxIf(set) => DebugReq::RxIf(set),
+            #[cfg(feature = "bench")]
+            Kind::Hold(set) => DebugReq::Hold(set),
+            #[cfg(feature = "bench")]
+            Kind::Meter(set) => DebugReq::Meter(set),
             #[cfg(feature = "bench")]
             Kind::Fsk(a) => DebugReq::Fsk(a),
         })
@@ -391,6 +406,71 @@ impl Job {
                     }
                 }
                 self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::RxIf(_), DebugAns::RxIf(v)) => {
+                match v {
+                    None => out.push(b"  bk rxif: off (an FM tune writes REG_43 for the slot's bandwidth)"),
+                    Some(v) => {
+                        out.push(b"  bk rxif: REG_43 = 0x");
+                        hex(v as u32, 4, out);
+                        put!(out, " after every FM tune (IF {} / weak {}, x2 {}); until bk rxif off or power-off", v >> 12 & 7, v >> 9 & 7, if v & 0x20 != 0 { "on" } else { "off" });
+                    }
+                }
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Hold(_), DebugAns::Hold(h)) => {
+                out.push(b"  bk hold:");
+                let mut any = false;
+                for (r, v) in h.iter().filter(|h| h.0 != 0) {
+                    out.push(b" REG_");
+                    hex(*r as u32, 2, out);
+                    out.push(b" = 0x");
+                    hex(*v as u32, 4, out);
+                    any = true;
+                }
+                out.push(if any { &b" after every FM tune; until bk hold off or power-off"[..] } else { b" none" });
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Meter(_), DebugAns::Meter(r)) => {
+                use ferrite_core::rxmeter::{FREQS, N, NONE};
+                // TERM-44: a head line, then five bins a line: Hz and dBFS
+                const PER: usize = 5;
+                if self.line == 0 {
+                    put!(out, "  meter {}: {} windows of 100 ms; loudest per bin, dB against full scale", if r.on { "on" } else { "off" }, r.windows);
+                } else {
+                    let at = (self.line as usize - 1) * PER;
+                    // right-aligned: Hz in 6, the level in 6 ("-123.4", " -12.3", "  --.-")
+                    fn pad(out: &mut Line, used: usize, width: usize) {
+                        for _ in used..width {
+                            out.push(b" ");
+                        }
+                    }
+                    let digits = |v: u32| if v >= 10_000 { 5 } else if v >= 1000 { 4 } else if v >= 100 { 3 } else if v >= 10 { 2 } else { 1 };
+                    out.push(b" ");
+                    for k in at..(at + PER).min(N) {
+                        let f = FREQS[k] as u32;
+                        pad(out, digits(f), 6);
+                        put!(out, "{}", f);
+                        match r.db10[k] {
+                            NONE => out.push(b"   --.-"),
+                            d => {
+                                let a = d.unsigned_abs() as u32;
+                                pad(out, digits(a / 10) + 2 + (d < 0) as usize, 7);
+                                put!(out, "{}{}.{}", if d < 0 { "-" } else { "" }, a / 10, a % 10);
+                            }
+                        }
+                    }
+                }
+                if self.line as usize >= N.div_ceil(PER) {
+                    self.st = St::Over;
+                }
+                self.line += 1;
                 Step::Line
             }
             #[cfg(feature = "bench")]

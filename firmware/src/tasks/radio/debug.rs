@@ -30,6 +30,19 @@ impl Radio {
             DebugReq::Turns { reset } => DebugAns::Turns(self.turns.take(reset)),
             // TERM-42, TERM-43 (decision 305): the receive filter override and the FSK modem test.
             DebugReq::RxAf(set) => self.rxaf_ask(set),
+            DebugReq::RxIf(set) => self.rxif_ask(set),
+            DebugReq::Hold(set) => self.hold_ask(set),
+            // TERM-44 (decision 315): the DSP task runs the meter; the answer is its last report (zeroed here on a
+            // start, so a stale one never shows)
+            DebugReq::Meter(set) => {
+                if let Some(on) = set {
+                    crate::tasks::dsp::meter_reset(on);
+                    if crate::chan::DSP.try_send(ferrite_core::msg::DspCmd::Meter(on)).is_err() {
+                        return DebugAns::Refused("the DSP task is busy; try again");
+                    }
+                }
+                DebugAns::Meter(crate::tasks::dsp::meter_report())
+            }
             DebugReq::Fsk(a) => self.fsk_ask(a),
             // TERM-32 (a bench test): PA0, the mic level tap VOX reads, at 8 kHz for 32 ms, to tell raw audio from an
             // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it. TERM-32.1 (`af`):

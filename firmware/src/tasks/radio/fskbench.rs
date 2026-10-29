@@ -55,6 +55,41 @@ impl Radio {
         DebugAns::RxAf(self.rxaf)
     }
 
+    /// TERM-42.2: the IF override set, ended or asked; a change retunes as `rxaf_ask`'s does.
+    pub(super) fn rxif_ask(&mut self, set: Option<Option<u16>>) -> DebugAns {
+        if let Some(v) = set {
+            self.rxif = v;
+            if self.path.keyed().is_none() {
+                for s in self.tuned.map(|t| t.map(|(s, _)| s)).into_iter().flatten().filter(|&s| (s as usize) < SLOTS) {
+                    self.retune(s);
+                }
+            }
+        }
+        DebugAns::RxIf(self.rxif)
+    }
+
+    /// TERM-42.3: a held register added or replaced, all ended, or asked; a change retunes as `rxaf_ask`'s does.
+    pub(super) fn hold_ask(&mut self, set: Option<Option<(u8, u16)>>) -> DebugAns {
+        if let Some(h) = set {
+            match h {
+                None => self.holds = [(0, 0); ferrite_core::msg::HOLDS],
+                Some((r, v)) => {
+                    let at = self.holds.iter().position(|x| x.0 == r).or_else(|| self.holds.iter().position(|x| x.0 == 0));
+                    match at {
+                        Some(i) => self.holds[i] = (r, v),
+                        None => return DebugAns::Refused("four registers held already: bk hold off first"),
+                    }
+                }
+            }
+            if self.path.keyed().is_none() {
+                for s in self.tuned.map(|t| t.map(|(s, _)| s)).into_iter().flatten().filter(|&s| (s as usize) < SLOTS) {
+                    self.retune(s);
+                }
+            }
+        }
+        DebugAns::Hold(self.holds)
+    }
+
     /// TERM-43: `fsk` asked, started or ended.
     pub(super) fn fsk_ask(&mut self, a: Ask) -> DebugAns {
         match a {
