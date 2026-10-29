@@ -87,11 +87,17 @@ jobs:
         run: |
           if [ -z "$MINISIGN_KEY" ]; then echo "no MINISIGN_KEY secret: not signed"; exit 0; fi
           apt-get install -y -q --no-install-recommends minisign
+          # The key file is a comment line and the key's base64 line; the secret may hold the base64 line alone or
+          # both joined into one, so rebuild the file around the base64.
+          b64=$(printf '%s' "$MINISIGN_KEY" | grep -oE 'RW[A-Za-z0-9+/]{100,}={0,2}' | tail -1)
           key=$(mktemp)
-          printf '%s\n' "$MINISIGN_KEY" > "$key"
+          printf 'untrusted comment: minisign encrypted secret key\n%s\n' "$b64" > "$key"
           cd target/out
           minisign -S -s "$key" -t "Ferrite $(git rev-parse --short HEAD)" -m *.btf SHA256SUMS
           rm "$key"
+          # Each signature checked against the public key in the repo (the one Console carries): a wrong secret fails here.
+          for f in *.btf SHA256SUMS; do minisign -Vqm "$f" -p ../../minisign.pub; done
+          echo "signed: $(ls *.minisig | tr '\n' ' ')"
       - uses: https://code.forgejo.org/forgejo/upload-artifact@v4
         with:
           name: ferrite-images

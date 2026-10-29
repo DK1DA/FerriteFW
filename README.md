@@ -93,6 +93,22 @@ cargo test -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea
 
 More: the spec (the manual) and the decisions are in the docs repo; debugging on the radio (the cable log, the terminal's bench commands, fault addresses) is its `debugging.md`.
 
+## Release images are signed
+
+Each release's images and `SHA256SUMS` come with a minisign signature (`.minisig` beside each file), made by the Forgejo CI. Ferrite Console checks it before installing. To check by hand:
+
+```sh
+minisign -Vm ferrite-0.9.btf -P RWQbhRdY9EcsW+Has6GdiIJMPCVPZltho1Lv4lkOpBYls0fxgxZ6Tvai
+```
+
+Ferrite's public key (key ID `5B2C47F45817851B`), also in [`minisign.pub`](minisign.pub):
+
+```
+RWQbhRdY9EcsW+Has6GdiIJMPCVPZltho1Lv4lkOpBYls0fxgxZ6Tvai
+```
+
+Your own builds aren't signed; Console installs them and says so.
+
 ## Safety
 
 - **Safe state first.** The first code after reset clears every RF path pin and holds the PA drive at 0 V,
