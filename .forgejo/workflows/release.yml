@@ -70,6 +70,18 @@ jobs:
           python3 tools/buildreport.py tx --ui "$ui"
           cp "$ui" target/ui-results.json
 
+      # Every run, by hand too: the images and the build report as a download on the run's page.
+      - name: Keep the images and the build report
+        run: |
+          mkdir -p target/out
+          cp "target/$(cat target/release-image)" target/ferrite-reader.btf target/build-report-tx.html \
+             target/build-report-tx.json target/ui-results.json target/out/
+          (cd target/out && sha256sum *.btf > SHA256SUMS)
+      - uses: https://code.forgejo.org/forgejo/upload-artifact@v4
+        with:
+          name: ferrite-images
+          path: target/out/
+
       - name: Attach to the release
         if: github.event_name == 'release'
         env:
