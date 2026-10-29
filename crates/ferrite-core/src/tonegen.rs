@@ -185,22 +185,23 @@ pub const BEEP_MAX_MS: u16 = 1_000;
 /// peak for 180 ms and fades about a DAC level (6 dB) every 100 ms as the glow settles: no fresh attack. One tone at
 /// a time from DAC1, as the key beeps (SND-11), at a fixed level: the volume knob after the amp sets how loud. The
 /// preview's gains (0.05 to 0.26, then an exponential fade to 0.002) in 6 dB DAC levels from the peak
-/// [`BOOT_SOUND_PEAK`]: level 8 keeps the glide's pitch steps fine (TMR6's divider at 1.8 kHz about 1.5 %). The
+/// [`BOOT_SOUND_PEAK`]: level 9 (raised from 8 for loudness, Alex, Oct 28; 6 dB a level) keeps the glide's pitch steps
+/// about 3 % at 1.8 kHz (TMR6's divider); level 10 would make them about 6 %, a semitone, audible as steps. The
 /// Radio task reads it, so it is one named static (fast flash, slowcheck).
 pub static BOOT_SOUND: [(u16, u8, u8); 40] = [
-    (330, 6, 25), (364, 6, 25), (402, 6, 25), (444, 6, 25), (490, 6, 25), (541, 6, 25), (598, 7, 25), (660, 7, 25),
-    (729, 7, 25), (805, 7, 25), (888, 7, 25), (981, 7, 25), (1083, 7, 25), (1196, 7, 25), // the 14 windings
-    (1209, 7, 10), (1237, 7, 10), (1265, 7, 10), (1294, 7, 10), (1323, 7, 10), (1353, 7, 10), (1384, 8, 10),
-    (1416, 8, 10), (1448, 8, 10), (1481, 8, 10), (1515, 8, 10), (1549, 8, 10), (1584, 8, 10), (1620, 8, 10),
-    (1657, 8, 10), (1695, 8, 10), (1734, 8, 10), (1773, 8, 10), // the glide up a fifth
-    (1793, 8, 230), // the flash, held
-    (1793, 7, 100), (1793, 6, 110), (1793, 5, 100), (1793, 4, 100), (1793, 3, 100), (1793, 2, 110), (1793, 1, 50), // the fade
+    (330, 7, 25), (364, 7, 25), (402, 7, 25), (444, 7, 25), (490, 7, 25), (541, 7, 25), (598, 8, 25), (660, 8, 25),
+    (729, 8, 25), (805, 8, 25), (888, 8, 25), (981, 8, 25), (1083, 8, 25), (1196, 8, 25), // the 14 windings
+    (1209, 8, 10), (1237, 8, 10), (1265, 8, 10), (1294, 8, 10), (1323, 8, 10), (1353, 8, 10), (1384, 9, 10),
+    (1416, 9, 10), (1448, 9, 10), (1481, 9, 10), (1515, 9, 10), (1549, 9, 10), (1584, 9, 10), (1620, 9, 10),
+    (1657, 9, 10), (1695, 9, 10), (1734, 9, 10), (1773, 9, 10), // the glide up a fifth
+    (1793, 9, 230), // the flash, held
+    (1793, 8, 100), (1793, 7, 110), (1793, 6, 100), (1793, 5, 100), (1793, 4, 100), (1793, 3, 110), (1793, 2, 50), // the fade
 ];
 /// When the boot sound's first note is heard, ms after the animation starts (the first winding fills then); the DAC
 /// comes on 30 ms before with the amp still off, as a key beep's (SND-11).
 pub const BOOT_SOUND_AT: u32 = 100;
 /// The boot sound's loudest DAC level (the flash).
-pub const BOOT_SOUND_PEAK: u8 = 8;
+pub const BOOT_SOUND_PEAK: u8 = 9;
 
 /// When the boot sound ends, ms after the animation starts.
 pub fn boot_sound_end() -> u32 {
