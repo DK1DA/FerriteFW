@@ -156,6 +156,19 @@ impl AprsSim {
         self.push(Live { msg, at_s: self.now_s(), tries: 0, next_s: self.now_s(), ack_s: None });
     }
 
+    /// APRS-46.1: message i goes (one of ours being tried stops with it); the ones after it move up.
+    pub fn delete(&self, i: u16) -> bool {
+        let i = i as usize;
+        if self.live.get(i).and_then(Cell::get).is_none() {
+            return false;
+        }
+        for k in i..LIVE - 1 {
+            self.live[k].set(self.live[k + 1].get());
+        }
+        self.live[LIVE - 1].set(None);
+        true
+    }
+
     /// APRS-13.1: ours being tried stops, cancelled.
     pub fn stop(&self, i: u16) -> bool {
         let Some(c) = self.live.get(i as usize) else { return false };

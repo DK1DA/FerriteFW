@@ -673,7 +673,7 @@ fn rename_goes_to_its_own_record() {
 fn hold_menu_is_options_everywhere() {
     use crate::screens::opts::Of;
     let mut t = T::new();
-    for (d, of) in [(Dest::EventLog, Of::Log), (Dest::AprsHeard, Of::Heard), (Dest::AprsMessages, Of::Messages), (Dest::GpsPosition, Of::Gps), (Dest::Waypoints, Of::Waypoints), (Dest::BandScope, Of::Scope), (Dest::Browse, Of::Channels)] {
+    for (d, of) in [(Dest::EventLog, Of::Log), (Dest::AprsHeard, Of::Heard), (Dest::AprsMessages, Of::Msg), (Dest::GpsPosition, Of::Gps), (Dest::Waypoints, Of::Waypoints), (Dest::BandScope, Of::Scope), (Dest::Browse, Of::Channels)] {
         t.open(d);
         let under = t.app.screen();
         t.hold(Key::Menu);

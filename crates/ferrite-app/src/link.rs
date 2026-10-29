@@ -555,6 +555,7 @@ impl Session {
             msg::MSGS => sub::msgs(st, p, &mut o),
             msg::MSG_SEND => sub::msg_send(app, st, dev, p, &mut o),
             msg::MSG_STOP => sub::msg_stop(st, p, &mut o),
+            msg::MSG_DELETE => sub::msg_delete(st, p, &mut o),
             // LINK-13.4: receive audio, the cable only (Bluetooth can't carry 4 KB/s, research/ble-speed.md)
             msg::AUDIO if self.by != crate::remote::BY_CABLE => Status::Refused,
             msg::AUDIO => match p.first() {

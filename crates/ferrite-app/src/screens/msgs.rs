@@ -120,6 +120,25 @@ pub(crate) fn stop_or_resend(app: &mut App, store: &impl ChannelStore, stop: boo
     }
 }
 
+/// APRS-46.1: the message under the list (or open) deleted; the list again, its cursor on the next one.
+pub(crate) fn delete(app: &mut App, store: &impl ChannelStore) {
+    let Screen::Msgs(s) = app.screen else { return };
+    let data = store.data();
+    let Some(m) = data.message(s.cur.sel) else { return };
+    if !data.request(Op::DeleteMessage(s.cur.sel)) {
+        return app.show_toast(b"Not deleted", b"try again", false);
+    }
+    if m.inbound && m.state == MsgState::Unread {
+        app.inbox = app.inbox.saturating_sub(1); // INBOX-3.1: one unread fewer
+    }
+    let n = data.messages();
+    let mut cur = s.cur;
+    cur.sel = cur.sel.min(n.saturating_sub(1));
+    cur.top = cur.top.min(cur.sel);
+    app.screen = Screen::Msgs(Msgs { cur, open: false });
+    app.show_toast(b"Message deleted", m.peer.as_bytes(), false);
+}
+
 impl View for Msgs {
     /// Hold MENU: the messages' options, with Stop sending or Send again first on one of ours (APRS-13.1, 13.2).
     fn own_hold_menu(self) -> bool {
@@ -141,10 +160,11 @@ impl View for Msgs {
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
             (Key::Menu, Long) => {
-                let of = match m.filter(|m| !m.inbound).map(|m| m.state) {
-                    Some(MsgState::Pending | MsgState::Retrying(_)) => Of::MsgSending,
-                    Some(MsgState::Failed | MsgState::Cancelled) => Of::MsgEnded,
-                    _ => Of::Messages,
+                let of = match m.map(|m| (m.inbound, m.state)) {
+                    Some((false, MsgState::Pending | MsgState::Retrying(_))) => Of::MsgSending,
+                    Some((false, MsgState::Failed | MsgState::Cancelled)) => Of::MsgEnded,
+                    Some(_) => Of::Msg,
+                    None => Of::Messages,
                 };
                 app.open_screen(of.screen());
             }

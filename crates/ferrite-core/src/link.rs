@@ -158,6 +158,9 @@ pub mod msg {
     /// Stop sending one of our APRS messages (LINK-49, APRS-13.1): to (length, text), the message (length, text);
     /// the newest of ours to that station with that text still being tried stops, kept as cancelled.
     pub const MSG_STOP: u8 = 0x55;
+    /// Delete one APRS message (LINK-52, APRS-46.1): flags (1: one to us), the station (length, text: from, or
+    /// to), the message (length, text); the newest that matches goes, as the radio's own Delete message.
+    pub const MSG_DELETE: u8 = 0x59;
     /// Receive audio to the PC (LINK-13.1, LINK-13.4): the cable only; payload one byte, 1 to listen, 0 to stop
     /// (2 or 3: the bench's raw stream at 12 or 16 kHz, LINK-13.9).
     /// The answer carries the stream's rate (u16) and a block's samples (u16). Listening ends with the session

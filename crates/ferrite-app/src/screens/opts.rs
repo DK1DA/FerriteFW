@@ -37,6 +37,8 @@ pub enum Of {
     /// One of our messages selected (APRS-13.1, APRS-13.2): being tried, or ended without an ack.
     MsgSending,
     MsgEnded,
+    /// Any other message selected (one to us, or ours acked or rejected): Delete first (APRS-46.1).
+    Msg,
 }
 
 impl Of {
@@ -66,6 +68,8 @@ pub(crate) enum Act {
     /// On the message selected under the page: stop sending it (APRS-13.1), or send it again (APRS-13.2).
     MsgStop,
     MsgResend,
+    /// On the message selected under the page: delete it, after a confirm (APRS-46.1, MENU-23).
+    MsgDelete,
 }
 
 pub(crate) type Opt = (&'static str, Act, &'static str);
@@ -84,9 +88,13 @@ const MESSAGES: [Opt; 6] = [
     ("Delete all messages", Act::Confirm(&Op::ClearMessages), "Inbox and sent, unread too"), // APRS-46
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
-/// APRS-13.1, APRS-13.2: the messages' rows under one of ours that is being tried, or ended without an ack.
-const MSG_SENDING: [Opt; 7] = [
+/// APRS-46.1: deletes the message under the page.
+const MSG_DELETE: Opt = ("Delete message", Act::MsgDelete, "This one only, either way");
+/// APRS-13.1, APRS-13.2, APRS-46.1: the messages' rows under one of ours that is being tried, or ended without an
+/// ack, or under any other message.
+const MSG_SENDING: [Opt; 8] = [
     ("Stop sending", Act::MsgStop, "No more tries; it stays, cancelled"),
+    MSG_DELETE,
     MESSAGES[0],
     MESSAGES[1],
     MESSAGES[2],
@@ -94,8 +102,9 @@ const MSG_SENDING: [Opt; 7] = [
     MESSAGES[4],
     MESSAGES[5],
 ];
-const MSG_ENDED: [Opt; 7] = [
+const MSG_ENDED: [Opt; 8] = [
     ("Send again", Act::MsgResend, "As a new message, five new tries"),
+    MSG_DELETE,
     MESSAGES[0],
     MESSAGES[1],
     MESSAGES[2],
@@ -103,6 +112,7 @@ const MSG_ENDED: [Opt; 7] = [
     MESSAGES[4],
     MESSAGES[5],
 ];
+const MSG: [Opt; 7] = [MSG_DELETE, MESSAGES[0], MESSAGES[1], MESSAGES[2], MESSAGES[3], MESSAGES[4], MESSAGES[5]];
 const GPS: [Opt; 3] = [
     ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
     ("Waypoints", Act::Open(Dest::Waypoints), "Distance and bearing to each"),
@@ -150,6 +160,7 @@ pub(crate) fn rows(of: Of) -> &'static [Opt] {
         Of::Messages => &MESSAGES,
         Of::MsgSending => &MSG_SENDING,
         Of::MsgEnded => &MSG_ENDED,
+        Of::Msg => &MSG,
         Of::Gps => &GPS,
         Of::Waypoints => &WAYPOINTS,
         Of::Scope => &SCOPE,
@@ -165,7 +176,7 @@ pub(crate) fn title(of: Of) -> &'static [u8] {
         Of::Log => b"Event log",
         Of::Heard => b"APRS heard",
         Of::Messages => b"APRS messages",
-        Of::MsgSending | Of::MsgEnded => b"APRS message",
+        Of::MsgSending | Of::MsgEnded | Of::Msg => b"APRS message",
         Of::Gps => b"GPS position",
         Of::Waypoints => b"Waypoints",
         Of::Scope => b"Scope",
@@ -209,7 +220,7 @@ impl View for Options {
                 }
             }
             (Key::Menu, Short) => match act {
-                Act::Confirm(_) | Act::Sel(_, true) if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
+                Act::Confirm(_) | Act::Sel(_, true) | Act::MsgDelete if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
                 Act::Sel(s, _) => {
                     app.back();
                     super::contacts::sel(app, s, store);
@@ -221,6 +232,10 @@ impl View for Options {
                 Act::MsgStop | Act::MsgResend => {
                     app.back();
                     super::msgs::stop_or_resend(app, store, act == Act::MsgStop);
+                }
+                Act::MsgDelete => {
+                    app.back();
+                    super::msgs::delete(app, store);
                 }
                 Act::Do(&op) | Act::Confirm(&op) => {
                     if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {

@@ -305,3 +305,31 @@ fn comment_limit() {
     t.tap(Key::Digit(2));
     assert_eq!(t.toast(), "40 characters / the comment limit");
 }
+
+/// APRS-46.1, MENU-23: hold MENU on a message, then Delete message and OK again: that one goes (an unread one
+/// leaves the mail badge too), the list closes up under the cursor; from an open message, the list again.
+#[test]
+fn delete_one() {
+    let mut t = T::new();
+    t.open(Dest::AprsMessages);
+    let n = t.s.messages();
+    t.app.inbox = 1;
+    t.hold(Key::Menu); // the first row: VE3KPW-9, unread
+    assert!(matches!(t.screen(), Screen::Options(o) if o.of == crate::screens::opts::Of::Msg), "{}", t.name());
+    t.shows("Delete message");
+    t.tap(Key::Menu);
+    assert_eq!(t.s.messages(), n, "asks first");
+    t.tap(Key::Menu);
+    assert_eq!(t.toast(), "Message deleted / VE3KPW-9");
+    assert_eq!(t.s.messages(), n - 1);
+    assert_eq!(t.app.inbox, 0, "the badge's unread one");
+    assert!(matches!(t.screen(), Screen::Msgs(m) if m.cur.sel == 0 && !m.open));
+    t.draw();
+    t.hides("On my way");
+    // The last row, open: deleted, and the cursor on the new last one.
+    t.app.screen = Screen::Msgs(Msgs { cur: crate::screens::lists::Cursor { sel: n - 2, top: 0 }, open: true });
+    t.hold(Key::Menu); // a failed one of ours: Send again, then Delete message
+    t.taps(&[Key::Down, Key::Menu, Key::Menu]);
+    assert_eq!(t.toast(), "Message deleted / VE3JLH");
+    assert!(matches!(t.screen(), Screen::Msgs(m) if m.cur.sel == n - 3 && !m.open), "{}", t.name());
+}

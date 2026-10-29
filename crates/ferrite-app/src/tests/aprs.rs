@@ -745,11 +745,11 @@ fn stop_sending_and_send_again() {
     a.tap(Key::Menu);
     assert_eq!(a.s.message(0).map(|m| (m.state, m.peer)), Some((MsgState::Pending, Buf::from(&b"VE3KPW"[..]))), "a new one");
     assert_eq!(a.s.message(1).map(|m| m.state), Some(MsgState::Cancelled), "the old one kept");
-    // A message to us has neither.
+    // A message to us has neither: Delete leads its options (APRS-46.1).
     let k = (0..a.s.messages()).find(|&i| a.s.message(i).is_some_and(|m| m.inbound)).unwrap();
     a.app.screen = Screen::Msgs(crate::screens::msgs::Msgs { cur: crate::screens::lists::Cursor { sel: k, top: 0 }, open: false });
     a.press(Key::Menu, 800);
-    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::Messages));
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::Msg));
 }
 
 /// APRS-17.9: Beacon now with neither APRS mode nor beacons holding C says so and asks for nothing (asked for,

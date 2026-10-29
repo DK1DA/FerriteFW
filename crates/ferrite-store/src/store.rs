@@ -91,6 +91,8 @@ pub enum Job {
     Heard([u8; logs::HEARD_JOB]),
     /// Event (`log`) or message `seq` read.
     Read { log: bool, seq: u32 },
+    /// Message `seq` deleted (APRS-46.1).
+    MsgDelete { seq: u32 },
     Waypoint(Waypoint),
     DeleteWaypoint(Waypoint),
     Contact(Contact),
@@ -125,6 +127,9 @@ pub const HEARD_CHECK: u16 = 16;
 /// (Sep 2026), so a GPS fix later moves it by a plausible amount rather than decades.
 const TIME0: u32 = 1_790_000_000;
 
+/// APRS-46.1: words of [`FlashStore::msgs_gone`]: a bit per message slot (the ring holds 6 sectors of 31).
+const MSGS_GONE_WORDS: usize = 6;
+
 pub struct FlashStore<N: Nor, D: Data> {
     f: Flash<N>,
     /// The records not in flash yet (see the module comment).
@@ -153,6 +158,9 @@ pub struct FlashStore<N: Nor, D: Data> {
     saving: Cell<bool>,
     events: Ring,
     msgs: Ring,
+    /// APRS-46.1: the message ring's deleted records, a bit per slot (seq % its capacity), kept from the
+    /// records' marks at mount so the list skips them without reading flash.
+    msgs_gone: Cell<[u32; MSGS_GONE_WORDS]>,
     /// The heard list's rows (APRS-4).
     heard: Ring,
     wps: Waypoints,
@@ -194,6 +202,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             saving: Cell::new(false),
             events: Ring::new(EVENT_LOG.start, EVENT_LOG.end, logs::EVENT_END),
             msgs: Ring::new(APRS.start + 2 * SECTOR, APRS.end, logs::MSG_END),
+            msgs_gone: Cell::new([0; MSGS_GONE_WORDS]),
             heard: Ring::new(HEARD.start, HEARD.end, logs::HEARD_END),
             wps: Waypoints::new(WAYPOINTS.start),
             contacts: Contacts::new(CONTACTS.start),
@@ -256,6 +265,15 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                     if logs::msg_is_open(&b) {
                         self.msgs.mark(&self.f, seq, at, v).await?;
                     }
+                }
+            }
+        }
+        // APRS-46.1: which records were deleted
+        self.msgs_gone.set([0; MSGS_GONE_WORDS]);
+        for i in 0..self.msgs.len() {
+            if let (Some(seq), Some(b)) = (self.msgs.seq(i), self.msgs.read(&self.f, i)) {
+                if logs::msg_deleted(&b) {
+                    self.set_gone(seq, true);
                 }
             }
         }
@@ -491,7 +509,13 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             }
             Job::Msg { inbound, peer, text, id, ago_s } => {
                 let mut r = logs::msg_rec(inbound, &peer, &text, &id, self.now_s().saturating_sub(ago_s), self.utc.get());
-                self.msgs.append(&self.f, &mut r).await.is_ok()
+                match self.msgs.append(&self.f, &mut r).await {
+                    Ok(seq) => {
+                        self.set_gone(seq, false); // a slot a deleted one had
+                        true
+                    }
+                    Err(_) => false,
+                }
             }
             Job::MsgState { peer, text, state } => self.msg_state_async(peer, text, state).await.is_ok(),
             Job::Heard(j) => {
@@ -508,6 +532,16 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 let ring = if log { &self.events } else { &self.msgs };
                 ring.mark(&self.f, seq, 10, 0).await.is_ok()
             }
+            Job::MsgDelete { seq } => match self.msgs.by_seq(&self.f, seq) {
+                Some(b) => {
+                    let mut ok = true;
+                    for (at, v) in logs::msg_delete_marks(&b) {
+                        ok &= self.msgs.mark(&self.f, seq, at, v).await.is_ok();
+                    }
+                    ok
+                }
+                None => true, // the ring wrapped over it meanwhile
+            },
             Job::Waypoint(w) => self.wps.add(&self.f, &w).await.unwrap_or(false),
             Job::DeleteWaypoint(w) => self.wps.delete(&self.f, &w).await.unwrap_or(false),
             Job::Contact(c) => self.contacts.put(&self.f, &c).await.unwrap_or(false),
@@ -560,7 +594,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             app.restore_state(&mut ferrite_app::persist::SliceSource(&buf[..len]), self);
         }
         // INBOX-3.1: the mail badge counts unread messages to us; the log keeps its own unread count.
-        let mail = (0..self.msgs.len()).filter(|&i| self.message(i).is_some_and(|m| m.inbound && m.state == MsgState::Unread)).count();
+        let mail = (0..self.messages()).filter(|&i| self.message(i).is_some_and(|m| m.inbound && m.state == MsgState::Unread)).count();
         app.set_inbox(mail as u16, (0..self.events.len()).filter(|&i| self.event(i).is_some_and(|e| e.unread)).count() as u16);
         self.mark_saved(app);
         found
@@ -914,6 +948,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         self.events.forget();
         self.msgs.forget();
+        self.msgs_gone.set([0; MSGS_GONE_WORDS]);
         self.heard.forget();
         self.wps.forget();
         self.contacts.0.forget();
@@ -1099,9 +1134,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::ClearHeard => self.heard.clear(&self.f).await, // APRS-4: the stored rows too
             // APRS-46, INBOX-7.1: each unread message to us read, and its log entry (among the last 64) with it.
             Op::MessagesReadAll => {
-                for i in 0..self.msgs.len() {
+                for i in 0..self.messages() {
                     let Some(m) = self.message(i).filter(|m| m.inbound && m.state == MsgState::Unread) else { continue };
-                    if let Some(seq) = self.msgs.seq(i) {
+                    if let Some(seq) = self.msg_seq(i) {
                         self.msgs.mark(&self.f, seq, 10, 0).await?;
                     }
                     let entry = (0..self.events.len().min(64)).find(|&j| {
@@ -1113,7 +1148,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 }
                 Ok(())
             }
-            Op::ClearMessages => self.msgs.clear(&self.f).await,
+            Op::ClearMessages => {
+                self.msgs_gone.set([0; MSGS_GONE_WORDS]);
+                self.msgs.clear(&self.f).await
+            }
             Op::Quick(i, t) => self.aprs_save(Some((i, t))).await,
             _ => Ok(()),
         }
@@ -1215,6 +1253,28 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     /// Our message to `peer` with `text` moved on (the APRS task: tried again, acked, failed).
+    /// APRS-46.1: whether message slot `seq` was deleted.
+    fn gone(&self, seq: u32) -> bool {
+        let k = (seq % self.msgs.cap()) as usize;
+        self.msgs_gone.get()[k / 32] & 1 << (k % 32) != 0
+    }
+
+    fn set_gone(&self, seq: u32, on: bool) {
+        let k = (seq % self.msgs.cap()) as usize;
+        let mut g = self.msgs_gone.get();
+        if on {
+            g[k / 32] |= 1 << (k % 32);
+        } else {
+            g[k / 32] &= !(1 << (k % 32));
+        }
+        self.msgs_gone.set(g);
+    }
+
+    /// Message `i` as the list counts them (newest first, deleted ones skipped): its seq.
+    fn msg_seq(&self, i: u16) -> Option<u32> {
+        (0..self.msgs.len()).filter_map(|j| self.msgs.seq(j)).filter(|&s| !self.gone(s)).nth(i as usize)
+    }
+
     pub fn message_state(&self, peer: &[u8], text: &[u8], state: MsgState) -> bool {
         self.ok() && self.submit(Job::MsgState { peer: Buf::from(peer), text: Buf::from(text), state })
     }
@@ -1271,7 +1331,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             },
             // INBOX-7.1: an unread message from someone also marks its log entry read (the newest unread one with
             // its sender and text, among the last 64).
-            Op::MessageRead(i) => match (self.msgs.seq(i), self.message(i)) {
+            Op::MessageRead(i) => match (self.msg_seq(i), self.message(i)) {
                 (Some(seq), Some(m)) => {
                     if !self.submit(Job::Read { log: false, seq }) {
                         return Some(false);
@@ -1300,6 +1360,20 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Some(m) if !m.inbound && matches!(m.state, MsgState::Pending | MsgState::Retrying(_)) => {
                     self.extra.request(Op::Unqueue(m.peer, m.text));
                     self.message_state(m.peer.as_bytes(), m.text.as_bytes(), MsgState::Cancelled)
+                }
+                _ => false,
+            },
+            // APRS-46.1: one message goes (ours still being tried stops first); the list skips it at once.
+            Op::DeleteMessage(i) => match (self.msg_seq(i), self.message(i)) {
+                (Some(seq), Some(m)) => {
+                    if !m.inbound && matches!(m.state, MsgState::Pending | MsgState::Retrying(_)) {
+                        self.extra.request(Op::Unqueue(m.peer, m.text));
+                    }
+                    if !self.submit(Job::MsgDelete { seq }) {
+                        return Some(false);
+                    }
+                    self.set_gone(seq, true);
+                    true
                 }
                 _ => false,
             },
@@ -1607,10 +1681,10 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         self.extra.beacon_sent(i)
     }
     fn messages(&self) -> u16 {
-        self.msgs.len()
+        (0..self.msgs.len()).filter(|&i| self.msgs.seq(i).is_some_and(|s| !self.gone(s))).count() as u16
     }
     fn message(&self, i: u16) -> Option<Message> {
-        self.msgs.read(&self.f, i).map(|b| logs::msg_decode(&b, self.msgs.ago(&b, self.clock())))
+        self.msgs.by_seq(&self.f, self.msg_seq(i)?).map(|b| logs::msg_decode(&b, self.msgs.ago(&b, self.clock())))
     }
     fn draft(&self) -> Draft {
         self.draft.get()

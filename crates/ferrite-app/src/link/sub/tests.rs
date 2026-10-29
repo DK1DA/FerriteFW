@@ -346,3 +346,20 @@ fn message_stop() {
     assert_eq!((s, &why[..]), (Status::Invalid as u8, &b"not being sent"[..]));
     assert_eq!(pc.ask(msg::MSG_STOP, &[3, b'A']).0, Status::BadArg as u8);
 }
+
+/// LINK-52, APRS-46.1: `MSG_DELETE` deletes the newest message that way with that station and text, as the radio's
+/// Delete message does; `invalid` when there is none; `bad argument` when malformed.
+#[test]
+fn message_delete() {
+    let mut pc = Pc::new(false);
+    let n = pc.st.messages();
+    let del = |inbound: bool, call: &[u8], text: &[u8]| [&[inbound as u8][..], &send_payload(call, text)].concat();
+    let (s, a) = pc.ask(msg::MSG_DELETE, &del(false, b"VE3KPW-9", b"On my way"));
+    assert_eq!((s, &a[..]), (Status::Invalid as u8, &b"no such message"[..]), "that one is to us, not ours");
+    let (s, a) = pc.ask(msg::MSG_DELETE, &del(true, b"ve3kpw-9", b"On my way"));
+    assert_eq!(s, 0, "{a:?}");
+    assert_eq!(pc.st.messages(), n - 1);
+    assert!((0..pc.st.messages()).all(|i| pc.st.message(i).is_some_and(|m| m.text.as_bytes() != b"On my way")));
+    assert_eq!(pc.ask(msg::MSG_DELETE, &del(true, b"VE3KPW-9", b"On my way")).0, Status::Invalid as u8, "gone");
+    assert_eq!(pc.ask(msg::MSG_DELETE, &[1, 3, b'A']).0, Status::BadArg as u8);
+}

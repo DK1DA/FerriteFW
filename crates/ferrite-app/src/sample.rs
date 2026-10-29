@@ -191,6 +191,8 @@ pub struct Sample {
     events_read: Cell<u32>,
     events_cleared: Cell<bool>,
     msgs_read: Cell<u32>,
+    /// APRS-46.1: sample messages deleted one by one, a bit each (by their place in `MESSAGES`).
+    msgs_del: Cell<u32>,
     /// The reset (Op::Wipe) took the sample messages.
     msgs_gone: Cell<bool>,
     /// The APRS task's live side: heard, messages with their tries, beacons.
@@ -250,6 +252,7 @@ impl Sample {
             events_read: Cell::new(0),
             events_cleared: Cell::new(false),
             msgs_read: Cell::new(0),
+            msgs_del: Cell::new(0),
             msgs_gone: Cell::new(false),
             aprs: aprs::AprsSim::new(),
             draft: Cell::new(Draft::default()),
@@ -365,6 +368,14 @@ impl Sample {
         self.aprs.live_n()
     }
 
+    /// The sample message shown at place `v` after the live ones: its place in `MESSAGES` (deleted ones skipped).
+    fn sample_msg(&self, v: u16) -> Option<usize> {
+        if self.msgs_gone.get() {
+            return None;
+        }
+        (0..MESSAGES.len()).filter(|&k| self.msgs_del.get() & 1 << k == 0).nth(v as usize)
+    }
+
     /// A second of the simulated APRS task ([`aprs`]): APRS mode on or off, and whether C can transmit with the
     /// band relay where the active slot holds it. The caller notifies the arrivals and shows the transmissions.
     pub fn aprs_tick(&self, now_s: u32, on: bool, relay_ok: bool) -> AprsNews {
@@ -458,14 +469,15 @@ impl Data for Sample {
     }
 
     fn messages(&self) -> u16 {
-        (if self.msgs_gone.get() { 0 } else { MESSAGES.len() as u16 }) + self.sent_n()
+        let kept = if self.msgs_gone.get() { 0 } else { MESSAGES.len() as u16 - self.msgs_del.get().count_ones() as u16 };
+        kept + self.sent_n()
     }
     fn message(&self, i: u16) -> Option<Message> {
         if i < self.sent_n() {
             return self.aprs.message(i);
         }
-        let k = i - self.sent_n();
-        let &(inbound, peer, text, ago_s, state) = MESSAGES.get(k as usize).filter(|_| !self.msgs_gone.get())?;
+        let k = self.sample_msg(i - self.sent_n())?;
+        let &(inbound, peer, text, ago_s, state) = MESSAGES.get(k)?;
         let ago_s = ago_s + self.aprs.now_s();
         let state = if state == MsgState::Unread && self.msgs_read.get() & 1 << k != 0 { MsgState::Read } else { state };
         Some(Message { inbound, peer: txt(peer), text: txt(text), ago_s, state })
@@ -591,6 +603,10 @@ impl Data for Sample {
                 (0..self.sent_n()).for_each(|i| self.aprs.read(i));
                 true
             }
+            Op::DeleteMessage(i) => match i.checked_sub(self.sent_n()) {
+                Some(v) => self.sample_msg(v).map(|k| self.msgs_del.set(self.msgs_del.get() | 1 << k)).is_some(),
+                None => self.aprs.delete(i),
+            },
             Op::ClearMessages => {
                 self.msgs_gone.set(true);
                 self.aprs.clear_messages();
@@ -768,7 +784,7 @@ impl Data for Sample {
             Op::StopMessage(i) => i < self.sent_n() && self.aprs.stop(i),
             Op::ResendMessage(i) => i < self.sent_n() && self.aprs.resend(i),
             Op::Queue(..) | Op::Unqueue(..) => false, // the store's, to the radio's APRS task
-            Op::MessageRead(i) => match i.checked_sub(self.sent_n()) {
+            Op::MessageRead(i) => match i.checked_sub(self.sent_n()).and_then(|v| self.sample_msg(v)) {
                 Some(k) => {
                     self.msgs_read.set(self.msgs_read.get() | 1 << k);
                     true

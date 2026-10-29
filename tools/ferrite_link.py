@@ -26,6 +26,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT heard                      # the APRS heard list (LINK-44)
     python3 tools/ferrite_link.py PORT msgs                       # APRS messages in and out, newest first (LINK-44)
     python3 tools/ferrite_link.py PORT msg-send CALL "TEXT"       # queue an APRS message as compose does (LINK-45)
+    python3 tools/ferrite_link.py PORT msg-delete in|out CALL "TEXT"  # delete the newest such message (LINK-52)
     python3 tools/ferrite_link.py PORT subscribe [heard,msgs,ui] [--seconds N] [--screen]   # print pushed events
     python3 tools/ferrite_link.py PORT audio [SECONDS [FILE.wav]]   # receive audio over the cable to a WAV (LINK-13.4)
     python3 tools/ferrite_link.py PORT audio SECONDS FILE.wav --raw [12000|16000]   # bench builds: the decoders' samples, 12-bit PCM (LINK-13.9)
@@ -90,6 +91,7 @@ CAP_STREAM, CAP_WINDOW, CAP_LZ, CAP_DELETE_MANY = 1, 2, 4, 8  # LINK-35.2: HELLO
 Z = 0x7D  # LINK-51: a compressed frame (| 0x80 for an answer): the inner type, the frame count, the coded payload
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND, MSG_STOP = 0x50, 0x51, 0x52, 0x53, 0x54, 0x55  # LINK-43 - LINK-49
+MSG_DELETE = 0x59  # LINK-52
 AUDIO, AUDIO_DATA = 0x56, 0x57  # LINK-13.4: receive audio (the cable only)
 AUDIO_RAW = 0x58  # LINK-13.9: the bench's raw stream
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
@@ -1496,6 +1498,11 @@ def run(link, a):
         to, body = a.args[0].encode("ascii"), a.args[1].encode("ascii")
         r = link.ok(MSG_SEND, bytes([len(to)]) + to + bytes([len(body)]) + body)
         print("queued: " + ("APRS mode is on, it goes out now" if r[0] else "it waits for APRS mode (MENU 0 5 3)"))
+    elif a.cmd == "msg-delete":
+        # msg-delete in|out CALL TEXT: the newest message that way with that station and text (LINK-52)
+        way, call, body = a.args[0], a.args[1].encode("ascii"), a.args[2].encode("ascii")
+        link.ok(MSG_DELETE, bytes([way == "in"]) + bytes([len(call)]) + call + bytes([len(body)]) + body)
+        print("deleted")
     elif a.cmd == "subscribe":
         what = (a.args[0] if a.args else "heard,msgs,ui").split(",")
         return subscribe(link, what, a.seconds if a.seconds != 5.0 else 3600, a.screen)

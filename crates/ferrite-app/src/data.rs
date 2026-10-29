@@ -369,6 +369,8 @@ pub enum Op {
     Send,
     /// APRS-13.1: our message i (as `MessageRead` counts) stops being tried and is kept as cancelled.
     StopMessage(u16),
+    /// APRS-46.1: message i (as `MessageRead` counts) deleted, either way; ours still being tried stops first.
+    DeleteMessage(u16),
     /// APRS-13.2: our failed or cancelled message i is queued again, as a new message with five new tries.
     ResendMessage(u16),
     /// To the APRS task (the store's, after saving): our message to `to` with this text is tried (APRS-13), or

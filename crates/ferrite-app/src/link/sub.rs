@@ -463,6 +463,28 @@ pub(super) fn msg_stop<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status
     }
 }
 
+/// `MSG_DELETE` (LINK-52): flags (1: one to us), the station and the text as `MSG_STOP`'s; the newest message that
+/// way with that station and text goes, as the radio's own Delete message does (APRS-46.1). `invalid` when none.
+pub(super) fn msg_delete<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    let Some((&flags, p)) = p.split_first() else { return Status::BadArg };
+    let Some((&n, rest)) = p.split_first() else { return Status::BadArg };
+    let Some(peer) = rest.get(..n as usize) else { return Status::BadArg };
+    let Some((&m, rest)) = rest[n as usize..].split_first() else { return Status::BadArg };
+    let Some(text) = rest.get(..m as usize).filter(|_| rest.len() == m as usize) else { return Status::BadArg };
+    let d = st.data();
+    let found = (0..d.messages()).find(|&i| {
+        d.message(i).is_some_and(|x| x.inbound == (flags & 1 != 0) && x.peer.as_bytes().eq_ignore_ascii_case(peer) && x.text.as_bytes() == text)
+    });
+    match found {
+        Some(i) if d.request(Op::DeleteMessage(i)) => Status::Ok,
+        Some(_) => Status::Busy,
+        None => {
+            o.put(b"no such message");
+            Status::Invalid
+        }
+    }
+}
+
 /// The APRS record as the link reads it (LINK-43): the frequency (u16, 5 kHz units, 0 the region's), beacon mode,
 /// power, path, digipeater, beacon after voice, SSID, then the custom path (16 bytes, 0-padded): the APRS record's
 /// settings in their stored order, without the quick messages.

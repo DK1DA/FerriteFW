@@ -764,3 +764,49 @@ fn messages_stop_resend_and_room() {
         assert!(send(&s, t), "room for four again");
     }
 }
+
+/// APRS-46.1: Delete message takes one message either way: the list skips it at once and after a power cycle;
+/// one of ours being tried is tried no more; one to us unread no longer counts as unread; the indices close up
+/// and a new message lands in front. When the ring wraps over a deleted record's slot, the new one there shows.
+#[test]
+fn delete_one_message() {
+    use ferrite_app::radio_data::RadioData;
+    let mount = |f: SimFlash| {
+        let d = RadioData::new();
+        d.set_callsign(b"VA7FER-9");
+        FlashStore::mount(f, d)
+    };
+    let text = |s: &FlashStore<SimFlash, RadioData>| (0..s.messages()).map(|i| s.message(i).unwrap().text).collect::<Vec<_>>();
+    let s = mount(SimFlash::new());
+    assert!(s.message_in(true, b"VE3KPW-9", b"first", 0));
+    assert!(s.request(Op::Draft(Draft { to: Buf::from(&b"VE3KPW"[..]), text: Buf::from(&b"second"[..]) })) && s.request(Op::Send));
+    assert!(s.message_in(true, b"VE3ABC", b"third", 0));
+    assert_eq!(s.messages(), 3);
+    assert!(!s.extra.aprs.room() || s.send_room());
+    // ours, still pending: deleted, and the APRS task drops it
+    assert_eq!(s.message(1).map(|m| (m.inbound, m.state)), Some((false, MsgState::Pending)));
+    assert!(s.request(Op::DeleteMessage(1)));
+    assert_eq!(text(&s), [Buf::from(&b"third"[..]), Buf::from(&b"first"[..])], "skipped, the rest close up");
+    assert!(s.send_room(), "tried no more");
+    // one to us, unread
+    assert!(s.request(Op::DeleteMessage(1)));
+    assert_eq!(text(&s), [Buf::from(&b"third"[..])]);
+    assert!(!s.request(Op::DeleteMessage(1)), "past the end");
+    let (f, _) = s.into_parts();
+    let s = mount(f);
+    assert_eq!(text(&s), [Buf::from(&b"third"[..])], "still gone after a power cycle");
+    assert!(s.message_in(true, b"VE3ABC", b"fourth", 0));
+    assert_eq!(text(&s), [Buf::from(&b"fourth"[..]), Buf::from(&b"third"[..])], "a new one in front");
+    // Wrap the ring: every slot written again, so nothing deleted is left and every record shows.
+    for k in 0..200u32 {
+        assert!(s.message_in(true, b"VE3ABC", format!("n{k}").as_bytes(), 0));
+    }
+    let n = s.messages();
+    assert!(n >= 155, "the ring full of new ones (a sector is erased ahead as it wraps): {n}");
+    for i in 0..n {
+        assert_eq!(s.message(i).unwrap().text.as_bytes(), format!("n{}", 199 - i).as_bytes(), "none hidden: {i}");
+    }
+    assert!(s.request(Op::DeleteMessage(0)));
+    assert_eq!(s.messages(), n - 1);
+    assert_eq!(s.message(0).unwrap().text.as_bytes(), b"n198");
+}
