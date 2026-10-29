@@ -35,6 +35,8 @@ const ROWS: usize = 5;
 const KEY_X: i32 = BOX.0 + 10;
 const NAME_X: i32 = BOX.0 + 56;
 const VAL_R: i32 = BOX.0 + BOX.2 - 10;
+/// The state's width: "auto" (GPS-1) the widest.
+const VAL_W: i32 = 30;
 /// The box closes after this long with no key or knob input.
 pub const IDLE_MS: u32 = 5000;
 
@@ -106,7 +108,7 @@ pub(crate) fn key_down(app: &mut App, key: Key) -> bool {
             }
         }
         Key::Side(1) => {
-            super::groups::change(app, &[6, 1], 1); // GPS on/off (0 6 1)
+            super::groups::change(app, &[6, 1], 1); // GPS Off, Auto, On in turn (0 6 1, GPS-1)
         }
         Key::Side(2) => {
             super::groups::change(app, &[9, 2, 1], 1); // Bluetooth on/off (0 9 2 1)
@@ -148,7 +150,11 @@ pub(crate) fn lines(app: &App) -> [Line; ROWS] {
         onoff(app.slots[app.active as usize].cfg().reverse)
     };
     let night = onoff(app.set.theme == NIGHT_RED);
-    let gps = onoff(app.set.gps_on);
+    // GPS-1: off, auto or on (the state code: 0 off, 1 on, 2 auto, as stored)
+    let gps = match app.set.gps {
+        crate::settings::GPS_AUTO => (Buf::from(b"auto"), TEXT, 2),
+        g => onoff(g == crate::settings::GPS_ON),
+    };
     let bt = onoff(app.set.bt);
     let level = app.set.brightness();
     let mut b = Buf::<4>::new();
@@ -172,8 +178,8 @@ fn row(lcd: &mut impl Panel, i: usize, (key, name, val, fg, _): &Line) {
     let (y, h) = row_box(i);
     let b = y + 15;
     w::field(lcd, KEY_X, NAME_X - KEY_X, y, y + h, b, Align::Left, key.as_bytes(), &UI_12B, TEXT, TOAST);
-    w::field(lcd, NAME_X, VAL_R - 24 - NAME_X, y, y + h, b, Align::Left, name.as_bytes(), &UI_12, TEXT, TOAST);
-    w::field(lcd, VAL_R - 24, 24, y, y + h, b, Align::Right, val.as_bytes(), &UI_12B, *fg, TOAST);
+    w::field(lcd, NAME_X, VAL_R - VAL_W - NAME_X, y, y + h, b, Align::Left, name.as_bytes(), &UI_12, TEXT, TOAST);
+    w::field(lcd, VAL_R - VAL_W, VAL_W, y, y + h, b, Align::Right, val.as_bytes(), &UI_12B, *fg, TOAST);
 }
 
 /// The box over home: whole when it isn't on the screen yet (the rounded corners keep what is under them), then
@@ -246,7 +252,7 @@ mod tests {
     fn rows_fit_the_box() {
         for (k, n) in [("PTT A", "Reverse"), ("PTT B", "Night red"), ("PF1", "GPS"), ("PF2", "Bluetooth"), ("Knob", "Brightness")] {
             assert!(text4_width(k.as_bytes(), &UI_12B) <= NAME_X - KEY_X - 4, "{k}");
-            assert!(text4_width(n.as_bytes(), &UI_12) <= VAL_R - 24 - NAME_X - 4, "{n}");
+            assert!(text4_width(n.as_bytes(), &UI_12) <= VAL_R - VAL_W - NAME_X - 4, "{n}");
         }
         for v in ["off", "on", "10"] {
             assert!(text4_width(v.as_bytes(), &UI_12B) <= 24, "{v}");

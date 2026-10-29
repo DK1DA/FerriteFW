@@ -269,8 +269,9 @@ pub struct Settings {
     pub dtmf_delay: u8,
     /// 0 8 6 2: CW ID ([`CW_ID_MODES`]: off, every 10 min, on unkey; VOX-12).
     pub cw_id: u8,
-    /// 0 6 1: the GPS receiver on (GPS-1).
-    pub gps_on: bool,
+    /// 0 6 1: the GPS receiver (GPS-1): [`GPS_OFF`], [`GPS_ON`] or [`GPS_AUTO`]. Stored as the old on/off byte was
+    /// (0 off, 1 on), Auto as 2, so a radio keeps the setting it had (GPS-1.4).
+    pub gps: u8,
     /// 0 6 8: GPS during RX/TX ([`GPS_RXTX`]: bit 0 off while receiving, bit 1 off while transmitting; GPS-4).
     pub gps_rxtx: u8,
     /// 0 6 7's arrival alarm: an index into [`ARRIVAL_M`] (0 off; GPS-12).
@@ -346,6 +347,14 @@ pub const WAKE_ON: [&str; 3] = ["Keys", "Keys and RX", "Keys, RX and TX"];
 /// The night red theme's index in [`THEMES`] (DISP-23: its own brightness).
 pub const NIGHT_RED: u8 = 2;
 /// 0 7 4 5's values.
+/// 0 6 1 (GPS-1): the stored values. Off and On are the old on/off byte's 0 and 1 (GPS-1.4: a radio keeps its
+/// setting); Auto (GPS-1.5) is new.
+pub const GPS_OFF: u8 = 0;
+pub const GPS_ON: u8 = 1;
+pub const GPS_AUTO: u8 = 2;
+/// 0 6 1's values in menu order (Off, Auto, On), and the stored value of each.
+pub const GPS_MODES: [&str; 3] = ["Off", "Auto", "On"];
+pub const GPS_ORDER: [u8; 3] = [GPS_OFF, GPS_AUTO, GPS_ON];
 /// 0 7 7 2 (PWR-24): Low Power Mode.
 pub const LPM_MODES: [&str; 3] = ["Off", "On", "Auto"];
 /// 0 7 7 3 (PWR-24.3): the battery % Auto enters below.
@@ -496,7 +505,7 @@ impl Settings {
         dtmf_ms: 100,
         dtmf_delay: 30,
         cw_id: 0,
-        gps_on: false, // GPS-1.4: off by default, as stock (decision 235)
+        gps: GPS_AUTO, // GPS-1.4: Auto by default (decision 268)
         gps_rxtx: 0,
         arrival: 0,
         menu_timeout: 3,
@@ -534,6 +543,9 @@ impl Settings {
         }
         if self.lpm as usize >= LPM_MODES.len() {
             self.lpm = 0;
+        }
+        if self.gps > GPS_AUTO {
+            self.gps = GPS_AUTO;
         }
         if !LPM_BELOW.contains(&self.lpm_below) {
             self.lpm_below = Self::DEFAULT.lpm_below; // PWR-24.1: an older record's zero

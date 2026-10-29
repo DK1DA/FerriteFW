@@ -298,6 +298,8 @@ pub struct App {
     lpm: u8,
     batt: u8,
     lpm_at: u32,
+    /// GPS-1.5: 0 6 1's Auto, whether something has the module powered ([`gpsdata::auto_step`]).
+    pub(crate) gps_auto: gpsdata::GpsAuto,
     /// VOX's flags: [`VOX_REFUSED`], speech refused on an emergency frequency (TX-35: the toast once per burst);
     /// [`VOX_SENT`] and [`VOX_SCREEN`], whether the screen lets VOX sample as last sent to the Radio task (VOX-3,
     /// [`App::vox_screen`]). One byte: the App's RAM budget (`ram_is_small`).
@@ -450,6 +452,7 @@ impl App {
             lpm: 0,
             batt: lpm::BATT_UNKNOWN,
             lpm_at: 0,
+            gps_auto: gpsdata::GpsAuto::new(),
             vox_bits: 0,
             remote: None,
             remote_ended: None,

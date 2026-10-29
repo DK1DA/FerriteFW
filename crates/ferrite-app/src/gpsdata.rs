@@ -39,9 +39,97 @@ impl GpsCfg {
     }
 }
 
-/// What the settings ask of the GPS task (0 6 1, 0 6 8).
-pub fn cfg(set: &crate::settings::Settings) -> GpsCfg {
-    GpsCfg { on: set.gps_on, rxtx: set.gps_rxtx & 3 }
+/// What the settings ask of the GPS task (0 6 1, 0 6 8): on for On; for Auto, `auto` (whether a need, or the
+/// minute after one, has it powered: [`GpsAuto`], GPS-1.5).
+pub fn cfg(set: &crate::settings::Settings, auto: bool) -> GpsCfg {
+    use crate::settings::{GPS_AUTO, GPS_ON};
+    GpsCfg { on: set.gps == GPS_ON || set.gps == GPS_AUTO && auto, rxtx: set.gps_rxtx & 3 }
+}
+
+/// GPS-1.5: in Auto the module stays powered this long after the last need ends, so a screen closed and opened
+/// again doesn't cycle it.
+pub const AUTO_HOLD_S: u16 = 60;
+
+/// What needs a position now, for Auto (GPS-1.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Needs {
+    /// (a) APRS mode on with position beacons (any beacon mode, or a beacon after voice) and no fixed position (GPS-3).
+    pub aprs: bool,
+    /// (b) A GPS screen open: position, satellites, waypoints, go to a waypoint.
+    pub screen: bool,
+    /// (c) The arrival alarm armed on the waypoint being gone to (a stored waypoint alone is not a need).
+    pub alarm: bool,
+    /// (d) The clock from GPS (0 6 6): one fix after power-on ([`GpsAuto`] drops it once taken).
+    pub clock: bool,
+}
+
+impl Needs {
+    pub fn any(&self) -> bool {
+        self.aprs || self.screen || self.alarm || self.clock
+    }
+}
+
+/// What needs a position now (GPS-1.5), from the App: `alarm` the arrival alarm armed ([`Arrival::armed`]).
+pub fn needs(app: &crate::App, alarm: bool) -> Needs {
+    let set = app.settings();
+    let c = app.aprs_cfg();
+    Needs {
+        aprs: app.aprs_on() && (c.mode() != 0 || c.after_voice) && !set.fixed_on,
+        screen: matches!(app.screen(), crate::Screen::Gps(_)),
+        alarm,
+        clock: set.clock_gps,
+    }
+}
+
+/// GPS-1.5: Auto's power, kept by the App: on while something needs a position and for [`AUTO_HOLD_S`] after;
+/// never in Low Power Mode (PWR-24.4); the clock's one fix after power-on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GpsAuto {
+    powered: bool,
+    /// When a need was last seen, in seconds (wrapping: only the minute after it counts; the App's RAM budget).
+    need_at: u16,
+    /// The power-on clock fix is taken, or won't be: Low Power Mode came first (GPS-1.5, PWR-24.4).
+    clock_done: bool,
+}
+
+impl GpsAuto {
+    pub const fn new() -> Self {
+        GpsAuto { powered: false, need_at: 0, clock_done: false }
+    }
+
+    /// One look: 0 6 1's stored value, Low Power Mode, the needs, whether there is a real fix (not the fixed
+    /// position), and the time. True while Auto has the module powered.
+    pub fn step(&mut self, now: u32, mode: u8, low_power: bool, mut n: Needs, fix: bool) -> bool {
+        // The clock takes one fix after power-on; in Low Power Mode it takes none, and none on leaving.
+        self.clock_done |= fix || low_power;
+        n.clock &= !self.clock_done;
+        let auto = mode == crate::settings::GPS_AUTO && !low_power;
+        if auto && n.any() {
+            (self.powered, self.need_at) = (true, (now / 1000) as u16);
+        } else if !auto || ((now / 1000) as u16).wrapping_sub(self.need_at) >= AUTO_HOLD_S {
+            self.powered = false;
+        }
+        self.powered
+    }
+
+    /// Whether Auto has the module powered (the status-bar icon follows the module, GPS-6).
+    pub fn powered(&self) -> bool {
+        self.powered
+    }
+
+    /// Whether the power-on clock fix is still to come.
+    pub fn clock_pending(&self) -> bool {
+        !self.clock_done
+    }
+}
+
+/// GPS-1.5: Auto's look, once a turn of the UI loop (the firmware's and the simulator's): the needs from the App
+/// and the alarm, a real fix from `data`; [`crate::App::gps_cfg`] then says what the GPS task does.
+pub fn auto_step(app: &mut crate::App, data: &dyn Data, alarm: bool, now: u32) {
+    let n = needs(app, alarm);
+    let fix = data.fix().is_some_and(|f| f.age_s != FIXED_AGE);
+    let (mode, lpm) = (app.settings().gps, app.low_power());
+    app.gps_auto.step(now, mode, lpm, n, fix);
 }
 
 /// Who needs the GPS module awake now (GPS-26 to GPS-28), for the GPS task's power manager: GPS on (0 6 1); a GPS
@@ -59,7 +147,7 @@ pub fn demand(app: &crate::App, data: &dyn Data, alarm: bool, now_ms: u32) -> Gp
         // Due now or overdue (waiting for a fix, the relay or a callsign) holds nothing: the minute wakes bring the fix.
         beacon_at = data.beacon().next_s.filter(|&s| s > 0).map(|s| now_ms.wrapping_add(s.saturating_mul(1000)));
     }
-    GpsDemand { on: app.settings().gps_on, watch, track, beacon_at, sky }
+    GpsDemand { on: app.gps_cfg().on, watch, track, beacon_at, sky }
 }
 
 /// The arrival alarm's radius in metres, 0 when off (0 6 7, GPS-12).
@@ -436,7 +524,7 @@ mod tests {
             }
         }
         let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());
-        app.settings_mut().gps_on = true; // off by default (GPS-1.4)
+        app.settings_mut().gps = crate::settings::GPS_ON; // Auto by default (GPS-1.4)
         let timed = D(crate::aprs::AprsCfg { beacon: 2 + 3, ..crate::aprs::AprsCfg::DEFAULT }, Some(400)); // 10 minutes
         let d = demand(&app, &timed, false, 1000);
         assert_eq!(d, GpsDemand { on: true, watch: false, track: false, beacon_at: None, sky: false }, "APRS mode off: no beacon");
@@ -454,19 +542,202 @@ mod tests {
         app.open(crate::screens::nav::Dest::Waypoints);
         let d = demand(&app, &smart, false, 0);
         assert!(d.watch && !d.sky, "the waypoints: running, GSV every 5th");
-        app.settings_mut().gps_on = false;
+        app.settings_mut().gps = crate::settings::GPS_OFF;
         assert!(!demand(&app, &smart, false, 0).on);
     }
 
-    /// GPS-1.4: off by default (decision 235); GPS-14: always on when on.
+    /// GPS-1.4: Auto by default (decision 268), off until something needs it; GPS-14: always on when on.
     #[test]
     fn settings_reach_the_gps() {
+        use crate::settings::{GPS_AUTO, GPS_OFF, GPS_ON};
         let mut set = crate::settings::Settings::DEFAULT;
-        assert_eq!(cfg(&set), GpsCfg { on: false, ..GpsCfg::DEFAULT }, "off by default (GPS-1.4); always on when on (GPS-14)");
+        assert_eq!(set.gps, GPS_AUTO, "Auto by default (GPS-1.4)");
+        assert_eq!(cfg(&set, false), GpsCfg { on: false, ..GpsCfg::DEFAULT }, "Auto, nothing needing it: off");
+        assert_eq!(cfg(&set, true), GpsCfg::DEFAULT, "Auto, needed: on, always on (GPS-14)");
         assert_eq!(arrival_radius_m(&set), 0, "arrival alarm off by default");
-        (set.gps_on, set.gps_rxtx, set.arrival) = (false, 2, 2);
-        assert_eq!(cfg(&set), GpsCfg { on: false, rxtx: 2 });
+        (set.gps, set.gps_rxtx, set.arrival) = (GPS_OFF, 2, 2);
+        assert_eq!(cfg(&set, true), GpsCfg { on: false, rxtx: 2 }, "Off: off whatever Auto says");
+        set.gps = GPS_ON;
+        assert_eq!(cfg(&set, false), GpsCfg { on: true, rxtx: 2 }, "On: on whatever Auto says");
         assert_eq!(arrival_radius_m(&set), 100);
+    }
+
+    fn auto_app() -> crate::App {
+        let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());
+        app.settings_mut().gps = crate::settings::GPS_AUTO;
+        app.settings_mut().clock_gps = false; // the clock's need tested on its own
+        app
+    }
+
+    /// A Data with a real fix or none.
+    struct F(bool);
+    impl Data for F {
+        fn version(&self) -> u32 {
+            0
+        }
+        fn fix(&self) -> Option<Fix> {
+            self.0.then_some(Fix { pos: Pos { lat: 1, lon: 2 }, three_d: true, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 6, age_s: 1, utc_s: 0 })
+        }
+    }
+
+    /// GPS-1.5 (a): APRS mode on with position beacons and no fixed position needs it; beacons off, a fixed
+    /// position, or APRS mode off don't. A beacon after voice is a position beacon too.
+    #[test]
+    fn auto_needs_aprs_beacons_without_a_fixed_position() {
+        let mut app = auto_app();
+        let timed = crate::aprs::AprsCfg { beacon: 2 + 3, ..crate::aprs::AprsCfg::DEFAULT };
+        app.set_aprs(timed);
+        assert!(!needs(&app, false).any(), "APRS mode off: no need");
+        app.set_aprs_mode(true);
+        assert!(needs(&app, false).aprs, "timed beacons, no fixed position");
+        auto_step(&mut app, &F(false), false, 0);
+        assert!(app.gps_cfg().on, "Auto powers the module (GPS-1.5)");
+        app.settings_mut().fixed_on = true;
+        assert!(!needs(&app, false).aprs, "the fixed position stands in (GPS-3)");
+        app.settings_mut().fixed_on = false;
+        app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..timed });
+        assert!(!needs(&app, false).aprs, "beacons off");
+        app.set_aprs(crate::aprs::AprsCfg { beacon: 0, after_voice: true, ..timed });
+        assert!(needs(&app, false).aprs, "a beacon after voice");
+    }
+
+    /// GPS-1.5 (b), (c): a GPS screen open (position, satellites, waypoints, go to) or the arrival alarm armed
+    /// needs it; home doesn't, nor a stored waypoint alone.
+    #[test]
+    fn auto_needs_a_gps_screen_or_the_alarm() {
+        use crate::screens::nav::Dest;
+        let mut app = auto_app();
+        assert!(!needs(&app, false).any(), "home, nothing needs a position");
+        for d in [Dest::GpsPosition, Dest::Waypoints] {
+            app.open(d);
+            assert!(needs(&app, false).screen);
+        }
+        for p in [crate::screens::gps::Page::Satellites, crate::screens::gps::Page::Go] {
+            app.screen = crate::Screen::Gps(crate::screens::gps::Gps::new(p));
+            assert!(needs(&app, false).screen);
+        }
+        app.go_home();
+        assert!(!needs(&app, false).any());
+        assert!(needs(&app, true).alarm, "the arrival alarm armed (Arrival::armed)");
+        let mut a = Arrival::default();
+        assert!(!a.armed(100), "no waypoint being gone to: a stored waypoint alone is not a need");
+        a.target(Some((0, Pos { lat: 0, lon: 0 })));
+        assert!(a.armed(100));
+    }
+
+    /// GPS-1.5: when the last need ends the module powers off a minute later, and a screen closed and opened
+    /// again inside the minute doesn't cycle it. Off and On don't follow the needs; Auto doesn't power the module
+    /// with nothing needing it.
+    #[test]
+    fn auto_holds_a_minute() {
+        use crate::screens::nav::Dest;
+        let mut app = auto_app();
+        let none = F(false);
+        auto_step(&mut app, &none, false, 0);
+        assert!(!app.gps_cfg().on, "Auto, no need: off (PA8, as Off)");
+        app.open(Dest::GpsPosition);
+        auto_step(&mut app, &none, false, 1_000);
+        assert!(app.gps_cfg().on && app.gps_auto().powered());
+        app.go_home();
+        auto_step(&mut app, &none, false, 30_000);
+        assert!(app.gps_cfg().on, "held after the screen closed");
+        app.open(Dest::Waypoints); // opened again inside the minute: the module stayed on
+        auto_step(&mut app, &none, false, 40_000);
+        app.go_home();
+        auto_step(&mut app, &none, false, 99_000);
+        assert!(app.gps_cfg().on, "a minute from the last need (40 s), not the first");
+        auto_step(&mut app, &none, false, 100_000);
+        assert!(!app.gps_cfg().on, "off a minute after the last need");
+        // Off and On
+        app.open(Dest::GpsPosition);
+        app.settings_mut().gps = crate::settings::GPS_OFF;
+        auto_step(&mut app, &none, false, 101_000);
+        assert!(!app.gps_cfg().on, "Off: off with a GPS screen open (GPS-1.1)");
+        app.go_home();
+        app.settings_mut().gps = crate::settings::GPS_ON;
+        auto_step(&mut app, &none, false, 102_000);
+        assert!(app.gps_cfg().on, "On: on with nothing needing it (GPS-1.2)");
+    }
+
+    /// GPS-1.5 (d): the clock from GPS (0 6 6) takes one fix after power-on, then nothing more for the clock; with
+    /// the clock not from GPS it needs nothing.
+    #[test]
+    fn auto_power_on_clock_fix() {
+        let mut app = auto_app();
+        app.settings_mut().clock_gps = true;
+        assert!(app.gps_auto().clock_pending());
+        auto_step(&mut app, &F(false), false, 0);
+        assert!(app.gps_cfg().on, "power-on: the clock's fix");
+        auto_step(&mut app, &F(false), false, 300_000);
+        assert!(app.gps_cfg().on, "still waiting for the fix");
+        auto_step(&mut app, &F(true), false, 310_000);
+        assert!(!app.gps_auto().clock_pending(), "the fix taken");
+        auto_step(&mut app, &F(false), false, 359_000);
+        assert!(app.gps_cfg().on, "the minute's hold, from the last look that needed it");
+        auto_step(&mut app, &F(false), false, 360_000);
+        assert!(!app.gps_cfg().on, "then nothing more for the clock");
+        let mut app = auto_app(); // 0 6 6 not from GPS: no need
+        auto_step(&mut app, &F(false), false, 0);
+        assert!(!app.gps_cfg().on);
+    }
+
+    /// GPS-1.5, PWR-24.4: in Low Power Mode GPS is off whatever the setting and whatever needs it; a power-on in the
+    /// mode takes no clock fix, nor does leaving it.
+    #[test]
+    fn auto_off_in_low_power_mode() {
+        let mut app = auto_app();
+        app.settings_mut().clock_gps = true;
+        app.set_lpm_mode(1); // On: in at once
+        assert!(app.low_power());
+        app.open(crate::screens::nav::Dest::GpsPosition);
+        auto_step(&mut app, &F(false), false, 0);
+        assert!(!app.gps_cfg().on, "Auto: off in the mode");
+        assert!(!app.gps_auto().clock_pending(), "a power-on in the mode takes no clock fix");
+        app.settings_mut().gps = crate::settings::GPS_ON;
+        assert!(!app.gps_cfg().on, "On: off in the mode too");
+        app.settings_mut().gps = crate::settings::GPS_AUTO;
+        app.set_lpm_mode(0);
+        assert!(!app.low_power());
+        app.go_home();
+        auto_step(&mut app, &F(false), false, 1_000);
+        assert!(!app.gps_cfg().on, "left: no clock fix taken on leaving");
+    }
+
+    /// GPS-6: the status-bar icon shows while the module is powered: in Auto the GPS task is told off with nothing
+    /// needing it, so it publishes "off" and the bar shows no icon; powered, searching.
+    #[test]
+    fn auto_icon_follows_the_module() {
+        let mut app = auto_app();
+        auto_step(&mut app, &F(false), false, 0);
+        let g = GpsData::new();
+        g.set_fix(GpsFix { on: app.gps_cfg().on, ..GpsFix::default() });
+        assert_eq!(g.state().0, GpsState::Off, "Auto, unneeded: no icon");
+        app.open(crate::screens::nav::Dest::GpsPosition);
+        auto_step(&mut app, &F(false), false, 1_000);
+        g.set_fix(GpsFix { on: app.gps_cfg().on, at_ms: 1_000, ..GpsFix::default() });
+        assert_eq!(g.state().0, GpsState::Searching, "powered: the icon, searching");
+    }
+
+    /// GPS-1: 0 6 1 turns Off, Auto, On in turn (stored 0, 2, 1); # resets it to Auto (GPS-1.4).
+    #[test]
+    fn menu_off_auto_on() {
+        use crate::settings::{GPS_AUTO, GPS_OFF, GPS_ON};
+        let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());
+        app.settings_mut().gps = GPS_OFF;
+        let shown = |app: &crate::App| {
+            let mut b = ferrite_ui::text::Buf::<24>::new();
+            crate::screens::groups::wired(app, &ferrite_core::msg::Device::default(), &[6, 1], &mut b);
+            std::string::String::from_utf8_lossy(b.as_bytes()).into_owned()
+        };
+        assert_eq!(shown(&app), "Off");
+        for (want, name) in [(GPS_AUTO, "Auto"), (GPS_ON, "On"), (GPS_OFF, "Off")] {
+            crate::screens::groups::change(&mut app, &[6, 1], 1);
+            assert_eq!((app.settings().gps, shown(&app).as_str()), (want, name));
+        }
+        crate::screens::groups::change(&mut app, &[6, 1], -1);
+        assert_eq!(app.settings().gps, GPS_ON);
+        crate::screens::groups::reset(&mut app, &[6, 1]);
+        assert_eq!(app.settings().gps, GPS_AUTO);
     }
 
     /// GPS-23: a typed clock: real dates only, and back to UTC by the zone.

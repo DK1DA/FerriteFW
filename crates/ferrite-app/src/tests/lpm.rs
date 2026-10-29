@@ -28,7 +28,7 @@ fn on_and_off_restore_everything() {
     let mut t = T::new();
     t.app.set.lpm = 0; // the default is Auto (PWR-24.1); these start from Off
     t.app.set.bt = true;
-    t.app.set.gps_on = true;
+    t.app.set.gps = crate::settings::GPS_ON;
     t.app.set_aprs_mode(true);
     t.app.set.pocsag_on = true;
     t.app.set.keypad_light = 3; // always

@@ -176,11 +176,17 @@ impl App {
         self.set.bt && !self.low_power()
     }
 
-    /// PWR-24: the GPS task's settings, with the module off in the mode.
+    /// PWR-24: the GPS task's settings, with the module off in the mode; in Auto, on while something needs a
+    /// position (GPS-1.5, [`crate::gpsdata::auto_step`]).
     pub fn gps_cfg(&self) -> crate::gpsdata::GpsCfg {
-        let mut c = crate::gpsdata::cfg(self.set);
+        let mut c = crate::gpsdata::cfg(self.set, self.gps_auto.powered());
         c.on &= !self.low_power();
         c
+    }
+
+    /// GPS-1.5: Auto's state (whether it has the module powered, the clock's power-on fix).
+    pub fn gps_auto(&self) -> &crate::gpsdata::GpsAuto {
+        &self.gps_auto
     }
 
     /// PWR-24: SAME alerts decoded (0 4 5 1, WX-3), never in the mode.
