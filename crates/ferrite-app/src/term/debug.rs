@@ -96,8 +96,8 @@ pub enum Kind {
     /// `synthfsk ...`: 4FSK from the keyed chip's tone generator (TERM-45).
     SynthFsk(ferrite_core::synthfsk::Cfg),
     #[cfg(feature = "bench")]
-    /// `pin pa15|pc12 0|1`: an audio switch pin (TERM-46).
-    Pin { which: u8, high: bool },
+    /// `pin PIN 0|1|u|d`: an audio pin (TERM-46).
+    Pin { which: u8, mode: ferrite_core::msg::PinMode },
     #[cfg(feature = "bench")]
     /// `meter [on|off]`: the receive level meter (TERM-44).
     Meter(Option<bool>),
@@ -202,7 +202,7 @@ impl Job {
             #[cfg(feature = "bench")]
             Kind::SynthFsk(c) => DebugReq::SynthFsk(c),
             #[cfg(feature = "bench")]
-            Kind::Pin { which, high } => DebugReq::Pin { which, high },
+            Kind::Pin { which, mode } => DebugReq::Pin { which, mode },
             #[cfg(feature = "bench")]
             Kind::Meter(set) => DebugReq::Meter(set),
             #[cfg(feature = "bench")]
@@ -448,8 +448,15 @@ impl Job {
                 Step::Line
             }
             #[cfg(feature = "bench")]
-            (Kind::Pin { .. }, DebugAns::Pin { which, high }) => {
-                put!(out, "  pin {} reads {} (until the radio's next path step sets it)", if which == 0 { "PA15" } else { "PC12" }, high as u8);
+            (Kind::Pin { .. }, DebugAns::Pin { which, mode, high }) => {
+                use ferrite_core::msg::{PinMode, PINS};
+                let m = match mode {
+                    PinMode::Low => "driven low",
+                    PinMode::High => "driven high",
+                    PinMode::PullUp => "input, pull-up",
+                    PinMode::PullDown => "input, pull-down",
+                };
+                put!(out, "  pin {} {}: reads {} (until the radio's next path step sets it)", PINS[which as usize % PINS.len()], m, high as u8);
                 self.st = St::Over;
                 Step::Line
             }

@@ -502,10 +502,10 @@ pub enum DebugReq {
     /// runs it at once (Dry TX on, keyed only). Answered with [`DebugAns::SynthFsk`].
     SynthFsk(crate::synthfsk::Cfg),
     #[cfg(feature = "bench")]
-    /// TERM-46 (decision 319, a bench test): drive an audio switch pin now (0 PA15, the cross-band mic-path select;
-    /// 1 PC12, DAC1's mic-line switch). The radio's own logic sets them again at its next path step or burst.
-    /// Answered with [`DebugAns::Pin`].
-    Pin { which: u8, high: bool },
+    /// TERM-46 (decisions 319, 320, a bench test): an audio pin now ([`PINS`]), driven low or high or made an input
+    /// with a pull-up or pull-down ([`PinMode`]). The radio's own logic sets them again at its next path step or
+    /// burst. Answered with [`DebugAns::Pin`].
+    Pin { which: u8, mode: PinMode },
     #[cfg(feature = "bench")]
     /// TERM-44 (decision 315, a bench test): the receive level meter on (zeroed), off, or only asked (`None`).
     /// Answered with [`DebugAns::Meter`].
@@ -581,6 +581,20 @@ pub const GGA_MAX: usize = 80;
 /// The most memory one `DebugReq::Mem` reads (a bench build's).
 #[cfg(feature = "bench")]
 pub const DEBUG_MEM: usize = 64;
+/// TERM-46: the pins `pin` drives, in its order: PA15 (cross-band mic-path select), PC12 (DAC1's mic-line switch),
+/// PC9 (an audio switch stock only ever clears), PB8 (the shared audio stage), PE1 (the accessory route), PE4 (the
+/// speaker amplifier).
+pub const PINS: [&str; 6] = ["pa15", "pc12", "pc9", "pb8", "pe1", "pe4"];
+
+/// TERM-46: what `pin` does to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinMode {
+    Low,
+    High,
+    PullUp,
+    PullDown,
+}
+
 /// TERM-42.3: how many registers `bk hold` keeps.
 pub const HOLDS: usize = 4;
 
@@ -648,7 +662,7 @@ pub enum DebugAns {
     SynthFsk(crate::synthfsk::Report),
     #[cfg(feature = "bench")]
     /// TERM-46: the pin and its level read back.
-    Pin { which: u8, high: bool },
+    Pin { which: u8, mode: PinMode, high: bool },
     #[cfg(feature = "bench")]
     /// TERM-44: the receive level meter's state and its bins.
     Meter(crate::rxmeter::Report),

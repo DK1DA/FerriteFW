@@ -1682,25 +1682,27 @@ fn hold(t: &mut Toks) -> Result<Done, Msg> {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-46 (decision 319, a bench test): `pin pa15 0|1` (the cross-band mic-path select) or `pin pc12 0|1` (DAC1's
-/// mic-line switch), set now by the Radio task.
+/// TERM-46 (decisions 319, 320, a bench test): `pin PIN MODE` sets an audio pin now from the Radio task: PIN one of
+/// `ferrite_core::msg::PINS`, MODE 0 (driven low), 1 (driven high), u (input with pull-up) or d (input with pull-down).
 fn pin(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "pin pa15|pc12 0|1: an audio switch pin, until the radio's next path step";
+    use ferrite_core::msg::{PinMode, PINS};
+    const USAGE: &str = "pin pa15|pc12|pc9|pb8|pe1|pe4 0|1|u|d: an audio pin (u, d: an input with a pull), until the radio's next path step";
     let bad = || msg!("{}", USAGE);
     let which = match t.next()? {
-        Some(Tok::Word(w)) if same(w, b"pa15") => 0,
-        Some(Tok::Word(w)) if same(w, b"pc12") => 1,
+        Some(Tok::Word(w)) => PINS.iter().position(|p| same(w, p.as_bytes())).ok_or_else(bad)? as u8,
         _ => return Err(bad()),
     };
-    let high = match t.next()? {
-        Some(Tok::Word(b"0")) => false,
-        Some(Tok::Word(b"1")) => true,
+    let mode = match t.next()? {
+        Some(Tok::Word(b"0")) => PinMode::Low,
+        Some(Tok::Word(b"1")) => PinMode::High,
+        Some(Tok::Word(w)) if same(w, b"u") => PinMode::PullUp,
+        Some(Tok::Word(w)) if same(w, b"d") => PinMode::PullDown,
         _ => return Err(bad()),
     };
     if t.next()?.is_some() {
         return Err(bad());
     }
-    Ok(Done::Debug(Job::new(Kind::Pin { which, high })))
+    Ok(Done::Debug(Job::new(Kind::Pin { which, mode })))
 }
 
 #[cfg(feature = "bench")]

@@ -45,10 +45,18 @@ impl Radio {
             }
             DebugReq::Fsk(a) => self.fsk_ask(a),
             // TERM-46 (decision 319): an audio switch pin, now
-            DebugReq::Pin { which, high } => {
-                let p = if which == 0 { crate::board::REPEAT_AUDIO } else { crate::board::MIC_INJECT };
-                p.write(high);
-                DebugAns::Pin { which, high: p.read() }
+            DebugReq::Pin { which, mode } => {
+                use crate::board::{ACC_ROUTE, AMP_EN, MIC_INJECT, PC9_AUDIO, REPEAT_AUDIO};
+                use ferrite_core::msg::PinMode;
+                let p = [REPEAT_AUDIO, MIC_INJECT, PC9_AUDIO, AMP_EN[0], ACC_ROUTE, AMP_EN[1]][which as usize % 6];
+                match mode {
+                    PinMode::Low => p.output(false, Mode::OutPp),
+                    PinMode::High => p.output(true, Mode::OutPp),
+                    PinMode::PullUp => p.config(Mode::InPu),
+                    PinMode::PullDown => p.config(Mode::InPd),
+                }
+                crate::hal::time::delay_us(50); // the level settles (a pull through a few k into a few nF)
+                DebugAns::Pin { which, mode, high: p.read() }
             }
             // TERM-45 (decision 318): tone-generator 4FSK while keyed (transmit builds)
             #[cfg(feature = "tx")]
