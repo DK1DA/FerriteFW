@@ -1403,6 +1403,8 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         #[cfg(feature = "bench")]
         _ if same(c, b"synthfsk") => synthfsk(&mut t),
         #[cfg(feature = "bench")]
+        _ if same(c, b"pin") => pin(&mut t),
+        #[cfg(feature = "bench")]
         _ if same(c, b"si") => si(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"bt") => bt(&mut t),
@@ -1540,7 +1542,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 14] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter", "synthfsk"];
+pub const BENCH_ONLY: [&str; 15] = ["pin", "mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter", "synthfsk"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
@@ -1677,6 +1679,28 @@ fn hold(t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("{}", USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Hold(set))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-46 (decision 319, a bench test): `pin pa15 0|1` (the cross-band mic-path select) or `pin pc12 0|1` (DAC1's
+/// mic-line switch), set now by the Radio task.
+fn pin(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "pin pa15|pc12 0|1: an audio switch pin, until the radio's next path step";
+    let bad = || msg!("{}", USAGE);
+    let which = match t.next()? {
+        Some(Tok::Word(w)) if same(w, b"pa15") => 0,
+        Some(Tok::Word(w)) if same(w, b"pc12") => 1,
+        _ => return Err(bad()),
+    };
+    let high = match t.next()? {
+        Some(Tok::Word(b"0")) => false,
+        Some(Tok::Word(b"1")) => true,
+        _ => return Err(bad()),
+    };
+    if t.next()?.is_some() {
+        return Err(bad());
+    }
+    Ok(Done::Debug(Job::new(Kind::Pin { which, high })))
 }
 
 #[cfg(feature = "bench")]

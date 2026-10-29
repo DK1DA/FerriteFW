@@ -502,6 +502,11 @@ pub enum DebugReq {
     /// runs it at once (Dry TX on, keyed only). Answered with [`DebugAns::SynthFsk`].
     SynthFsk(crate::synthfsk::Cfg),
     #[cfg(feature = "bench")]
+    /// TERM-46 (decision 319, a bench test): drive an audio switch pin now (0 PA15, the cross-band mic-path select;
+    /// 1 PC12, DAC1's mic-line switch). The radio's own logic sets them again at its next path step or burst.
+    /// Answered with [`DebugAns::Pin`].
+    Pin { which: u8, high: bool },
+    #[cfg(feature = "bench")]
     /// TERM-44 (decision 315, a bench test): the receive level meter on (zeroed), off, or only asked (`None`).
     /// Answered with [`DebugAns::Meter`].
     Meter(Option<bool>),
@@ -641,6 +646,9 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-45: what the tone-generator 4FSK run did.
     SynthFsk(crate::synthfsk::Report),
+    #[cfg(feature = "bench")]
+    /// TERM-46: the pin and its level read back.
+    Pin { which: u8, high: bool },
     #[cfg(feature = "bench")]
     /// TERM-44: the receive level meter's state and its bins.
     Meter(crate::rxmeter::Report),

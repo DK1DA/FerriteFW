@@ -96,6 +96,9 @@ pub enum Kind {
     /// `synthfsk ...`: 4FSK from the keyed chip's tone generator (TERM-45).
     SynthFsk(ferrite_core::synthfsk::Cfg),
     #[cfg(feature = "bench")]
+    /// `pin pa15|pc12 0|1`: an audio switch pin (TERM-46).
+    Pin { which: u8, high: bool },
+    #[cfg(feature = "bench")]
     /// `meter [on|off]`: the receive level meter (TERM-44).
     Meter(Option<bool>),
     #[cfg(feature = "bench")]
@@ -198,6 +201,8 @@ impl Job {
             Kind::Hold(set) => DebugReq::Hold(set),
             #[cfg(feature = "bench")]
             Kind::SynthFsk(c) => DebugReq::SynthFsk(c),
+            #[cfg(feature = "bench")]
+            Kind::Pin { which, high } => DebugReq::Pin { which, high },
             #[cfg(feature = "bench")]
             Kind::Meter(set) => DebugReq::Meter(set),
             #[cfg(feature = "bench")]
@@ -439,6 +444,12 @@ impl Job {
             (Kind::SynthFsk(c), DebugAns::SynthFsk(r)) => {
                 put!(out, "  synthfsk {}: {} steps at {} a symbol; gain write {}.{} us avg, {}.{} max; {} late (worst {} us); carrier word {}",
                     if c.cal { "cal" } else { "4fsk" }, r.steps, c.sub, r.write_avg_x10 / 10, r.write_avg_x10 % 10, r.write_max_x10 / 10, r.write_max_x10 % 10, r.late, r.late_max_us, r.freq_word);
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Pin { .. }, DebugAns::Pin { which, high }) => {
+                put!(out, "  pin {} reads {} (until the radio's next path step sets it)", if which == 0 { "PA15" } else { "PC12" }, high as u8);
                 self.st = St::Over;
                 Step::Line
             }

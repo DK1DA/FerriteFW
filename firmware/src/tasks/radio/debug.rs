@@ -44,6 +44,12 @@ impl Radio {
                 DebugAns::Meter(crate::tasks::dsp::meter_report())
             }
             DebugReq::Fsk(a) => self.fsk_ask(a),
+            // TERM-46 (decision 319): an audio switch pin, now
+            DebugReq::Pin { which, high } => {
+                let p = if which == 0 { crate::board::REPEAT_AUDIO } else { crate::hal::audio::MIC_INJECT };
+                p.write(high);
+                DebugAns::Pin { which, high: p.read() }
+            }
             // TERM-45 (decision 318): tone-generator 4FSK while keyed (transmit builds)
             #[cfg(feature = "tx")]
             DebugReq::SynthFsk(c) => self.synth_fsk(c),

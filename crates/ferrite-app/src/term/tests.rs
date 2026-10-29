@@ -1276,6 +1276,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::SynthFsk(_) => DebugAns::SynthFsk(ferrite_core::synthfsk::Report { steps: 57600, write_max_x10: 123, write_avg_x10: 45, late: 2, late_max_us: 31, freq_word: 44_647_500 }),
         #[cfg(feature = "bench")]
+        DebugReq::Pin { which, high } => DebugAns::Pin { which, high },
+        #[cfg(feature = "bench")]
         DebugReq::Hold(set) => DebugAns::Hold([set.flatten().unwrap_or((0, 0)), (0, 0), (0, 0), (0, 0)]),
         #[cfg(feature = "bench")]
         DebugReq::Meter(set) => {
@@ -1385,6 +1387,18 @@ fn debug_bk_rxif_and_meter() {
     r.cmd("synthfsk cal 1800 2400 1290");
     assert_eq!(r.serve(4, regs), vec![DebugReq::SynthFsk(ferrite_core::synthfsk::Cfg { cal: true, ms: 1800, sub: 1, shift_hz: 2400, dev: 1290, g: [0; 4] })]);
     r.send(b"\r");
+    // TERM-46: `pin`
+    r.cmd("pin PA15 0");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Pin { which: 0, high: false }]);
+    assert!(r.raw().contains("pin PA15 reads 0"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("pin pc12 1");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Pin { which: 1, high: true }]);
+    r.send(b"\r");
+    for bad in ["pin", "pin pa14 0", "pin pa15 2", "pin pc12 1 1"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("pin pa15|pc12 0|1"), "{bad}: {}", r.bottom());
+    }
     for bad in ["synthfsk", "synthfsk cal 50 0 0", "synthfsk 3000 17 0 0 1 2 3 4", "synthfsk 3000 4 0 0 1 2 3 200", "synthfsk 3000 4 0 0 1 2 3"] {
         r.cmd(bad);
         assert!(r.bottom().contains("synthfsk cal MS SHIFT DEV"), "{bad}: {}", r.bottom());
@@ -2096,12 +2110,12 @@ fn debug_no_answer_and_stop() {
 #[test]
 fn user_build_refuses_bench_commands() {
     let mut r = Rig::main();
-    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "meter", "meter on", "synthfsk cal 1000 0 0", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5"] {
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "meter", "meter on", "synthfsk cal 1000 0 0", "pin pa15 0", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5"] {
         r.cmd(c);
         assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
     }
-    assert_eq!(super::cmd::BENCH_ONLY.len(), 14);
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 15);
     r.cmd("gps");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
     r.send(b"\r");
