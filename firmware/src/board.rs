@@ -30,6 +30,9 @@ pub static AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
 /// chip's audio into the transmitting chip's mic input (`analysis/crossband_repeat.md` §5; to confirm on the
 /// bench). Driven only through the path machine's `Act::RepeatAudio` (XB-6, XB-8).
 pub const REPEAT_AUDIO: Pin = pin(GPIOA, 15); // (L)
+/// PC12, DAC1's mic-line switch (owned by the audio HAL); here for TERM-46's bench `pin`, which drives it as a plain
+/// GPIO and never touches the DAC.
+pub const MIC_INJECT: Pin = crate::hal::audio::MIC_INJECT;
 /// PC15: stock's debounced, active-low accessory / mute detect (`analysis/pin_audit.md`; docs/hardware.md 6.8): a
 /// speaker mic in the side connector grounds it. The input task debounces it (`ferrite_core::acc`, SND-12).
 pub const ACC_DET: Pin = pin(GPIOC, 15); // (L: connector pin 3)

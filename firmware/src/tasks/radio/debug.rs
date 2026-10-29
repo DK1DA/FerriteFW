@@ -46,7 +46,7 @@ impl Radio {
             DebugReq::Fsk(a) => self.fsk_ask(a),
             // TERM-46 (decision 319): an audio switch pin, now
             DebugReq::Pin { which, high } => {
-                let p = if which == 0 { crate::board::REPEAT_AUDIO } else { crate::hal::audio::MIC_INJECT };
+                let p = if which == 0 { crate::board::REPEAT_AUDIO } else { crate::board::MIC_INJECT };
                 p.write(high);
                 DebugAns::Pin { which, high: p.read() }
             }
