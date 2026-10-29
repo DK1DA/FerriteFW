@@ -26,6 +26,10 @@ pub const SAMPLE_MS: u32 = 2_000;
 pub const HOLD_MS: u32 = 10_000;
 /// A higher reading shows only once it has lasted this long (charging, not a recovery blip).
 pub const RISE_MS: u32 = 60_000;
+/// PWR-22.3: for this long after the first reading, the shown level follows the average both ways: the first reading
+/// is taken under the power-up load (the screen, both chips starting, the boot sound's amplifier) and read low, and
+/// [`RISE_MS`] then held it there for a minute (black, Oct 28, 2026: red at power-up at 51 %).
+pub const SETTLE_MS: u32 = 15_000;
 
 /// The percentage for a 12-bit PA1 reading on this gauge: 0 at or below the cut-off, 100 at 8.1 V and over.
 pub fn percent(g: &Gauge, raw: u16) -> u8 {
@@ -96,6 +100,8 @@ pub struct Battery {
     hold_until: Option<u32>,
     /// Since when the average has been above what shows.
     rise_since: Option<u32>,
+    /// When the first reading came (PWR-22.3's settling window).
+    first: Option<u32>,
 }
 
 impl Battery {
@@ -111,6 +117,8 @@ impl Battery {
         }
         if raw != 0 && !held && (self.avg.is_none() || now.wrapping_sub(self.last) >= SAMPLE_MS) {
             self.last = now;
+            let first = *self.first.get_or_insert(now);
+            let settling = now.wrapping_sub(first) < SETTLE_MS;
             let r = (raw as u32) << 4;
             // a few seconds' average: each reading moves it a third of the way (about 5 s at one per 2 s)
             let a = self.avg.map_or(r, |a| (2 * a + r) / 3);
@@ -118,7 +126,7 @@ impl Battery {
             let a = ((a + 8) >> 4) as u16;
             match self.shown {
                 // falls with the average; rises only once it has stayed higher for RISE_MS
-                Some(s) if a > s => {
+                Some(s) if a > s && !settling => {
                     let since = *self.rise_since.get_or_insert(now);
                     if now.wrapping_sub(since) >= RISE_MS {
                         self.shown = Some(a);
@@ -254,6 +262,29 @@ mod tests {
             t += 2000;
         }
         assert!(b.update(&g, raw_mv(8200), t, false).unwrap().raw > fell.raw, "a sustained rise shows");
+    }
+
+    /// PWR-22.3: a first reading taken under the power-up load (low) doesn't hold for RISE_MS: within SETTLE_MS of
+    /// the first reading the level follows the average up; after it, rises wait RISE_MS again.
+    #[test]
+    fn power_up_settles_quickly() {
+        let g = Gauge::defaults();
+        let mut b = Battery::default();
+        let low = raw_mv(6900);
+        let real = raw_mv(7700);
+        assert_eq!(b.update(&g, low, 0, false).unwrap().raw, low, "the sagging first reading shows");
+        let mut t = 0;
+        let mut shown = low;
+        while t < 12_000 {
+            t += 2000;
+            shown = b.update(&g, real, t, false).unwrap().raw;
+        }
+        assert!(shown > real - (real - low) / 10, "settled close to the real level within 12 s: {shown} of {real}");
+        // after the window, a rise waits RISE_MS again
+        t = SETTLE_MS + 4000;
+        let before = b.update(&g, real, t, false).unwrap().raw;
+        t += 2000;
+        assert_eq!(b.update(&g, raw_mv(8100), t, false).unwrap().raw, before, "no rise yet after the window");
     }
 
     /// PWR-20: the warning below t1, the cut-off below t0, from the shown reading.
