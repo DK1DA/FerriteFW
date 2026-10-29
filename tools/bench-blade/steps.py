@@ -36,14 +36,28 @@ try:
     if wav != "-": player = subprocess.Popen(["afplay", wav]); time.sleep(1.0)
     for name, lines in plan["steps"]:
         for c in lines:
+            if c.startswith("add "):  # add CHIP REG N: read, add N, write
+                _, chip, reg, d = c.split(); cur = int(term(f"bk {chip} {reg}").split()[3], 16)
+                c = f"bk {chip} {reg} {(cur + int(d)) & 0xFFFF:04X}"
             if c.startswith("set ") or c.startswith("clr "):  # set|clr CHIP REG MASK: read-modify-write
                 op, chip, reg, mask = c.split(); cur = int(term(f"bk {chip} {reg}").split()[3], 16); m = int(mask, 16)
                 c = f"bk {chip} {reg} {(cur | m) if op == 'set' else (cur & ~m):04X}"
             r = term(c)
-            say(f"         {c} -> {r[:60]}")
+            say(f"         {c} -> {r[:230]}")
             if "refused" in r or "<-" not in r and c.split()[0] == "bk" and len(c.split()) == 4: say("  ! " + r[:120])
         time.sleep(0.3)
         sw, hz = [], []
+        if plan.get("show"):
+            outs = []
+            for c in plan["show"]:
+                r = term(c).replace("\n", " / ")
+                outs.append(r[:int(plan.get("width", 70))])
+            say(f"{time.time() - t0:5.1f} s  [{time.time() - TC:5.1f} cap]  {name:16s} " + "  ||  ".join(outs))
+            continue
+        if plan.get("read64"):
+            v = [term(f"bk {plan['read64']} 64").split()[3] for _ in range(3)]
+            say(f"{time.time() - t0:5.1f} s  {name:28s} REG_64 {' '.join(v)}  [{time.time() - TC:5.1f} cap]")
+            continue
         for _ in range(plan.get("reads", 2)):
             link.send(fl.KEY, bytes([fl.PTT, fl.PTT_ALIVE])); link.answers()
             a = term("af"); m = re.search(r"min (\d+), max (\d+)", a); h = re.search(r"(\d+) Hz if", a)
