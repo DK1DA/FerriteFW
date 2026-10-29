@@ -2,12 +2,12 @@
 
 use super::*;
 
-/// HF-31: the SI4732's AM seek band in HF mode (kHz): HF mode's bottom (150 kHz) to the SI4732's top (30 MHz).
-const HF_SEEK_KHZ: (u16, u16) = (150, 30_000);
+/// HF-31: the SI4732's AM seek band in HF mode (kHz): HF mode's bottom (150 kHz) to chip 1's start (18 MHz).
+const HF_SEEK_KHZ: (u16, u16) = (150, 18_000);
 
 impl Radio {
-    /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz and for AM up to 30 MHz,
-    /// chip 1 through the energised relay otherwise. Watch, scan and the other chip pause meanwhile (HF-8).
+    /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz, chip 1 through the
+    /// energised relay from 18 MHz (decision 322, as stock and nicFW). Watch, scan and the other chip pause meanwhile (HF-8).
     pub(super) async fn hf(&mut self, freq: Freq10, mode: u8, on: bool) {
         self.seek_cancel(); // HF-31: a retune or off ends a seek
         if !on {
@@ -23,7 +23,7 @@ impl Radio {
             log(b"hf off", 0);
             return;
         }
-        let si = freq < mhz(18) || (mode == 2 && freq <= mhz(30));
+        let si = freq < mhz(18);
         let was = self.hf.replace(HfOn { freq, mode, si });
         for n in 0..2u8 {
             if !(n == 1 && !si) {

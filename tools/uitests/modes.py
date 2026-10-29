@@ -100,7 +100,7 @@ def hf_screen_shows_its_fields(t):
 @test("HF-9", "HF-10", pages=("Hf",))
 def hf_receiver_follows_frequency_and_mode(t):
     """HF mode's receiver by range and mode: LW, MW and shortwave AM on the SI4732; USB, LSB, CW on it too (with
-    the patch); FM 18-64 MHz on chip 1; AM 18-30 MHz on the SI4732."""
+    the patch); from 18 MHz chip 1, FM and AM (decision 322, as stock)."""
     vfo = HfVfo(t)
     try:
         for mhz, band in ((0.198, "LW"), (0.909, "MW"), (9.58, "31 m"), (15.4, "19 m")):
@@ -119,20 +119,22 @@ def hf_receiver_follows_frequency_and_mode(t):
             t.eq(hf_line(u)["rx"], "CHIP 1", f"{mhz} MHz FM: chip 1")
         hf_type(t, 27.185)
         u = hf_mode(t, "AM")
-        t.eq(hf_line(u)["rx"], "SI4732", "AM on CB (18-30 MHz): the SI4732")
+        t.eq(hf_line(u)["rx"], "CHIP 1", "AM on CB: chip 1")
     finally:
         vfo.restore()
 
 
 @test("HF-10", pages=("Hf",))
-def hf_am_above_30_mhz_is_chip_1(t):
-    """AM above 30 MHz (6 m) is chip 1's: the SI4732 stops at 30 MHz (HF-9: chip 1 takes 18-64 MHz, FM and AM;
-    HF-10: AM uses the SI4732 on 18-30 MHz only)."""
+def hf_no_ssb_from_18_mhz(t):
+    """From 18 MHz chip 1 receives, AM on 6 m included, and USB isn't offered there (HF-10, decision 322: chip 1
+    has no SSB; as stock)."""
     vfo = HfVfo(t)
     try:
         hf_type(t, 50.4)
         u = hf_mode(t, "AM")
         t.eq(hf_line(u)["rx"], "CHIP 1", "AM on 50.4 MHz")
+        hf_type(t, 21.2)
+        t.eq(hf_mode(t, "USB"), None, "no USB on 15 m")
     finally:
         vfo.restore()
 
@@ -213,8 +215,8 @@ def hf_side1_on_chip_1(t):
 
 @test("HF-31", pages=("Hf",))
 def hf_seek(t):
-    """Hold 3 seeks up, hold 1 down, in AM below 30 MHz (the SI4732's seek): it stops on a station and keeps the
-    frequency, or gives up within 15 s; in USB or on chip 1 a toast says AM below 30 MHz only."""
+    """Hold 3 seeks up, hold 1 down, in AM below 18 MHz (the SI4732's seek): it stops on a station and keeps the
+    frequency, or gives up within 15 s; in USB or on chip 1 a toast says AM below 18 MHz only."""
     vfo = HfVfo(t)
     try:
         hf_type(t, 9.4)
@@ -233,7 +235,7 @@ def hf_seek(t):
         t.check(float(hf_line(u)["freq"]) <= float(f1), "down: below", hf_line(u))
         if hf_mode(t, "USB") is not None:
             u = t.press("3", long=True)
-            t.eq(u.toast, {"head": "Seek", "body": "AM below 30 MHz only"}, "USB: no seek, the toast says so")
+            t.eq(u.toast, {"head": "Seek", "body": "AM below 18 MHz only"}, "USB: no seek, the toast says so")
             t.eq(hf_line(u)["seek"], 0, "and nothing seeks")
     finally:
         vfo.restore()

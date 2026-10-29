@@ -49,10 +49,8 @@ pub fn mode_name(m: u8) -> &'static str {
     }
 }
 
-/// Chip 1 takes over from 18 MHz (HF-9, HF-10).
+/// Chip 1 takes over from 18 MHz, every mode (HF-9, HF-10; decision 322: as stock and nicFW).
 const CHIP1_FROM: Freq10 = mhz(18);
-/// The SI4732 tunes AM up to 30 MHz; above it chip 1 takes AM too (HF-9, HF-10).
-const SI_TOP: Freq10 = mhz(30);
 const TOP: Freq10 = mhz(64);
 const BOTTOM: Freq10 = 15_000; // 150 kHz
 
@@ -71,13 +69,13 @@ const BANDS: [(&str, Freq10, Freq10, Freq10, u8); 19] = [
     ("25 m", 1_160_000, 1_210_000, 1_177_000, AM),
     ("20 m", 1_400_000, 1_435_000, 1_407_400, USB),
     ("19 m", 1_510_000, 1_580_000, 1_540_000, AM),
-    ("17 m", 1_806_800, 1_816_800, 1_810_000, USB),
-    ("15 m", 2_100_000, 2_145_000, 2_107_400, USB),
+    ("17 m", 1_806_800, 1_816_800, 1_810_000, FM),
+    ("15 m", 2_100_000, 2_145_000, 2_107_400, FM),
     ("13 m", 2_145_000, 2_185_000, 2_150_000, AM),
-    ("12 m", 2_489_000, 2_499_000, 2_491_500, USB),
+    ("12 m", 2_489_000, 2_499_000, 2_491_500, FM),
     ("CB", 2_696_500, 2_740_500, 2_718_500, AM),
     ("10 m", 2_800_000, 2_970_000, 2_960_000, FM),
-    ("6 m", 5_000_000, 5_400_000, 5_012_500, USB),
+    ("6 m", 5_000_000, 5_400_000, 5_012_500, FM),
 ];
 
 /// HF-32: the amateur list (CB with it); the rest are the broadcast list.
@@ -158,13 +156,12 @@ impl HfMem {
         matches!(self.mode, USB | LSB | CW)
     }
 
-    /// 0 SI4732 AM, 1 SI4732 SSB/CW, 2 chip 1 (HF-10: FM from 18 MHz, and AM above the SI4732's 30 MHz, as the
-    /// Radio task tunes them).
+    /// 0 SI4732 AM, 1 SI4732 SSB/CW, 2 chip 1 (HF-10: everything from 18 MHz, as the Radio task tunes it).
     fn rx(&self) -> usize {
-        if self.ssb() {
-            1
-        } else if self.freq >= CHIP1_FROM && (self.mode == FM || self.freq > SI_TOP) {
+        if self.freq >= CHIP1_FROM {
             2
+        } else if self.ssb() {
+            1
         } else {
             0
         }
@@ -215,11 +212,11 @@ impl HfMem {
         BANDS.iter().position(|b| (b.1..=b.2).contains(&self.freq))
     }
 
-    /// A mode allowed here: FM only on chip 1's range; USB, LSB, CW only with the patch (HF-20).
+    /// A mode allowed here: FM only on chip 1's range; USB, LSB, CW only below it, with the patch (HF-10, HF-20).
     pub(crate) fn allowed(&self, m: u8, patch: bool) -> bool {
         match m {
             FM => self.freq >= CHIP1_FROM,
-            USB | LSB | CW => patch,
+            USB | LSB | CW => patch && self.freq < CHIP1_FROM,
             _ => true,
         }
     }
@@ -231,10 +228,10 @@ impl HfMem {
     }
 }
 
-/// An HF channel's mode is one HF mode has at its frequency (CHAN-26): AM, USB, LSB and CW anywhere, FM from
-/// 18 MHz (chip 1).
+/// An HF channel's mode is one HF mode has at its frequency (CHAN-26): AM anywhere, USB, LSB and CW below
+/// 18 MHz (the SI4732), FM from 18 MHz (chip 1).
 pub fn channel_mode_ok(f: Freq10, m: u8) -> bool {
-    matches!(m, AM | USB | LSB | CW) || m == FM && f >= CHIP1_FROM
+    m == AM || matches!(m, USB | LSB | CW) && f < CHIP1_FROM || m == FM && f >= CHIP1_FROM
 }
 
 /// CHAN-26: an HF channel recalled (by number, from the browser, the home channel) opens HF mode on its
@@ -297,11 +294,11 @@ fn loading(live: &LiveAll) -> u8 {
 /// the stale report as its landing (HF-31 on the radio, Oct 15, 2026: down from 9.4 "landed" on 10.94 MHz).
 const SEEK_MS: u32 = 17_000;
 
-/// HF-31: seek is the SI4732's, in AM: below 30 MHz, not in SSB or CW (the patch has no seek).
+/// HF-31: seek is the SI4732's, in AM: below 18 MHz, not in SSB or CW (the patch has no seek).
 fn seek(app: &mut App, up: bool) {
     let h = app.set.hf;
-    if h.mode != AM || h.freq >= SI_TOP {
-        return app.show_toast(b"Seek", b"AM below 30 MHz only", false);
+    if h.mode != AM || h.freq >= CHIP1_FROM {
+        return app.show_toast(b"Seek", b"AM below 18 MHz only", false);
     }
     app.radio.hf_seeking = true;
     app.radio.hf_tuned_at = app.now;
@@ -862,15 +859,22 @@ mod band_list_tests {
 mod rx_tests {
     use super::*;
 
-    /// HF-10: AM on 18-30 MHz is the SI4732's; above 30 MHz (6 m) chip 1's, as the Radio task tunes it; FM from
-    /// 18 MHz chip 1's; below 18 MHz the SI4732.
+    /// HF-10 (decision 322, as stock and nicFW): below 18 MHz the SI4732 in every mode; from 18 MHz chip 1 in
+    /// every mode, where USB, LSB and CW aren't offered (chip 1 has no SSB).
     #[test]
-    fn am_above_30_mhz_is_chip_1() {
-        let at = |freq, mode| HfMem { freq, mode, ..HfMem::DEFAULT }.chip1();
-        assert!(!at(mhz(9), AM));
-        assert!(!at(2_718_500, AM), "CB AM: the SI4732");
-        assert!(!at(mhz(30), AM), "30 MHz is still the SI4732's");
-        assert!(at(5_040_000, AM), "6 m AM: chip 1");
-        assert!(at(2_718_500, FM));
+    fn chip_1_from_18_mhz() {
+        let mem = |freq, mode| HfMem { freq, mode, ..HfMem::DEFAULT };
+        assert!(!mem(mhz(9), AM).chip1());
+        assert!(!mem(mhz(18) - 1, USB).chip1(), "17.99 MHz USB: the SI4732");
+        assert!(mem(mhz(18), AM).chip1(), "18 MHz AM: chip 1");
+        assert!(mem(2_718_500, AM).chip1(), "CB AM: chip 1");
+        assert!(mem(1_810_000, USB).chip1(), "17 m: chip 1 whatever the mode");
+        let h = mem(1_420_000, AM);
+        assert!(h.allowed(USB, true) && !h.allowed(USB, false), "20 m USB with the patch");
+        let h = mem(2_107_400, AM);
+        assert!(!h.allowed(USB, true) && !h.allowed(LSB, true) && !h.allowed(CW, true), "15 m: no SSB on chip 1");
+        assert!(h.allowed(FM, true) && h.allowed(AM, true));
+        assert!(channel_mode_ok(1_420_000, USB) && !channel_mode_ok(2_107_400, USB));
+        assert!(BANDS.iter().all(|b| b.1 < CHIP1_FROM || matches!(b.4, AM | FM)), "every band from 18 MHz starts in AM or FM");
     }
 }

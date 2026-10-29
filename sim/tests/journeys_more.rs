@@ -56,7 +56,7 @@ fn compose_typing() {
     let _ = Event::Message;
 }
 
-/// Without a verified SSB patch, USB, LSB and CW are hidden: * cycles AM only below 30 MHz, and About says
+/// Without a verified SSB patch, USB, LSB and CW are hidden: * cycles AM only below 18 MHz, and About says
 /// the patch isn't installed (HF-20).
 #[test]
 fn no_ssb_patch() {
