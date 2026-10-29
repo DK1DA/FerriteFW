@@ -498,6 +498,10 @@ pub enum DebugReq {
     /// with [`DebugAns::Hold`].
     Hold(Option<Option<(u8, u16)>>),
     #[cfg(feature = "bench")]
+    /// TERM-45 (decision 318, a bench test): 4FSK from the keyed chip's tone generator, the mic off; the Radio task
+    /// runs it at once (Dry TX on, keyed only). Answered with [`DebugAns::SynthFsk`].
+    SynthFsk(crate::synthfsk::Cfg),
+    #[cfg(feature = "bench")]
     /// TERM-44 (decision 315, a bench test): the receive level meter on (zeroed), off, or only asked (`None`).
     /// Answered with [`DebugAns::Meter`].
     Meter(Option<bool>),
@@ -634,6 +638,9 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-42.3: the registers held ([`HOLDS`] slots; register 0 an empty one).
     Hold([(u8, u16); HOLDS]),
+    #[cfg(feature = "bench")]
+    /// TERM-45: what the tone-generator 4FSK run did.
+    SynthFsk(crate::synthfsk::Report),
     #[cfg(feature = "bench")]
     /// TERM-44: the receive level meter's state and its bins.
     Meter(crate::rxmeter::Report),

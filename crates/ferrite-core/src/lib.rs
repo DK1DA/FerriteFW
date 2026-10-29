@@ -44,6 +44,8 @@ pub mod name;
 pub mod path;
 pub mod rawaudio;
 pub mod rxmeter;
+#[cfg(feature = "bench")]
+pub mod synthfsk;
 pub mod reader;
 pub mod restore;
 pub mod rxaudio;

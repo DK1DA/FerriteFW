@@ -1401,6 +1401,8 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         #[cfg(feature = "bench")]
         _ if same(c, b"meter") => meter(&mut t),
         #[cfg(feature = "bench")]
+        _ if same(c, b"synthfsk") => synthfsk(&mut t),
+        #[cfg(feature = "bench")]
         _ if same(c, b"si") => si(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"bt") => bt(&mut t),
@@ -1538,7 +1540,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 13] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter"];
+pub const BENCH_ONLY: [&str; 14] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter", "synthfsk"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
@@ -1675,6 +1677,43 @@ fn hold(t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("{}", USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Hold(set))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-45 (decision 318, a bench test): `synthfsk cal MS SHIFT DEV` holds tone 1's gain at 0 to 127 in nine steps;
+/// `synthfsk MS SUB SHIFT DEV G0 G1 G2 G3` sends 4FSK (M17's symbols, PRBS9) by stepping the gain, SUB steps a
+/// symbol. MS the run (100-5000), SHIFT the carrier moved down (Hz, 0-9990), DEV REG_40's scale (0-4095), Gn the gains
+/// for -3, -1, +1, +3 (0-127). The Radio task runs it at once on the keyed chip, Dry TX on only.
+fn synthfsk(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::synthfsk::{Cfg, SUB_MAX};
+    const USAGE: &str = "synthfsk cal MS SHIFT DEV, or synthfsk MS SUB SHIFT DEV G0 G1 G2 G3: while keyed, Dry TX only";
+    let bad = || msg!("{}", USAGE);
+    let mut words = [0u32; 8];
+    let mut n = 0;
+    let mut cal = false;
+    while let Some(tok) = t.next()? {
+        match tok {
+            Tok::Word(w) if n == 0 && !cal && same(w, b"cal") => cal = true,
+            Tok::Word(w) if n < 8 => {
+                words[n] = number(w).ok_or_else(bad)?;
+                n += 1;
+            }
+            _ => return Err(bad()),
+        }
+    }
+    let ok = |v: u32, lo: u32, hi: u32| (lo..=hi).contains(&v);
+    let cfg = if cal {
+        if n != 3 || !ok(words[0], 100, 5000) || !ok(words[1], 0, 9990) || !ok(words[2], 0, 4095) {
+            return Err(bad());
+        }
+        Cfg { cal, ms: words[0] as u16, sub: 1, shift_hz: words[1] as u16, dev: words[2] as u16, g: [0; 4] }
+    } else {
+        if n != 8 || !ok(words[0], 100, 5000) || !ok(words[1], 1, SUB_MAX as u32) || !ok(words[2], 0, 9990) || !ok(words[3], 0, 4095) || words[4..8].iter().any(|&g| g > 127) {
+            return Err(bad());
+        }
+        Cfg { cal, ms: words[0] as u16, sub: words[1] as u8, shift_hz: words[2] as u16, dev: words[3] as u16, g: [words[4] as u8, words[5] as u8, words[6] as u8, words[7] as u8] }
+    };
+    Ok(Done::Debug(Job::new(Kind::SynthFsk(cfg))))
 }
 
 #[cfg(feature = "bench")]
@@ -2292,6 +2331,7 @@ const HELP_BENCH: &str = concat!(
     "  bk rxif 5A20  bk rxif off   bench test: REG_43 after every FM tune (RX IF width)\n",
     "  bk hold 73 4692   bk hold off   bench test: up to 4 registers after every FM tune\n",
     "  meter on       meter        bench test: RX audio levels 50 Hz-12.5 kHz at 48 kHz\n",
+    "  synthfsk 3000 4 2400 1290 10 40 70 100   bench test while keyed: 4FSK from tone 1's gain\n",
     "  fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off\n",
     "  fsk tx 2400 20         20 test frames at the next PTT key-up (Dry TX only; ffsk1800 ...)\n",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",

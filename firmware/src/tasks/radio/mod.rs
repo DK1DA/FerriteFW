@@ -80,6 +80,8 @@ mod cmd;
 mod debug;
 #[cfg(feature = "bench")]
 mod fskbench;
+#[cfg(all(feature = "bench", feature = "tx"))]
+mod synthbench;
 mod tune;
 mod tick;
 mod same;

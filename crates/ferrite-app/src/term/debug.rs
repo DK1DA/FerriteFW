@@ -93,6 +93,9 @@ pub enum Kind {
     /// `bk hold [REG VALUE|off]`: registers held after every FM tune (TERM-42.3).
     Hold(Option<Option<(u8, u16)>>),
     #[cfg(feature = "bench")]
+    /// `synthfsk ...`: 4FSK from the keyed chip's tone generator (TERM-45).
+    SynthFsk(ferrite_core::synthfsk::Cfg),
+    #[cfg(feature = "bench")]
     /// `meter [on|off]`: the receive level meter (TERM-44).
     Meter(Option<bool>),
     #[cfg(feature = "bench")]
@@ -194,10 +197,21 @@ impl Job {
             #[cfg(feature = "bench")]
             Kind::Hold(set) => DebugReq::Hold(set),
             #[cfg(feature = "bench")]
+            Kind::SynthFsk(c) => DebugReq::SynthFsk(c),
+            #[cfg(feature = "bench")]
             Kind::Meter(set) => DebugReq::Meter(set),
             #[cfg(feature = "bench")]
             Kind::Fsk(a) => DebugReq::Fsk(a),
         })
+    }
+
+    /// How long to wait for the answer: TERM-45's run blocks the Radio task for its length.
+    fn answer_ms(&self) -> u32 {
+        match self.kind {
+            #[cfg(feature = "bench")]
+            Kind::SynthFsk(c) => ANSWER_MS + c.ms as u32,
+            _ => ANSWER_MS,
+        }
     }
 
     /// The firmware's answer to the last request.
@@ -213,7 +227,7 @@ impl Job {
         match self.st {
             St::Over => return Step::Over,
             St::Ask => return Step::Wait,
-            St::Wait(at) if now.wrapping_sub(at) >= ANSWER_MS => {
+            St::Wait(at) if now.wrapping_sub(at) >= self.answer_ms() => {
                 self.st = St::Over;
                 out.push(b"  no answer (the firmware didn't reply in 2 s)");
                 return Step::Line;
@@ -418,6 +432,13 @@ impl Job {
                         put!(out, " after every FM tune (IF {} / weak {}, x2 {}); until bk rxif off or power-off", v >> 12 & 7, v >> 9 & 7, if v & 0x20 != 0 { "on" } else { "off" });
                     }
                 }
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::SynthFsk(c), DebugAns::SynthFsk(r)) => {
+                put!(out, "  synthfsk {}: {} steps at {} a symbol; gain write {}.{} us avg, {}.{} max; {} late (worst {} us); carrier word {}",
+                    if c.cal { "cal" } else { "4fsk" }, r.steps, c.sub, r.write_avg_x10 / 10, r.write_avg_x10 % 10, r.write_max_x10 / 10, r.write_max_x10 % 10, r.late, r.late_max_us, r.freq_word);
                 self.st = St::Over;
                 Step::Line
             }

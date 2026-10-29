@@ -44,6 +44,11 @@ impl Radio {
                 DebugAns::Meter(crate::tasks::dsp::meter_report())
             }
             DebugReq::Fsk(a) => self.fsk_ask(a),
+            // TERM-45 (decision 318): tone-generator 4FSK while keyed (transmit builds)
+            #[cfg(feature = "tx")]
+            DebugReq::SynthFsk(c) => self.synth_fsk(c),
+            #[cfg(not(feature = "tx"))]
+            DebugReq::SynthFsk(_) => DebugAns::Refused("synthfsk needs a transmit build"),
             // TERM-32 (a bench test): PA0, the mic level tap VOX reads, at 8 kHz for 32 ms, to tell raw audio from an
             // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it. TERM-32.1 (`af`):
             // PA2, the receive audio (both BK4829s summed, and the SI4732's: bench Oct 25, 2026, decision 290).
