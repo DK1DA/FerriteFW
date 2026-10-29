@@ -167,7 +167,7 @@ impl View for Aprs {
 
     fn hints(self, _: &App) -> Hints {
         if self.station {
-            Hints::new(&[("OK", "Message"), ("#", "Waypoint"), ("BACK", "Back")])
+            Hints::new(&[("OK", "Msg"), ("#", "Wpt"), ("Hold MENU", "Contact")]) // APRS-41: hold MENU: Save contact
         } else {
             Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("Hold MENU", "More")])
         }

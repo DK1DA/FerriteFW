@@ -84,7 +84,7 @@ const G4: [Entry; 5] = [
     Entry("Weather alerts|On|SAME and your location codes."),
 ];
 const G5: [Entry; 9] = [
-    Entry("Heard||Stations heard, nearest first."),
+    Entry("Heard||Stations heard, newest first."),
     Entry("Messages||Messages sent to you and by you."),
     Entry("APRS mode|Off|Slot C becomes the APRS slot."),
     Entry("Frequency|144.390|OK types it; # the region's."),
@@ -201,7 +201,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("TX level|Mid|Modulation level."),
         Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
         Entry("Mute speaker|On|Mute packets on the speaker."),
-        Entry("Shared VHF|APRS first|When A or B shares C's VHF chip: APRS first gives C long turns and A and B short looks; Voice first gives A and B their usual turns, and C misses more packets."),
+        Entry("Shared VHF|APRS first|When A or B shares C's VHF chip: APRS first gives C long turns and A and B short looks; A·B first gives A and B their usual turns, and C misses more packets."),
     ]),
     ((7, 3), &[
         Entry("S-meter|Bars|Bars or dBm."),
