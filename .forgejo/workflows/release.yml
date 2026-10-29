@@ -79,6 +79,19 @@ jobs:
           cp target/build-report-tx.html target/out/build-report.html
           cp target/build-report-tx.json target/out/build-report.json
           (cd target/out && sha256sum *.btf > SHA256SUMS)
+      # The images and SHA256SUMS signed with minisign (a .minisig beside each), once the MINISIGN_KEY secret is set:
+      # the secret key file's contents, made without a password (minisign -G -W); the public key ships in Console.
+      - name: Sign
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+        run: |
+          if [ -z "$MINISIGN_KEY" ]; then echo "no MINISIGN_KEY secret: not signed"; exit 0; fi
+          apt-get install -y -q --no-install-recommends minisign
+          key=$(mktemp)
+          printf '%s\n' "$MINISIGN_KEY" > "$key"
+          cd target/out
+          minisign -S -s "$key" -t "Ferrite $(git rev-parse --short HEAD)" -m *.btf SHA256SUMS
+          rm "$key"
       - uses: https://code.forgejo.org/forgejo/upload-artifact@v4
         with:
           name: ferrite-images
@@ -92,7 +105,7 @@ jobs:
           API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets
         run: |
           cd target/out
-          for f in *.btf SHA256SUMS build-report.html build-report.json ui-results.json; do
+          for f in *.btf *.minisig SHA256SUMS build-report.html build-report.json ui-results.json; do
             curl -sSf -X POST -H "Authorization: token $TOKEN" -F "attachment=@$f" "$API?name=$f" > /dev/null
             echo "attached $f"
           done
