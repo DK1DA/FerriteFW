@@ -49,7 +49,8 @@ fn state_text(m: &Message, b: &mut Buf<16>) -> u16 {
             GREEN
         }
         MsgState::Retrying(n) => {
-            let _ = uwrite!(b, "retry {}", n);
+            // APRS-13: the try it's on of the five ("retry 2" read as a second retry on the first)
+            let _ = uwrite!(b, "try {}/{}", n, crate::aprs::TRIES);
             AMBER
         }
         MsgState::Failed => {

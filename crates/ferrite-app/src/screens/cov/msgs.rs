@@ -27,14 +27,14 @@ fn draft(t: &T) -> String {
     String::from_utf8_lossy(t.s.draft().text.as_bytes()).into_owned()
 }
 
-/// APRS-13: the list shows each of ours with its state (new, acked, retry n, failed); its hints; BACK leaves.
+/// APRS-13: the list shows each of ours with its state (new, acked, "try n/5", failed); its hints; BACK leaves.
 #[test]
 fn list_shows_states() {
     let mut t = T::new();
     t.open(Dest::AprsMessages);
     t.shows("new");
     t.shows("acked");
-    t.shows("retry 2");
+    t.shows("try 2/5");
     t.shows("failed");
     t.reads("title=\"Messages\"");
     t.reads("hints \"OK\" \"Open\" \"#\" \"New\" \"Hold MENU\" \"More\"");
