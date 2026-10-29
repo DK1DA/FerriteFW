@@ -15,7 +15,8 @@
 #![no_std]
 #![no_main]
 
-#[allow(dead_code)]
+// The firmware's `bench` pins: the reader has no such feature, and they stay out.
+#[allow(dead_code, unexpected_cfgs)]
 #[path = "../../firmware/src/board.rs"]
 mod board;
 mod bringup;

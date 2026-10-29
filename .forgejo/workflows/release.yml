@@ -40,9 +40,14 @@ jobs:
 
       - name: Host tests
         run: |
-          cargo test -q
+          # Run once, under coverage: the build report counts these logs and reports this run's coverage. The store's
+          # power-cut and chip-gone tests run about 40 times slower instrumented (11 s plain, over 7 min covered), so
+          # they're skipped here and run plainly in the bench build below (store coverage 96.7 -> 92.7 %).
+          mkdir -p target/ci
+          cargo llvm-cov --no-report -q -- --skip chip_gone --skip power_cut 2>&1 | tee target/ci/host-tests.log
+          cargo llvm-cov --no-report -q -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea \
+            --all-features 2>&1 | tee target/ci/driver-tests.log
           cargo test -q --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench
-          cargo test -q -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea --all-features
       - name: Lints
         run: |
           cargo clippy -q --all-targets -- -D warnings
@@ -54,6 +59,8 @@ jobs:
       - name: Sim UI tests
         run: python3 tools/uitest.py --sim auto -j "$(nproc)" --results target/ci-ui
 
+      # Every run, by hand too, keeps target/out as a download on the run's page: the two images, SHA256SUMS, their
+      # signatures, the build report and the UI results.
       - name: Images
         run: |
           tools/mkbtf.sh tx
@@ -61,46 +68,45 @@ jobs:
           # The release tag without a leading v (v0.9 -> ferrite-0.9.btf); a run by hand uses the commit.
           tag="${{ github.event.release.tag_name }}"
           ver="${tag#v}"
-          img="ferrite-${ver:-$(git rev-parse --short HEAD)}.btf"
-          cp target/ferrite-tx.btf "target/$img"
-          echo "$img" > target/release-image
-      - name: Build report
-        run: |
-          ui=$(ls -t target/ci-ui/*/ui/results.json | head -1)
-          python3 tools/buildreport.py tx --ui "$ui"
-          cp "$ui" target/ui-results.json
-
-      # Every run, by hand too: the images and the build report as a download on the run's page.
-      - name: Keep the images and the build report
-        run: |
           mkdir -p target/out
-          cp "target/$(cat target/release-image)" target/ferrite-reader.btf target/ui-results.json target/out/
-          # Only the tx build ships, so the report drops the build from its name.
-          cp target/build-report-tx.html target/out/build-report.html
-          cp target/build-report-tx.json target/out/build-report.json
+          cp target/ferrite-tx.btf "target/out/ferrite-${ver:-$(git rev-parse --short HEAD)}.btf"
+          cp target/ferrite-reader.btf target/out/
           (cd target/out && sha256sum *.btf > SHA256SUMS)
       # The images and SHA256SUMS signed with minisign (a .minisig beside each), once the MINISIGN_KEY secret is set:
       # the secret key file's contents, made without a password (minisign -G -W); the public key ships in Console.
       - name: Sign
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
+          apt-get install -y -q --no-install-recommends minisign # also the build report's check
           if [ -z "$MINISIGN_KEY" ]; then echo "no MINISIGN_KEY secret: not signed"; exit 0; fi
-          apt-get install -y -q --no-install-recommends minisign
           # The key file is a comment line and the key's base64 line; the secret may hold the base64 line alone or
           # both joined into one, so rebuild the file around the base64.
           b64=$(printf '%s' "$MINISIGN_KEY" | grep -oE 'RW[A-Za-z0-9+/]{100,}={0,2}' | tail -1)
           key=$(mktemp)
           printf 'untrusted comment: minisign encrypted secret key\n%s\n' "$b64" > "$key"
           cd target/out
-          minisign -S -s "$key" -t "Ferrite $(git rev-parse --short HEAD)" -m *.btf SHA256SUMS
+          minisign -S -s "$key" -t "Ferrite ${TAG:-build} $(git rev-parse --short HEAD)" -m *.btf SHA256SUMS
           rm "$key"
           # Each signature checked against the public key in the repo (the one Console carries): a wrong secret fails here.
           for f in *.btf SHA256SUMS; do minisign -Vqm "$f" -p ../../minisign.pub; done
           echo "signed: $(ls *.minisig | tr '\n' ' ')"
+      # Only reads what the steps above made (the tests' logs and coverage, the UI results, the image and its
+      # signature): nothing is built or run again.
+      - name: Build report
+        run: |
+          ui=$(ls -t target/ci-ui/*/ui/results.json | head -1)
+          sig=$(ls target/out/ferrite-*.btf.minisig 2>/dev/null | grep -v reader | head -1)
+          python3 tools/buildreport.py tx --no-build --ui "$ui" ${sig:+--sig "$sig"} \
+            --from-logs target/ci/host-tests.log target/ci/driver-tests.log
+          cp "$ui" target/out/ui-results.json
+          # Only the tx build ships, so the report drops the build from its name.
+          cp target/build-report-tx.html target/out/build-report.html
+          cp target/build-report-tx.json target/out/build-report.json
       - uses: https://code.forgejo.org/forgejo/upload-artifact@v4
         with:
-          name: ferrite-images
+          name: ferrite-images.zip # the download is a zip; Forgejo names the file after this
           path: target/out/
 
       - name: Attach to the release
