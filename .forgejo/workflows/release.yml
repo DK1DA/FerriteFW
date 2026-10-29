@@ -1,7 +1,8 @@
 name: release
 # Runs only when a release is published (or by hand from the Actions tab), so the one worker isn't busy on every
-# push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. The images,
-# the build report and the UI results are attached to the release.
+# push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. Two images go
+# out: the user build (tx) as ferrite-VERSION.btf and Console's backup reader, with the build report and UI results.
+# The receive-only and tx-bench images aren't built here (tx-bench is for local bench work only).
 on:
   release:
     types: [published]
@@ -55,10 +56,14 @@ jobs:
 
       - name: Images
         run: |
-          tools/mkbtf.sh
           tools/mkbtf.sh tx
-          tools/mkbtf.sh tx-bench
           tools/mkbtf.sh reader
+          # The release tag without a leading v (v0.9 -> ferrite-0.9.btf); a run by hand uses the commit.
+          tag="${{ github.event.release.tag_name }}"
+          ver="${tag#v}"
+          img="ferrite-${ver:-$(git rev-parse --short HEAD)}.btf"
+          cp target/ferrite-tx.btf "target/$img"
+          echo "$img" > target/release-image
       - name: Build report
         run: |
           ui=$(ls -t target/ci-ui/*/ui/results.json | head -1)
@@ -73,8 +78,9 @@ jobs:
           API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets
         run: |
           cd target
-          sha256sum ferrite.btf ferrite-tx.btf ferrite-txbench.btf ferrite-reader.btf > SHA256SUMS
-          for f in ferrite.btf ferrite-tx.btf ferrite-txbench.btf ferrite-reader.btf SHA256SUMS \
+          img=$(cat release-image)
+          sha256sum "$img" ferrite-reader.btf > SHA256SUMS
+          for f in "$img" ferrite-reader.btf SHA256SUMS \
                    build-report-tx.html build-report-tx.json ui-results.json; do
             curl -sSf -X POST -H "Authorization: token $TOKEN" -F "attachment=@$f" "$API?name=$f" > /dev/null
             echo "attached $f"
