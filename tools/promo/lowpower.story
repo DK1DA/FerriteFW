@@ -66,8 +66,8 @@ script:
   wait 2500ms
 ---
 kind: intro
-title: 41 % less current in typical use
-left: About 23 hours becomes about 39 on the stock battery pack.
+title: About 107 hours at rest
+left: On the stock battery pack, listening on a quiet channel: the processor runs at 24 MHz until something needs it.
 seconds: 6
 ---
 kind: outro
