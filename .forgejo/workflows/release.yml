@@ -1,7 +1,7 @@
 name: release
 # Runs only when a release is published (or by hand from the Actions tab), so the one worker isn't busy on every
 # push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. Two images go
-# out: the user build (tx) as ferrite-VERSION.btf and Console's backup reader, with the build report and UI results.
+# out: the user build (tx) as ferrite-VERSION.btf and Console's backup reader, with the build report.
 # The receive-only and tx-bench images aren't built here (tx-bench is for local bench work only).
 on:
   release:
