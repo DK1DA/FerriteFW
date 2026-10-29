@@ -3,7 +3,7 @@
 
 kind: intro
 title: Only on Ferrite
-left: Things we haven't seen in stock's menus or in nicFW's wiki.
+left: Things we haven't seen in the stock firmware.
 seconds: 4
 music: music/chiptune3.wav
 ---
