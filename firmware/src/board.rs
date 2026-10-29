@@ -32,8 +32,10 @@ pub static AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
 pub const REPEAT_AUDIO: Pin = pin(GPIOA, 15); // (L)
 /// PC12, DAC1's mic-line switch (owned by the audio HAL); here for TERM-46's bench `pin`, which drives it as a plain
 /// GPIO and never touches the DAC.
+#[cfg(feature = "bench")]
 pub const MIC_INJECT: Pin = crate::hal::audio::MIC_INJECT;
 /// PC9: an audio switch stock's arbiter only ever clears (role unknown; TERM-46 explores it).
+#[cfg(feature = "bench")]
 pub const PC9_AUDIO: Pin = pin(GPIOC, 9);
 /// PC15: stock's debounced, active-low accessory / mute detect (`analysis/pin_audit.md`; docs/hardware.md 6.8): a
 /// speaker mic in the side connector grounds it. The input task debounces it (`ferrite_core::acc`, SND-12).
