@@ -108,16 +108,20 @@ fn ptt_b_is_night_red() {
     assert_eq!(t.app.set.theme, 0);
 }
 
-/// HOME-17: PF1 is GPS on/off (0 6 1), PF2 Bluetooth on/off (0 9 2 1), each at the press; the rows follow.
+/// HOME-17: PF1 steps GPS (0 6 1: Off, Auto, On in turn, GPS-1), PF2 Bluetooth on/off (0 9 2 1), each at the press;
+/// the rows follow.
 #[test]
 fn pf1_gps_and_pf2_bluetooth() {
+    use crate::settings::{GPS_AUTO, GPS_OFF, GPS_ON};
     let mut t = T::new();
-    let (gps, bt) = (t.app.set.gps_on, t.app.set.bt);
+    t.app.set.gps = GPS_OFF;
+    let bt = t.app.set.bt;
     open(&mut t);
-    down(&mut t, Key::Side(1));
-    assert_eq!(t.app.set.gps_on, !gps);
-    assert_eq!(shown(&t, 2), if gps { "off" } else { "on" });
-    up(&mut t, Key::Side(1));
+    for (want, text) in [(GPS_AUTO, "auto"), (GPS_ON, "on"), (GPS_OFF, "off")] {
+        down(&mut t, Key::Side(1));
+        assert_eq!((t.app.set.gps, shown(&t, 2).as_str()), (want, text));
+        up(&mut t, Key::Side(1));
+    }
     down(&mut t, Key::Side(2));
     assert_eq!(t.app.set.bt, !bt);
     assert_eq!(shown(&t, 3), if bt { "off" } else { "on" });

@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     lpm, lpm_below, spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, spare_lock, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx, aprs_share });
+} bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, spare_lock, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx, aprs_share });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -345,6 +345,36 @@ mod tests {
     /// 5's squelch (SQL-18.3), 0 5 9 6's APRS mute, 0 4 3's DTMF decode and 0 5 9 7's shared VHF (WATCH-17.3), a
     /// byte each.
     const AFTER_SPARE: usize = 16;
+
+    /// GPS-1.4: a radio keeps the setting it has. 0 6 1's byte is where the old on/off bool was, with Off and On
+    /// its 0 and 1 and Auto 2: an old record set to Off reads Off, one set to On reads On, the record's length is
+    /// unchanged, and a value out of range reads Auto.
+    #[test]
+    fn old_gps_on_off_is_kept() {
+        use crate::settings::{GPS_AUTO, GPS_OFF, GPS_ON};
+        let save = |gps: u8| {
+            let mut v = Vec2(std::vec::Vec::new());
+            Settings { gps, ..Settings::DEFAULT }.save(&mut v);
+            v.0
+        };
+        let (off, on, auto) = (save(GPS_OFF), save(GPS_ON), save(GPS_AUTO));
+        assert_eq!((on.len(), auto.len()), (off.len(), off.len()), "the record's length stays");
+        let at = off.iter().zip(&on).position(|(a, b)| a != b).unwrap();
+        assert_eq!((off[at], on[at], auto[at]), (false as u8, true as u8, 2), "as the old bool saved Off and On");
+        for (rec, want) in [(&off, GPS_OFF), (&on, GPS_ON), (&auto, GPS_AUTO)] {
+            let mut b = Settings::DEFAULT;
+            b.load(&mut SliceSource(rec));
+            assert_eq!(b.gps, want);
+        }
+        let mut b = Settings::DEFAULT;
+        b.load(&mut SliceSource(&on[..at]));
+        assert_eq!(b.gps, GPS_AUTO, "a record from before the byte: the default, Auto");
+        let mut w = on.clone();
+        w[at] = 7;
+        b.load(&mut SliceSource(&w));
+        b.sanitize();
+        assert_eq!(b.gps, GPS_AUTO, "out of range: Auto");
+    }
 
     /// VOX-15: a record from before 0 8 3 existed (it ends at the spare) loads with Mic gain at its default, 5.
     #[test]

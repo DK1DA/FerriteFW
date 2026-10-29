@@ -204,7 +204,7 @@ def star_quick_mute(t):
 @test("HOME-17", "HOME-17.1", "KEY-18", pages=("Home", "Scan"))
 def quick_menu(t):
     """Hold * on home: the quick menu (PTT A Reverse, PTT B Night red, PF1 GPS, PF2 Bluetooth, Knob
-    Brightness); the knob changes the brightness, PF1 toggles GPS; BACK closes it. Not while scanning."""
+    Brightness); the knob changes the brightness, PF1 steps GPS (off, auto, on); BACK closes it. Not while scanning."""
     u = t.press("STAR", long=True)
     t.eq([q[:2] for q in u.qmenu], [["Knob", "Brightness"], ["PTT A", "Reverse"], ["PTT B", "Night red"],
                                      ["PF1", "GPS"], ["PF2", "Bluetooth"]], "the quick menu, the knob first (HOME-17.1)")
@@ -215,10 +215,14 @@ def quick_menu(t):
     t.eq(t.get("0 7 4 2"), str(b0 - 1), "the setting follows")
     u = t.knob(+1)
     t.eq(int(u.qmenu[0][2]), b0, "and back")
+    # GPS-1: PF1 steps 0 6 1 through Off, Auto and On, so three presses come back.
     u = t.keys("SIDE1")
-    t.check(u.qmenu and u.qmenu[3][2] != g0, "PF1 toggled GPS", u.qmenu)
+    t.check(u.qmenu and u.qmenu[3][2] != g0, "PF1 stepped GPS", u.qmenu)
+    t.check(u.qmenu[3][2] in ("off", "auto", "on"), "PF1: off, auto or on", u.qmenu)
     u = t.keys("SIDE1")
-    t.eq(u.qmenu[3][2], g0, "PF1 again: GPS back")
+    t.check(u.qmenu[3][2] not in (g0, ""), "PF1 again: the third state", u.qmenu)
+    u = t.keys("SIDE1")
+    t.eq(u.qmenu[3][2], g0, "PF1 a third time: GPS back")
     u = t.keys("BACK")
     t.eq(u.qmenu, [], "BACK closes it")
     t.eq(u.id, "Home", "still home")

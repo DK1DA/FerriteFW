@@ -1,7 +1,8 @@
 //! GPS (manual chapter 28, roadmap 5a): the ATGM336H on USART3 (PB11 in, 9600 baud, as stock) and
 //! its power on PA8 (low = on), which this task owns (decision 76).
 //!
-//! - **Power (GPS-1, GPS-4):** on or off with 0 6 1, and off around signals as 0 6 8 asks (the UI sends
+//! - **Power (GPS-1, GPS-4):** on or off with 0 6 1 (Auto: on while something needs a position, decided in the UI
+//!   task by `ferrite_app::gpsdata::auto_step`, GPS-1.5), and off around signals as 0 6 8 asks (the UI sends
 //!   [`GPS_CFG`]; the Radio task's [`RF_STATE`] says what it is doing). After a signal the module comes back
 //!   2 s later, so a burst of short signals doesn't cycle it. GPS off forgets the fix and publishes "off";
 //!   powered off with GPS on, the last fix stays with its age (GPS-25).
@@ -432,7 +433,11 @@ impl GpsUi {
         g.tick(now);
         let set = app.settings();
         g.set_fixed(set.fixed_on.then_some(set.fixed));
-        let cfg = app.gps_cfg(); // 0 6 1, off in Low Power Mode (PWR-24)
+        // GPS-1.5: Auto powers the module while something needs a position (and a minute after); the arrival
+        // alarm armed is one of those needs, as it keeps the module running (GPS-28).
+        let alarm = self.arrival.armed(ferrite_app::gpsdata::arrival_radius_m(app.settings()));
+        ferrite_app::gpsdata::auto_step(app, store.data(), alarm, now);
+        let cfg = app.gps_cfg(); // 0 6 1 (Off, Auto, On), off in Low Power Mode (PWR-24)
         if self.cfg != Some(cfg) {
             GPS_CFG.signal(cfg);
             self.cfg = Some(cfg);
@@ -440,7 +445,6 @@ impl GpsUi {
         (dev.gps, dev.sats) = g.state();
         // GPS-26 to GPS-28: who needs the module awake, sent when it changes (a beacon time that only moves with
         // the second's rounding isn't a change); and what the manager has it doing, for Status.
-        let alarm = self.arrival.armed(ferrite_app::gpsdata::arrival_radius_m(app.settings()));
         let d = ferrite_app::gpsdata::demand(app, store.data(), alarm, now);
         let moved = |a: Option<u32>, b: Option<u32>| match (a, b) {
             (Some(a), Some(b)) => a.abs_diff(b) > 2000,

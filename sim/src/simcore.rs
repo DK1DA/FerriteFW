@@ -592,11 +592,14 @@ impl SimCore {
                 store.set_time(u);
             }
             let secs = self.clock0 + now as u64 / 1000;
-            // GPS-3 as on the radio: the sample's fix while the GPS is on (0 6 1); off, the fixed position stands in
+            // GPS-3 as on the radio: the sample's fix while the GPS is on (0 6 1, or Auto while something needs it); off, the fixed position stands in
             // (0 6 9), else there is none. So a test gives the simulator a place with `set 0 6 1 Off`, `set 0 6 9`.
             // (A fix a test set itself is left alone while the GPS is on.)
+            // GPS-1.5: Auto's look, as the firmware's UI task takes it; Low Power Mode left aside here, as before.
+            ferrite_app::gpsdata::auto_step(app, store.data(), false, now);
+            let gps_on = ferrite_app::gpsdata::cfg(app.settings(), app.gps_auto().powered()).on;
             let set = app.settings();
-            if !set.gps_on {
+            if !gps_on {
                 let fix = set.fixed_on.then_some(ferrite_app::data::Fix { pos: set.fixed, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: ferrite_app::gpsdata::FIXED_AGE, utc_s: 0 });
                 if store.extra.fix.get() != fix {
                     store.extra.fix.set(fix);

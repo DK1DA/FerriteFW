@@ -158,7 +158,7 @@ const HF: [(Freq10, u8); 6] = [(707_400, 3), (1_407_400, 3), (376_000, 4), (1_01
 /// (off by default since decision 235, GPS-1.4; the sample shows the position screens with a fix).
 pub fn settings() -> Settings {
     let mut s = Settings::DEFAULT;
-    s.gps_on = true;
+    s.gps = crate::settings::GPS_ON;
     s.set_callsign(b"VA7FER");
     s.set_region(Some(ferrite_core::txplan::Region::Canada));
     s.setup_done = true;

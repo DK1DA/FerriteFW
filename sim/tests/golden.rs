@@ -299,7 +299,7 @@ fn zones_page_matches_its_goldens() {
     failures.extend(check("zones-located", &r.sim.screen_rgb()));
     r.press(Key::Up).press(Key::Up).wait(1000);
     failures.extend(check("zones-nearby", &r.sim.screen_rgb()));
-    r.sim.app_mut().settings_mut().gps_on = false; // no fix, no fixed position: no location anywhere
+    r.sim.app_mut().settings_mut().gps = ferrite_app::settings::GPS_OFF; // no fix, no fixed position: no location anywhere
     r.home();
     r.menu("0 2 3").press(Key::Down).wait(1000);
     failures.extend(check("zones-no-fix", &r.sim.screen_rgb()));

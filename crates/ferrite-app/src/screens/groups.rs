@@ -96,7 +96,7 @@ const G5: [Entry; 9] = [
     Entry("Advanced||Path, TX delay and level, FX.25."),
 ];
 const G6: [Entry; 9] = [
-    Entry("GPS|On|The GPS receiver."),
+    Entry("GPS|Auto|Off, Auto (when needed) or On."),
     Entry("Position||Fix, satellites, position, grid."),
     Entry("Coordinate format|DDM|Decimal, DDM, DMS or grid square."),
     Entry("Units|Metric|Distance, altitude and speed units."),
@@ -403,7 +403,7 @@ impl Setting {
     }
 }
 
-/// A `Setting` for a field: `field!(gps_on: bool, ...)` or `field!(theme: u8, ...)`.
+/// A `Setting` for a field: `field!(scan_tx: bool, ...)` or `field!(theme: u8, ...)`.
 macro_rules! field {
     ($path:expr, $f:ident: bool, $kind:expr, $tell:ident) => {
         Setting { path: $path, term: true, kind: $kind, get: |s| s.$f as u8, set: |s, v| s.$f = v != 0, tell: Tell::$tell }
@@ -467,7 +467,15 @@ static SETTINGS: [Setting; 95] = [
     field!([5, 9, 5], special), // APRS-45
     field!([5, 9, 6], aprs_mute: bool, Kind::Flip(&ON_OFF), AprsMute), // APRS-2
     field!([5, 9, 7], aprs_share: u8, Kind::Pick(&crate::settings::APRS_SHARE), Nothing), // WATCH-17.3
-    field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
+    // GPS-1: Off, Auto, On in menu order (stored 0, 2, 1: the old on/off byte reads as it was, GPS-1.4)
+    Setting {
+        path: [6, 1, 0],
+        term: true,
+        kind: Kind::Pick(&crate::settings::GPS_MODES),
+        get: |s| crate::settings::GPS_ORDER.iter().position(|&m| m == s.gps).unwrap_or(1) as u8,
+        set: |s, v| s.gps = crate::settings::GPS_ORDER[v as usize % 3],
+        tell: Tell::Nothing,
+    },
     field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
     field!([6, 5, 0], tz: u8, Kind::Round(TIME_ZONES.len() as u8, zone_text), Nothing),
