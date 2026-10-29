@@ -213,6 +213,7 @@ impl Radio {
             RadioCmd::DtmfRx(on) => self.dtmf_on = on,
             RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
             RadioCmd::Chime { sound, level } => self.chime(sound, level).await,
+            RadioCmd::BootSound { at } => self.boot_sound(at).await,
             #[cfg(feature = "tx")]
             RadioCmd::ToneBurst { on } => self.keyed_tone(if on { Some(1750) } else { None }, None),
             #[cfg(feature = "tx")]

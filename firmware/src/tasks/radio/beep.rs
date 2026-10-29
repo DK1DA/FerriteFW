@@ -110,4 +110,48 @@ impl Radio {
         }
         log(b"chime ", i as u32);
     }
+
+    /// BOOT-18: the boot sound under the boot animation that started at `at` (ms since power-on), step by step from
+    /// DAC1 (`tonegen::BOOT_SOUND`), one tone at a time, each step at its time from `at`: if this task gets the
+    /// command late (its own start-up runs first) the steps already past are skipped, so the sound stays with the
+    /// picture, and none at all once too little is left. The key beep's order: DAC on, 30 ms, amp on; amp off,
+    /// 30 ms, DAC off. Here, not in the UI task, because this task owns the amp (its tick switches it every pass).
+    /// Nothing over audio already playing, and never while keyed. The task waits through it (at most about 1.5 s,
+    /// once, at power-on): commands queue meanwhile.
+    pub(super) async fn boot_sound(&mut self, at: u32) {
+        let since = || (now_ms() as u32).wrapping_sub(at);
+        let end = tonegen::boot_sound_end();
+        let playing = SPEAKER_ON.load(core::sync::atomic::Ordering::Relaxed);
+        if self.path.keyed().is_some() || playing || since() > end.saturating_sub(100) {
+            return;
+        }
+        for n in 0..2u8 {
+            if self.has(n) && self.tuned[n as usize].is_some() {
+                self.chip(n).af_out(AfOut::Mute);
+            }
+        }
+        // The DAC on 30 ms before the first note is heard (or at once when late), the amp after it.
+        let t0 = Instant::from_millis(at as u64);
+        let first = tonegen::BOOT_SOUND_AT - 30;
+        Timer::at(t0 + embassy_time::Duration::from_millis(first as u64)).await;
+        let Some((mut i, _)) = tonegen::boot_sound_step(since().max(tonegen::BOOT_SOUND_AT)) else { return };
+        let (hz, level, _) = tonegen::BOOT_SOUND[i];
+        crate::hal::tone::start(hz as u32, level);
+        Timer::after_millis(30).await;
+        speaker(true);
+        let mut on = (hz, level);
+        while let Some((k, until)) = tonegen::boot_sound_step(since()) {
+            i = k;
+            let (hz, level, _) = tonegen::BOOT_SOUND[i];
+            if (hz, level) != on {
+                crate::hal::tone::start(hz as u32, level);
+                on = (hz, level);
+            }
+            Timer::at(t0 + embassy_time::Duration::from_millis(until as u64)).await;
+        }
+        speaker(false);
+        Timer::after_millis(30).await;
+        crate::hal::tone::stop();
+        log(b"boot sound to step ", i as u32);
+    }
 }

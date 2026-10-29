@@ -28,7 +28,7 @@ pub enum Class {
 /// What the command is for the queue.
 pub fn class(c: &RadioCmd) -> Class {
     match c {
-        RadioCmd::Activity | RadioCmd::Lease | RadioCmd::SweepHold | RadioCmd::Beep { .. } | RadioCmd::Chime { .. } => Class::Drop,
+        RadioCmd::Activity | RadioCmd::Lease | RadioCmd::SweepHold | RadioCmd::Beep { .. } | RadioCmd::Chime { .. } | RadioCmd::BootSound { .. } => Class::Drop,
         _ if key(c).is_some() => Class::State,
         _ => Class::Keep,
     }
@@ -232,6 +232,7 @@ mod tests {
         assert_eq!((key(&RadioCmd::Activity), key(&RadioCmd::SweepHold), key(&RadioCmd::Lease)), (Some(4), Some(13), Some(14)));
         assert_eq!(class(&RadioCmd::SweepHold), Class::Drop);
         assert_eq!(class(&RadioCmd::Chime { sound: 0, level: 0 }), Class::Drop);
+        assert_eq!(class(&RadioCmd::BootSound { at: 0 }), Class::Drop);
         // All of them queue side by side; a second round replaces each in place of none.
         let mut r = CmdRing::<16>::default();
         for c in settings {

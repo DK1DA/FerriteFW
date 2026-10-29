@@ -178,6 +178,51 @@ pub const CHIME_DEFAULT: u8 = CHIME_PACKET;
 /// A local beep's length, clamped: the Radio task waits through it.
 pub const BEEP_MAX_MS: u16 = 1_000;
 
+/// BOOT-18: the boot sound under the boot animation ("Charge and flash" with its "Lock" ending,
+/// research/boot-animation/preview.html), steps as (Hz, DAC level 1-11, ms) from [`BOOT_SOUND_AT`] ms after the
+/// animation starts. A note per winding as it fills, 25 ms apart: 330 Hz up two octaves over the 14 (2^(1/7) a
+/// step), louder as they go; the last glides up a fifth (x1.5) in 10 ms steps into the flash at 630 ms, holds at the
+/// peak for 180 ms and fades about a DAC level (6 dB) every 100 ms as the glow settles: no fresh attack. One tone at
+/// a time from DAC1, as the key beeps (SND-11), at a fixed level: the volume knob after the amp sets how loud. The
+/// preview's gains (0.05 to 0.26, then an exponential fade to 0.002) in 6 dB DAC levels from the peak
+/// [`BOOT_SOUND_PEAK`]: level 8 keeps the glide's pitch steps fine (TMR6's divider at 1.8 kHz about 1.5 %). The
+/// Radio task reads it, so it is one named static (fast flash, slowcheck).
+pub static BOOT_SOUND: [(u16, u8, u8); 40] = [
+    (330, 6, 25), (364, 6, 25), (402, 6, 25), (444, 6, 25), (490, 6, 25), (541, 6, 25), (598, 7, 25), (660, 7, 25),
+    (729, 7, 25), (805, 7, 25), (888, 7, 25), (981, 7, 25), (1083, 7, 25), (1196, 7, 25), // the 14 windings
+    (1209, 7, 10), (1237, 7, 10), (1265, 7, 10), (1294, 7, 10), (1323, 7, 10), (1353, 7, 10), (1384, 8, 10),
+    (1416, 8, 10), (1448, 8, 10), (1481, 8, 10), (1515, 8, 10), (1549, 8, 10), (1584, 8, 10), (1620, 8, 10),
+    (1657, 8, 10), (1695, 8, 10), (1734, 8, 10), (1773, 8, 10), // the glide up a fifth
+    (1793, 8, 230), // the flash, held
+    (1793, 7, 100), (1793, 6, 110), (1793, 5, 100), (1793, 4, 100), (1793, 3, 100), (1793, 2, 110), (1793, 1, 50), // the fade
+];
+/// When the boot sound's first note is heard, ms after the animation starts (the first winding fills then); the DAC
+/// comes on 30 ms before with the amp still off, as a key beep's (SND-11).
+pub const BOOT_SOUND_AT: u32 = 100;
+/// The boot sound's loudest DAC level (the flash).
+pub const BOOT_SOUND_PEAK: u8 = 8;
+
+/// When the boot sound ends, ms after the animation starts.
+pub fn boot_sound_end() -> u32 {
+    BOOT_SOUND_AT + BOOT_SOUND.iter().map(|s| s.2 as u32).sum::<u32>()
+}
+
+/// The boot sound's step at `t` ms after the animation starts, and when it ends; None before the first note and
+/// after the last.
+pub fn boot_sound_step(t: u32) -> Option<(usize, u32)> {
+    let mut end = BOOT_SOUND_AT;
+    if t < end {
+        return None;
+    }
+    for (i, s) in BOOT_SOUND.iter().enumerate() {
+        end += s.2 as u32;
+        if t < end {
+            return Some((i, end));
+        }
+    }
+    None
+}
+
 /// Beep volume 1-5 (SND-3, 0 7 5 2) as tone 1's gain: level 3 is stock V0.29's 0x17, each step about 3 dB.
 /// Bench-confirm the steps by ear.
 pub const BEEP_GAINS: [u8; 5] = [0x0B, 0x10, 0x17, 0x20, 0x2D];
@@ -305,5 +350,31 @@ mod tests {
         let row = pad([(440, 10), (0, 5)]);
         assert_eq!(&row[..3], &[(440, 10), (0, 5), (0, 0)]);
         assert_eq!(CHIMES[2], pad([(1047, 110), (1568, 230)]));
+    }
+
+    /// BOOT-18.2: the boot sound as the preview plays it ("Lock"): a note per winding 25 ms apart from 100 ms, 330 Hz
+    /// up 2^(1/7) a step; the last glides up a fifth by the flash at 630 ms, never down; the level rises to the peak
+    /// and then only falls (no fresh attack); over by about 1.5 s, inside the boot screen's 1.5 s plus its tail.
+    #[test]
+    fn boot_sound_charges_glides_and_fades() {
+        for (i, s) in BOOT_SOUND[..14].iter().enumerate() {
+            let want = 330.0 * 2f64.powf(i as f64 / 7.0);
+            assert!((s.0 as f64 - want).abs() < 1.0, "note {i}: {} Hz, want {want:.0}", s.0);
+            assert_eq!(s.2, 25, "note {i}");
+        }
+        assert!(BOOT_SOUND.windows(2).all(|w| w[1].0 >= w[0].0), "the pitch only rises");
+        let flash = boot_sound_step(630).unwrap().0;
+        assert_eq!(BOOT_SOUND[flash].0, 1793, "a fifth over the last note at the flash");
+        assert!((BOOT_SOUND[flash].0 as f64 / BOOT_SOUND[13].0 as f64 - 1.5).abs() < 0.01);
+        assert_eq!(boot_sound_step(629).map(|s| BOOT_SOUND[s.0].0), Some(1773), "still gliding before it");
+        let peak = BOOT_SOUND.iter().position(|s| s.1 == BOOT_SOUND_PEAK).unwrap();
+        assert!(BOOT_SOUND[..peak].windows(2).all(|w| w[1].1 >= w[0].1), "louder into the flash");
+        assert!(BOOT_SOUND[peak..].windows(2).all(|w| w[1].1 <= w[0].1), "then only quieter");
+        assert!(BOOT_SOUND.iter().all(|s| (1..=11).contains(&s.1) && s.0 > 0 && s.2 > 0));
+        assert_eq!(boot_sound_end(), 1530);
+        assert_eq!(boot_sound_step(99), None);
+        assert_eq!(boot_sound_step(100), Some((0, 125)));
+        assert_eq!(boot_sound_step(1529).map(|s| s.0), Some(BOOT_SOUND.len() - 1));
+        assert_eq!(boot_sound_step(1530), None);
     }
 }

@@ -160,6 +160,9 @@ pub enum RadioCmd {
     /// One of [`crate::tonegen::CHIMES`] to the speaker at a DAC level (1-11; APRS-6.1, 0 7 5 6's), even over
     /// received audio, as the alert tone.
     Chime { sound: u8, level: u8 },
+    /// BOOT-18: the boot sound ([`crate::tonegen::BOOT_SOUND`]) under the boot animation that started at `at` (ms
+    /// since power-on): timed from then, so a late start skips what is past and stays in step with the picture.
+    BootSound { at: u32 },
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
     /// The Transmit group's radio-wide tone settings (sent at start-up and when one changes): 0 8 8 3's tail

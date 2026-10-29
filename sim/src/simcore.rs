@@ -217,6 +217,8 @@ pub struct SimCore {
     // The power switch: booting until `boot_end`; `off_at` while the app saves before going dark.
     booting: bool,
     boot_end: u32,
+    /// BOOT-18: the boot animation still has frames to draw (the logo screen; the owner card stays still).
+    boot_anim: bool,
     off_at: Option<u32>,
     off: bool,
     // Parts held by the keyboard and by the mouse; the knob half last clicked and until when it shows; PTT.
@@ -374,6 +376,7 @@ impl SimCore {
             clock0: 0,
             booting: true,
             boot_end: BOOT_MS,
+            boot_anim: false,
             off_at: None,
             off: false,
             kb_held: Vec::new(),
@@ -436,7 +439,23 @@ impl SimCore {
     fn draw_boot(&mut self) {
         let set = *self.app.settings();
         ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
-        boot::draw(&mut self.lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &CHECKS, note: None });
+        let info = BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &CHECKS, note: None };
+        // BOOT-18: the logo screen animates as on the radio (no sound: the simulator has no DAC).
+        self.boot_anim = !boot::shows_card(&info);
+        if self.boot_anim {
+            boot::draw_at(&mut self.lcd, &info, 0);
+        } else {
+            boot::draw(&mut self.lcd, &info);
+        }
+    }
+
+    /// BOOT-18: the boot animation's frame for now, the last one the still screen.
+    fn boot_frame(&mut self) {
+        let t = self.now.saturating_sub(self.boot_end.saturating_sub(BOOT_MS));
+        let set = *self.app.settings();
+        let info = BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &CHECKS, note: None };
+        boot::frame(&mut self.lcd, &info, t);
+        self.boot_anim = t < boot::ANIM_MS;
     }
 
     /// The status bar clock: `utc_secs` is UTC now (seconds since 1970).
@@ -492,6 +511,9 @@ impl SimCore {
             // Saved: the radio is off and the screen dark until the switch is turned on again.
             (self.off_at, self.off, self.booting) = (None, true, true);
             self.lcd.fill(0, 0, W, H, 0);
+        }
+        if self.booting && !self.off && self.boot_anim {
+            self.boot_frame();
         }
         if self.booting && !self.off && now > self.boot_end {
             self.booting = false;

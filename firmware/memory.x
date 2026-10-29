@@ -73,6 +73,8 @@ SECTIONS
     *(.text.*10ferrite_ui3gfx*);
     *(.text.*10ferrite_ui5font4*);
     *(.text.*10ferrite_ui5panel*);
+    /* BOOT-18: the boot animation's pixels (the logo and the wordmark, about 30 frames a second for 1.3 s) */
+    *(.text.*10ferrite_ui8bootanim*);
     /* the off-screen canvas's band (DISP-25): drawing into it is per-pixel work too */
     *(.text.*10ferrite_ui6canvas4Band*3gfx3Gfx*);
     *(.text.*10ferrite_ui6canvasNtB*4Band*);

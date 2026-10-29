@@ -162,7 +162,7 @@ pub struct RleAt {
 /// One pixel row of a line of text, the pen starting at x, into `line` (its pixels from x0 on): the strongest ink
 /// of the glyphs over each pixel, through `lut`. Not generic: the same code for every panel.
 #[allow(clippy::too_many_arguments)]
-fn text_row(line: &mut [u16], lut: &[u16; 16], s: &[u8], f: &Font4, x: i32, x0: i32, baseline: i32, row: i32, rle: &mut RleAt) {
+pub(crate) fn text_row(line: &mut [u16], lut: &[u16; 16], s: &[u8], f: &Font4, x: i32, x0: i32, baseline: i32, row: i32, rle: &mut RleAt) {
     let n = line.len();
     let x1 = x0 + n as i32;
     let mut cov = [0u8; W as usize];

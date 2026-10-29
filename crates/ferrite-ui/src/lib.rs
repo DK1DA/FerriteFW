@@ -22,6 +22,7 @@ macro_rules! clip_site {
 
 pub mod assets;
 pub mod boot;
+pub mod bootanim;
 pub mod canvas;
 #[cfg(feature = "clipcheck")]
 pub mod clipcheck;

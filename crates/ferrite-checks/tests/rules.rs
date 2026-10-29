@@ -229,8 +229,10 @@ fn dictionary_is_small() {
 
 /// TONE-12, SND-11: tones that go on air come from the BK4829's generator; only local beeps use DAC1, as stock's
 /// key beeps do (decision 100). The DAC tone (`hal::tone`) is used by the board's reset, the bring-up build and
-/// the Radio task's `beep` and `chime` only; the tone code (`ferrite_core::tonegen`) never touches the DAC, and the Radio task
-/// never uses the audio DAC's DMA path (`audio::`).
+/// the Radio task's `beep`, `chime` and `boot_sound` only; the tone code (`ferrite_core::tonegen`) never touches the DAC,
+/// and the Radio task never uses the audio DAC's DMA path (`audio::`). BOOT-18.2 (decision 321): the boot sound is a
+/// local sound like the key beeps, played once at power-on before anything can key, so it joins them; it is the Radio
+/// task's (not the UI's boot path's) because that task owns the speaker amp, which its tick switches every pass.
 #[test]
 fn tones_never_use_the_dac() {
     only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs", "firmware/src/hal/clock.rs", "firmware/src/hal/audio.rs", RADIO], "the DAC tone");
@@ -245,7 +247,9 @@ fn tones_never_use_the_dac() {
         (at, at + radio[at..].find("\n    }\n").expect("its end"))
     };
     let (beep, chime) = (span("async fn beep"), span("async fn chime")); // APRS-6.1: the message sound
-    assert!(uses.iter().all(|&i| (i > beep.0 && i < beep.1) || (i > chime.0 && i < chime.1)), "only the beep and the chime use the DAC tone");
+    let boot = span("async fn boot_sound"); // BOOT-18.2: the boot sound
+    let inside = |i: usize| [beep, chime, boot].iter().any(|s| i > s.0 && i < s.1);
+    assert!(uses.iter().all(|&i| inside(i)), "only the beep, the chime and the boot sound use the DAC tone");
 }
 
 /// BCR-14: PA7/PC5, the SI4732's input switch, are set only by the Radio task's path state.

@@ -49,6 +49,9 @@ impl Sink for Out {
 }
 
 /// The milliseconds the app counts in (wrapping).
+/// BOOT-18: the boot animation's frame period, ms (30 a second).
+const FRAME_MS: u64 = 33;
+
 fn now_ms() -> u32 {
     Instant::now().as_millis() as u32
 }
@@ -260,6 +263,14 @@ pub async fn task() {
     let mut key_seen = false;
     ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
     let start = Instant::now();
+    // BOOT-18 (decision 321): the logo screen animates for its first ANIM_MS, about 30 frames a second, redrawing
+    // only the logo and the wordmark, the self-test running underneath; the Radio task plays the boot sound timed
+    // from the same start. The owner card stays as it is. The logo shows 1.5 s at least anyway, so the animation
+    // never makes a boot longer.
+    let mut animating = !card;
+    if animating {
+        let _ = RADIO.try_send(RadioCmd::BootSound { at: start.as_millis() as u32 });
+    }
     // The boot screen is drawn whole once, then only its progress as checks finish (BOOT-9; a whole redraw per
     // check flashed the logo on the radio). Whole again only if a failure turns the owner card into the logo.
     let mut shown: Option<(bool, [u8; 8])> = None;
@@ -293,27 +304,41 @@ pub async fn task() {
         }
         states[7] = !note.is_empty() as u8; // the note's coming and going redraws the line
         let now = (boot::shows_card(&info), states);
+        let ms = start.elapsed().as_millis() as u32;
         match shown {
             Some((card_shown, _)) if card_shown == now.0 && shown != Some(now) => boot::update(&mut lcd, &info),
             Some(_) if shown == Some(now) => {}
+            _ if animating => boot::draw_at(&mut lcd, &info, ms),
             _ => boot::draw(&mut lcd, &info),
+        }
+        // BOOT-18: the next frame (the last one, at ANIM_MS or after, is the still screen's logo and wordmark).
+        if animating && shown.is_some() {
+            boot::frame(&mut lcd, &info, ms);
+            animating = ms < boot::ANIM_MS;
         }
         shown = Some(now);
         let done = checks.iter().all(|c| c.state != State::Pending);
         let t = start.elapsed();
-        if (done && (t >= least || skip)) || t >= Duration::from_secs(5) {
+        if (done && (t >= least || skip) && !animating) || t >= Duration::from_secs(5) {
             break;
         }
+        // A frame every 33 ms while animating, on the start's grid (a slow frame skips ahead, never queues up).
+        let wait = if animating {
+            let next = (start.elapsed().as_millis() / FRAME_MS + 1) * FRAME_MS;
+            Timer::at(start + Duration::from_millis(next))
+        } else {
+            Timer::after_millis(100)
+        };
         if card || cfg!(feature = "bringup") {
             // Keys while the card shows: any press skips the rest of it; MENU's state still counts (BOOT-14).
-            if let Either::First(i) = select(INPUT.receive(), Timer::after_millis(100)).await {
+            if let Either::First(i) = select(INPUT.receive(), wait).await {
                 skip |= card && front_key(&i);
                 key_seen |= front_key(&i);
                 log_input(&i);
                 menu_state(&i, &mut menu_held);
             }
         } else {
-            Timer::after_millis(100).await;
+            wait.await;
         }
     }
     for c in checks.iter_mut().filter(|c| c.state == State::Pending) {
