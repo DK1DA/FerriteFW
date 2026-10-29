@@ -1106,6 +1106,11 @@ def subscribe(link, what, seconds, screen):
     return 0
 
 
+def ago(s):
+    """An age from the radio: seconds, or AGO_UNKNOWN (u32::MAX) for a row kept from before the last restart."""
+    return "before restart" if s == 0xFFFFFFFF else f"{s} s ago"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("port")
@@ -1449,7 +1454,7 @@ def run(link, a):
     elif a.cmd == "log":
         for e in link.log(int(a.args[0]) if a.args else 0):
             where = f" {e['pos'][0]:.5f},{e['pos'][1]:.5f}" if e["pos"] else ""
-            print(f"#{e['seq']} {e['ago_s']} s ago {e['src']} {e['freq'] / 100000:.5f} MHz slot {'ABC'[e['slot']] if e['slot'] < 3 else e['slot']}"
+            print(f"#{e['seq']} {ago(e['ago_s'])} {e['src']} {e['freq'] / 100000:.5f} MHz slot {'ABC'[e['slot']] if e['slot'] < 3 else e['slot']}"
                   f"{' unread' if e['unread'] else ''} id {e['id']}{where} {e['name']!r} {e['text']!r}")
     elif a.cmd == "baud":
         rate = int(a.args[0])
@@ -1472,7 +1477,7 @@ def run(link, a):
             while rest:
                 st, rest = parse_station(rest)
                 pos = "%.5f %.5f" % st["pos"] if "pos" in st else "no position"
-                print(f"{st['call']:<10} {st['sym']:<5} {st['ago_s']:>6} s ago  x{st['times']:<3} {pos:<22} via {st['via'] or 'direct'}  {st['comment']}")
+                print(f"{st['call']:<10} {st['sym']:<5} {ago(st['ago_s']):>14}  x{st['times']:<3} {pos:<22} via {st['via'] or 'direct'}  {st['comment']}")
                 i += 1
         print(f"{n} heard")
     elif a.cmd == "msgs":
@@ -1484,7 +1489,7 @@ def run(link, a):
                 break
             while rest:
                 m, rest = parse_message(rest)
-                print(f"{'from' if m['in'] else 'to':<4} {m['peer']:<9} {m['ago_s']:>6} s ago  [{m['state']}] {m['text']}")
+                print(f"{'from' if m['in'] else 'to':<4} {m['peer']:<9} {ago(m['ago_s']):>14}  [{m['state']}] {m['text']}")
                 i += 1
         print(f"{n} messages")
     elif a.cmd == "msg-send":
