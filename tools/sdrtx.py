@@ -548,6 +548,10 @@ def afsk_edges(dev, fs, a_mark, a_space):
     at mid-bit in the 7-bit runs; a phase jump shows as a spike at the switch."""
     T0 = 1 / 1200
     ts, up = tone_switches(dev, fs, a_mark, a_space)
+    out = {}
+    if len(ts) < 20:  # also none at all: no tones, or the capture's IQ mirrored (swap I and Q for the bladeRF)
+        print("  bit timing: too few tone switches found")
+        return out
     # Keep the switches at least half a bit after the last kept (a noise crossing inside a bit falls out) and
     # number them by their gaps rounded to whole bits.
     keep = [0]
@@ -555,7 +559,6 @@ def afsk_edges(dev, fs, a_mark, a_space):
         if (ts[k] - ts[keep[-1]]) / T0 > 0.5:
             keep.append(k)
     ts, up = ts[keep], up[keep]
-    out = {}
     if len(ts) < 20:
         print("  bit timing: too few tone switches found")
         return out
@@ -721,6 +724,9 @@ def selftest(out_dir):
         nonlocal ok
         ok &= bool(cond)
         print(f"  [{'pass' if cond else 'FAIL'}] {what}: {got}")
+
+    print("== selftest AFSK edges on a capture without tones (crashed on a bladeRF capture, Oct 27)")
+    check("no switches: an empty result, no crash", afsk_edges(np.zeros(48_000), 48_000, 1.0, 1.0) == {}, "{}")
 
     print("== selftest 4FSK: +3 = 2400 Hz, clock +40 ppm, carrier +1.2 kHz, 6 s")
     raw = to_iq(gen_fsk4(6) * 800, 48_000, 40, 1200, rng)
