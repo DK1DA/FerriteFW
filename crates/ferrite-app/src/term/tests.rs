@@ -1945,12 +1945,17 @@ fn debug_bk_read_and_write() {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-23: transmit and PA bits, and the GPIO registers, are refused before anything is asked.
+/// TERM-23: the PA bit, the Tx DSP with the PLL on (decision 317), and the GPIO registers, are refused before anything
+/// is asked.
 #[test]
 fn debug_bk_refuses_tx_and_gpio() {
     let mut r = Rig::main();
     r.cmd("bk 0 30 BFF9");
-    assert!(r.bottom().contains("refused: REG_30 Tx DSP and PA Gain"), "{}", r.bottom());
+    assert!(r.bottom().contains("refused: REG_30's PA Gain bit"), "{}", r.bottom());
+    assert_eq!(r.term.debug_req(), None);
+    // decision 317: the Tx DSP only with the PLL off
+    r.cmd("bk 0 30 BFF3");
+    assert!(r.bottom().contains("refused: REG_30's Tx DSP bit only with the PLL/VCO bits"), "{}", r.bottom());
     assert_eq!(r.term.debug_req(), None);
     r.cmd("bk 1 33 0000");
     assert!(r.bottom().contains("REG_33 and REG_34"), "{}", r.bottom());

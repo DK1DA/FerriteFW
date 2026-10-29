@@ -712,6 +712,10 @@ mod bt_query_tests {
 /// BK4829 REG_30 bits that turn on the transmitter: Tx DSP Enable (1) and PA Gain Enable (3), from the
 /// register table (`datasheets/rf/bk4829_registers_table`).
 pub const BK_REG30_TX_BITS: u16 = 1 << 1 | 1 << 3;
+/// REG_30's PA Gain Enable (3) and PLL/VCO Enable (7:4). Without the PLL the chip makes no carrier, so the Tx DSP
+/// alone can't radiate (TERM-23, decision 317: the mic research runs the transmit DSP on an idle chip).
+pub const BK_REG30_PA: u16 = 1 << 3;
+pub const BK_REG30_PLL: u16 = 0x00F0;
 
 /// Why a terminal write to a BK4829 register is refused, in every build (TERM-23): transmit goes only through
 /// the Radio task's own checks, and the chip's GPIO outputs (REG_33, REG_34) are wired to who knows what on
@@ -719,7 +723,8 @@ pub const BK_REG30_TX_BITS: u16 = 1 << 1 | 1 << 3;
 #[cfg(feature = "bench")]
 pub fn bk_write_refused(reg: u8, val: u16) -> Option<&'static str> {
     match reg {
-        0x30 if val & BK_REG30_TX_BITS != 0 => Some("REG_30 Tx DSP and PA Gain bits are never set from the terminal"),
+        0x30 if val & BK_REG30_PA != 0 => Some("REG_30's PA Gain bit is never set from the terminal"),
+        0x30 if val & BK_REG30_TX_BITS != 0 && val & BK_REG30_PLL != 0 => Some("REG_30's Tx DSP bit only with the PLL/VCO bits (7:4) off: no carrier"),
         0x33 | 0x34 => Some("REG_33 and REG_34 drive the chip's GPIO pins: unknown wiring, not written from the terminal"),
         0x80.. => Some("BK4829 registers are 0x00 to 0x7F"),
         _ => None,
@@ -1125,7 +1130,11 @@ mod debug_tests {
         assert!(bk_write_refused(0x30, 0xBFF1).is_none(), "stock's receive value");
         assert!(bk_write_refused(0x30, 0xC1FE).is_some(), "stock's transmit value");
         assert!(bk_write_refused(0x30, 1 << 3).is_some());
-        assert!(bk_write_refused(0x30, 1 << 1).is_some());
+        // decision 317: the Tx DSP alone, with the PLL off, is allowed (no carrier); never with the PLL or the PA
+        assert!(bk_write_refused(0x30, 1 << 1).is_none());
+        assert!(bk_write_refused(0x30, 0xC306).is_none(), "mic ADC, Tx DSP, AF DAC: no PLL, no PA");
+        assert!(bk_write_refused(0x30, 0xC3F6).is_some(), "Tx DSP with the PLL");
+        assert!(bk_write_refused(0x30, 0x0208).is_some(), "PA gain, even without the Tx DSP");
         assert!(bk_write_refused(0x33, 0xFF00).is_some());
         assert!(bk_write_refused(0x34, 0).is_some());
         assert!(bk_write_refused(0x80, 0).is_some());
