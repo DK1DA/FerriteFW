@@ -725,7 +725,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, clr_c, &ht))) {
         w::badge(lcd, 14, hy + 1, s, big, BG);
         lcd.fill(28, hy, 6, 17, SURFACE);
-        // HOME-4a: the header takes what the state beside it leaves (a 16-character zone name fits beside an idle
+        // HOME-4.3: the header takes what the state beside it leaves (a 16-character zone name fits beside an idle
         // state or an RX tag), never less than 120 px; clipped at a character, never wrapped.
         // (the APRS card's holder is short, and its priority shows only where it fits beside it: no minimum)
         let hw = if wide { 226 - ww - 34 } else { (226 - 6 - head_right_w(big, state, &clr) - 34).max(if aprs { 0 } else { 120 }) };
@@ -1024,7 +1024,7 @@ fn compact_state<'a>(state: &'a str, clr: &'a Buf<16>, sc: u16, cc: u16) -> (&'a
     if state == "idle" && !clr.is_empty() { (clr.as_bytes(), cc, f) } else { (state.as_bytes(), sc, f) }
 }
 
-/// How wide the header's right side draws (HOME-4a): the state (a tag on the large card for RX, MON, FM; idle shows
+/// How wide the header's right side draws (HOME-4.3): the state (a tag on the large card for RX, MON, FM; idle shows
 /// nothing there) and the clarifier or APRS note beside it, so the header can take the rest.
 pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
     let cw = if clr.is_empty() { 0 } else { text4_width(clr.as_bytes(), &UI_12) };
@@ -1105,7 +1105,7 @@ mod tests {
         assert_eq!(show(d023n, 0, true), "R D023N");
     }
 
-    /// HOME-4a (decision 178): "012 · " and a 16-character zone name fit the header whole beside the idle and the
+    /// HOME-4.3 (decision 178): "012 · " and a 16-character zone name fit the header whole beside the idle and the
     /// tagged states (RX, MON, FM) on the large card and beside the compact cards' states; with a clarifier or the
     /// APRS note beside a tag, the header keeps at least 120 px and the name is clipped at a character.
     #[test]

@@ -271,10 +271,10 @@ def put_back(t, letter, before):
     t.note(f"slot {letter}: not put back on ch {m.group(1)}")
 
 
-@test("CHAN-27", "NAV-1", "HOME-4a", pages=("Zones", "Home"))
+@test("CHAN-27", "NAV-1", "HOME-4.3", pages=("Zones", "Home"))
 def zones_ok_puts_the_slot_on_the_zone(t):
     """OK on a zone (decision 178): the active slot goes to channel mode on the zone's first channel in number order
-    (991) and the page goes home, the card's header naming the zone ("991 · UITEST Z", HOME-4a). The slot is put
+    (991) and the page goes home, the card's header naming the zone ("991 · UITEST Z", HOME-4.3). The slot is put
     back after."""
     f = Fixture(t)
     letter, before = None, ""

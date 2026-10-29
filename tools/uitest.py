@@ -308,13 +308,19 @@ SCREENS_MOD = os.path.join(FERRITE, "crates", "ferrite-app", "src", "screens", "
 
 def screen_modules():
     """{screen id: its file under crates/ferrite-app/src/screens/}: the `Screen` enum's variants (the readback's ids,
-    uistate.rs) and the module each comes from; Home is a plain variant (home.rs)."""
+    uistate.rs) and the module each comes from; Home is a plain variant (home.rs), LowPower its id in Low Power Mode
+    (PWR-24.7)."""
     src = open(SCREENS_MOD).read()
     body = src[src.index("pub enum Screen {"):]
     body = body[:body.index("\n}")]
-    out = {"Home": "home"}
+    out = {"Home": "home", "LowPower": "home"}
     for m in re.finditer(r"^\s+(\w+)\((\w+)::\w+\),", body, re.M):
         out[m.group(1)] = m.group(2)
+    # the readback names a few variants otherwise (uistate.rs `id`: Advanced reads "More")
+    ids = open(os.path.join(os.path.dirname(SCREENS_MOD), "..", "uistate.rs")).read()
+    for m in re.finditer(r'Screen::(\w+)\(_\) => "(\w+)"', ids):
+        if m.group(1) != m.group(2) and m.group(1) in out:
+            out[m.group(2)] = out.pop(m.group(1))
     return out
 
 

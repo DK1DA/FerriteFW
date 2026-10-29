@@ -1139,6 +1139,15 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     if lv.hits > 0 {
         kn(l, "hits", lv.hits as u32); // LINK-19.4: the scan's hits, as the card shows them ("4 hits")
     }
+    // LINK-19.4, HOME-4.1: the scan's last hit as the value line draws it ("last 119.500" or the channel's name)
+    if lv.scanning && lv.hits > 0 && lv.last_hit != app.shown_freq(s, cx.live) {
+        let hn = app.hit_name(s, cx.live, cx.store);
+        if hn.is_empty() {
+            kq(l, "lasthit", w::freq3(lv.last_hit).as_bytes());
+        } else {
+            kq(l, "lasthit", hn.as_bytes());
+        }
+    }
     let kind = screens::home::card_kind(app, s);
     if kind == 1 {
         // APRS-17: the APRS card shows no mode, tone or shift chips, but the last heard and the beacon lines and

@@ -30,7 +30,7 @@ pub struct Channel {
     pub num: u16,
     pub zone: u8,
     pub rx: Freq10,
-    /// Name: 16 bytes, all shown on home (CHAN-5, HOME-4a); unused bytes are 0.
+    /// Name: 16 bytes, all shown on home (CHAN-5, HOME-4.3); unused bytes are 0.
     pub name: [u8; 16],
     pub cfg: SlotCfg,
     /// [`FLAG_SKIP`], [`FLAG_APRS`], [`FLAG_RX_ONLY`] (CHAN-4).

@@ -274,7 +274,7 @@ impl App {
 
     // ---- slot texts (home cards, edit header) ----
 
-    /// "VFO · VHF", "012 · Repeaters", "SCAN · Airband" (HOME-4a): a channel names its zone where a VFO names its
+    /// "VFO · VHF", "012 · Repeaters", "SCAN · Airband" (HOME-4.3): a channel names its zone where a VFO names its
     /// band (decision 178); a channel in no zone keeps the band.
     pub(crate) fn head_text(&self, s: u8, live: &LiveAll, store: &impl ChannelStore, b: &mut Buf<32>) {
         let sl = &self.slots[s as usize];

@@ -1170,7 +1170,7 @@ fn split_across_the_relay() {
     assert_eq!(t.app.slot(0).cfg().offset, 0, "still simplex");
 }
 
-/// HOME-4, HOME-4a: channel mode leads with the name; the header carries the short number and the channel's zone
+/// HOME-4, HOME-4.3: channel mode leads with the name; the header carries the short number and the channel's zone
 /// ("012 · Local"; the band, "012 · UHF", for a channel in no zone; a VFO keeps "VFO · VHF"), and a VFO, a scan or
 /// a channel with no name has no name line (its frequency stays large).
 #[test]

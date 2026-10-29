@@ -48,7 +48,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     if app.dirty(1, hash(&(a, &h, state, &ht))) {
         w::badge(lcd, 8, 25, a, true, BG);
         let ww = (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W);
-        // HOME-4a: the header takes what the state leaves (a 16-character zone name fits), at least 140 px
+        // HOME-4.3: the header takes what the state leaves (a 16-character zone name fits), at least 140 px
         let hw = if ht.is_empty() { (232 - 6 - super::home::head_right_w(true, state, &Buf::new()) - 26).max(140) } else { 232 - ww - 26 };
         w::field(lcd, 26, hw, 22, 40, 36, Align::Left, w::fit(h.as_bytes(), &UI_12, hw), &UI_12, SUB, BG);
         canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
@@ -72,7 +72,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             if name.is_empty() {
                 w::freq_centred(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, FREQ, SUB, BG); // HOME-3: centred
             } else {
-                // 26 px when the whole name fits, else 22 px (HOME-4a).
+                // 26 px when the whole name fits, else 22 px (HOME-4.3).
                 let nb = name.as_bytes();
                 let (font, base) = if text4_width(nb, &NAME_26) <= 224 { (&NAME_26, 70) } else { (&NAME_22, 68) };
                 w::field(lcd, 8, 224, 43, 76, base, Align::Left, w::fit(nb, font, 224), font, TEXT, BG);
@@ -272,7 +272,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
             w::badge(lcd, 14, y + 5, s, active, BG);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
-            // HOME-4a: the state's own width (at least 40 px), so a zone name in the header has the rest
+            // HOME-4.3: the state's own width (at least 40 px), so a zone name in the header has the rest
             let sw = if state == "heard" || state == "DTMF" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { (text4_width(stt.as_bytes(), f) + 6).clamp(40, 72) };
             w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);

@@ -62,7 +62,8 @@ fn broadcast_card_small_and_elsewhere() {
     t.shows("Some text");
 }
 
-/// HOME-4, HOME-4.1: a slot scanning on a small card shows its hits and the last hit's frequency.
+/// HOME-4, HOME-4.1, LINK-19.4: a slot scanning on a small card shows its hits and the last hit's frequency, and
+/// the readback carries the last hit as drawn.
 #[test]
 fn scanning_small_card() {
     let mut t = T::ready();
@@ -71,10 +72,13 @@ fn scanning_small_card() {
     t.wait(100);
     t.shows("3 hits");
     t.shows("last 146.520");
+    let card = |t: &T| t.readback().into_iter().find(|l| l.starts_with("card B")).unwrap();
+    assert!(card(&t).contains("lasthit=\"146.520\""), "LINK-19.4: the readback has the last hit: {}", card(&t));
     t.live.slots[1].hits = 0;
     t.wait(100);
     t.shows("0 hits");
     t.hides("last ");
+    assert!(!card(&t).contains("lasthit="), "{}", card(&t));
 }
 
 /// HOME-4: a split's TX frequency takes the band's place in the active card's header.
