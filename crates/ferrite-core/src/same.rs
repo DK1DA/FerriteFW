@@ -25,11 +25,20 @@ pub struct SameHeader {
     pub sender: [u8; 8],
 }
 
+/// A plain loop, no iterator adaptor: the Radio task parses headers from interrupt context, and a generic
+/// `Iterator::all` the compiler chose not to inline landed in slow flash on one host's build (slowcheck, Oct 28).
 fn digits(b: &[u8]) -> Option<u32> {
-    if b.is_empty() || !b.iter().all(u8::is_ascii_digit) {
+    if b.is_empty() {
         return None;
     }
-    Some(b.iter().fold(0, |a, &c| a * 10 + (c - b'0') as u32))
+    let mut n = 0u32;
+    for &c in b {
+        if !c.is_ascii_digit() {
+            return None;
+        }
+        n = n * 10 + (c - b'0') as u32;
+    }
+    Some(n)
 }
 
 /// The header's start. A named `static`: the Radio task parses headers, and a short unnamed literal can land in
