@@ -801,7 +801,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             let job = jobs[(head + i) % QUEUE];
             let num = match job {
                 Some(Job::Write(ChanWrite::Put { ch, from: None })) => ch.num,
-                Some(Job::Write(ChanWrite::Delete(num))) => num,
+                Some(Job::Write(ChanWrite::Delete(num) | ChanWrite::Pos { num, .. })) => num,
                 _ => break,
             };
             if num < MAX_CHANNELS && ch_addr(num) - ch_addr(num) % SECTOR == sector {
@@ -809,6 +809,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 let cur = out[..n].iter().rev().flatten().find(|m| m.0 == num).map_or_else(|| self.raw_ch(num), |m| Ok(m.1.unwrap_or([0xFF; CH_LEN])))?;
                 let rec = match job {
                     Some(Job::Write(ChanWrite::Put { ch, .. })) => Some(ch_encode(&ch, &cur)),
+                    // LINK-53: on the record as it stands after the writes merged before it; no channel: as it is
+                    Some(Job::Write(ChanWrite::Pos { pos, .. })) => Some(pos_rec(&cur, pos).unwrap_or(cur)),
                     _ => None,
                 };
                 out[n] = Some((num, rec));
@@ -850,6 +852,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         match w {
             ChanWrite::Put { ch, from } => self.put_channel(ch, from).await,
             ChanWrite::PutPos { ch, pos } => self.put_channel_pos(ch, pos).await,
+            ChanWrite::Pos { num, pos } => self.set_pos(num, pos).await,
             ChanWrite::Delete(n) => self.delete(n).await,
             ChanWrite::DeleteZone(z) => self.delete_zone(z).await,
             ChanWrite::EraseAll => self.erase_channels().await,
@@ -887,6 +890,18 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.write_ch(ch.num, &rec).await
     }
 
+    /// LINK-53: the position of the channel stored at `num` set or cleared, its other fields as they are; none
+    /// there, nothing.
+    async fn set_pos(&self, num: u16, pos: Option<Pos>) -> Result {
+        if num >= MAX_CHANNELS {
+            return Err(NorError);
+        }
+        match pos_rec(&self.raw_ch(num)?, pos) {
+            Some(rec) => self.write_ch(num, &rec).await,
+            None => Ok(()),
+        }
+    }
+
     async fn write_ch(&self, num: u16, rec: &[u8; CH_LEN]) -> Result {
         if *rec != self.raw_ch(num)? {
             self.put_rec(ch_addr(num), rec).await?;
@@ -904,7 +919,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         Ok(())
     }
 
-    /// Writes a channel and sets its position (the simulator's sample; the web app's import later).
+    /// Writes a channel and sets its position (the simulator's sample).
     pub fn put_with_position(&self, ch: Channel, pos: Option<Pos>) -> bool {
         let ok = block(async {
             let here = self.raw_ch(ch.num)?;
@@ -1609,6 +1624,10 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
 
     fn position(&self, num: u16) -> Option<Pos> {
         ch_position(&self.read_ch(num))
+    }
+
+    fn chan_version(&self) -> u32 {
+        self.ver.get()
     }
 
     fn located(&self, num: u16) -> Option<(Channel, Pos)> {

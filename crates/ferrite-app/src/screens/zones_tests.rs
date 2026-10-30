@@ -239,12 +239,12 @@ fn nearby_row_only_with_a_fix_and_positions() {
 #[test]
 fn chips_for_the_active_slot_scan_and_hidden() {
     let mut t = T::new();
-    t.app.set_channel(0, 0, 0, &t.s); // A on Local
+    t.app.set_channel(0, 0, 0, &t.s); // A on Simplex
     t.app.set_channel(1, 1, 1, &t.s); // B on Repeaters
     t.open();
     let rows: Vec<String> = t.ui().into_iter().filter(|l| l.contains("kind=zone")).collect();
     let row = |name: &str| rows.iter().find(|l| l.starts_with(&std::format!("row 0 \"{name}\""))).cloned().unwrap();
-    assert!(row("Local").contains("chips=\"A\""), "{}", row("Local"));
+    assert!(row("Simplex").contains("chips=\"A\""), "{}", row("Simplex"));
     assert!(row("Repeaters").contains("chips=\"SCAN\""), "B on it says nothing: {}", row("Repeaters"));
     assert!(row("Weather").contains("chips=\"HID\""), "{}", row("Weather"));
     assert!(row("Empty").contains(" grey"), "{}", row("Empty"));
@@ -255,7 +255,7 @@ fn chips_for_the_active_slot_scan_and_hidden() {
     t.open();
     let rows: Vec<String> = t.ui().into_iter().filter(|l| l.contains("kind=zone")).collect();
     assert!(rows.iter().any(|l| l.starts_with("row 0 \"Repeaters\"") && l.contains("chips=\"B SCAN\"")), "{rows:?}");
-    assert!(rows.iter().any(|l| l.starts_with("row 0 \"Local\"") && l.contains("chips=\"\"")), "{rows:?}");
+    assert!(rows.iter().any(|l| l.starts_with("row 0 \"Simplex\"") && l.contains("chips=\"\"")), "{rows:?}");
 }
 
 /// CHAN-27: the preview: the zone's name in capitals and its state, its first four channels (no numbers, no shift
@@ -266,7 +266,7 @@ fn preview_of_a_zone() {
     t.open();
     let ui = t.ui();
     assert!(ui.contains(&"head \"6 zones \u{b7} 21 ch\"".to_string()), "{ui:?}");
-    assert!(ui.contains(&"preview \"LOCAL\" \"2m \u{b7} 70cm\"".to_string()), "{ui:?}");
+    assert!(ui.contains(&"preview \"SIMPLEX\" \"2m \u{b7} 70cm\"".to_string()), "{ui:?}");
     let rows: Vec<&String> = ui.iter().filter(|l| l.starts_with("pvrow")).collect();
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0], "pvrow \"Calling 2 m\" \"\" \"146.520\"", "no position: no place");
@@ -373,9 +373,9 @@ fn keys_through_the_nearby_row() {
     assert_eq!((t.zones().on_nearby(), t.zones().cur.sel), (false, 0));
     t.tap(Key::Up);
     t.tap(Key::Up);
-    assert_eq!((t.zones().on_nearby(), t.zones().cur.sel), (false, 5), "past Nearby to the last zone");
+    assert_eq!((t.zones().on_nearby(), t.zones().cur.sel), (false, 6), "past Nearby to the last row: Local (CHAN-34)");
     t.tap(Key::Down);
-    assert!(t.zones().on_nearby(), "down from the last zone: Nearby");
+    assert!(t.zones().on_nearby(), "down from the last row: Nearby");
     t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == 8), "OK: the Nearby view");
     t.tap(Key::Exit);
@@ -386,7 +386,13 @@ fn keys_through_the_nearby_row() {
     t.app.open(Dest::Zones);
     t.draw();
     t.tap(Key::Up);
-    assert_eq!((t.zones().on_nearby(), t.zones().cur.sel), (false, 5));
+    assert_eq!((t.zones().on_nearby(), t.zones().cur.sel), (false, 6), "Local, there without a position too");
+    t.app.set.local = 0;
+    t.app.open(Dest::Zones);
+    t.draw();
+    t.tap(Key::Up);
+    assert_eq!((t.zones().on_nearby(), t.zones().cur.sel), (false, 5), "Local off: the last zone");
+    t.app.set.local = crate::local::DEFAULT_RANGE;
     // the knob does the same as ▲▼
     t.s.fix.set(Sample::sample_fix());
     t.app.open(Dest::Zones);
@@ -439,7 +445,7 @@ fn ok_keeps_the_slots_channel_in_that_zone() {
     // a channel hidden: OK on its zone passes it
     t.s.data().request(Op::Hide(0, true));
     t.open();
-    t.tap(Key::Menu); // Local
+    t.tap(Key::Menu); // Simplex
     assert_eq!(t.app.slot(0).ch.map(|c| c.num), Some(1), "Calling 2 m is hidden: Calling 70 cm");
     t.app.set.show_hidden = true;
     t.app.slots[0].zone = 1;
@@ -515,7 +521,7 @@ fn a_move_redraws_rows_and_preview_only() {
     assert!(changed.iter().all(|r| allowed.contains(r)), "{changed:?}");
     assert!(changed.contains(&(R_ROW + 2)) && changed.contains(&(R_ROW + 3)) && changed.contains(&R_PV));
     let texts: Vec<_> = t.lcd.texts.iter().map(|x| x.4.clone()).collect();
-    assert!(!texts.iter().any(|x| x == "Local" || x == "Air" || x.contains("zones")), "only what changed is drawn: {texts:?}");
+    assert!(!texts.iter().any(|x| x == "Simplex" || x == "Air" || x.contains("zones")), "only what changed is drawn: {texts:?}");
 }
 
 /// The channel browser's zone list draws its zones as the zones page does (chips, dimmed when empty).
@@ -526,8 +532,94 @@ fn browser_zone_rows_match() {
     t.app.open(Dest::Browse);
     t.draw();
     let texts: Vec<_> = t.lcd.texts.iter().map(|x| x.4.clone()).collect();
-    for want in ["Local", "A", "Repeaters", "SCAN", "Weather", "HID", "All"] {
+    for want in ["Simplex", "A", "Repeaters", "SCAN", "Weather", "HID", "All"] {
         assert!(texts.iter().any(|x| x == want), "{want}: {texts:?}");
     }
     let _ = NO_ZONE;
+}
+
+/// CHAN-34.1: Local is the zones page's last row (after the stored zones), named Local with its channel count and no
+/// SCAN or HID chips; its preview says the range and lists its nearest four with their places, nearest first. OK
+/// puts the active slot on its nearest channel and goes home ("Slot A" / "Local"); SLOT and \* do nothing on it.
+#[test]
+fn local_on_the_zones_page() {
+    let mut t = T::new();
+    t.open();
+    t.tap(Key::Up);
+    t.tap(Key::Up); // Nearby, then round to the last row
+    let ui = t.ui();
+    let row = ui.iter().find(|l| l.contains("kind=local")).cloned().unwrap_or_else(|| panic!("{ui:?}"));
+    let n = t.app.local().len();
+    assert!(n >= 3);
+    assert_eq!(row, std::format!("row 0 \"Local\" \"{n}\" sel kind=local chips=\"\""));
+    assert!(ui.iter().any(|l| l == "preview \"LOCAL\" \"within 50 km\""), "{ui:?}");
+    let pv: Vec<&String> = ui.iter().filter(|l| l.starts_with("pvrow ")).collect();
+    let first = t.s.get(t.app.local().num(0).unwrap()).unwrap();
+    assert!(pv[0].starts_with(&std::format!("pvrow \"{}\" \"", s(first.name()))) && pv[0].contains("km\""), "{pv:?}");
+    assert_eq!(pv.len(), (n as usize).min(4));
+    assert!(ui.iter().any(|l| l.starts_with("pvfoot ") && l.contains("nearest first")), "{ui:?}");
+    t.tap(Key::Star);
+    assert_eq!(t.app.screen().name(), "Zones", "no delete");
+    t.tap(Key::Slot);
+    assert!(matches!(t.app.screen(), Screen::Group(g) if (g.g, g.sub, g.row) == (2, 0, 4)), "SLOT: its setting, 0 2 5");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen().name(), "Zones", "BACK: the list again");
+    assert!(t.ui().iter().any(|l| l.contains("kind=local") && l.contains(" sel")), "still on Local");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Home));
+    let sl = *t.app.slot(0);
+    assert_eq!((sl.on_channel(), sl.zone, sl.ch.map(|c| c.num)), (true, crate::local::LOCAL, Some(first.num)));
+    assert_eq!(toast(&t).as_deref(), Some("toast \"Slot A\" \"Local\""));
+    let mut h = Buf::<32>::new();
+    t.app.head_text(0, &LiveAll::default(), &t.s, &mut h);
+    assert!(s(h.as_bytes()).ends_with("\u{b7} Local"), "the card names Local: {}", s(h.as_bytes()));
+}
+
+/// CHAN-34.4: without a position Local is still a row, dimmed with no channels, its preview saying "no position" and
+/// what it needs; OK says so and stays; a slot on it keeps its channel and SIDE2 refuses a scan, saying why.
+#[test]
+fn local_without_a_position() {
+    let mut t = T::new();
+    t.app.tick(t.t, &LiveAll::default(), &t.s);
+    t.app.set_channel(0, crate::local::LOCAL, 0, &t.s);
+    let ch = t.app.slot(0).ch;
+    t.s.fix.set(None);
+    t.open();
+    t.tap(Key::Up); // no Nearby row: round to the last
+    let ui = t.ui();
+    assert!(ui.iter().any(|l| l == "row 0 \"Local\" \"0\" sel grey kind=local chips=\"A\""), "{ui:?}");
+    assert!(ui.iter().any(|l| l == "preview \"LOCAL\" \"no position\""), "{ui:?}");
+    assert!(ui.iter().any(|l| l.starts_with("pvfoot ") && l.contains("GPS fix")), "{ui:?}");
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen().name(), "Zones");
+    assert_eq!(toast(&t).as_deref(), Some("toast \"Local\" \"no position\""));
+    assert_eq!(t.app.slot(0).ch, ch, "the slot keeps its channel");
+    t.app.go_home();
+    while t.app.pop_cmd().is_some() {}
+    crate::screens::scan::side2(&mut t.app, &t.s);
+    assert!(!core::iter::from_fn(|| t.app.pop_cmd()).any(|c| matches!(c, ferrite_core::msg::RadioCmd::ScanChans { .. } | ferrite_core::msg::RadioCmd::Scan { .. })), "no scan");
+    assert_eq!(toast(&t).as_deref(), Some("toast \"Local\" \"no position\""));
+}
+
+/// CHAN-34.1, NAV-1: ◀▶ on home reach Local after the last zone (and ◀ from the first), on its nearest channel; the
+/// knob steps it nearest first; ▶ goes round to the first zone. With Local off, ◀▶ never stop there.
+#[test]
+fn home_arrows_reach_local() {
+    let mut t = T::new();
+    t.app.set_channel(0, 5, 0, &t.s); // Weather, the last zone
+    t.app.go_home();
+    t.tap(Key::Right);
+    let l = *t.app.local();
+    assert_eq!((t.app.slot(0).zone, t.app.slot(0).ch.map(|c| c.num)), (crate::local::LOCAL, l.num(0)));
+    t.app.knob(1, t.t, &t.s);
+    assert_eq!(t.app.slot(0).ch.map(|c| c.num), l.num(1), "the next nearest");
+    t.tap(Key::Right);
+    assert_eq!(t.app.slot(0).zone, 0, "round to the first zone");
+    t.tap(Key::Left);
+    assert_eq!(t.app.slot(0).zone, crate::local::LOCAL, "back from the first zone");
+    t.app.set.local = 0;
+    t.tap(Key::Left); // Local turned off with the slot on it: the slot went to its channel's own zone
+    t.app.set_channel(0, 5, 0, &t.s);
+    t.tap(Key::Right);
+    assert_eq!(t.app.slot(0).zone, 0, "Local off: from the last zone round to the first");
 }

@@ -207,7 +207,10 @@ def zones_nearby_row_only_with_a_position(t):
         t.eq(nearby(u), None, "no fix, no fixed position: no Nearby row")
         t.eq(u.sel["name"], first, "on the first zone")
         u = t.keys("UP")
-        t.check(u.sel and u.sel.get("kind") == "zone" and u.sel["name"] == ZONE, "▲ wraps to the last zone (the test zone)",
+        t.check(u.sel and u.sel.get("kind") == "local" and u.sel["name"] == "Local", "▲ wraps to the last row: Local (CHAN-34)",
+                u.sel)
+        u = t.keys("UP")
+        t.check(u.sel and u.sel.get("kind") == "zone" and u.sel["name"] == ZONE, "then the last zone (the test zone)",
                 u.sel)
         u = f.open()
         t.check(all(r["place"] == "" for r in u["pvrows"]), "no places without a position", u["pvrows"])
@@ -290,4 +293,35 @@ def zones_ok_puts_the_slot_on_the_zone(t):
     finally:
         if letter:
             put_back(t, letter, before)
+        f.close()
+
+
+@test("CHAN-34", "CHAN-34.1", "CHAN-34.4", pages=("Zones", "Home"))
+def zones_local_zone(t):
+    """Local (MENU 0 2 5, 50 km by default) is the zones page's last row: the channels with a position within the
+    range of the fixed position, nearest first ("within 50 km"); a shorter range takes the far one out; OK puts the
+    slot on the nearest; with no position it is still there, dimmed, saying "no position"."""
+    f = Fixture(t)
+    try:
+        t.eq(t.get("0 2 5"), "50 km", "on by default, 50 km")
+        f.located()
+        t.home()
+        u = t.keys("MENU 0 2 3 UP UP")  # Nearby, then round to the last row
+        t.check(u.sel and u.sel.get("kind") == "local" and u.sel["name"] == "Local", "▲▲: Local, the last row", u.sel)
+        t.eq(u.sel["value"], "2", "UT North (2.3 km) and the long name (23.4 km); 123 km and far are out")
+        t.eq(u["preview"]["args"], ["LOCAL", "within 50 km"], "its preview's header")
+        t.eq([r["name"] for r in u["pvrows"]], ["UT North", "UITEST LONG NAME"], "nearest first")
+        t.set("0 2 5", "10 km")
+        t.home()
+        u = t.keys("MENU 0 2 3 UP UP")
+        t.eq((u.sel["name"], u.sel["value"]), ("Local", "1"), "10 km: UT North only")
+        u = t.keys("MENU")
+        t.eq(u.id, "Home", "OK: the slot on Local, home")
+        f.nowhere()
+        t.home()
+        u = t.keys("MENU 0 2 3 UP")
+        t.check(u.sel and u.sel.get("kind") == "local" and u.sel.get("grey"), "no position: Local still there, dimmed", u.sel)
+        t.eq(u["preview"]["args"], ["LOCAL", "no position"], "and says why")
+    finally:
+        t.set("0 2 5", "50 km")
         f.close()

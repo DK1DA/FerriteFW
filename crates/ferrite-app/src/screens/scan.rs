@@ -47,6 +47,9 @@ pub fn side2(app: &mut App, store: &impl ChannelStore) {
     if app.off_refuse(a) {
         return; // HOME-15.4: an off slot doesn't scan
     }
+    if app.slot(a).on_channel() && app.slot(a).zone == crate::local::LOCAL && app.local.is_empty() {
+        return crate::local::refuse(app); // CHAN-34: nothing to scan, and why
+    }
     app.radio.clear_hits();
     app.radio.hits_seen = 0;
     app.radio.zones = 0;
@@ -88,7 +91,7 @@ fn tune_hit(app: &mut App, s: Scan, store: &impl ChannelStore) -> bool {
 fn hit_chan_name(app: &App, slot: u8, f: u32, store: &impl ChannelStore) -> Buf<16> {
     let mut b = Buf::new();
     if app.slot(slot).on_channel() {
-        if let Some(c) = app.scan_chan(slot, f, store).and_then(|(z, p)| store.zone_at(z, p)) {
+        if let Some(c) = app.scan_chan(slot, f, store).and_then(|(z, p)| app.zat(store, z, p)) {
             b.set(c.name());
         }
     }
@@ -249,7 +252,7 @@ impl View for Scan {
         // The channel it stopped on, or the S-meter text.
         let mut name = Buf::<32>::new();
         if sl.on_channel() {
-            if let Some(c) = channel_on(cx.store, sl.zone, lv.freq) {
+            if let Some(c) = channel_on(app, cx.store, sl.zone, lv.freq) {
                 chan_label(c.num, &mut name);
                 name.push(" \u{b7} ".as_bytes());
                 name.push(c.name());
@@ -265,15 +268,15 @@ impl View for Scan {
         let mut pos = Buf::<28>::new();
         if sl.on_channel() {
             target.push(b"Zone ");
-            target.push(cx.store.zone_name(sl.zone).unwrap_or_else(|| crate::chan::Name::from(b"?")).as_bytes());
+            target.push(cx.store.zone_label(sl.zone, b"?", b"?").as_bytes()); // "Local" for Local (CHAN-34)
             let z = app.radio.zones;
             if z != 0 {
                 for d in (0..10).filter(|d| z & 1 << d != 0) {
                     let _ = uwrite!(target, " +{}", d);
                 }
             }
-            let n = cx.store.zone_len(sl.zone);
-            let i = (0..n).position(|i| cx.store.zone_at(sl.zone, i).is_some_and(|c| c.rx == lv.freq));
+            let n = app.zlen(cx.store, sl.zone);
+            let i = (0..n).position(|i| app.zat(cx.store, sl.zone, i).is_some_and(|c| c.rx == lv.freq));
             match i {
                 Some(i) => {
                     let _ = uwrite!(pos, "{} of {}", i + 1, n);
@@ -400,7 +403,7 @@ fn lasting_skip(app: &mut App, s: u8, store: &impl ChannelStore) {
         return app.show_toast(b"No skip list", b"* skips it once", false);
     }
     let zones = core::iter::once(sl.zone).chain((0..10u8).filter(|z| app.radio.zones & 1 << z != 0));
-    let Some(mut c) = zones.filter_map(|z| channel_on(store, z, f)).next() else {
+    let Some(mut c) = zones.filter_map(|z| channel_on(app, store, z, f)).next() else {
         return app.show_toast(b"Nothing to skip", b"", false);
     };
     c.flags |= FLAG_SKIP;
@@ -412,9 +415,9 @@ fn lasting_skip(app: &mut App, s: u8, store: &impl ChannelStore) {
     app.show_toast(b.as_bytes(), b"for every scan", false);
 }
 
-/// The zone's channel on this frequency, if any.
-fn channel_on(store: &impl ChannelStore, zone: u8, f: u32) -> Option<crate::chan::Channel> {
-    (0..store.zone_len(zone)).filter_map(|i| store.zone_at(zone, i)).find(|c| c.rx == f)
+/// The zone's channel on this frequency, if any (Local's too, CHAN-34).
+fn channel_on(app: &App, store: &impl ChannelStore, zone: u8, f: u32) -> Option<crate::chan::Channel> {
+    (0..app.zlen(store, zone)).filter_map(|i| app.zat(store, zone, i)).find(|c| c.rx == f)
 }
 
 /// "12 s", "3 min", "2 h".

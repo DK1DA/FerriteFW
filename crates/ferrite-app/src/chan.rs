@@ -69,6 +69,10 @@ pub enum ChanWrite {
     /// Write this channel at its number and set its position, or clear it with None (CHAN-2: the terminal's
     /// `ch N pos=`, TERM-9).
     PutPos { ch: Channel, pos: Option<Pos> },
+    /// Set or clear (None) the position of whatever channel is stored at this number when the write is made, its
+    /// other fields as they are then (LINK-53: the link's `WRITE_MANY` of positions, queued behind channel writes
+    /// to the same sector and merged with them, decision 227). No channel there: nothing.
+    Pos { num: u16, pos: Option<Pos> },
     /// Remove a channel (CHAN-13, from the browser).
     Delete(u16),
     /// Remove a zone: its channels move to no zone and stay in All (CHAN-12).
@@ -149,6 +153,7 @@ pub trait ChannelStore {
     fn zone_label(&self, zone: u8, none: &[u8], missing: &[u8]) -> Name {
         match self.zone_name(zone) {
             _ if zone == NO_ZONE => Name::from(none),
+            _ if zone == crate::local::LOCAL => Name::from(b"Local".as_slice()), // CHAN-34
             Some(n) => n,
             None => Name::from(missing),
         }
@@ -214,6 +219,13 @@ pub trait ChannelStore {
     /// A channel's position, if it has one (CHAN-2, CHAN-15).
     fn position(&self, _num: u16) -> Option<Pos> {
         None
+    }
+
+    /// A number that changes whenever a channel may have (CHAN-34: Local is worked out again when it does). The
+    /// default is [`Data::version`]; the firmware's store gives its own records' count alone, so a GPS fix or a
+    /// heard station doesn't count.
+    fn chan_version(&self) -> u32 {
+        self.data().version()
     }
 
     /// A channel and its position, when it has one (Nearby, the zones page: CHAN-15, CHAN-29). A store with records

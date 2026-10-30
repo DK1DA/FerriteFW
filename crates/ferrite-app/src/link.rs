@@ -688,7 +688,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS]); // LINK-35.2
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION]); // LINK-35.2
         Status::Ok
     }
 
@@ -771,7 +771,7 @@ impl Session {
     /// assembled is dropped.
     fn write_many(&mut self, p: &[u8]) -> Status {
         let Some((&w, recs)) = p.split_first() else { return Status::BadArg };
-        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT) {
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION) {
             return Status::BadArg; // the settings are one record, larger than a frame: WRITE
         }
         let mut r = recs;
@@ -1160,6 +1160,14 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             Some(pr) => preset_save(&pr, win),
             None => return Status::NotFound,
         },
+        // LINK-53: latitude and longitude, 1e-7 degree; a channel without one isn't listed
+        what::POSITION => match st.position(idx).filter(|_| idx < MAX_CHANNELS) {
+            Some(p) => {
+                win.put(&p.lat.to_le_bytes());
+                win.put(&p.lon.to_le_bytes());
+            }
+            None => return Status::NotFound,
+        },
         // APRS-42: callsign (10) and name (12), 0-padded, then the flags (0)
         what::CONTACT => match st.data().contact(idx) {
             Some(c) => {
@@ -1201,7 +1209,7 @@ fn read(app: &App, p: &[u8], o: &mut Out) -> Status {
 /// How many indexes `w` has: channels 0-999, the zones and presets there are. None for the settings.
 fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
     match w {
-        what::CHANNEL => Some(MAX_CHANNELS),
+        what::CHANNEL | what::POSITION => Some(MAX_CHANNELS),
         what::ZONE => Some(st.zones() as u16),
         what::PRESET => Some(st.data().presets() as u16),
         what::CONTACT => Some(st.data().contacts()),
@@ -1213,7 +1221,8 @@ fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
 /// reading it.
 fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
     match w {
-        what::CHANNEL => st.zone_of(i).is_some(),
+        // LINK-53: a stored channel; whether it has a position is its record's (read by `READ_MANY` only)
+        what::CHANNEL | what::POSITION => st.zone_of(i).is_some(),
         what::ZONE => st.zone_name(i as u8).is_some(),
         what::CONTACT => i < st.data().contacts(),
         _ => st.data().preset(i as u8).is_some(),
@@ -1222,7 +1231,7 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
 
 /// `USED` (LINK-39): the index count, then the bitmap of the ones holding a record.
 fn used<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
-    let Some(w) = p.first().copied() else { return Status::BadArg };
+    let Some(w) = p.first().copied().filter(|&w| w != what::POSITION) else { return Status::BadArg }; // LINK-53: READ_MANY
     let Some(n) = indexes(st, w) else { return Status::BadArg };
     o.put(&n.to_le_bytes());
     let mut byte = 0u8;
@@ -1324,7 +1333,7 @@ fn log_read_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Optio
 /// store's queue has room (behind channel writes only), for anything else the store is idle (a zone may need the
 /// one before it stored).
 fn write_room<S: ChannelStore>(app: &App, st: &S, what: u8) -> bool {
-    !app.write_pending() && if what == what::CHANNEL { st.data().write_room() > 0 } else { !st.data().busy() }
+    !app.write_pending() && if matches!(what, what::CHANNEL | what::POSITION) { st.data().write_room() > 0 } else { !st.data().busy() }
 }
 
 /// The settings record written (`WRITE`): the protected ones keep the radio's (LINK-5).
@@ -1394,6 +1403,26 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             if st.get(idx) != Some(c) {
                 app.put_channel_queued(c, st);
+            }
+            Status::Ok
+        }
+        // LINK-53: a position (8 bytes) or none (0), checked as the terminal's `pos=` is (CHAN-2: within 90 and 180
+        // degrees); it goes to the store's queue behind the channel writes before it, so it lands on the channel as
+        // they leave it and shares their sector's rewrite (decision 227). No channel at that number: nothing changes.
+        what::POSITION if idx < MAX_CHANNELS => {
+            let pos = match *rec {
+                [] => None,
+                [a, b, c, d, e, f, g, h] => {
+                    let (lat, lon) = (i32::from_le_bytes([a, b, c, d]), i32::from_le_bytes([e, f, g, h]));
+                    if lat.unsigned_abs() > 900_000_000 || lon.unsigned_abs() > 1_800_000_000 {
+                        return invalid(o, "position: latitude -90 to 90, longitude -180 to 180".as_bytes());
+                    }
+                    Some(crate::data::Pos { lat, lon })
+                }
+                _ => return Status::BadArg,
+            };
+            if st.position(idx) != pos || st.data().busy() {
+                app.put_pos_queued(idx, pos, st);
             }
             Status::Ok
         }

@@ -308,6 +308,8 @@ pub struct Settings {
     /// 0 5 9 7 (WATCH-17.3, decision 295): [`APRS_SHARE`]: 0 APRS first (APRS mode's C takes long turns on a chip
     /// it shares, the other slots short looks), 1 A·B first (WATCH-17.2's turns; decision 313 renamed Voice first).
     pub aprs_share: u8,
+    /// 0 2 5 Local zone (CHAN-34, decision 326): an index into [`crate::local::RANGES`], 0 Off; 50 km by default.
+    pub local: u8,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -522,6 +524,7 @@ impl Settings {
         aprs_mute: true,
         dtmf_rx: true,
         aprs_share: 0,
+        local: crate::local::DEFAULT_RANGE,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
@@ -546,6 +549,9 @@ impl Settings {
         }
         if self.gps > GPS_AUTO {
             self.gps = GPS_AUTO;
+        }
+        if self.local as usize >= crate::local::RANGES.len() {
+            self.local = Self::DEFAULT.local; // CHAN-34
         }
         if !LPM_BELOW.contains(&self.lpm_below) {
             self.lpm_below = Self::DEFAULT.lpm_below; // PWR-24.1: an older record's zero

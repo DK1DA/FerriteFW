@@ -30,6 +30,7 @@ pub mod data;
 pub mod gpsdata;
 pub mod keys;
 pub mod lights;
+pub mod local;
 pub mod lpm;
 pub mod link;
 pub mod pager;
@@ -409,6 +410,9 @@ pub struct App {
     /// The zones page's Nearby row (CHAN-29): the nearest positioned channel, found again only when the fix moved
     /// about 100 m or the channels changed. 12 bytes.
     pub(crate) near: screens::zones::NearCache,
+    /// The Local zone (CHAN-34): its channels, nearest first, found again only when the position moved about 1 km,
+    /// the channels or the range changed. 112 bytes.
+    pub(crate) local: local::Local,
     /// Radio activity: transmit, the exclusive modes, scan hits, region ([`screens::activity`]).
     pub(crate) radio: screens::activity::RadioUi,
     /// Radio-wide settings: not the App's, only borrowed ([`settings`]).
@@ -506,6 +510,7 @@ impl App {
             contact_call: Buf::new(),
             back: [None; BACK_DEPTH],
             near: screens::zones::NearCache::NONE,
+            local: local::Local::OFF,
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false },
             radio: screens::activity::RadioUi::new(),
             set,
@@ -652,6 +657,14 @@ impl App {
             self.channel_put(c);
         } else {
             self.put_channel(c);
+        }
+    }
+
+    /// LINK-53: a channel's position set or cleared from the link: into the store's queue when it takes it.
+    pub(crate) fn put_pos_queued(&mut self, num: u16, pos: Option<data::Pos>, st: &impl chan::ChannelStore) {
+        let w = ChanWrite::Pos { num, pos };
+        if !st.queue_write(w) {
+            self.write(w);
         }
     }
 
@@ -806,7 +819,7 @@ impl App {
         let s = self.slots[slot as usize % SLOTS];
         let zones = core::iter::once(s.zone).chain((0..10u8).filter(|z| self.radio.zones & 1 << z != 0));
         for z in zones {
-            if let Some(pos) = (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| c.rx == f)) {
+            if let Some(pos) = (0..self.zlen(store, z)).find(|&i| self.zat(store, z, i).is_some_and(|c| c.rx == f)) {
                 return Some((z, pos));
             }
         }
@@ -815,10 +828,10 @@ impl App {
 
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
     pub fn set_channel(&mut self, slot: u8, zone: u8, pos: u16, store: &impl ChannelStore) {
-        let s = &mut self.slots[slot as usize % SLOTS];
-        match store.zone_at(zone, pos) {
+        match self.zat(store, zone, pos) {
             Some(c) if c.is_hf() => screens::hf::recall(self, &c), // CHAN-26: HF mode's, not a slot's
             Some(c) => {
+                let s = &mut self.slots[slot as usize % SLOTS];
                 (s.zone, s.pos, s.ch, s.vfo_mode) = (zone, pos, Some(c), false);
                 self.send_slot(slot);
             }
@@ -1212,6 +1225,7 @@ impl App {
     /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
     pub fn tick(&mut self, now: u32, live: &LiveAll, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        local::tick(self, store); // CHAN-34: before anything steps through a slot's zone
         // Channel scans in the Radio task: their set going out, and the frequencies it asks for.
         chanscan::feed(self, store);
         chanscan::answer(self, live, store);

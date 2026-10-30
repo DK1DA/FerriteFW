@@ -46,7 +46,7 @@ fn recent_view() {
     t.shows(&String::from_utf8_lossy(c.name()));
 }
 
-/// CHAN-29: Nearby with a fix but no channel with a position says the web app imports them.
+/// CHAN-29: Nearby with a fix but no channel with a position says how they are set (the terminal, the link: LINK-53).
 #[test]
 fn nearby_without_positions() {
     let mut t = T::new();

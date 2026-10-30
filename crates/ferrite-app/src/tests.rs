@@ -151,8 +151,9 @@ fn ram_is_small() {
     // with padding, to 1552; its home's last reception (PWR-24.8: slot, opened, closed, peak: 11 bytes), 16 with
     // padding, to 1568; each slot's scan's last hit for Return to (SCAN-6: 3 x 4 bytes), 16 with padding, to 1584;
     // the beacon comment and ambiguity (APRS-50, APRS-51: 41 bytes in the App's AprsCfg), 40 with padding, to 1624;
-    // the slots turned off (HOME-15.1: a byte), 8 with padding, to 1632
-    assert!(n <= 1632, "App is {n} bytes");
+    // the slots turned off (HOME-15.1: a byte), 8 with padding, to 1632; the Local zone (CHAN-34: 48 channel
+    // numbers, their count and state, the range, where and for which channels it was found), 112, to 1744
+    assert!(n <= 1744, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

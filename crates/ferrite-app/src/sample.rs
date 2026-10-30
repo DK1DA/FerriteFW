@@ -32,7 +32,7 @@ const fn mode(m: u8, narrow: bool) -> SlotCfg {
 const AIR: SlotCfg = mode(2, false);
 const WIDE: SlotCfg = mode(0, false);
 
-const ZONES: [&[u8]; 8] = [b"Local", b"Repeaters", b"Empty", b"Air", b"Marine", b"Weather", b"Zone 7", b"Zone 8"];
+const ZONES: [&[u8]; 8] = [b"Simplex", b"Repeaters", b"Empty", b"Air", b"Marine", b"Weather", b"Zone 7", b"Zone 8"];
 /// Zones 0-5 exist at first; "new zone" brings the next one in.
 const ZONES_AT_START: usize = 6;
 
@@ -328,9 +328,11 @@ impl Sample {
             }
             ChanWrite::PutPos { ch, pos } => {
                 self.apply(ChanWrite::Put { ch, from: None });
-                let at = self.pos_set.iter().find(|c| c.get().is_some_and(|(n, _)| n == ch.num)).or_else(|| self.pos_set.iter().find(|c| c.get().is_none()));
-                if let Some(c) = at {
-                    c.set(Some((ch.num, pos)));
+                self.set_pos(ch.num, pos);
+            }
+            ChanWrite::Pos { num, pos } => {
+                if self.slot_of(num).is_some() {
+                    self.set_pos(num, pos);
                 }
             }
             ChanWrite::Delete(n) => {
@@ -349,6 +351,13 @@ impl Sample {
             ChanWrite::EraseAll => self.chans.iter().for_each(|c| c.set(None)),
         }
         self.bump();
+    }
+
+    fn set_pos(&self, num: u16, pos: Option<Pos>) {
+        let at = self.pos_set.iter().find(|c| c.get().is_some_and(|(n, _)| n == num)).or_else(|| self.pos_set.iter().find(|c| c.get().is_none()));
+        if let Some(c) = at {
+            c.set(Some((num, pos)));
+        }
     }
 
     fn slot_of(&self, num: u16) -> Option<&Cell<Option<Channel>>> {

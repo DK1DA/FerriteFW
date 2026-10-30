@@ -810,7 +810,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 }
             }
             check(&c)?;
-            // A line without pos= keeps the position the channel has (the web app's import sets it).
+            // A line without pos= keeps the position the channel has (the link sets it too: LINK-53).
             Ok(Done::Said(match pos {
                 Some(p) => save_pos(app, st, c, p),
                 None => save(app, st, c),

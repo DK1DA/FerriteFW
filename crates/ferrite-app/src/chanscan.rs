@@ -51,7 +51,9 @@ fn zone_cfg(app: &App, slot: u8, store: &impl ChannelStore) -> crate::data::Zone
 /// Whether channel `n` is a stop of the scan: in the set, not Skip-flagged, not an HF channel (CHAN-26: a scan
 /// never moves the relay, SAFE-20); and whether it is a flagged priority channel.
 fn stop(app: &App, slot: u8, store: &impl ChannelStore, n: u16) -> Option<bool> {
-    if !store.zone_of(n).is_some_and(|z| in_set(app, slot, z)) {
+    // CHAN-34: a slot on Local scans its members (the zones added with digits as well)
+    let local = app.slot(slot).zone == crate::local::LOCAL && app.local.has(n);
+    if !(local || store.zone_of(n).is_some_and(|z| in_set(app, slot, z))) {
         return None;
     }
     store.get(n).filter(|c| !c.skip() && !c.is_hf() && crate::chan::rx_ok(c.rx)).map(|c| c.flags & FLAG_PRIORITY != 0)
@@ -177,6 +179,27 @@ mod tests {
         let pri = store.data().zone_cfg(zone).pri[0];
         assert_eq!(set.prio(0), pri);
         let _ = NO_WANT;
+    }
+
+    /// CHAN-34.2: a slot on Local scans Local's members (nearest first is only the list's order; the Radio task walks
+    /// them by number as any zone's), Skip-flagged and HF ones passed as in any zone.
+    #[test]
+    fn local_scans_its_members() {
+        let store = Sample::new();
+        let leak = || -> &'static mut crate::settings::Settings { std::boxed::Box::leak(std::boxed::Box::new(crate::settings::Settings::DEFAULT)) };
+        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
+        let mut app = App::new(leak(), alert());
+        crate::local::tick(&mut app, &store);
+        app.set_channel(0, crate::local::LOCAL, 0, &store);
+        while app.pop_cmd().is_some() {}
+        start(&mut app, 0);
+        let mut set = ChanSet::new();
+        drain(&mut app, &store, &mut set);
+        let mut want: std::vec::Vec<u16> = (0..app.local().len()).filter_map(|i| app.local().num(i)).filter(|&n| store.get(n).is_some_and(|c| !c.skip() && !c.is_hf())).collect();
+        want.sort();
+        let got: std::vec::Vec<u16> = (0..MAX_CHANNELS).filter(|&n| set.has(n)).collect();
+        assert!(!want.is_empty());
+        assert_eq!(got, want);
     }
 
     #[test]

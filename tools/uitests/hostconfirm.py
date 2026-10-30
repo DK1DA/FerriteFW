@@ -135,7 +135,7 @@ def link_has_no_calibration_write(t):
             continue  # READ_MANY's and WRITE_MANY's kinds
         for ty, p in ((fl.USED, bytes([kind])), (fl.READ_MANY, struct.pack("<BHH", kind, 0, 1)),
                       (fl.WRITE_MANY, struct.pack("<BHB", kind, 0, 1) + b"\x00")):
-            s, why = link.ask(ty, p, timeout=1.0)  # LINK-39 - LINK-41: the record kinds only (channel, zone, preset, contact)
+            s, why = link.ask(ty, p, timeout=1.0)  # LINK-39 - LINK-41: the record kinds only (channel, zone, preset, contact, position)
             t.check(s != 0, f"0x{ty:02X} kind {kind}: refused", (s, why))
     for c in ("flash", "erase", "spi", "cal", "calibration", "write", "update"):
         ok, out = t.cmd_err(c)

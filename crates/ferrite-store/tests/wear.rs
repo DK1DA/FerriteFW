@@ -123,3 +123,53 @@ fn a_console_bulk_write() {
     assert!(ch <= 10, "a channel sector took {ch} erases");
     assert!(sc <= 6, "a scratch sector took {sc} erases");
 }
+
+/// LINK-53 (decision 325): Console's positions for 1,000 channels after the channels themselves. Positions are kept
+/// in the channel records, so a position write is a channel record write: queued behind the channel writes and
+/// merged with the ones for the same sector (decision 227), it costs what a bulk channel write costs, and a position
+/// that is already stored costs nothing.
+#[test]
+fn a_console_position_import() {
+    let s: Store = FlashStore::mount(SimFlash::new(), NoData);
+    let at = |n: u16| Pos { lat: 450_000_000 + n as i32 * 1_000, lon: -750_000_000 - n as i32 * 1_000 };
+    s.set_deferred(true);
+    let before = s.nor().erases.clone();
+    // the channels and then their positions, as the link queues them: each position lands on its channel as the
+    // writes before it leave it, whether or not those are on flash yet
+    let mut jobs = (0..1000u16).map(|n| ChanWrite::Put { ch: channel(n, NO_ZONE, 14_400_000 + n as u32 * 125, "New", DEFAULT_CFG), from: None }).chain((0..1000u16).map(|n| ChanWrite::Pos { num: n, pos: Some(at(n)) })).peekable();
+    while jobs.peek().is_some() || s.has_jobs() {
+        while let Some(&j) = jobs.peek() {
+            if !s.apply(j) {
+                break;
+            }
+            jobs.next();
+        }
+        if let Some(j) = s.next_job() {
+            ferrite_store::block(s.run(j));
+        }
+    }
+    let w = worst(&before, &s.nor().erases);
+    let ch: u32 = w.iter().filter(|(s, _)| region(*s) == "channels").map(|x| x.1).max().unwrap_or(0);
+    println!("1,000 channels then their positions: a channel sector {ch} erases");
+    assert!(ch <= 10, "a channel sector took {ch} erases");
+    for n in [0, 62, 63, 500, 999] {
+        assert_eq!(s.position(n), Some(at(n)), "channel {n}");
+        assert_eq!(s.get(n).map(|c| c.name().to_vec()), Some(b"New".to_vec()), "channel {n} kept");
+    }
+    // the same positions again: nothing is written; one cleared and a number with no channel: one record
+    let before = s.nor().erases.clone();
+    for n in 0..1000u16 {
+        assert!(s.apply(ChanWrite::Pos { num: n, pos: Some(at(n)) }));
+        while let Some(j) = s.next_job() {
+            ferrite_store::block(s.run(j));
+        }
+    }
+    assert_eq!(s.nor().erases, before, "positions as stored: no erase");
+    s.set_deferred(false);
+    assert!(s.apply(ChanWrite::Pos { num: 5, pos: None }));
+    assert_eq!(s.position(5), None);
+    assert!(s.get(5).is_some(), "the channel stays");
+    assert!(s.apply(ChanWrite::Delete(6)));
+    assert!(s.apply(ChanWrite::Pos { num: 6, pos: Some(at(6)) }));
+    assert!(s.get(6).is_none() && s.position(6).is_none(), "no channel at 6: nothing made");
+}

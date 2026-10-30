@@ -999,12 +999,13 @@ fn zones_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, z: screens::zones::Zones,
             l.push(b" kind=nearby");
         }
     }
-    let n = st.zones() as u16;
-    let keep = |i: u16| st.zone_name(i as u8).is_some();
+    let (n, local) = list_n(app, st);
+    let keep = keep(st, local);
     let vis = zone_rows(near.is_some());
     let cur = z.cur.shown(n, vis, &keep);
     cur.rows(n, vis, &keep, |_, i| {
-        let r = ZoneRow::of(app, st, i as u8);
+        let zone = zid(st, i);
+        let r = ZoneRow::of(app, st, zone);
         if let Some(l) = d.ln() {
             l.push(b"row 0 ");
             q(l, r.name.as_bytes());
@@ -1015,7 +1016,7 @@ fn zones_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, z: screens::zones::Zones,
             if r.count == 0 {
                 l.push(b" grey");
             }
-            l.push(b" kind=zone");
+            l.push(if zone == crate::local::LOCAL { b" kind=local" } else { b" kind=zone" }); // CHAN-34
             let mut c = Buf::<16>::new();
             r.chip_words(&mut c);
             kq(l, "chips", c.as_bytes());
@@ -1024,7 +1025,7 @@ fn zones_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, z: screens::zones::Zones,
     let p = if on_near {
         preview_nearby(app, st)
     } else if (0..n).any(keep) {
-        preview_zone(app, st, cur.sel as u8)
+        preview_zone(app, st, zid(st, cur.sel))
     } else {
         return;
     };

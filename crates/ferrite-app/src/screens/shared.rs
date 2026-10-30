@@ -296,7 +296,8 @@ impl App {
             b.push(b"VFO");
         }
         b.push(" \u{b7} ".as_bytes());
-        let zone = sl.ch.filter(|_| sl.on_channel() && !lv.scanning && !self.aprs_slot(s)).and_then(|c| store.zone_name(c.zone));
+        // CHAN-34: a slot on Local names Local, where ◀▶ go on from
+        let zone = sl.ch.filter(|_| sl.on_channel() && !lv.scanning && !self.aprs_slot(s)).and_then(|c| if sl.zone == crate::local::LOCAL { Some(crate::chan::Name::from(b"Local".as_slice())) } else { store.zone_name(c.zone) });
         if self.in_bcast_band(s) && !lv.scanning {
             b.push(b"Broadcast"); // BCR-21: a slot in the broadcast band says so where the band goes
         } else if let Some(z) = zone {

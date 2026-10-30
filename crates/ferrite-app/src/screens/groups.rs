@@ -62,11 +62,12 @@ const G1: [Entry; 6] = [
     Entry("Skip list|Empty|Frequencies * skipped in this scan."),
     Entry("Advanced||Pause time, direction, scan inputs, return to."),
 ];
-const G2: [Entry; 4] = [
+const G2: [Entry; 5] = [
     Entry("Browse||Zones, all channels, nearby, recent."),
     Entry("Add repeater||Frequency, shift, tone, name."),
     Entry("Zones||Name, scan options, priority channels."),
     Entry("Channel display|Name|Name, number or frequency on home."),
+    Entry("Local zone|50 km|A zone of the channels within this range of you, nearest first. Needs a GPS fix or the fixed position (0 6 9)."),
 ];
 const G3: [Entry; 6] = [
     Entry("FM broadcast||Listen now; hold MENU there for its settings."),
@@ -420,7 +421,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 95] = [
+static SETTINGS: [Setting; 96] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -429,6 +430,7 @@ static SETTINGS: [Setting; 95] = [
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
     field!([1, 6, 4], scan_return_hit: bool, Kind::Flip(&["Start", "Last hit"]), Nothing),
     field!([2, 4, 0], ch_display: u8, Kind::Pick(&crate::settings::CHANNEL_DISPLAY), Nothing),
+    field!([2, 5, 0], local: u8, Kind::Pick(&crate::local::RANGES), Nothing), // CHAN-34
     field!([3, 1, 1], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), SiOpts),
     field!([3, 1, 2], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), SiOpts),
     field!([3, 1, 3], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),

@@ -96,7 +96,9 @@ AUDIO, AUDIO_DATA = 0x56, 0x57  # LINK-13.4: receive audio (the cable only)
 AUDIO_RAW = 0x58  # LINK-13.9: the bench's raw stream
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
 CONTACT = 6  # APRS-42
-ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
+POSITION = 7  # LINK-53: a channel's position by number, <ii lat, lon in 1e-7 degree; b"" clears it
+CAP_POSITION = 64  # LINK-53: HELLO's caps say POSITION
+ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT, POSITION)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
 # SUBSCRIBE's mask and flags, EVENT's kinds (Appendix G)
 SUB_HEARD, SUB_MSGS, SUB_UI, RENEW = 1, 2, 4, 1
 EV_HEARD, EV_MSG, EV_MSG_STATE, EV_UI = 1, 2, 3, 4
@@ -514,7 +516,7 @@ class Link:
         """LINK-40: every record held from `first`, `count` indexes on (default: to the end; channels are 0-999):
         [(index, record)], and the requests it took."""
         if count is None:
-            count = (1000 if what == CHANNEL else 256) - first
+            count = (1000 if what in (CHANNEL, POSITION) else 256) - first
         if self.caps & CAP_STREAM:
             out, end, asks = [], first + count, 0
             while first < end:

@@ -610,6 +610,13 @@ impl Apply for Blank {
                     None => self.pos.borrow_mut().remove(&ch.num),
                 };
             }
+            ChanWrite::Pos { num, pos } if c.contains_key(&num) => {
+                match pos {
+                    Some(p) => self.pos.borrow_mut().insert(num, p),
+                    None => self.pos.borrow_mut().remove(&num),
+                };
+            }
+            ChanWrite::Pos { .. } => {}
             ChanWrite::Delete(n) => {
                 c.remove(&n);
             }

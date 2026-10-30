@@ -145,7 +145,7 @@ pub fn ch_position(b: &[u8; CH_LEN]) -> Option<Pos> {
     (ch_valid(b) && u16_at(b, 16) & HAS_POS != 0 && lat != NO_POS).then_some(Pos { lat, lon })
 }
 
-/// A record with a position set (the web app's RepeaterBook import; the simulator's sample).
+/// A record with a position set (the terminal's `pos=`, the link's positions: LINK-53; the simulator's sample).
 pub fn ch_with_position(b: &[u8; CH_LEN], p: Pos) -> [u8; CH_LEN] {
     let mut r = *b;
     r[20..24].copy_from_slice(&p.lat.to_le_bytes());
@@ -167,6 +167,14 @@ pub fn ch_without_position(b: &[u8; CH_LEN]) -> [u8; CH_LEN] {
     let crc = crc16(&r[..62]);
     r[62..64].copy_from_slice(&crc.to_le_bytes());
     r
+}
+
+/// LINK-53: record `b` with its position set or cleared (None), when it holds a channel.
+pub fn pos_rec(b: &[u8; CH_LEN], pos: Option<Pos>) -> Option<[u8; CH_LEN]> {
+    ch_valid(b).then(|| match pos {
+        Some(p) => ch_with_position(b, p),
+        None => ch_without_position(b),
+    })
 }
 
 // ---- zones ----

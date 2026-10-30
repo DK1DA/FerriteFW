@@ -270,7 +270,7 @@ fn browser_views_and_copy_to_slot() {
 fn browser_move_skip_renumber() {
     let mut t = T::new();
     t.open(Dest::Browse);
-    t.tap(Key::Menu); // Local
+    t.tap(Key::Menu); // Simplex
     t.tap(Key::Menu); // Calling 2 m: actions
     t.tap(Key::Down);
     t.tap(Key::Down); // Move
@@ -325,7 +325,7 @@ fn zone_delete_keeps_channels() {
 fn zone_editor_changes_live_and_resets() {
     let mut t = T::new();
     t.open(Dest::Zones);
-    t.tap(Key::Slot); // Local's editor (decision 178)
+    t.tap(Key::Slot); // Simplex's editor (decision 178)
     assert_eq!(t.name(), "Zone editor");
     t.tap(Key::Down); // Scan all
     assert!(!t.s.zone_cfg(0).scan_all);
@@ -447,7 +447,7 @@ fn skips_and_presets() {
     assert!(p.start < p.end);
 }
 
-/// Two saved stations, channels in the broadcast band (BCR-31): 88.5 in zone Local, 91.5 in no zone.
+/// Two saved stations, channels in the broadcast band (BCR-31): 88.5 in zone Simplex, 91.5 in no zone.
 fn stations(t: &T) {
     use crate::chan::{channel, ChanWrite};
     use crate::slot::DEFAULT_CFG;
@@ -633,7 +633,7 @@ fn rename_goes_to_its_own_record() {
     let mut t = T::new();
     let before = call(&t);
     t.open(Dest::Browse);
-    t.tap(Key::Menu); // Local
+    t.tap(Key::Menu); // Simplex
     let num = t.s.zone_at(0, 0).unwrap().num;
     t.tap(Key::Menu); // its actions
     t.tap(Key::Down);
@@ -651,7 +651,7 @@ fn rename_goes_to_its_own_record() {
     assert_eq!(t.app.text.as_bytes(), b"Repeaters");
     t.type_ab();
     assert_eq!(t.s.zone_name(1).unwrap().as_bytes(), b"AB");
-    assert_eq!(t.s.zone_name(0).unwrap().as_bytes(), b"Local", "only that zone");
+    assert_eq!(t.s.zone_name(0).unwrap().as_bytes(), b"Simplex", "only that zone");
     assert_eq!(t.name(), "Zone editor");
     assert!(call(&t) == before);
     // A range preset, from its editor's Name row.

@@ -287,7 +287,8 @@ fn shots_are_deterministic() {
 }
 
 /// CHAN-27 to CHAN-30: the zones page with location (B active on Repeaters: its chip, the places in the preview),
-/// on the Nearby row (its preview), and with the GPS off and no fixed position (the plain list, no places).
+/// on the Nearby row (its preview), and with the GPS off and no fixed position (the plain list, no places); CHAN-34.1,
+/// CHAN-34.4: on Local (its nearest four), home with B on Local, and Local without a position.
 #[test]
 fn zones_page_matches_its_goldens() {
     use ferrite_core::keys::Key;
@@ -299,10 +300,17 @@ fn zones_page_matches_its_goldens() {
     failures.extend(check("zones-located", &r.sim.screen_rgb()));
     r.press(Key::Up).press(Key::Up).wait(1000);
     failures.extend(check("zones-nearby", &r.sim.screen_rgb()));
+    // CHAN-34: Local, the last row (▲ from Nearby), and home with B on it (OK)
+    r.press(Key::Up).wait(1000);
+    failures.extend(check("zones-local", &r.sim.screen_rgb()));
+    r.press(Key::Menu).wait(1000);
+    failures.extend(check("home-on-local", &r.sim.screen_rgb()));
     r.sim.app_mut().settings_mut().gps = ferrite_app::settings::GPS_OFF; // no fix, no fixed position: no location anywhere
     r.home();
     r.menu("0 2 3").press(Key::Down).wait(1000);
     failures.extend(check("zones-no-fix", &r.sim.screen_rgb()));
+    r.press(Key::Up).press(Key::Up).wait(1000);
+    failures.extend(check("zones-local-no-position", &r.sim.screen_rgb()));
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

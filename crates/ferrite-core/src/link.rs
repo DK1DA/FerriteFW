@@ -194,6 +194,8 @@ pub mod caps {
     pub const AUDIO: u8 = 16;
     /// The readback with the screen as drawn (LINK-19.5): `UI` what=3, and `SUBSCRIBE`'s [`super::event::TEXTS`].
     pub const TEXTS: u8 = 32;
+    /// Channel positions by `READ_MANY` and `WRITE_MANY` of [`super::what::POSITION`] (LINK-53, decision 325).
+    pub const POSITION: u8 = 64;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -363,6 +365,10 @@ pub mod what {
     pub const APRS: u8 = 5;
     /// An APRS contact, in callsign order (APRS-42): written by callsign whatever the index.
     pub const CONTACT: u8 = 6;
+    /// A channel's position by channel number, 0-999 (LINK-53, decision 325): latitude and longitude (i32 each,
+    /// little-endian, 1e-7 degree, north and east positive), 8 bytes. `READ_MANY` gives only the channels that have
+    /// one; a `WRITE_MANY` record of length 0 clears it. Only from radios that say [`super::caps::POSITION`].
+    pub const POSITION: u8 = 7;
 }
 
 /// The first byte of every answer.

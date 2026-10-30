@@ -77,10 +77,11 @@ fn new_zones_until_full() {
     assert_eq!(t.toast(), "No room / 255 zones at most");
 }
 
-/// CHAN-10: with no zones the list says how to make one.
+/// CHAN-10: with no zones (and Local off, CHAN-34) the list says how to make one.
 #[test]
 fn no_zones() {
     let mut t = T::new();
+    t.app.settings_mut().local = 0;
     t.app.screen = Screen::Zones(Zones::new());
     let empty = crate::chan::Table { zones: &[], channels: &[] };
     let s = t.texts_in(&empty);

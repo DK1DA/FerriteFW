@@ -188,7 +188,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
@@ -1815,3 +1815,61 @@ fn ui_texts_are_the_screen_as_drawn() {
 
 /// Zones, presets, deletes and contacts at their edges.
 mod more;
+
+/// LINK-53 (decision 325): channel positions by number. `READ_MANY` of positions lists only the channels that have
+/// one (lat, lon: i32, 1e-7 degree); `WRITE_MANY` sets one (8 bytes), clears one (0 bytes), refuses one out of
+/// range with its reason (CHAN-2's checks, as the terminal's `pos=`) and a record of another length as malformed;
+/// a number with no channel changes nothing. `USED` of positions is refused (the channels' map is `USED` of
+/// channels). The channel itself is kept as it was.
+#[test]
+fn channel_positions_by_number() {
+    let mut pc = Pc::new(true);
+    let mut p = std::vec![what::POSITION];
+    p.extend_from_slice(&0u16.to_le_bytes());
+    p.extend_from_slice(&1000u16.to_le_bytes());
+    let (s, a) = pc.ask(msg::READ_MANY, &p);
+    assert_eq!(s, 0);
+    let mut got = Vec::new();
+    let mut r = &a[2..];
+    while r.len() >= 3 {
+        let (i, l) = (u16::from_le_bytes([r[0], r[1]]), r[2] as usize);
+        assert_eq!(l, 8);
+        let (lat, lon) = (i32::from_le_bytes(r[3..7].try_into().unwrap()), i32::from_le_bytes(r[7..11].try_into().unwrap()));
+        got.push((i, lat, lon));
+        r = &r[3 + l..];
+    }
+    let want: Vec<(u16, i32, i32)> = (0..1000).filter_map(|n| pc.st.position(n).filter(|_| pc.st.get(n).is_some()).map(|p| (n, p.lat, p.lon))).collect();
+    assert!(!want.is_empty());
+    assert_eq!(got, want, "every channel with a position, in number order");
+    // set one on a channel without
+    let c = (0..1000).filter_map(|n| pc.st.get(n)).find(|c| pc.st.position(c.num).is_none()).unwrap();
+    let mut rec = 454_000_000i32.to_le_bytes().to_vec();
+    rec.extend_from_slice(&(-757_000_000i32).to_le_bytes());
+    assert_eq!(pc.write_many(what::POSITION, &[(c.num, rec.clone())]), (0, std::vec![1]));
+    assert_eq!(pc.st.position(c.num), Some(crate::data::Pos { lat: 454_000_000, lon: -757_000_000 }));
+    assert_eq!(pc.st.get(c.num), Some(c), "the channel as it was");
+    let mut one = std::vec![what::POSITION];
+    one.extend_from_slice(&c.num.to_le_bytes());
+    one.extend_from_slice(&1u16.to_le_bytes());
+    let (_, a) = pc.ask(msg::READ_MANY, &one);
+    assert_eq!(&a[5..13], rec.as_slice(), "read back");
+    // out of range: refused with the reason, nothing changed
+    for (lat, lon) in [(900_000_001i32, 0i32), (0, -1_800_000_001)] {
+        let mut bad = lat.to_le_bytes().to_vec();
+        bad.extend_from_slice(&lon.to_le_bytes());
+        let (s, a) = pc.write_many(what::POSITION, &[(c.num, bad)]);
+        assert_eq!(s, Status::Invalid as u8);
+        assert!(std::str::from_utf8(&a[1..]).unwrap().contains("latitude -90 to 90"), "{a:?}");
+    }
+    assert_eq!(pc.write_many(what::POSITION, &[(c.num, std::vec![0; 5])]).0, Status::BadArg as u8);
+    assert_eq!(pc.st.position(c.num), Some(crate::data::Pos { lat: 454_000_000, lon: -757_000_000 }));
+    // cleared
+    assert_eq!(pc.write_many(what::POSITION, &[(c.num, Vec::new())]), (0, std::vec![1]));
+    assert_eq!(pc.st.position(c.num), None);
+    assert_eq!(pc.st.get(c.num), Some(c));
+    // no channel there: nothing
+    let free = pc.st.free_num(500).unwrap();
+    assert_eq!(pc.write_many(what::POSITION, &[(free, rec)]).0, 0);
+    assert!(pc.st.get(free).is_none() && pc.st.position(free).is_none());
+    assert_eq!(pc.ask(msg::USED, &[what::POSITION]).0, Status::BadArg as u8);
+}

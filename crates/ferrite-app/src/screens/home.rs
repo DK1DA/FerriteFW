@@ -6,6 +6,7 @@ use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
+use crate::local::LOCAL;
 use crate::data::Data;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{self, band_near, card_tone, mode_chip, shift_chip, shift_text, BANDS, STEPS};
@@ -927,24 +928,25 @@ fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
     let a = app.active as usize;
     // BCR-25: a VFO in the broadcast band steps by the FM step (0 3 1 1)
     let fm_step = (!big && app.in_bcast_band(a as u8)).then(|| crate::settings::FM_STEPS[app.set.fm_step as usize % 3].0 as i32 * 1000);
-    let s = &mut app.slots[a];
-    if s.on_channel() {
-        let n = store.zone_len(s.zone) as i32;
+    if app.slots[a].on_channel() {
+        let (z, pos) = (app.slots[a].zone, app.slots[a].pos);
+        let n = app.zlen(store, z) as i32; // CHAN-34: Local's from its list
         if n == 0 {
             return;
         }
-        let mut p = (s.pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n);
+        let mut p = (pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n);
         // CHAN-26: HF channels are HF mode's; stepping goes past them
         for _ in 0..n {
-            if store.zone_at(s.zone, p as u16).is_some_and(|c| !c.is_hf()) {
+            if app.zat(store, z, p as u16).is_some_and(|c| !c.is_hf()) {
                 break;
             }
             p = (p + d.signum()).rem_euclid(n);
         }
-        s.pos = p as u16;
-        s.ch = store.zone_at(s.zone, s.pos);
+        let ch = app.zat(store, z, p as u16);
+        (app.slots[a].pos, app.slots[a].ch) = (p as u16, ch);
         app.send_slot(a as u8);
     } else {
+        let s = &mut app.slots[a];
         let step = if big { 100_000 } else { fm_step.unwrap_or(STEPS[s.cfg.step as usize % STEPS.len()].0 as i32) };
         // Plain steps from where it is (146.520 stays on its 5 kHz raster with a 12.5 kHz step); snapping to
         // the step is for typed entry (VFO-12). Kept inside what the chips tune.
@@ -960,26 +962,32 @@ fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
     }
 }
 
-/// ◀▶ on home: next band in VFO mode (NAV-2), next zone with channels in channel mode (NAV-1, CHAN-11).
+/// ◀▶ on home: next band in VFO mode (NAV-2), next zone with channels in channel mode (NAV-1, CHAN-11); Local,
+/// when on, after the last stored zone (CHAN-34).
 fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
     let a = app.active as usize;
     let region = app.set.region();
-    let s = &mut app.slots[a];
-    if s.on_channel() {
+    if app.slots[a].on_channel() {
+        let from = app.slots[a].zone;
         let zones = store.zones() as i32;
-        let mut z = s.zone as i32;
-        for _ in 0..zones {
-            z = (z + d).rem_euclid(zones);
-            if first_slot_channel(store, z as u8).is_some() {
+        let ring = zones + crate::local::on(app) as i32;
+        let zone = |r: i32| if r == zones { LOCAL } else { r as u8 };
+        let mut r = if from == LOCAL { zones } else { from as i32 };
+        for _ in 0..ring {
+            r = (r + d).rem_euclid(ring);
+            if first_slot_channel(app, store, zone(r)).is_some() {
                 break;
             }
         }
-        if let Some(p) = first_slot_channel(store, z as u8).filter(|_| z as u8 != s.zone) {
-            (s.zone, s.pos) = (z as u8, p);
-            s.ch = store.zone_at(s.zone, p);
+        let z = zone(r);
+        if let Some(p) = first_slot_channel(app, store, z).filter(|_| z != from) {
+            let ch = app.zat(store, z, p);
+            let s = &mut app.slots[a];
+            (s.zone, s.pos, s.ch) = (z, p, ch);
             app.send_slot(a as u8);
         }
     } else {
+        let s = &mut app.slots[a];
         let (b, from) = (band_near(s.vfo), s.vfo);
         s.mem[b] = s.vfo;
         let nb = (b as i32 + d).rem_euclid(BANDS.len() as i32) as usize;
@@ -1044,17 +1052,19 @@ pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
     }
 }
 
-/// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26).
-fn first_slot_channel(store: &impl ChannelStore, z: u8) -> Option<u16> {
-    (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| !c.is_hf()))
+/// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26); Local's nearest (CHAN-34).
+fn first_slot_channel(app: &App, store: &impl ChannelStore, z: u8) -> Option<u16> {
+    (0..app.zlen(store, z)).find(|&i| app.zat(store, z, i).is_some_and(|c| !c.is_hf()))
 }
 
 fn toggle_vfo(app: &mut App, store: &impl ChannelStore) {
     let a = app.active as usize;
+    let need = app.slots[a].vfo_mode && app.slots[a].ch.is_none();
+    let first = if need { (0..store.zones()).find_map(|z| Some(z).zip(first_slot_channel(app, store, z))) } else { None };
     let s = &mut app.slots[a];
     if s.vfo_mode {
         if s.ch.is_none() {
-            match (0..store.zones()).find_map(|z| Some(z).zip(first_slot_channel(store, z))) {
+            match first {
                 Some((z, p)) => {
                     (s.zone, s.pos) = (z, p);
                     s.ch = store.zone_at(z, p);

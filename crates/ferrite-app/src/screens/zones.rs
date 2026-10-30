@@ -21,6 +21,7 @@ use super::{Cx, Hints, View};
 use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, MAX_CHANNELS};
 use crate::data::{Op, Pos, ZoneCfg};
 use crate::keys::{KeyEvent, Press};
+use crate::local::LOCAL;
 use crate::slot::chan_label;
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::freq::{mhz, Freq10};
@@ -199,8 +200,13 @@ pub(crate) struct ZoneRow {
 
 impl ZoneRow {
     pub(crate) fn of(app: &App, store: &impl ChannelStore, z: u8) -> ZoneRow {
-        let c = store.data().zone_cfg(z);
         let s = app.slot(app.active);
+        if z == LOCAL {
+            // CHAN-34: no settings of its own, so no SCAN or HID; dimmed while empty (no position, none in range)
+            let chip = (s.on_channel() && s.zone == LOCAL).then_some(Chip::Slot(app.active));
+            return ZoneRow { name: crate::chan::Name::from(b"Local".as_slice()), chips: [chip, None, None], count: app.local.len() };
+        }
+        let c = store.data().zone_cfg(z);
         ZoneRow {
             name: store.zone_name(z).unwrap_or_default(),
             // only the active slot's: B and C on a zone say nothing here (decision 155)
@@ -379,6 +385,9 @@ fn pv_row(app: &App, store: &impl ChannelStore, c: &Channel, here: Option<Pos>, 
 /// more", then "★ NAME" for the first priority channel while in scan (the star, not the word "priority", so a full
 /// name fits 240 px without scrolling: decision 157), or "scan off".
 pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: u8) -> Preview {
+    if z == LOCAL {
+        return preview_local(app, store);
+    }
     let hidden = app.set.show_hidden;
     let here = here(store);
     let cfg = store.data().zone_cfg(z);
@@ -424,6 +433,38 @@ pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: u8) -> Previ
             p.foot.push(" \u{b7} ".as_bytes());
         }
         p.foot.push(t.as_bytes());
+    }
+    p
+}
+
+/// The preview of Local (CHAN-34): "within 50 km" and its four nearest with their places, "+N more" for the rest;
+/// without a position "no position" and what it needs; none in range says so.
+fn preview_local(app: &App, store: &impl ChannelStore) -> Preview {
+    let l = app.local;
+    let mut p = Preview { head: crate::chan::Name::from(b"LOCAL".as_slice()), ..Preview::default() };
+    let km = crate::local::range_km(app);
+    match l.state() {
+        crate::local::State::Ready => _ = uwrite!(p.state, "within {} km", km),
+        _ => {
+            p.state.set(b"no position");
+            p.foot.set(b"Needs a GPS fix, or set 0 6 9");
+            return p;
+        }
+    }
+    let here = here(store);
+    let mut filled = 0;
+    for c in (0..l.len()).filter_map(|i| app.zat(store, LOCAL, i)).filter(|c| listed(c, app.set.show_hidden)) {
+        if filled < PV_ROWS {
+            p.rows[filled] = Some(pv_row(app, store, &c, here, None));
+        }
+        filled += 1;
+    }
+    if filled > PV_ROWS {
+        let _ = uwrite!(p.foot, "+{} more \u{b7} nearest first", filled - PV_ROWS);
+    } else if filled == 0 {
+        let _ = uwrite!(p.foot, "No channel with a position within {} km", km);
+    } else {
+        p.foot.set(b"nearest first");
     }
     p
 }
@@ -501,7 +542,7 @@ impl App {
 
 /// "6 zones · 21 ch": the zones shown and every channel stored.
 pub(crate) fn head_text(store: &impl ChannelStore) -> Buf<32> {
-    let n = (0..store.zones() as u16).filter(|&i| keep(store)(i)).count();
+    let n = (0..store.zones() as u16).filter(|&i| keep(store, false)(i)).count();
     let mut l = Buf::<32>::new();
     let _ = uwrite!(l, "{} {} \u{b7} {} ch", n, if n == 1 { "zone" } else { "zones" }, store.count());
     l
@@ -528,8 +569,20 @@ const ROWS: [(&str, &str); 8] = [
 /// The defaults, for the dot (MENU-12) and # (MENU-18).
 const DEFAULT: ZoneCfg = ZoneCfg { scan_all: false, shown: true, by_distance: false, resume: 0, dwell: 255, pri: [None, None] };
 
-fn keep(store: &impl ChannelStore) -> impl Fn(u16) -> bool + '_ {
-    |i| store.zone_name(i as u8).is_some()
+/// The list's rows that exist: the stored zones, and Local after them when it is on (CHAN-34).
+pub(crate) fn keep(store: &impl ChannelStore, local: bool) -> impl Fn(u16) -> bool + '_ {
+    move |i| store.zone_name(i as u8).is_some() || local && i == store.zones() as u16
+}
+
+/// The list's length and whether Local is in it (after the stored zones, CHAN-34).
+pub(crate) fn list_n(app: &App, store: &impl ChannelStore) -> (u16, bool) {
+    let local = crate::local::on(app);
+    (store.zones() as u16 + local as u16, local)
+}
+
+/// The zone on list row `i`: a stored zone's number, or Local after them (CHAN-34).
+pub(crate) fn zid(store: &impl ChannelStore, i: u16) -> u8 {
+    if i == store.zones() as u16 { LOCAL } else { i as u8 }
 }
 
 fn value(store: &impl ChannelStore, z: u8, c: &ZoneCfg, row: usize, b: &mut Buf<24>) {
@@ -603,9 +656,9 @@ fn change(store: &impl ChannelStore, z: u8, c: &mut ZoneCfg, row: usize, d: i32)
 
 impl Zones {
     /// One row up (-1) or down (+1) through the Nearby row (when it shows) and the zones, wrapping (CHAN-29).
-    fn step(self, near: bool, store: &impl ChannelStore, dir: i32) -> Zones {
-        let n = store.zones() as u16;
-        let k = keep(store);
+    fn step(self, near: bool, app: &App, store: &impl ChannelStore, dir: i32) -> Zones {
+        let (n, local) = list_n(app, store);
+        let k = keep(store, local);
         let vis = zone_rows(near);
         let first = (0..n).find(|&i| k(i));
         let last = (0..n).rev().find(|&i| k(i));
@@ -644,29 +697,32 @@ impl View for Zones {
         use Press::*;
         let near = self.edit().is_none() && nearby(app, store).is_some();
         let mut s = self.settled(near);
-        let z = s.cur.sel as u8;
+        let z = if s.edit().is_some() { s.cur.sel as u8 } else { zid(store, s.cur.sel) };
         let d = store.data();
         match (e.key, e.press, s.edit()) {
             (Key::Up | Key::Down, Short | Repeat, _) => {
                 let dir = if e.key == Key::Up { -1 } else { 1 };
                 match s.edit() {
                     Some(r) => s.mode = 2 + (r as i32 + dir).rem_euclid(ROWS.len() as i32) as u8,
-                    None => s = s.step(near, store, dir),
+                    None => s = s.step(near, app, store, dir),
                 }
             }
             // OK on Nearby: the channel browser's Nearby view (CHAN-29)
             (Key::Menu, Short, None) if s.on_nearby() => return app.open_screen(Screen::Browse(super::browse::nearby_view(store, app.set.show_hidden))),
             // OK on a zone: the active slot takes it and home shows it (CHAN-27, decision 178)
-            (Key::Menu, Short, None) if store.zone_name(z).is_some() => return accept(app, store, z),
+            (Key::Menu, Short, None) if store.zone_name(z).is_some() || z == LOCAL => return accept(app, store, z),
+            // SLOT on Local: its setting, MENU 0 2 5 (CHAN-34: Local has no zone settings); BACK returns here
+            (Key::Slot, Short, None) if z == LOCAL && !s.on_nearby() => return app.open_screen(Screen::Group(super::groups::Group { g: 2, sub: 0, row: 4 })),
             // SLOT on a zone: its editor (A12); SLOT edits, as hold SLOT on home and EDIT-6
             (Key::Slot, Short, None) if !s.on_nearby() && store.zone_name(z).is_some() => s.mode = 2,
             (Key::Menu, Short, Some(0)) => return super::text::open(app, super::text::TextFor::Zone(z), store), // rename (A7)
             (Key::Hash, Short, None) => {
                 if d.request(Op::NewZone) {
-                    let n = store.zones() as u16;
-                    s.cur = Cursor { sel: n - 1, top: s.cur.top }.shown(n, zone_rows(near), &keep(store));
+                    let (n, local) = list_n(app, store);
+                    let made = store.zones() as u16 - 1;
+                    s.cur = Cursor { sel: made, top: s.cur.top }.shown(n, zone_rows(near), &keep(store, local));
                     s.mode = 0;
-                    app.show_toast(b"New zone", store.zone_name((n - 1) as u8).unwrap_or_default().as_bytes(), false);
+                    app.show_toast(b"New zone", store.zone_name(made as u8).unwrap_or_default().as_bytes(), false);
                 } else {
                     app.show_toast(b"No room", b"255 zones at most", false);
                 }
@@ -708,7 +764,7 @@ impl View for Zones {
                 let near = nearby(app, store).is_some();
                 let mut s = self.settled(near);
                 for _ in 0..d.unsigned_abs().min(255) {
-                    s = s.step(near, store, d.signum());
+                    s = s.step(near, app, store, d.signum());
                 }
                 app.screen = Screen::Zones(s);
             }
@@ -724,7 +780,7 @@ impl View for Zones {
         let s = app.slot(app.active);
         let at = (app.active, s.on_channel().then_some(s.zone));
         let fix = here(store).map(|p| (p.lat / 10_000, p.lon / 10_000));
-        if !app.gate((self, data.version(), fix, at, app.set.units, app.set.show_hidden)) {
+        if !app.gate((self, data.version(), fix, at, app.set.units, app.set.show_hidden, app.local)) {
             return;
         }
         let z = self.cur.sel as u8;
@@ -747,8 +803,8 @@ impl View for Zones {
         }
         let near = nearby(app, store);
         let s = self.settled(near.is_some());
-        let n = store.zones() as u16;
-        let k = keep(store);
+        let (n, local) = list_n(app, store);
+        let k = keep(store, local);
         app.list_head(lcd, head_text(store).as_bytes(), b"");
         let mut first = 0;
         if let Some(nr) = near {
@@ -762,7 +818,7 @@ impl View for Zones {
         let vis = zone_rows(near.is_some());
         let cur = s.cur.shown(n, vis, &k);
         let rows = cur.rows(n, vis, &k, |row, i| {
-            let r = ZoneRow::of(app, store, i as u8);
+            let r = ZoneRow::of(app, store, zid(store, i));
             let sel = !s.on_nearby() && i == cur.sel;
             let at = first + row;
             if app.dirty(R_ROW + at, hash(&(2u8, &r, sel))) {
@@ -784,7 +840,7 @@ impl View for Zones {
         let p = if s.on_nearby() {
             preview_nearby(app, store)
         } else if rows > 0 {
-            preview_zone(app, store, cur.sel as u8)
+            preview_zone(app, store, zid(store, cur.sel))
         } else {
             Preview::default()
         };
@@ -806,12 +862,12 @@ impl View for Zones {
 /// not an HF channel (CHAN-26). None: no such channel.
 pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: u8) -> Option<u16> {
     let hidden = app.set.show_hidden;
-    let usable = |p: u16| store.zone_at(z, p).is_some_and(|c| !c.is_hf() && listed(&c, hidden));
+    let usable = |p: u16| app.zat(store, z, p).is_some_and(|c| !c.is_hf() && listed(&c, hidden));
     let s = app.slot(app.active);
     if s.zone == z && s.ch.is_some() && usable(s.pos) {
         return Some(s.pos);
     }
-    (0..store.zone_len(z)).find(|&p| usable(p))
+    (0..app.zlen(store, z)).find(|&p| usable(p))
 }
 
 /// OK on zone `z` (CHAN-27, decision 178): the active slot goes to channel mode on [`accept_pos`] and the page goes
@@ -824,7 +880,9 @@ fn accept(app: &mut App, store: &impl ChannelStore, z: u8) {
         return;
     }
     let Some(pos) = accept_pos(app, store, z) else {
-        return if store.zone_len(z) == 0 {
+        return if z == LOCAL && app.local.is_empty() {
+            crate::local::refuse(app) // CHAN-34: no position, or none in range
+        } else if app.zlen(store, z) == 0 {
             app.show_toast(b"No channels", b"in this zone", false)
         } else {
             app.show_toast(b"No channels", b"HF or hidden only", false)
@@ -837,12 +895,12 @@ fn accept(app: &mut App, store: &impl ChannelStore, z: u8) {
     app.go_home();
     let mut h = Buf::<20>::new();
     let _ = uwrite!(h, "Slot {}", w::LETTERS[a as usize] as char);
-    app.show_toast(h.as_bytes(), store.zone_name(z).unwrap_or_default().as_bytes(), false);
+    app.show_toast(h.as_bytes(), store.zone_label(z, b"", b"").as_bytes(), false);
 }
 
 /// After the shared confirm deleted a zone: the list again from its first zone.
 pub(crate) fn after_delete(store: &impl ChannelStore) -> Zones {
-    Zones { mode: 0, cur: Cursor::first(store.zones() as u16, &keep(store)) }
+    Zones { mode: 0, cur: Cursor::first(store.zones() as u16, &keep(store, false)) }
 }
 
 #[cfg(test)]
