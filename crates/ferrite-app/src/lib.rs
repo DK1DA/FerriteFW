@@ -62,6 +62,8 @@ use slot::{band_near, Item, SlotCfg, BANDS, DEFAULT_CFG, SQ_GLOBAL};
 
 pub use ferrite_ui::panel::Panel;
 pub use screens::Screen;
+/// Maidenhead grid squares to and from a position (GPS-21), for Ferrite Console's channel positions (LINK-53).
+pub use screens::lists::{grid, grid_pos};
 
 /// Toasts show for 3 s (HOME-9); undo is offered for 5 s (EDIT-4, MENU-22).
 pub const TOAST_MS: u32 = 3000;
