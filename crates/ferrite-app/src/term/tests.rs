@@ -535,6 +535,22 @@ fn monitor() {
     assert!(r.vt.line(now_row).trim_start().starts_with("now"));
 }
 
+/// The main page's slot lines show the APRS slot as APRS on the APRS frequency, not the channel it keeps
+/// underneath (daily use, Oct 29: clear in APRS mode read as on an FRS channel).
+#[test]
+fn radio_now_shows_the_aprs_slot() {
+    let mut r = Rig::main();
+    r.app.set_aprs_mode(true);
+    for _ in 0..30 {
+        r.poll();
+    }
+    let f = super::mhz5(r.app.aprs_freq());
+    let f = core::str::from_utf8(f.as_bytes()).unwrap().trim();
+    let line = r.vt.line(r.vt.row_of("APRS").expect("an APRS slot line"));
+    assert!(line.trim_start().starts_with("C  APRS"), "{line}");
+    assert!(line.contains(f), "{line}");
+}
+
 #[test]
 fn frequencies() {
     assert_eq!(parse_mhz(b"146.52"), Some(14_652_000));

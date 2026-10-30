@@ -1647,8 +1647,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 5 1 10_ SAME: US/Canada only
 :_ :set 0 4 5 1 none_ SAME: US/Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
-:_ :set 0 5 3 on_ 0 5 3 APRS mode: On
-:_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
+:_ :set 0 5 3 on_  C  APRS                  144.80000                     idle 0 5 3 APRS mode: On
+:_ :set 0 5 3 off_  C  VFO                   118.95000   AM                idle 0 5 3 APRS mode: Off
 :_ :set 0 5 3 1_ APRS mode: one of Off, On
 :_ :set 0 5 3 2_ APRS mode: one of Off, On
 :_ :set 0 5 3 10_ APRS mode: one of Off, On
@@ -1705,7 +1705,7 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 5 6 1 xyzzy_ Mode: one of Off, Manual, Every 1 min, Every 2 min, Every 5 min, Every 10 min,
 :_ :set 0 5 6 1 on_ Mode: one of Off, Manual, Every 1 min, Every 2 min, Every 5 min, Every 10 min,
 :_ :set 0 5 6 1 off_ 0 5 6 1 Mode: Off
-:_ :set 0 5 6 1 1_ 0 5 6 1 Mode: Every 1 min
+:_ :set 0 5 6 1 1_  C  APRS                  144.80000                     idle 0 5 6 1 Mode: Every 1 min
 :_ :set 0 5 6 1 2_ 0 5 6 1 Mode: Every 2 min
 :_ :set 0 5 6 1 10_ 0 5 6 1 Mode: Every 10 min
 :_ :set 0 5 6 1 none_ Mode: one of Every 10 min, Every 15 min, Every 20 min, Every 30 min, Every 60 m
@@ -1976,8 +1976,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 7 1 10_ Battery Save: one of Level 2, Level 3, Off, Level 1
 :_ :set 0 7 7 1 none_ Battery Save: one of Level 2, Level 3, Off, Level 1
 :_ :set 0 7 7 2 xyzzy_ Low Power Mode: one of Auto, On, Off
-:_ :set 0 7 7 2 on_ 0 7 7 2 Low Power Mode: On
-:_ :set 0 7 7 2 off_ 0 7 7 2 Low Power Mode: Off
+:_ :set 0 7 7 2 on_  C  VFO                   118.95000   AM                idle 0 7 7 2 Low Power Mode: On
+:_ :set 0 7 7 2 off_  C  APRS                  144.80000                     idle 0 7 7 2 Low Power Mode: Off
 :_ :set 0 7 7 2 1_ Low Power Mode: one of Off, Auto, On
 :_ :set 0 7 7 2 2_ Low Power Mode: one of Off, Auto, On
 :_ :set 0 7 7 2 10_ Low Power Mode: one of Off, Auto, On
@@ -3853,8 +3853,8 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 4 5 1 10_ SAME: US/Canada only
 :_ :set 0 4 5 1 none_ SAME: US/Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
-:_ :set 0 5 3 on_ 0 5 3 APRS mode: On
-:_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
+:_ :set 0 5 3 on_  C  APRS                  145.17500                     idle 0 5 3 APRS mode: On
+:_ :set 0 5 3 off_  C  VFO                   118.95000   AM                idle 0 5 3 APRS mode: Off
 :_ :set 0 5 3 1_ APRS mode: one of Off, On
 :_ :set 0 5 3 2_ APRS mode: one of Off, On
 :_ :set 0 5 3 10_ APRS mode: one of Off, On
@@ -3911,7 +3911,7 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 5 6 1 xyzzy_ Mode: one of Off, Manual, Every 1 min, Every 2 min, Every 5 min, Every 10 min,
 :_ :set 0 5 6 1 on_ Mode: one of Off, Manual, Every 1 min, Every 2 min, Every 5 min, Every 10 min,
 :_ :set 0 5 6 1 off_ 0 5 6 1 Mode: Off
-:_ :set 0 5 6 1 1_ 0 5 6 1 Mode: Every 1 min
+:_ :set 0 5 6 1 1_  C  APRS                  145.17500                     idle 0 5 6 1 Mode: Every 1 min
 :_ :set 0 5 6 1 2_ 0 5 6 1 Mode: Every 2 min
 :_ :set 0 5 6 1 10_ 0 5 6 1 Mode: Every 10 min
 :_ :set 0 5 6 1 none_ Mode: one of Every 10 min, Every 15 min, Every 20 min, Every 30 min, Every 60 m
@@ -4182,8 +4182,8 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 7 7 1 10_ Battery Save: one of Level 2, Level 3, Off, Level 1
 :_ :set 0 7 7 1 none_ Battery Save: one of Level 2, Level 3, Off, Level 1
 :_ :set 0 7 7 2 xyzzy_ Low Power Mode: one of Auto, On, Off
-:_ :set 0 7 7 2 on_ 0 7 7 2 Low Power Mode: On
-:_ :set 0 7 7 2 off_ 0 7 7 2 Low Power Mode: Off
+:_ :set 0 7 7 2 on_  C  VFO                   118.95000   AM                idle 0 7 7 2 Low Power Mode: On
+:_ :set 0 7 7 2 off_  C  APRS                  145.17500                     idle 0 7 7 2 Low Power Mode: Off
 :_ :set 0 7 7 2 1_ Low Power Mode: one of Off, Auto, On
 :_ :set 0 7 7 2 2_ Low Power Mode: one of Off, Auto, On
 :_ :set 0 7 7 2 10_ Low Power Mode: one of Off, Auto, On
@@ -6040,8 +6040,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 5 1 10_ SAME: US/Canada only
 :_ :set 0 4 5 1 none_ SAME: US/Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
-:_ :set 0 5 3 on_ 0 5 3 APRS mode: On
-:_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
+:_ :set 0 5 3 on_  C  APRS                  144.80000                     idle 0 5 3 APRS mode: On
+:_ :set 0 5 3 off_  C  VFO                   118.95000   AM                idle 0 5 3 APRS mode: Off
 :_ :set 0 5 3 1_ APRS mode: one of Off, On
 :_ :set 0 5 3 2_ APRS mode: one of Off, On
 :_ :set 0 5 3 10_ APRS mode: one of Off, On
@@ -6098,7 +6098,7 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 5 6 1 xyzzy_ Mode: one of Off, Manual, Every 1 min, Every 2 min, Every 5 min, Every 10 min,
 :_ :set 0 5 6 1 on_ Mode: one of Off, Manual, Every 1 min, Every 2 min, Every 5 min, Every 10 min,
 :_ :set 0 5 6 1 off_ 0 5 6 1 Mode: Off
-:_ :set 0 5 6 1 1_ 0 5 6 1 Mode: Every 1 min
+:_ :set 0 5 6 1 1_  C  APRS                  144.80000                     idle 0 5 6 1 Mode: Every 1 min
 :_ :set 0 5 6 1 2_ 0 5 6 1 Mode: Every 2 min
 :_ :set 0 5 6 1 10_ 0 5 6 1 Mode: Every 10 min
 :_ :set 0 5 6 1 none_ Mode: one of Every 10 min, Every 15 min, Every 20 min, Every 30 min, Every 60 m
@@ -6369,8 +6369,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 7 1 10_ Battery Save: one of Level 2, Level 3, Off, Level 1
 :_ :set 0 7 7 1 none_ Battery Save: one of Level 2, Level 3, Off, Level 1
 :_ :set 0 7 7 2 xyzzy_ Low Power Mode: one of Auto, On, Off
-:_ :set 0 7 7 2 on_ 0 7 7 2 Low Power Mode: On
-:_ :set 0 7 7 2 off_ 0 7 7 2 Low Power Mode: Off
+:_ :set 0 7 7 2 on_  C  VFO                   118.95000   AM                idle 0 7 7 2 Low Power Mode: On
+:_ :set 0 7 7 2 off_  C  APRS                  144.80000                     idle 0 7 7 2 Low Power Mode: Off
 :_ :set 0 7 7 2 1_ Low Power Mode: one of Off, Auto, On
 :_ :set 0 7 7 2 2_ Low Power Mode: one of Off, Auto, On
 :_ :set 0 7 7 2 10_ Low Power Mode: one of Off, Auto, On

@@ -1845,7 +1845,10 @@ fn slot_line<S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W) {
     w.at(2);
     w.s(&[w::LETTERS[i as usize]]);
     w.at(5);
-    match s.ch.filter(|_| s.on_channel()) {
+    // The APRS slot shows what it's on, the APRS frequency, not the channel or VFO it keeps underneath (APRS-21).
+    let aprs = cx.app.aprs_slot(i);
+    match s.ch.filter(|_| s.on_channel() && !aprs) {
+        _ if aprs => w.s(b"APRS"),
         Some(c) => {
             let mut v = Buf::<32>::new();
             put!(v, "CH {} ", Zero(c.num as u32 + 1, 3));
@@ -1856,18 +1859,22 @@ fn slot_line<S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W) {
         None => w.s(b"VFO"),
     }
     w.at(27);
-    let f = if l.scanning { l.freq } else { s.freq() };
+    let f = if l.scanning { l.freq } else { cx.app.tuned_freq(i) };
     w.s(mhz5(f).as_bytes());
-    w.at(39);
-    let mut v = Buf::<16>::new();
-    mode_chip(s.cfg(), &mut v);
-    w.s(v.as_bytes());
-    w.at(46);
-    v.clear();
-    tone_text(s.cfg().tx_tone, &mut v);
-    w.s(v.as_bytes());
+    if !aprs {
+        w.at(39);
+        let mut v = Buf::<16>::new();
+        mode_chip(s.cfg(), &mut v);
+        w.s(v.as_bytes());
+        w.at(46);
+        v.clear();
+        tone_text(s.cfg().tx_tone, &mut v);
+        w.s(v.as_bytes());
+    }
     w.at(57);
-    if l.squelch_open {
+    if cx.app.slot_off(i) {
+        w.s(b"off");
+    } else if l.squelch_open {
         w.s(b"RX ");
         w.s(w::s_text(l.rssi).as_bytes());
     } else if l.scanning {
