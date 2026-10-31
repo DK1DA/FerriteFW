@@ -1168,6 +1168,13 @@ def audio(link, seconds, path):
     """LINK-13.4: listen to the radio's receive audio over the cable for SECONDS into a WAV (12 kHz, 16-bit mono):
     blocks while a squelch is open (silence for the gaps between, so the file keeps time), keep-alives otherwise."""
     import wave
+    port = link.p
+    fast = getattr(port, "ser", None) is not None  # the cable at 230400, as Console runs it: 115200 is too slow for µ-law
+    if fast:
+        link.ok(BAUD, struct.pack("<I", 230_400))
+        time.sleep(0.05)
+        port.baud(230_400)
+        link.hello()  # within 1 s, or the radio goes back (LINK-11)
     rest = link.ok(AUDIO, b"\x01")
     rate, block = struct.unpack("<HH", rest[:4])
     t0 = time.time()
@@ -1198,6 +1205,11 @@ def audio(link, seconds, path):
             time.sleep(0.005)
     finally:
         link.ok(AUDIO, b"\x00")
+        if fast:
+            link.ok(BAUD, struct.pack("<I", 115_200))
+            time.sleep(0.05)
+            port.baud(115_200)
+            link.hello()
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
