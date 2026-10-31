@@ -91,7 +91,7 @@ pub struct Session {
     /// Events pushed to this session (LINK-46).
     sub: sub::Sub,
     /// LINK-13.4: the receive audio this session asked for (the cable only; never on by itself, LINK-13.5): 0 none,
-    /// 1 the ADPCM stream, 2 or 3 the bench's raw stream (LINK-13.9); and the blocks' counter.
+    /// 1 the µ-law stream (decision 330), 2 or 3 the bench's raw stream (LINK-13.9); and the blocks' counter.
     audio: u8,
     audio_seq: u16,
 }
@@ -556,9 +556,10 @@ impl Session {
             msg::MSG_SEND => sub::msg_send(app, st, dev, p, &mut o),
             msg::MSG_STOP => sub::msg_stop(st, p, &mut o),
             msg::MSG_DELETE => sub::msg_delete(st, p, &mut o),
-            // LINK-13.4: receive audio, the cable only (Bluetooth can't carry 4 KB/s, research/ble-speed.md)
+            // LINK-13.4: receive audio, the cable only (Bluetooth can't carry 4-12 KB/s, research/ble-speed.md)
             msg::AUDIO if self.by != crate::remote::BY_CABLE => Status::Refused,
             msg::AUDIO => match p.first() {
+                // decision 330: 1 the 12 kHz µ-law stream; 0 stops
                 Some(&on @ (0 | 1)) => {
                     self.audio = on;
                     o.put(&(ferrite_core::rxaudio::RATE_HZ as u16).to_le_bytes());

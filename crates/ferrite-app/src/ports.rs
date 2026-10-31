@@ -123,12 +123,13 @@ impl Ports {
     }
 
     /// LINK-13.4, LINK-13.5: what the cable's session listens to (the `AUDIO` mode: 0 nothing; asked for, and still
-    /// active): the caller runs the capture and hands its ADPCM blocks to [`Ports::audio`] only while this isn't 0.
+    /// active): the caller runs the capture and hands its µ-law blocks to [`Ports::audio`] only
+    /// while this is 1.
     pub fn audio_wanted(&mut self, now: u32) -> u8 {
         self.links[0].audio_on(now)
     }
 
-    /// LINK-13.4: one 32 ms block of receive audio for the cable's session: sent while a slot's squelch is open
+    /// LINK-13.4: one block of receive audio for the cable's session: sent while a slot's squelch is open
     /// (with the slot heard), else only a keep-alive each [`AUDIO_KEEPALIVE_MS`]; nothing unless it listens.
     pub fn audio(&mut self, blk: &ferrite_core::rxaudio::Block, live: &LiveAll, now: u32, cable: &mut impl Sink) {
         use ferrite_core::rxaudio::{NO_SLOT, SQ_OPEN};

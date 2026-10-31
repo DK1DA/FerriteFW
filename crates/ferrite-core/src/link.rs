@@ -161,14 +161,14 @@ pub mod msg {
     /// Delete one APRS message (LINK-52, APRS-46.1): flags (1: one to us), the station (length, text: from, or
     /// to), the message (length, text); the newest that matches goes, as the radio's own Delete message.
     pub const MSG_DELETE: u8 = 0x59;
-    /// Receive audio to the PC (LINK-13.1, LINK-13.4): the cable only; payload one byte, 1 to listen, 0 to stop
+    /// Receive audio to the PC (LINK-13.1, LINK-13.4): the cable only; payload one byte, 1 to listen (12 kHz µ-law,
+    /// decision 330), 0 to stop
     /// (2 or 3: the bench's raw stream at 12 or 16 kHz, LINK-13.9).
     /// The answer carries the stream's rate (u16) and a block's samples (u16). Listening ends with the session
     /// (a `HELLO`, the session going quiet, a new connection): never on by itself (LINK-13.5).
     pub const AUDIO: u8 = 0x56;
     /// A block of receive audio, pushed unasked while listening ([`crate::rxaudio`]): seq (u16), the slot heard
-    /// (0xFF none), flags (1: squelch open), the coder's state at the block's start (pred i16, index), then the
-    /// codes; with no codes, a keep-alive while nothing is heard. Never compressed (LINK-51), nor counted there.
+    /// (0xFF none), flags (1: squelch open), then the µ-law codes, a byte a sample; with no codes, a keep-alive while nothing is heard. Never compressed (LINK-51), nor counted there.
     pub const AUDIO_DATA: u8 = 0x57;
     /// A block of the bench's raw receive audio (LINK-13.9, `AUDIO` 2 or 3 in a bench build; [`crate::rawaudio`]):
     /// seq (u16), the first sample's index (u32), the slot heard, flags, then 152 samples of 12 bits, two in three

@@ -1,5 +1,5 @@
 //! The bench's raw receive audio (LINK-13.9, decision 307): the decoders' own 24 kHz samples to the PC as plain
-//! 12-bit PCM, for measurements the 8 kHz ADPCM stream ([`crate::rxaudio`]) can't carry (tone sweeps to 6 kHz, bit
+//! 12-bit PCM, for measurements Console's µ-law stream ([`crate::rxaudio`]) can't carry (tone sweeps to 8 kHz, bit
 //! error rates of fast data). A bench build's only; Console's stream is unchanged.
 //!
 //! - **Why 12 bits at 12 or 16 kHz:** the cable carries about 23 KB/s sustained (230400 baud, 10 bits a byte;

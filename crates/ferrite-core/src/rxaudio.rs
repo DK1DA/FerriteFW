@@ -1,106 +1,20 @@
-//! Receive audio to the PC over the cable (LINK-13.1, decision 213, decision 288): the decoders' 24 kHz samples
-//! stepped down 3:1 to 8 kHz, coded as IMA ADPCM (4 bits a sample, about 4 KB/s) in blocks of [`BLOCK`] samples,
-//! each block carrying the coder's state at its start, so a block lost on the way costs only itself. The radio
-//! codes ([`Packer`]), Ferrite Console decodes ([`decode`]); both are this file, so they can't disagree.
+//! Receive audio to the PC over the cable (LINK-13.1, LINK-13.4; decisions 213, 288, 330): the decoders' 24 kHz
+//! samples stepped down 2:1 to 12 kHz through a half-band low-pass (flat to 4.5 kHz, -6 dB at 6 kHz), coded as
+//! G.711 µ-law (8 bits a sample, about 12 KB/s) in blocks of [`BLOCK`] samples (16 ms). About 38 dB on a tone or on
+//! speech. A block decodes on its own, so a block lost on the way costs only itself. The radio codes ([`Packer`]),
+//! Ferrite Console decodes ([`ulaw_decode`]); both are this file, so they can't disagree. (Until decision 330 the
+//! stream was 8 kHz IMA ADPCM, about 18 dB.)
 
 /// The stream's sample rate.
-pub const RATE_HZ: u32 = 8_000;
-/// Samples a block: 32 ms, 128 bytes of codes.
-pub const BLOCK: usize = 256;
-/// A block's codes: two samples a byte, the first in the low nibble.
-pub const BLOCK_BYTES: usize = BLOCK / 2;
+pub const RATE_HZ: u32 = 12_000;
+/// Samples (and bytes) a block: 16 ms, what fits a link frame (240 bytes of payload at most).
+pub const BLOCK: usize = 192;
 
-const N_TAPS: usize = 31;
-/// The low-pass ahead of the 3:1 step (24 kHz to 8 kHz): 31 taps, Kaiser-windowed sinc (beta 6, 3.4 kHz), Q15,
-/// summing to 1. Flat to 2 kHz, -2.7 dB at 3 kHz, -6 dB at 3.4 kHz, -15 dB at 4 kHz, 75 dB or more from 5 kHz:
-/// a voice channel's band (the BK4829's audio is band-limited much the same). A named `static`: read per sample.
-static TAPS: [i32; N_TAPS] = [7, -3, -49, -99, -61, 132, 388, 420, -42, -893, -1475, -871, 1414, 4860, 8010, 9292, 8010, 4860, 1414, -871, -1475, -893, -42, 420, 388, 132, -61, -99, -49, -3, 7];
+/// One block for the link: its µ-law codes, a byte a sample.
+pub type Block = [u8; BLOCK];
 
-/// IMA ADPCM's step sizes and index changes (the standard tables).
-static STEP: [i16; 89] = [
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
-    130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060,
-    1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484,
-    7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
-];
-static INDEX: [i8; 8] = [-1, -1, -1, -1, 2, 4, 6, 8];
-
-/// The coder's state: the last sample it decoded to and its step index.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct State {
-    pub pred: i16,
-    pub index: u8,
-}
-
-impl State {
-    /// One code's effect: the next sample, the state moved on (the same for coder and decoder).
-    fn step(&mut self, code: u8) -> i16 {
-        let step = STEP[self.index as usize] as i32;
-        let mut diff = step >> 3;
-        if code & 4 != 0 {
-            diff += step;
-        }
-        if code & 2 != 0 {
-            diff += step >> 1;
-        }
-        if code & 1 != 0 {
-            diff += step >> 2;
-        }
-        let p = if code & 8 != 0 { self.pred as i32 - diff } else { self.pred as i32 + diff };
-        self.pred = p.clamp(-32768, 32767) as i16;
-        self.index = (self.index as i32 + INDEX[(code & 7) as usize] as i32).clamp(0, 88) as u8;
-        self.pred
-    }
-
-    /// Sample `x` coded: its 4-bit code.
-    pub fn encode(&mut self, x: i16) -> u8 {
-        let step = STEP[self.index as usize] as i32;
-        let mut d = x as i32 - self.pred as i32;
-        let mut code = 0u8;
-        if d < 0 {
-            code = 8;
-            d = -d;
-        }
-        if d >= step {
-            code |= 4;
-            d -= step;
-        }
-        if d >= step >> 1 {
-            code |= 2;
-            d -= step >> 1;
-        }
-        if d >= step >> 2 {
-            code |= 1;
-        }
-        self.step(code);
-        code
-    }
-}
-
-/// A block's codes to samples, from the state at its start: `out` takes two samples a byte.
-pub fn decode(start: State, codes: &[u8], out: &mut [i16]) -> usize {
-    let mut s = start;
-    let mut n = 0;
-    for &b in codes {
-        for code in [b & 15, b >> 4] {
-            if n < out.len() {
-                out[n] = s.step(code);
-                n += 1;
-            }
-        }
-    }
-    n
-}
-
-/// One block for the link: the state at its start and its codes.
-#[derive(Clone, Copy, Debug)]
-pub struct Block {
-    pub start: State,
-    pub codes: [u8; BLOCK_BYTES],
-}
-
-/// `AUDIO_DATA`'s head: seq, slot, flags, pred, index (LINK-13.4).
-pub const HEAD: usize = 7;
+/// `AUDIO_DATA`'s head: seq (u16), slot, flags (LINK-13.4).
+pub const HEAD: usize = 4;
 /// `AUDIO_DATA`'s flags.
 pub const SQ_OPEN: u8 = 1;
 /// What was heard is the broadcast receiver's (FM or AM broadcast, decision 290); the slot is the broadcast's.
@@ -132,15 +46,12 @@ pub fn unpack_source(v: u16) -> (u8, u8) {
 
 /// An `AUDIO_DATA` payload into `out`: a block, or a keep-alive (`None`). Its length.
 pub fn put(seq: u16, slot: u8, flags: u8, blk: Option<&Block>, out: &mut [u8]) -> usize {
-    let st = blk.map_or(State::default(), |b| b.start);
     out[..2].copy_from_slice(&seq.to_le_bytes());
     (out[2], out[3]) = (slot, flags);
-    out[4..6].copy_from_slice(&st.pred.to_le_bytes());
-    out[6] = st.index;
     match blk {
         Some(b) => {
-            out[HEAD..HEAD + BLOCK_BYTES].copy_from_slice(&b.codes);
-            HEAD + BLOCK_BYTES
+            out[HEAD..HEAD + BLOCK].copy_from_slice(b);
+            HEAD + BLOCK
         }
         None => HEAD,
     }
@@ -149,26 +60,60 @@ pub fn put(seq: u16, slot: u8, flags: u8, blk: Option<&Block>, out: &mut [u8]) -
 /// A whole `AUDIO_DATA` link frame into `w` (the wire bytes, framed as every link frame is): its length, or `None`
 /// if `w` is too small. The DSP task sends these itself (decision 290), so audio never waits for the UI task.
 pub fn frame(seq: u16, slot: u8, flags: u8, blk: Option<&Block>, w: &mut [u8]) -> Option<usize> {
-    let mut p = [0u8; HEAD + BLOCK_BYTES];
+    let mut p = [0u8; HEAD + BLOCK];
     let n = put(seq, slot, flags, blk, &mut p);
     crate::link::build(crate::link::msg::AUDIO_DATA, 0, &p[..n], w)
 }
 
-/// An `AUDIO_DATA` payload read back: seq, slot, flags, the state at its start, the codes (empty: a keep-alive).
-pub fn get(p: &[u8]) -> Option<(u16, u8, u8, State, &[u8])> {
+/// An `AUDIO_DATA` payload read back: seq, slot, flags, the codes (empty: a keep-alive).
+pub fn get(p: &[u8]) -> Option<(u16, u8, u8, &[u8])> {
     let h = p.get(..HEAD)?;
-    let st = State { pred: i16::from_le_bytes([h[4], h[5]]), index: h[6].min(88) };
-    Some((u16::from_le_bytes([h[0], h[1]]), h[2], h[3], st, &p[HEAD..]))
+    Some((u16::from_le_bytes([h[0], h[1]]), h[2], h[3], &p[HEAD..]))
 }
 
-/// The radio's side: 24 kHz samples in ([`Packer::push`]), blocks out. About 380 bytes.
+/// G.711 µ-law (the 16-bit form: bias 0x84, clipped at 32635): a sample to its byte, by bit operations (no table).
+#[inline]
+pub fn ulaw_encode(x: i16) -> u8 {
+    let mut s = x as i32;
+    let sign = if s < 0 {
+        s = -s;
+        0x80
+    } else {
+        0
+    };
+    let s = s.min(32635) + 0x84; // 132 ..= 32767: the top bit is bit 7 to 14
+    let exp = 24 - (s as u32).leading_zeros(); // 0 ..= 7
+    let mant = (s >> (exp + 3)) as u32 & 15;
+    !(sign | exp << 4 | mant) as u8
+}
+
+/// A µ-law byte to its sample (at most +-32124).
+#[inline]
+pub fn ulaw_decode(u: u8) -> i16 {
+    let u = !u;
+    let t = ((((u & 15) as i32) << 3) + 0x84) << ((u >> 4) & 7);
+    (if u & 0x80 != 0 { 0x84 - t } else { t - 0x84 }) as i16
+}
+
+const HB_TAPS: usize = 31;
+/// The half-band low-pass ahead of the 2:1 step (24 kHz to 12 kHz, decision 330): 31 taps, Kaiser-windowed sinc
+/// (beta 5, 6 kHz), Q15, summing to 1; every other tap is 0, so these are the taps either side of the centre,
+/// nearest first ([`HB_MID`] the centre). Flat to 4.5 kHz, -0.3 dB at 5 kHz, -1.8 at 5.5 kHz, -6 at 6 kHz (the new
+/// rate's edge), -30 at 7 kHz and 60 dB or more from 8 kHz: what folds onto the audio below 5 kHz is 30 dB down
+/// here and over 55 dB with the decoders' own filter ahead of it ([`crate::audio::Decim`]). 9 multiplies an output
+/// sample. A named `static`: read per sample.
+static HB: [i32; 8] = [10328, -3177, 1618, -893, 481, -236, 96, -26];
+const HB_MID: i32 = 16386;
+
+/// The radio's coder (decision 330): 24 kHz samples in ([`Packer::push`]), 12 kHz µ-law blocks out. About 320
+/// bytes.
 pub struct Packer {
-    hist: [i16; N_TAPS],
+    /// The last [`HB_TAPS`] inputs twice over, so the window is always one straight run.
+    hist: [i16; 2 * HB_TAPS],
     at: u8,
-    phase: u8,
-    state: State,
+    odd: bool,
+    n: u8,
     block: Block,
-    n: u16,
 }
 
 impl Default for Packer {
@@ -179,32 +124,29 @@ impl Default for Packer {
 
 impl Packer {
     pub const fn new() -> Self {
-        Packer { hist: [0; N_TAPS], at: 0, phase: 0, state: State { pred: 0, index: 0 }, block: Block { start: State { pred: 0, index: 0 }, codes: [0; BLOCK_BYTES] }, n: 0 }
+        Packer { hist: [0; 2 * HB_TAPS], at: 0, odd: false, n: 0, block: [0; BLOCK] }
     }
 
-    /// A 24 kHz sample in; a whole block out through `out` every [`BLOCK`] 8 kHz samples.
+    /// A 24 kHz sample in; a whole block out through `out` every [`BLOCK`] 12 kHz samples.
     #[inline]
     pub fn push(&mut self, x: i16, mut out: impl FnMut(&Block)) {
-        self.hist[self.at as usize] = x;
-        self.at = if self.at as usize + 1 == N_TAPS { 0 } else { self.at + 1 };
-        self.phase += 1;
-        if self.phase < 3 {
+        self.at = if self.at as usize + 1 == HB_TAPS { 0 } else { self.at + 1 };
+        let a = self.at as usize;
+        self.hist[a] = x;
+        self.hist[a + HB_TAPS] = x;
+        self.odd = !self.odd;
+        if self.odd {
             return;
         }
-        self.phase = 0;
-        let mut acc = 0i32;
-        let mut k = self.at as usize; // the oldest sample
-        for t in TAPS.iter() {
-            acc += *t * self.hist[k] as i32;
-            k = if k + 1 == N_TAPS { 0 } else { k + 1 };
+        let w = &self.hist[a + 1..a + 1 + HB_TAPS]; // oldest first
+        const C: usize = HB_TAPS / 2;
+        let mut acc = HB_MID * w[C] as i32;
+        for (k, t) in HB.iter().enumerate() {
+            let d = 2 * k + 1;
+            acc += *t * (w[C - d] as i32 + w[C + d] as i32);
         }
         let y = (acc >> 15).clamp(-32768, 32767) as i16;
-        if self.n == 0 {
-            self.block.start = self.state;
-        }
-        let code = self.state.encode(y);
-        let i = self.n as usize / 2;
-        self.block.codes[i] = if self.n.is_multiple_of(2) { code } else { self.block.codes[i] | code << 4 };
+        self.block[self.n as usize] = ulaw_encode(y);
         self.n += 1;
         if self.n as usize == BLOCK {
             self.n = 0;
@@ -244,6 +186,28 @@ mod tests {
         (0..n).map(|i| (amp * (2.0 * core::f64::consts::PI * hz * i as f64 / 24_000.0).sin()) as i16).collect()
     }
 
+    fn power(x: &[i16]) -> f64 {
+        x.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / x.len() as f64
+    }
+
+    /// The stream's samples: what [`Packer`] was given, filtered and stepped 2:1 (the reference).
+    fn halfband_ref(x: &[i16]) -> Vec<i16> {
+        let mut taps = [0i32; HB_TAPS];
+        taps[HB_TAPS / 2] = HB_MID;
+        for (k, t) in HB.iter().enumerate() {
+            taps[HB_TAPS / 2 - 2 * k - 1] = *t;
+            taps[HB_TAPS / 2 + 2 * k + 1] = *t;
+        }
+        assert_eq!(taps.iter().sum::<i32>(), 32768, "the taps sum to 1");
+        (1..x.len())
+            .step_by(2)
+            .map(|i| {
+                let acc: i32 = (0..HB_TAPS).map(|t| taps[t] * if i + 1 >= HB_TAPS - t { x[i + 1 + t - HB_TAPS] as i32 } else { 0 }).sum();
+                (acc >> 15).clamp(-32768, 32767) as i16
+            })
+            .collect()
+    }
+
     fn blocks(x: &[i16]) -> Vec<Block> {
         let mut p = Packer::new();
         let mut v = Vec::new();
@@ -253,98 +217,106 @@ mod tests {
         v
     }
 
-    fn power(x: &[i16]) -> f64 {
-        x.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / x.len() as f64
+    fn samples(b: &[Block]) -> Vec<i16> {
+        b.iter().flat_map(|b| b.iter().map(|&u| ulaw_decode(u))).collect()
     }
 
-    /// LINK-13.1: a 1 kHz tone survives the step to 8 kHz and the coder: decoded from each block's own start, it
-    /// matches what went in (the filtered tone) to 20 dB or better (4-bit IMA ADPCM: about 22 dB on a tone), and a block decodes alone (a lost one costs
-    /// only itself).
+    fn snr(got: &[i16], refx: &[i16]) -> f64 {
+        let err: Vec<i16> = got.iter().zip(refx).map(|(a, b)| a.saturating_sub(*b)).collect();
+        10.0 * (power(refx) / power(&err)).log10()
+    }
+
+    /// LINK-13.4 (decision 330): µ-law is G.711's: known values both ways, every byte decodes and codes back to
+    /// itself (bar the two zeros), and the coding error stays within half a step of its segment.
+    #[test]
+    fn ulaw_is_g711() {
+        assert_eq!((ulaw_encode(0), ulaw_encode(-1), ulaw_encode(32767), ulaw_encode(-32768)), (0xFF, 0x7F, 0x80, 0x00));
+        assert_eq!((ulaw_decode(0xFF), ulaw_decode(0x80), ulaw_decode(0x00)), (0, 32124, -32124));
+        for u in 0..=255u8 {
+            let x = ulaw_decode(u);
+            let back = ulaw_encode(x);
+            assert!(back == u || (x == 0 && (back == 0xFF || back == 0x7F)), "{u:#x} -> {x} -> {back:#x}");
+        }
+        for x in (-32768i32..=32767).step_by(7) {
+            let y = ulaw_decode(ulaw_encode(x as i16)) as i32;
+            let seg = 24 - ((x.unsigned_abs().min(32635) + 0x84).leading_zeros() as i32);
+            assert!((x.clamp(-32635, 32635) - y).abs() <= 4 << seg, "{x} -> {y}");
+        }
+    }
+
+    /// LINK-13.1, LINK-13.4 (decision 330): a 1 kHz tone through the 2:1 step and µ-law, each block decoded alone,
+    /// matches the filtered tone to 35 dB or better (8-bit µ-law: about 38-40 dB), 12,000 samples a second in 16 ms
+    /// blocks; a quiet one (-30 dBFS) keeps 33 dB (µ-law's steps scale with the level).
     #[test]
     fn tone_round_trips_block_by_block() {
         let x = tone(1000.0, 24_000, 12_000.0);
         let b = blocks(&x);
-        assert_eq!(b.len(), 8_000 / BLOCK);
-        let mut out = [0i16; BLOCK];
-        let mut got = Vec::new();
-        for blk in b.iter().rev().take(10).rev() {
-            assert_eq!(decode(blk.start, &blk.codes, &mut out), BLOCK);
-            got.extend_from_slice(&out);
-        }
-        // the reference: what the coder was given (the same filter and 3:1 step), for the same samples
-        let mut y = Vec::new();
-        for i in (2..x.len()).step_by(3) {
-            let acc: i32 = (0..N_TAPS).map(|t| TAPS[t] * if i + 1 >= N_TAPS - t { x[i + 1 + t - N_TAPS] as i32 } else { 0 }).sum();
-            y.push((acc >> 15).clamp(-32768, 32767) as i16);
-        }
-        let refx = &y[y.len() - got.len()..];
-        let err: Vec<i16> = got.iter().zip(refx).map(|(a, b)| a.saturating_sub(*b)).collect();
-        let snr = 10.0 * (power(refx) / power(&err)).log10();
-        assert!(snr > 20.0, "SNR {snr:.1} dB");
+        assert_eq!(b.len(), 12_000 / BLOCK);
+        let got = samples(&b);
+        let refx = halfband_ref(&x);
+        let s = snr(&got[600..], &refx[600..got.len()]); // past the filter's start
+        assert!(s >= 35.0, "SNR {s:.1} dB");
+        let x = tone(1000.0, 24_000, 1_000.0);
+        let got = samples(&blocks(&x));
+        let refx = halfband_ref(&x);
+        let s = snr(&got[600..], &refx[600..got.len()]);
+        assert!(s >= 33.0, "quiet SNR {s:.1} dB");
     }
 
-    /// LINK-13.1: the step's low-pass: 6 kHz (which would fold onto 2 kHz at 8 kHz) is 60 dB down or more.
+    /// LINK-13.1 (decision 330): the 2:1 step's half-band: flat to 4.5 kHz (within 0.2 dB), 5 kHz within 0.5 dB, 7
+    /// kHz (which would fold onto 5 kHz) 25 dB down or more, 8 kHz (onto 4 kHz) 55 dB, 10 kHz 60; and the packer
+    /// gives the reference's samples through the coder.
     #[test]
     fn above_the_band_is_filtered() {
-        let x = tone(6000.0, 24_000, 12_000.0);
-        let b = blocks(&x);
-        let mut out = [0i16; BLOCK];
-        let mut got = Vec::new();
-        for blk in &b[4..] {
-            decode(blk.start, &blk.codes, &mut out);
-            got.extend_from_slice(&out);
+        let level = |hz: f64| {
+            let y = halfband_ref(&tone(hz, 24_000, 12_000.0));
+            10.0 * (power(&y[600..]) / (12_000.0f64.powi(2) / 2.0)).log10()
+        };
+        for hz in [300.0, 1000.0, 2000.0, 3000.0, 4000.0, 4500.0] {
+            assert!(level(hz).abs() < 0.2, "{hz} Hz at {:.2} dB", level(hz));
         }
-        let db = 10.0 * (power(&got) / (12_000.0f64.powi(2) / 2.0)).log10();
-        assert!(db < -45.0, "6 kHz at {db:.1} dB");
+        assert!(level(5000.0).abs() < 0.5, "5 kHz at {:.2} dB", level(5000.0));
+        assert!(level(7000.0) < -25.0, "7 kHz at {:.1} dB", level(7000.0));
+        assert!(level(8000.0) < -55.0, "8 kHz at {:.1} dB", level(8000.0));
+        assert!(level(10_000.0) < -60.0, "10 kHz at {:.1} dB", level(10_000.0));
+        let x = tone(3000.0, 4_800, 12_000.0);
+        let got = samples(&blocks(&x));
+        let refx = halfband_ref(&x);
+        assert!(got.iter().zip(&refx).all(|(a, b)| *a == ulaw_decode(ulaw_encode(*b))));
     }
 
-    /// The coder's state stays in range on full-scale square waves and silence.
+    /// LINK-13.4, LINK-13.6 (decision 330): a block goes out as one link frame (196 bytes of payload, within the
+    /// link's 240) and reads back through the link's own parser to its bytes; a keep-alive has no codes; a payload
+    /// shorter than the head is none; too small a buffer for the wire is none.
     #[test]
-    fn coder_stays_in_range() {
-        let mut s = State::default();
-        for i in 0..10_000 {
-            let x = if (i / 7) % 2 == 0 { 32767 } else { -32768 };
-            let c = s.encode(x);
-            assert!(c < 16 && s.index <= 88);
-        }
-        let mut s = State::default();
-        for _ in 0..1000 {
-            s.encode(0);
-        }
-        assert!(s.pred.abs() < 64 && s.index == 0);
-    }
-
-    /// LINK-13.4: a block's payload reads back as written (head, start state, codes); a keep-alive has no codes; a
-    /// payload shorter than the head is none; an index past the table's end is held to 88.
-    #[test]
-    fn payload_round_trips() {
-        let mut codes = [0u8; BLOCK_BYTES];
-        codes.iter_mut().enumerate().for_each(|(i, c)| *c = i as u8);
-        let blk = Block { start: State { pred: -1234, index: 40 }, codes };
-        let mut p = [0u8; HEAD + BLOCK_BYTES];
-        assert_eq!(put(0x0102, 2, SQ_OPEN, Some(&blk), &mut p), HEAD + BLOCK_BYTES);
-        assert_eq!(get(&p), Some((0x0102, 2, SQ_OPEN, blk.start, &codes[..])));
-        let n = put(9, NO_SLOT, 0, None, &mut p);
-        assert_eq!(get(&p[..n]), Some((9, NO_SLOT, 0, State::default(), &[][..])));
+    fn block_frames_through_the_link() {
+        let b = blocks(&tone(440.0, 2 * 2 * BLOCK, 8_000.0));
+        assert_eq!(b.len(), 2);
+        let mut w = [0u8; crate::link::MAX_WIRE];
+        let n = frame(0x0203, 1, SQ_OPEN, Some(&b[1]), &mut w).unwrap();
+        assert!(HEAD + BLOCK <= crate::link::MAX_PAYLOAD && n <= crate::link::MAX_WIRE);
+        let mut wire: Vec<u8> = w[..n].iter().copied().filter(|&c| c != 0).collect(); // COBS: the 0 is the delimiter only
+        assert_eq!(wire.len(), n - 1);
+        let f = crate::link::parse(&mut wire).unwrap();
+        assert_eq!(f.ty, crate::link::msg::AUDIO_DATA);
+        assert_eq!(get(f.payload), Some((0x0203, 1, SQ_OPEN, &b[1][..])));
+        let mut p = [0u8; HEAD + BLOCK];
+        let k = put(9, NO_SLOT, 0, None, &mut p);
+        assert_eq!(get(&p[..k]), Some((9, NO_SLOT, 0, &[][..])));
         assert_eq!(get(&p[..HEAD - 1]), None);
-        p[6] = 200;
-        assert_eq!(get(&p[..HEAD]).unwrap().3.index, 88);
         let mut w = [0u8; 8];
-        assert_eq!(frame(1, 0, 0, Some(&blk), &mut w), None, "too small for the wire");
+        assert_eq!(frame(1, 0, 0, Some(&b[0]), &mut w), None, "too small for the wire");
     }
 
-    /// Decoding stops at the room given (two samples a byte); a fresh packer starts from the zero state.
+    /// A fresh packer gives silence for silence, a block every 384 inputs.
     #[test]
-    fn decode_into_short_room() {
-        let mut out = [0i16; 3];
-        assert_eq!(decode(State::default(), &[0x77, 0x77], &mut out), 3);
-        assert!(out[0] > 0 && out[1] > out[0] && out[2] > out[1], "a rising run: {out:?}");
+    fn silence_is_silence() {
         let mut v = Vec::new();
         let mut p = Packer::default();
-        for _ in 0..3 * BLOCK {
+        for _ in 0..2 * BLOCK + 1 {
             p.push(0, |b| v.push(*b));
         }
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].start, State::default());
+        assert!(v[0].iter().all(|&u| ulaw_decode(u) == 0));
     }
 }

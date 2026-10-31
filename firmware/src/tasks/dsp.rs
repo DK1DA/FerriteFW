@@ -66,7 +66,7 @@ pub static TXTEST: Signal<M, Option<(ferrite_core::txtest::Gen, ferrite_core::tx
 const RECHECK_HALVES: u32 = 5_000;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
-/// LINK-13.4: blocks made; dropped (the queue below full: the cable's ring had no room for 192 ms); and the times
+/// LINK-13.4: blocks made; dropped (the queue below full: the cable's ring had no room for 128 ms); and the times
 /// a block waited (the ring full, or a thread-mode writer mid-frame). The readback's `audio` line.
 pub static AUDIO_MADE: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_DROPS: AtomicU32 = AtomicU32::new(0);
@@ -78,10 +78,11 @@ pub static AUDIO_PEAK: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_GAIN: AtomicU32 = AtomicU32::new(ferrite_core::rxlevel::UNITY as u32);
 /// The peak's window, in 2 ms capture halves: one second.
 const PEAK_HALVES: u32 = 500;
-/// Decision 290: blocks waiting for room in `TERM_OUT`, at most this many (192 ms), each with what it was heard from.
-const AUDIO_QUEUE: usize = 6;
+/// Decision 290: blocks waiting for room in `TERM_OUT`, at most this many (128 ms of 16 ms blocks, decision 330),
+/// each with what it was heard from.
+const AUDIO_QUEUE: usize = 8;
 /// A keep-alive this many blocks apart while nothing is heard (about 1 s, LINK-13.4).
-const KEEPALIVE_BLOCKS: u8 = 31;
+const KEEPALIVE_BLOCKS: u8 = (ferrite_core::rxaudio::RATE_HZ as usize / ferrite_core::rxaudio::BLOCK) as u8;
 
 /// Decision 290: the DSP task's own sender of receive audio. Blocks are framed and put straight into the cable's
 /// output ring (its transmit interrupt sends them), never waiting for the UI task, whose redraws took longer than
@@ -97,8 +98,7 @@ struct AudioOut {
 
 impl AudioOut {
     fn new() -> Self {
-        let blank = ferrite_core::rxaudio::Block { start: Default::default(), codes: [0; ferrite_core::rxaudio::BLOCK_BYTES] };
-        AudioOut { q: [(blank, 0); AUDIO_QUEUE], head: 0, n: 0, seq: 0, quiet: 0 }
+        AudioOut { q: [([0; ferrite_core::rxaudio::BLOCK], 0); AUDIO_QUEUE], head: 0, n: 0, seq: 0, quiet: 0 }
     }
 
     /// One whole frame into `TERM_OUT`, or nothing (`false`).
@@ -166,7 +166,7 @@ fn to_cable(w: &[u8]) -> bool {
 #[cfg(feature = "bench")]
 const RAW_QUEUE: usize = 3;
 
-/// LINK-13.9: the bench's raw receive audio, framed and sent by this task as the ADPCM stream is: every block,
+/// LINK-13.9: the bench's raw receive audio, framed and sent by this task as the listening stream is: every block,
 /// whatever the squelch; the oldest dropped when the queue is full (the PC sees the gap in the sample index).
 #[cfg(feature = "bench")]
 struct RawOut {
@@ -216,13 +216,13 @@ impl RawOut {
     }
 }
 
-/// LINK-13.4, LINK-13.9: the stream to the PC. One place in the task's future for either: the raw stream's coder
-/// and queue sit where the ADPCM stream's do (24 bytes more in a bench build). Boxing a variant isn't an option
-/// here: the room is the task's static future, held whichever runs.
+/// LINK-13.4, LINK-13.9: the stream to the PC. One place in the task's future for any: the raw stream's coder and
+/// queue sit where the listening stream's do. Boxing a variant isn't an option here: the room is the task's static
+/// future, held whichever runs.
 #[allow(clippy::large_enum_variant)]
 enum Stream {
     Off,
-    Adpcm { pack: ferrite_core::rxaudio::Packer, sender: AudioOut, agc: ferrite_core::rxlevel::Agc },
+    Listen { pack: ferrite_core::rxaudio::Packer, sender: AudioOut, agc: ferrite_core::rxlevel::Agc },
     #[cfg(feature = "bench")]
     Raw(RawOut),
 }
@@ -233,7 +233,7 @@ impl Stream {
             0 => Stream::Off,
             #[cfg(feature = "bench")]
             m if ferrite_core::rawaudio::rate(m).is_some() => Stream::Raw(RawOut::new(m)),
-            _ => Stream::Adpcm { pack: ferrite_core::rxaudio::Packer::new(), sender: AudioOut::new(), agc: ferrite_core::rxlevel::Agc::new() },
+            _ => Stream::Listen { pack: ferrite_core::rxaudio::Packer::new(), sender: AudioOut::new(), agc: ferrite_core::rxlevel::Agc::new() },
         }
     }
 }
@@ -283,7 +283,7 @@ pub async fn task() {
     // What each side asks for, and what runs (DEC-18).
     let (mut aprs, mut pager, mut running) = (DecoderKind::Off, false, DecoderKind::Off);
     // LINK-13.4: receive audio for the PC, coded from the same samples the decoder gets (the `AUDIO` mode: 0 none, 1
-    // ADPCM, 2 or 3 the bench's raw stream, LINK-13.9). LINK-13.8: the ADPCM stream's gain is its own, ahead of its
+    // µ-law, 2 or 3 the bench's raw stream, LINK-13.9). LINK-13.8: the listening stream's gain is its own, ahead of its
     // coder only (the decoders take the samples as they are).
     let mut listen = 0u8;
     let mut stream = Stream::Off;
@@ -389,7 +389,7 @@ pub async fn task() {
                 }
                 match &mut stream {
                     Stream::Off => {}
-                    Stream::Adpcm { pack, sender, agc } => {
+                    Stream::Listen { pack, sender, agc } => {
                         // LINK-13.8: scaled for the PC only, held while nothing is heard
                         let open = ferrite_core::rxaudio::unpack_source(crate::chan::AUDIO_SRC.load(Relaxed)).1 & ferrite_core::rxaudio::SQ_OPEN != 0;
                         let mut y = out;

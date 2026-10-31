@@ -1153,36 +1153,19 @@ def main():
         port.close()
 
 
-# LINK-13.4: IMA ADPCM, as ferrite_core::rxaudio codes it (the standard tables)
-IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
-            107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724,
-            796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026,
-            4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500,
-            20350, 22385, 24623, 27086, 29794, 32767]
-IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8]
-
-
-def ima_decode(pred, index, codes):
-    """One AUDIO_DATA block's codes (two a byte, low nibble first) to 16-bit samples, from the block's own state."""
+# LINK-13.4 (decision 330): G.711 µ-law, as ferrite_core::rxaudio codes it
+def ulaw_decode(codes):
+    """One AUDIO_DATA block's codes (a byte a sample) to 16-bit samples."""
     out = []
-    for b in codes:
-        for c in (b & 15, b >> 4):
-            step = IMA_STEP[index]
-            d = step >> 3
-            if c & 4:
-                d += step
-            if c & 2:
-                d += step >> 1
-            if c & 1:
-                d += step >> 2
-            pred = max(-32768, min(32767, pred - d if c & 8 else pred + d))
-            index = max(0, min(88, index + IMA_INDEX[c & 7]))
-            out.append(pred)
+    for u in codes:
+        u = ~u & 0xFF
+        t = (((u & 15) << 3) + 0x84) << ((u >> 4) & 7)
+        out.append(0x84 - t if u & 0x80 else t - 0x84)
     return out
 
 
 def audio(link, seconds, path):
-    """LINK-13.4: listen to the radio's receive audio over the cable for SECONDS into a WAV (8 kHz, 16-bit mono):
+    """LINK-13.4: listen to the radio's receive audio over the cable for SECONDS into a WAV (12 kHz, 16-bit mono):
     blocks while a squelch is open (silence for the gaps between, so the file keeps time), keep-alives otherwise."""
     import wave
     rest = link.ok(AUDIO, b"\x01")
@@ -1196,18 +1179,18 @@ def audio(link, seconds, path):
             while link.audio:
                 p = link.audio.pop(0)
                 nbytes += len(p) + 6
-                seq, slot, flags, pred = struct.unpack("<HBBh", p[:6])
+                seq, slot, flags = struct.unpack("<HBB", p[:4])
                 if last_seq is not None and (seq - last_seq) & 0xFFFF > 1:
                     lost += ((seq - last_seq) & 0xFFFF) - 1
                 last_seq = seq
                 now = time.time()
-                if len(p) == 7:
+                if len(p) == 4:
                     keep += 1
                     gap = int((now - last_at) * rate)  # nothing heard: silence of the right length
                     samples.extend([0] * max(0, gap))
                 else:
                     blocks += 1
-                    samples.extend(ima_decode(pred, p[6], p[7:]))
+                    samples.extend(ulaw_decode(p[4:]))
                 last_at = now
             if time.time() - renew >= 3.0:
                 link.send(AUDIO, b"\x01")  # keeps the session active (LINK-13.5: a quiet one stops listening)

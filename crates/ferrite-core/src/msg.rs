@@ -276,7 +276,7 @@ pub enum DspCmd {
     /// APRS's AFSK first, the pager decoder when APRS doesn't want it (DEC-18).
     Pager(bool),
     /// LINK-13.4: receive audio wanted for the PC (the cable's session listens): the capture runs for it too, and
-    /// the DSP task sends its blocks. The `AUDIO` request's mode: 0 off, 1 the 8 kHz ADPCM stream, 2 or 3 the bench's
+    /// the DSP task sends its blocks. The `AUDIO` request's mode: 0 off, 1 the 12 kHz µ-law stream, 2 or 3 the bench's
     /// raw stream (LINK-13.9, [`crate::rawaudio`]).
     Audio(u8),
     Beep { hz: u16, ms: u16 },

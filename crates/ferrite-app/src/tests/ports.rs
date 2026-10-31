@@ -466,16 +466,16 @@ fn compression_first_come_first_served() {
 /// `HELLO`, or the session going quiet, stops it.
 #[test]
 fn receive_audio_cable_only_and_opt_in() {
-    use ferrite_core::rxaudio::{self, Block, State, BLOCK_BYTES, NO_SLOT, SQ_OPEN};
+    use ferrite_core::rxaudio::{self, Block, NO_SLOT, SQ_OPEN};
     let mut r = Rig::new();
     assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
     assert_eq!(r.p.audio_wanted(r.now), 0, "off until asked");
     assert_eq!(r.ask(Port::Bt, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
     assert_eq!(r.ask(Port::Bt, msg::AUDIO, &[1]), Status::Refused as u8, "Bluetooth can't carry it");
     let (s, rest) = r.ask_full(Port::Cable, msg::AUDIO, &[1]);
-    assert_eq!((s, rest), (0, std::vec![0x40, 0x1F, 0, 1]), "8000 Hz, 256 samples a block");
+    assert_eq!((s, rest), (0, std::vec![0xE0, 0x2E, 192, 0]), "12000 Hz, 192 samples a block (decision 330)");
     assert_eq!(r.p.audio_wanted(r.now), 1);
-    let blk = Block { start: State { pred: -5, index: 9 }, codes: [0x37; BLOCK_BYTES] };
+    let blk: Block = core::array::from_fn(|i| i as u8);
     let frames = |o: &mut Out| -> Vec<Vec<u8>> {
         let mut v = Vec::new();
         for raw in core::mem::take(&mut o.0).split(|&b| b == 0).filter(|f| !f.is_empty()) {
@@ -491,12 +491,12 @@ fn receive_audio_cable_only_and_opt_in() {
     r.p.audio(&blk, &live, r.now + 2100, &mut r.cable); // and not again within the second
     let k = frames(&mut r.cable);
     assert_eq!(k.len(), 1);
-    assert_eq!(rxaudio::get(&k[0]).map(|(_, slot, fl, _, codes)| (slot, fl, codes.len())), Some((NO_SLOT, 0, 0)));
+    assert_eq!(rxaudio::get(&k[0]).map(|(_, slot, fl, codes)| (slot, fl, codes.len())), Some((NO_SLOT, 0, 0)));
     live.slots[1].squelch_open = true;
     r.p.audio(&blk, &live, r.now + 2132, &mut r.cable);
     let b = frames(&mut r.cable);
-    let (seq, slot, fl, st, codes) = rxaudio::get(&b[0]).unwrap();
-    assert_eq!((seq, slot, fl, st, codes), (1, 1, SQ_OPEN, blk.start, &blk.codes[..]), "the block, slot B heard");
+    let (seq, slot, fl, codes) = rxaudio::get(&b[0]).unwrap();
+    assert_eq!((seq, slot, fl, codes), (1, 1, SQ_OPEN, &blk[..]), "the block, slot B heard");
     assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
     assert_eq!(r.p.audio_wanted(r.now), 0, "a HELLO ends it");
     assert_eq!(r.ask(Port::Cable, msg::AUDIO, &[1]), 0);
@@ -504,7 +504,7 @@ fn receive_audio_cable_only_and_opt_in() {
 }
 
 /// LINK-13.9: the raw stream (`AUDIO` 2, 12 kHz; 3, 16 kHz) is a bench build's only: a user build refuses it and
-/// keeps not listening; a bench build answers its rate and block and listens in that mode, which the ADPCM path
+/// keeps not listening; a bench build answers its rate and block and listens in that mode, which the µ-law path
 /// ([`Ports::audio`]) leaves to the DSP task.
 #[test]
 fn raw_audio_bench_only() {
@@ -518,8 +518,8 @@ fn raw_audio_bench_only() {
             want.extend_from_slice(&(BLOCK as u16).to_le_bytes());
             assert_eq!((s, rest), (0, want));
             assert_eq!(r.p.audio_wanted(r.now), m);
-            r.p.audio(&ferrite_core::rxaudio::Block { start: Default::default(), codes: [0; ferrite_core::rxaudio::BLOCK_BYTES] }, &LiveAll::default(), r.now + 2000, &mut r.cable);
-            assert!(r.cable.0.is_empty(), "no ADPCM keep-alive in a raw mode");
+            r.p.audio(&[0; ferrite_core::rxaudio::BLOCK], &LiveAll::default(), r.now + 2000, &mut r.cable);
+            assert!(r.cable.0.is_empty(), "no µ-law keep-alive in a raw mode");
         } else {
             assert_eq!(s, Status::Refused as u8);
             assert_eq!(r.p.audio_wanted(r.now), 0);
@@ -555,7 +555,6 @@ impl Rig {
 /// session asked.
 #[test]
 fn receive_audio_without_room_is_counted() {
-    use ferrite_core::rxaudio::{Block, State, BLOCK_BYTES};
     struct Full;
     impl Sink for Full {
         fn room(&self) -> usize {
@@ -571,7 +570,7 @@ fn receive_audio_without_room_is_counted() {
     assert!(r.p.listening());
     let mut live = LiveAll::default();
     live.slots[0].squelch_open = true;
-    let blk = Block { start: State { pred: 0, index: 0 }, codes: [0; BLOCK_BYTES] };
+    let blk = [0u8; ferrite_core::rxaudio::BLOCK];
     assert_eq!(r.p.audio_noroom(), 0);
     r.p.audio(&blk, &live, r.now, &mut Full);
     r.p.audio(&blk, &live, r.now + 32, &mut Full);
