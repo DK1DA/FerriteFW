@@ -253,7 +253,7 @@ fn aprs_events() {
     pc.aprs_second();
     pc.aprs_second();
     assert!(pc.events(2000).is_empty());
-    assert_eq!(pc.ask(msg::SUBSCRIBE, &[0x08]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::SUBSCRIBE, &[0x10]).0, Status::BadArg as u8);
 }
 
 #[derive(Default)]
@@ -362,4 +362,37 @@ fn message_delete() {
     assert!((0..pc.st.messages()).all(|i| pc.st.message(i).is_some_and(|m| m.text.as_bytes() != b"On my way")));
     assert_eq!(pc.ask(msg::MSG_DELETE, &del(true, b"VE3KPW-9", b"On my way")).0, Status::Invalid as u8, "gone");
     assert_eq!(pc.ask(msg::MSG_DELETE, &[1, 3, b'A']).0, Status::BadArg as u8);
+}
+
+/// LINK-57: subscribed to the event log, the session is sent each event logged after the subscription, oldest
+/// first, as `LOG_READ` gives it (its sequence number first, the next after the one before); none of the ones
+/// before it; nothing without the bit.
+#[test]
+fn event_log_events() {
+    let mut pc = Pc::new(true);
+    let (s, a) = pc.ask(msg::SUBSCRIBE, &[ev::SUB_LOG]);
+    assert_eq!((s, a[0]), (0, ev::SUB_LOG));
+    assert!(pc.events(500).is_empty(), "the events logged before aren't sent");
+    let top = pc.st.event_seq(0).unwrap() + 1;
+    pc.st.log_dtmf();
+    pc.st.log_dtmf();
+    pc.st.log_dtmf();
+    let mut got = Vec::new();
+    for _ in 0..4 {
+        for e in pc.events(300) {
+            assert_eq!(e[0], ev::LOG);
+            let seq = u32::from_le_bytes(e[1..5].try_into().unwrap());
+            assert_eq!(e[9], crate::data::Src::Dtmf as u8, "the source");
+            let (nl, at) = (e[1 + ferrite_core::link::LOG_FIXED] as usize, 2 + ferrite_core::link::LOG_FIXED);
+            let tl = e[at + nl] as usize;
+            got.push((seq, std::string::String::from_utf8(e[at + nl + 1..at + nl + 1 + tl].to_vec()).unwrap()));
+        }
+        pc.ask(msg::SUBSCRIBE, &[ev::SUB_LOG, 0, ev::RENEW]);
+    }
+    let want: Vec<(u32, std::string::String)> = (0..3).map(|k| (top + k, std::format!("*7{k}#"))).collect();
+    assert_eq!(got, want, "oldest first, each once");
+    // without the bit: nothing
+    pc.ask(msg::SUBSCRIBE, &[ev::SUB_HEARD]);
+    pc.st.log_dtmf();
+    assert!(pc.events(500).is_empty());
 }

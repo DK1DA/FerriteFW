@@ -688,7 +688,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION]); // LINK-35.2
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS]); // LINK-35.2
         Status::Ok
     }
 
@@ -771,7 +771,7 @@ impl Session {
     /// assembled is dropped.
     fn write_many(&mut self, p: &[u8]) -> Status {
         let Some((&w, recs)) = p.split_first() else { return Status::BadArg };
-        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION) {
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION | what::QUICK | what::WAYPOINT | what::DTMF) {
             return Status::BadArg; // the settings are one record, larger than a frame: WRITE
         }
         let mut r = recs;
@@ -1081,8 +1081,9 @@ fn settings_record(app: &App, w: &mut Window) -> usize {
 }
 
 /// Settings the link never changes (LINK-5): the region, Extend TX, the PIN, setup, the cable port (the link
-/// would lose its own port) and the spare bytes. Dry TX (TX-48) isn't in the record at all. A written record keeps the radio's. The callsign is written, in
-/// capitals as on the radio (LINK-26, decision 77: as nicFW's RMS writes it).
+/// would lose its own port), the KISS port and the spare bytes. Dry TX (TX-48) isn't in the record at all. A written
+/// record keeps the radio's. The callsign is written, in capitals as on the radio (LINK-26, decision 77: as nicFW's
+/// RMS writes it). Low Power Mode and its Auto level are written (PWR-24.1, decision 328).
 fn keep_protected(new: &mut Settings, old: &Settings) {
     let call = new.callsign;
     new.set_callsign(call.as_bytes());
@@ -1095,9 +1096,6 @@ fn keep_protected(new: &mut Settings, old: &Settings) {
     new.spare_tokens = [0; 30];
     new.spare_temp = 0;
     new.spare_lock = 0;
-    // PWR-24: Low Power Mode and its Auto level sit in what was spare; a writer that doesn't know them (the
-    // Console so far) would zero them, so the radio's stay.
-    (new.lpm, new.lpm_below) = (old.lpm, old.lpm_below);
 }
 
 fn channel_save(c: &Channel, s: &mut dyn PSink) {
@@ -1178,6 +1176,7 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             }
             None => return Status::NotFound,
         },
+        what::QUICK | what::WAYPOINT | what::DTMF => return lists::record(st, w, idx, win), // LINK-54 – LINK-56
         _ => return Status::BadArg,
     }
     Status::Ok
@@ -1213,7 +1212,7 @@ fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
         what::ZONE => Some(st.zones() as u16),
         what::PRESET => Some(st.data().presets() as u16),
         what::CONTACT => Some(st.data().contacts()),
-        _ => None,
+        _ => lists::indexes(st, w),
     }
 }
 
@@ -1225,13 +1224,14 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
         what::CHANNEL | what::POSITION => st.zone_of(i).is_some(),
         what::ZONE => st.zone_name(i as u8).is_some(),
         what::CONTACT => i < st.data().contacts(),
+        what::QUICK | what::WAYPOINT | what::DTMF => lists::held(st, w, i),
         _ => st.data().preset(i as u8).is_some(),
     }
 }
 
 /// `USED` (LINK-39): the index count, then the bitmap of the ones holding a record.
 fn used<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
-    let Some(w) = p.first().copied().filter(|&w| w != what::POSITION) else { return Status::BadArg }; // LINK-53: READ_MANY
+    let Some(w) = p.first().copied().filter(|&w| w < what::POSITION) else { return Status::BadArg }; // LINK-53 – LINK-56: READ_MANY
     let Some(n) = indexes(st, w) else { return Status::BadArg };
     o.put(&n.to_le_bytes());
     let mut byte = 0u8;
@@ -1286,7 +1286,6 @@ fn log_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
 
 /// [`log_read`], and for a stream (LINK-50) the `before` to go on from when older records are left.
 fn log_read_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Option<u32>) {
-    use ferrite_core::link::{LOG_FIXED, LOG_POS, LOG_UNREAD};
     let Some(b) = p.get(..4) else { return (Status::BadArg, None) };
     let before = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
     let most = p.get(4).copied().filter(|&m| m > 0).unwrap_or(u8::MAX);
@@ -1301,25 +1300,9 @@ fn log_read_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Optio
     let mut last = None;
     while i < kept && n < most {
         if let (Some(e), Some(seq)) = (d.event(i), d.event_seq(i)) {
-            let (nm, tx) = (e.name.as_bytes(), e.text.as_bytes());
-            let k = LOG_FIXED + if e.pos.is_some() { 8 } else { 0 } + 2 + nm.len() + tx.len();
-            if o.n + k > MAX_PAYLOAD {
+            if !log_record(o, seq, &e) {
                 break;
             }
-            o.put(&seq.to_le_bytes());
-            o.put(&e.ago_s.to_le_bytes());
-            let flags = if e.unread { LOG_UNREAD } else { 0 } | if e.pos.is_some() { LOG_POS } else { 0 };
-            o.put(&[e.src as u8, e.slot, flags]);
-            o.put(&e.freq.to_le_bytes());
-            o.put(&e.id.to_le_bytes());
-            o.put(&e.x.to_le_bytes());
-            o.put(&e.y.to_le_bytes());
-            if let Some(ps) = e.pos {
-                o.put(&ps.lat.to_le_bytes());
-                o.put(&ps.lon.to_le_bytes());
-            }
-            o.text(nm);
-            o.text(tx);
             n += 1;
             last = Some(seq);
         }
@@ -1327,6 +1310,32 @@ fn log_read_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Optio
     }
     o.a[count] = n;
     (Status::Ok, last.filter(|_| i < kept))
+}
+
+/// One event log record (LINK-42) as `LOG_READ` and the event log's `EVENT` (LINK-57) give it; false (nothing put)
+/// when it doesn't fit.
+fn log_record(o: &mut Out, seq: u32, e: &crate::data::Event) -> bool {
+    use ferrite_core::link::{LOG_FIXED, LOG_POS, LOG_UNREAD};
+    let (nm, tx) = (e.name.as_bytes(), e.text.as_bytes());
+    let k = LOG_FIXED + if e.pos.is_some() { 8 } else { 0 } + 2 + nm.len() + tx.len();
+    if o.n + k > MAX_PAYLOAD {
+        return false;
+    }
+    o.put(&seq.to_le_bytes());
+    o.put(&e.ago_s.to_le_bytes());
+    let flags = if e.unread { LOG_UNREAD } else { 0 } | if e.pos.is_some() { LOG_POS } else { 0 };
+    o.put(&[e.src as u8, e.slot, flags]);
+    o.put(&e.freq.to_le_bytes());
+    o.put(&e.id.to_le_bytes());
+    o.put(&e.x.to_le_bytes());
+    o.put(&e.y.to_le_bytes());
+    if let Some(ps) = e.pos {
+        o.put(&ps.lat.to_le_bytes());
+        o.put(&ps.lon.to_le_bytes());
+    }
+    o.text(nm);
+    o.text(tx);
+    true
 }
 
 /// LINK-41.1: room for one more record of a `WRITE_MANY` of `what`: the App holds no write, and for a channel the
@@ -1345,6 +1354,9 @@ fn apply_settings(app: &mut App, rec: &[u8]) -> Status {
     keep_protected(&mut new, &old);
     *app.set = new;
     app.send_radio_settings();
+    if new.lpm != old.lpm {
+        app.set_lpm_mode(new.lpm); // PWR-24.1: as the menu turns it (On goes in, Off comes out)
+    }
     Status::Ok
 }
 
@@ -1504,10 +1516,12 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             request(st, Op::SaveContact(c))
         }
+        what::QUICK | what::WAYPOINT | what::DTMF => lists::apply(st, w, idx, rec, o), // LINK-54 – LINK-56
         _ => Status::Refused, // nothing else is written over the link (LINK-3)
     }
 }
 
+mod lists;
 mod sub;
 pub mod z;
 /// LINK-43: the APRS record's length, for Ferrite Console (which reads its layout from this crate).

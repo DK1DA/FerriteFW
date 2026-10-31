@@ -173,3 +173,39 @@ fn a_console_position_import() {
     assert!(s.apply(ChanWrite::Pos { num: 6, pos: Some(at(6)) }));
     assert!(s.get(6).is_none() && s.position(6).is_none(), "no channel at 6: nothing made");
 }
+
+/// LINK-54 – LINK-56 (decision 327): Console writing the lists. 256 waypoints added and 16 DTMF memories with names
+/// set on a blank store are programmed only (no erase); one waypoint replaced, one deleted, one DTMF memory renamed
+/// each rewrite one sector once (through the scratch ring); a quick message saves the APRS record (one erase of one
+/// of its two copies), as the radio's own editors do. The link writes nothing for a record as stored.
+#[test]
+fn console_writes_the_lists() {
+    use ferrite_app::data::Dtmf;
+    let s: Store = FlashStore::mount(SimFlash::new(), NoData);
+    let wp = |n: u32| Waypoint { name: Buf::from(format!("WP {n}").as_bytes()), pos: Pos { lat: n as i32 * 1000, lon: -(n as i32) }, src: WpSrc::Link };
+    let before = s.nor().erases.clone();
+    for n in 0..256 {
+        assert!(s.request(Op::PutWaypoint(ferrite_core::link::ADD, wp(n))));
+    }
+    assert!(!s.request(Op::PutWaypoint(ferrite_core::link::ADD, wp(999))), "256 at most");
+    for i in 0..16u8 {
+        assert!(s.request(Op::Dtmf(i, Dtmf::parse(b"*79#"))));
+        assert!(s.request(Op::DtmfName(i, Buf::from(b"Link on"))));
+    }
+    assert_eq!(s.nor().erases, before, "added to blank flash: programmed only");
+    assert_eq!((s.waypoints(), s.waypoint(0), s.waypoint(255)), (256, Some(wp(255)), Some(wp(0))));
+    let before = s.nor().erases.clone();
+    assert!(s.request(Op::PutWaypoint(10, wp(1000))));
+    assert_eq!((s.waypoint(10), s.waypoint(9), s.waypoint(11), s.waypoints()), (Some(wp(1000)), Some(wp(246)), Some(wp(244)), 256), "in its place");
+    assert!(s.request(Op::PutWaypoint(10, wp(1000))), "as stored: nothing to do");
+    assert!(s.request(Op::DtmfName(3, Buf::from(b"IRLP 3500"))));
+    let w = worst(&before, &s.nor().erases);
+    let most = w.iter().filter(|(s, _)| region(*s) == "other").map(|x| x.1).max().unwrap_or(0);
+    println!("a waypoint replaced and a DTMF name changed: {w:?}");
+    assert!(most <= 1, "a list sector took {most} erases: {w:?}");
+    assert_eq!(s.dtmf_name(3).as_bytes(), b"IRLP 3500");
+    let before = s.nor().erases.clone();
+    assert!(s.request(Op::Quick(0, Some(Buf::from(b"At the club")))));
+    let n: u32 = worst(&before, &s.nor().erases).iter().filter(|(s, _)| region(*s) != "scratch ring").map(|x| x.1).sum();
+    assert_eq!(n, 1, "a quick message: one erase of one APRS record copy");
+}

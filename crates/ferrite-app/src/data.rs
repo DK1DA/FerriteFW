@@ -190,7 +190,7 @@ pub struct Contact {
 }
 
 /// A waypoint (GPS-10).
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Waypoint {
     pub name: Buf<16>,
     pub pos: Pos,
@@ -394,6 +394,9 @@ pub enum Op {
     DtmfName(u8, Buf<10>),
     /// A waypoint typed as a grid square, at its centre, named with it (GPS-21).
     AddWaypoint(Pos, Buf<16>),
+    /// From the link (LINK-55): waypoint i (newest first) replaced, or with i [`ferrite_core::link::ADD`] (any i
+    /// past the last) added as the newest; refused when the store is full.
+    PutWaypoint(u16, Waypoint),
     /// A contact added, or renamed by its callsign (APRS-37); refused when the book is full.
     SaveContact(Contact),
     DeleteContact(Buf<10>),

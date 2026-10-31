@@ -6,7 +6,7 @@
 </p>
 
 <p align="center"><b>Free firmware for the Radtel RT-950 Pro</b>, source public, in Rust on Embassy.</p>
-<p align="center"><a href="https://www.radtels.com/products/radtel-rt-950-pro-27mhz-tx-rx-10w-walkie-talkie-am-fm-usb-lsb-cw-receive-gps-aprs-wireless-bluetooth-phone-programming-noaa-two-way-radio?ref=FERRITEFW&variant=44669996794064">Get the RT-950 Pro from Radtel</a> (affiliate link: buying through it supports Ferrite, at no extra cost to you)</p>
+<p align="center"><a href="https://www.radtels.com/products/radtel-rt-950-pro-27mhz-tx-rx-10w-walkie-talkie-am-fm-usb-lsb-cw-receive-gps-aprs-wireless-bluetooth-phone-programming-noaa-two-way-radio?ref=FERRITEFW&variant=44669996794064">Get the RT-950 Pro from Radtel</a></p>
 
 <p align="center">Help and questions: <a href="https://discord.gg/fYygBVD2Kx">the Ferrite Discord</a>.</p>
 

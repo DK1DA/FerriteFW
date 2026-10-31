@@ -196,6 +196,11 @@ pub mod caps {
     pub const TEXTS: u8 = 32;
     /// Channel positions by `READ_MANY` and `WRITE_MANY` of [`super::what::POSITION`] (LINK-53, decision 325).
     pub const POSITION: u8 = 64;
+    /// The quick messages, waypoints and DTMF memories by `READ_MANY` and `WRITE_MANY` ([`super::what::QUICK`],
+    /// [`super::what::WAYPOINT`], [`super::what::DTMF`]) and `SUBSCRIBE`'s event log ([`super::event::SUB_LOG`]):
+    /// LINK-54 – LINK-57, decision 327. The byte's last bit: a capability after these goes in a second byte after
+    /// this one (a client that reads only the first sees none of them).
+    pub const LISTS: u8 = 128;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -204,6 +209,8 @@ pub mod event {
     pub const SUB_HEARD: u8 = 1;
     pub const SUB_MSGS: u8 = 2;
     pub const SUB_UI: u8 = 4;
+    /// New event log entries (LINK-57): only from a radio that says [`super::caps::LISTS`].
+    pub const SUB_LOG: u8 = 8;
     /// `SUBSCRIBE`'s flags bit: keep the Live View stream as it is (a keepalive); without it a UI subscription starts
     /// over with the whole state.
     pub const RENEW: u8 = 1;
@@ -218,6 +225,8 @@ pub mod event {
     pub const MSG_STATE: u8 = 3;
     /// Live View: the UI's compact state or what changed ([`crate::liveview`]).
     pub const UI: u8 = 4;
+    /// A new event log entry (LINK-57): the record as `LOG_READ` gives it (its sequence number first).
+    pub const LOG: u8 = 5;
     /// The UI's least gap by default: Bluetooth 500 ms, the cable 200 ms; at least 100 ms.
     pub const UI_GAP_BT_MS: u32 = 500;
     pub const UI_GAP_CABLE_MS: u32 = 200;
@@ -369,7 +378,24 @@ pub mod what {
     /// little-endian, 1e-7 degree, north and east positive), 8 bytes. `READ_MANY` gives only the channels that have
     /// one; a `WRITE_MANY` record of length 0 clears it. Only from radios that say [`super::caps::POSITION`].
     pub const POSITION: u8 = 7;
+    /// A quick message, 0-8 (LINK-54, TEXT-7): flags (bit 0 [`super::QUICK_OWN`]: the owner's own text; clear: the
+    /// factory text), then the text (0-67 bytes). Only from radios that say [`super::caps::LISTS`].
+    pub const QUICK: u8 = 8;
+    /// A waypoint, newest first, 0-255 (LINK-55, GPS-10): name (16 bytes, 0-padded), latitude and longitude (i32
+    /// each, 1e-7 degree), source (u8: 0 marked, 1 APRS, 2 link, 3 grid): [`super::WAYPOINT_LEN`] bytes. A
+    /// `WRITE_MANY` record replaces the waypoint at its index, adds one at [`super::ADD`], deletes with length 0.
+    pub const WAYPOINT: u8 = 9;
+    /// A DTMF memory, 0-15 (LINK-56, DTMF-12): the symbols (length u8, then 1-16 of `0-9 A-D * #`), then the name
+    /// (the rest, 0-10 bytes). Only the memories set are listed; a record of length 0 clears one.
+    pub const DTMF: u8 = 10;
 }
+
+/// A quick message record's flags (LINK-54): the text is the owner's own (clear: the factory text).
+pub const QUICK_OWN: u8 = 1;
+/// A waypoint record's length (LINK-55).
+pub const WAYPOINT_LEN: usize = 25;
+/// `WRITE_MANY`'s index for a new waypoint (LINK-55): added as the newest.
+pub const ADD: u16 = 0xFFFF;
 
 /// The first byte of every answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

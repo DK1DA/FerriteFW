@@ -2658,3 +2658,30 @@ fn usage_texts_fit_the_answer() {
         }
     }
 }
+
+/// TEXT-7: `quick N` shows a quick message ("factory" after the factory text), `quick N "text"` sets it, `quick N
+/// factory` puts the factory text back; | ~ { and a 68th character are refused, as is a tenth one; `quick N` alone
+/// only reads (TERM-25), and a dump's load doesn't take it.
+#[test]
+fn quick_messages_in_the_terminal() {
+    use crate::data::Data;
+    let mut r = Rig::main();
+    r.cmd("quick 1");
+    assert_eq!(r.bottom().trim(), std::format!("quick 1 \"{}\" factory", std::str::from_utf8(crate::words::quick(0)).unwrap()));
+    r.cmd("quick 3 \"Meet at \\\"the\\\" club\"");
+    assert!(r.bottom().contains("Quick message 3 saved"), "{}", r.bottom());
+    assert_eq!(r.store.quick(2), Some(Buf::from(b"Meet at \"the\" club")));
+    r.cmd("quick 3");
+    assert_eq!(r.bottom().trim(), "quick 3 \"Meet at \\\"the\\\" club\"");
+    r.cmd("quick 3 \"Meet at \\\"the\\\" club\"");
+    assert!(r.bottom().contains("unchanged"), "{}", r.bottom());
+    for bad in ["quick 3 \"a|b\"", "quick 10 \"x\"", "quick 3 maybe"] {
+        r.cmd(bad);
+        assert_eq!(r.store.quick(2), Some(Buf::from(b"Meet at \"the\" club")), "{bad}: {}", r.bottom());
+    }
+    r.cmd(&std::format!("quick 3 \"{}\"", "x".repeat(68)));
+    assert!(r.bottom().contains("67 characters"), "{}", r.bottom());
+    r.cmd("quick 3 factory");
+    assert_eq!(r.store.quick(2), None);
+    assert!(!crate::term::cmd::writes(b"quick 3") && crate::term::cmd::writes(b"quick 3 factory"));
+}

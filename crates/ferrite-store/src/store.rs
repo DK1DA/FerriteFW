@@ -95,6 +95,8 @@ pub enum Job {
     MsgDelete { seq: u32 },
     Waypoint(Waypoint),
     DeleteWaypoint(Waypoint),
+    /// LINK-55: the newest waypoint equal to the first replaced by the second, in its place.
+    SetWaypoint(Waypoint, Waypoint),
     Contact(Contact),
     DeleteContact(Buf<10>),
     /// The APRS settings (kept in RAM since their last change) and the quick messages.
@@ -544,6 +546,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             },
             Job::Waypoint(w) => self.wps.add(&self.f, &w).await.unwrap_or(false),
             Job::DeleteWaypoint(w) => self.wps.delete(&self.f, &w).await.unwrap_or(false),
+            Job::SetWaypoint(old, new) => self.wps.replace(&self.f, &old, &new).await.unwrap_or(false),
             Job::Contact(c) => self.contacts.put(&self.f, &c).await.unwrap_or(false),
             Job::DeleteContact(c) => self.contacts.delete(&self.f, c.as_bytes()).await.unwrap_or(false),
             Job::AprsSave => self.aprs_save(None).await.is_ok(),
@@ -1445,6 +1448,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::DeleteWaypoint(i) => match self.wps.get(&self.f, i) {
                 Some(w) => self.submit(Job::DeleteWaypoint(w)),
                 None => false,
+            },
+            // LINK-55: in its place (one sector rewritten), or added as the newest (programmed only)
+            Op::PutWaypoint(i, w) => match self.wps.get(&self.f, i) {
+                Some(old) if old == w => true,
+                Some(old) => self.submit(Job::SetWaypoint(old, w)),
+                None => self.wps.len() < logs::WP_MAX && self.submit(Job::Waypoint(w)),
             },
             // APRS-37: a new callsign needs room; a saved one is renamed.
             Op::SaveContact(c) => (!self.contacts.0.full() || self.contacts.find(&self.f, c.call.as_bytes()).is_ok()) && self.submit(Job::Contact(c)),

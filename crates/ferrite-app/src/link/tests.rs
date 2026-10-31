@@ -188,7 +188,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
@@ -305,6 +305,32 @@ fn settings_round_trip_keeps_protected() {
     assert_eq!(pc.app.set.callsign.as_bytes(), b"VA7FER", "the callsign is written, in capitals (LINK-26)");
     assert_eq!((pc.app.set.region, pc.app.set.extend_tx, pc.app.set.cable_port), (region, false, 0), "kept");
     assert_eq!(pc.app.set.pin, 1234, "kept, not zeroed by the masked read");
+}
+
+/// PWR-24.1 (decision 328): a settings write sets Low Power Mode (0 7 7 2) and its Auto level (0 7 7 3) as the menu
+/// does: On goes in at once, Off comes out; the KISS port stays the radio's (LINK-5, KISS-7).
+#[test]
+fn settings_write_sets_low_power_mode() {
+    let mut pc = Pc::new(true);
+    let rec = pc.read(what::SETTINGS, 0).unwrap();
+    let mut s = Settings::DEFAULT;
+    s.load(&mut Rd { b: &rec, n: 0 });
+    let put = |pc: &mut Pc, s: &Settings| {
+        let mut out = std::vec![0u8; RECORD_MAX];
+        let mut w = Window { b: &mut out, from: 0, n: 0 };
+        s.save(&mut w);
+        let n = w.n;
+        assert_eq!(pc.write(what::SETTINGS, 0, &out[..n], 100).0, 0);
+    };
+    let kiss = pc.app.set.kiss_port;
+    (s.lpm, s.lpm_below, s.kiss_port) = (1, 30, 2);
+    put(&mut pc, &s);
+    assert_eq!((pc.app.set.lpm, pc.app.set.lpm_below, pc.app.set.kiss_port), (1, 30, kiss));
+    assert!(pc.app.low_power(), "On: in at once");
+    s.lpm = 0;
+    put(&mut pc, &s);
+    assert_eq!(pc.app.set.lpm, 0);
+    assert!(!pc.app.low_power(), "Off: out");
 }
 
 /// LINK-7, LINK-30, LINK-31: with no PIN lock, a Bluetooth session reads and writes like the cable, with no
@@ -1815,6 +1841,9 @@ fn ui_texts_are_the_screen_as_drawn() {
 
 /// Zones, presets, deletes and contacts at their edges.
 mod more;
+
+/// Quick messages, waypoints and DTMF memories (LINK-54 – LINK-56).
+mod lists;
 
 /// LINK-53 (decision 325): channel positions by number. `READ_MANY` of positions lists only the channels that have
 /// one (lat, lon: i32, 1e-7 degree); `WRITE_MANY` sets one (8 bytes), clears one (0 bytes), refuses one out of

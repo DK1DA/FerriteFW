@@ -1015,6 +1015,40 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     put(st, "Preset", "preset", i, stored, Op::PutPreset(i, p))
 }
 
+/// TEXT-7: `quick N` shows quick message N (1-9, "factory" after the factory text), `quick N "text"` sets it (up
+/// to 67 characters, as compose takes them; "" leaves it empty), `quick N factory` puts the factory text back.
+fn quick<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
+    let usage = "quick 3 \"On my way\", quick 3 factory, or quick 3 to show it";
+    let i = index(t.word(usage)?, crate::words::QUICK as u32, "quick")? as u8;
+    let d = st.data();
+    let new = match t.next()? {
+        None => {
+            let mut l = Line::new();
+            l.push(b"quick ");
+            l.push(&[b'1' + i]);
+            l.push(b" ");
+            quoted(crate::screens::msgs::quick_text(st, i as usize).as_bytes(), &mut l);
+            if d.quick(i as usize).is_none() {
+                l.push(b" factory");
+            }
+            return Ok(Done::Said(Msg::from(l.as_bytes())));
+        }
+        Some(Tok::Word(w)) if same(w, b"factory") => None,
+        Some(Tok::Quoted(q)) => {
+            let b: Buf<67> = unquote(q, "quick")?;
+            if b.as_bytes().iter().any(|c| b"|~{".contains(c)) {
+                return Err(msg!("quick: APRS can't carry {}", "| ~ {"));
+            }
+            Some(b)
+        }
+        _ => return Err(msg!("{}", usage)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", usage));
+    }
+    put(st, "Quick message", "quick", i, d.quick(i as usize) == new, Op::Quick(i, new))
+}
+
 // ---- Settings ----
 
 /// The menu number after MENU (TERM-6): "0", the group, the item, and the third level where the item has one.
@@ -1332,7 +1366,7 @@ pub fn writes(line: &[u8]) -> bool {
     // TERM-36: `gps` and `gps query` only read; `gps standby` puts the module to sleep.
     let second = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1);
     let reads = reads || same(c, b"gps") && second.is_none_or(|w| same(w, b"query"));
-    let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx", b"txtest"].iter().any(|r| same(c, r)) && rest == 0;
+    let shows = [&b"ch"[..], b"zone", b"preset", b"quick"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx", b"txtest"].iter().any(|r| same(c, r)) && rest == 0;
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
@@ -1356,6 +1390,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"ch") => ch(app, st, &mut t),
         _ if same(c, b"zone") => zone(st, &mut t),
         _ if same(c, b"preset") => preset(st, &mut t),
+        _ if same(c, b"quick") && !loading => quick(st, &mut t),
         _ if same(c, b"home") => {
             let w = t.word("home: a channel number, or none")?;
             if same(w, b"none") {
@@ -2310,6 +2345,7 @@ const HELP: &str = concat!(
     "  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ...\n",
     "  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw\n",
     "  home 12   home none    the home channel\n",
+    "  quick 3 \"On my way\"   quick message 3; quick 3 shows it, quick 3 factory resets it\n",
     "  dump                   everything, as these lines; save it with your terminal's log\n",
     "  load                   read a dump back: send the file, it ends at the line end\n",
     "  clear channels N       delete every channel (N: how many there are)\n",

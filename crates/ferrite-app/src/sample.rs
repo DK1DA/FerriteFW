@@ -189,6 +189,8 @@ pub struct Sample {
     dtmf: [Cell<Option<Dtmf>>; DTMF_MEMS as usize],
     dtmf_names: [Cell<Buf<10>>; DTMF_MEMS as usize],
     events_read: Cell<u32>,
+    /// Events logged since (DTMF heard, [`Sample::log_dtmf`]), newest first, ahead of the sample's.
+    logged: Cell<u16>,
     events_cleared: Cell<bool>,
     msgs_read: Cell<u32>,
     /// APRS-46.1: sample messages deleted one by one, a bit each (by their place in `MESSAGES`).
@@ -202,8 +204,10 @@ pub struct Sample {
     wp_gone: Cell<u32>,
     wp_marked: Cell<u8>,
     wp_saved: Cell<Option<u16>>,
-    /// A waypoint typed as a grid square (GPS-21): one, first in the list.
-    wp_typed: Cell<Option<(Pos, Buf<16>)>>,
+    /// A waypoint typed as a grid square (GPS-21), or added from the link (LINK-55): one, first in the list.
+    wp_typed: Cell<Option<Waypoint>>,
+    /// Waypoints replaced from the link (LINK-55), by their place in the whole list (deleted ones counted).
+    wp_over: Cell<[Option<(u16, Waypoint)>; 4]>,
     /// Contacts in callsign order (APRS-37); a few to start with, room for more.
     contacts: Cell<[Option<Contact>; 12]>,
     skips_gone: Cell<u32>,
@@ -250,6 +254,7 @@ impl Sample {
             dtmf: core::array::from_fn(|i| Cell::new([Dtmf::parse(b"*79"), Dtmf::parse(b"12345#")].get(i).copied().flatten())),
             dtmf_names: core::array::from_fn(|i| Cell::new(Buf::from(if i == 0 { &b"Link on"[..] } else { b"" }))),
             events_read: Cell::new(0),
+            logged: Cell::new(0),
             events_cleared: Cell::new(false),
             msgs_read: Cell::new(0),
             msgs_del: Cell::new(0),
@@ -261,6 +266,7 @@ impl Sample {
             wp_marked: Cell::new(0),
             wp_saved: Cell::new(None),
             wp_typed: Cell::new(None),
+            wp_over: Cell::new([None; 4]),
             contacts: Cell::new({
                 let mut c = [None; 12];
                 for (k, &(call, name)) in CONTACTS.iter().enumerate() {
@@ -369,6 +375,18 @@ impl Sample {
         true
     }
 
+    /// A waypoint went in first: the deleted bits and the replaced ones move along with the stored ones.
+    fn wp_added(&self) {
+        self.wp_gone.set(self.wp_gone.get() << 1);
+        self.wp_over.set(self.wp_over.get().map(|o| o.map(|(k, w)| (k + 1, w))));
+    }
+
+    /// An event logged now (a DTMF sequence heard, "*7N#"): the link's event log subscription sees it (LINK-57).
+    pub fn log_dtmf(&self) {
+        self.logged.set(self.logged.get() + 1);
+        self.bump();
+    }
+
     fn marked(&self) -> u16 {
         self.wp_marked.get() as u16 + self.wp_saved.get().is_some() as u16 + self.wp_typed.get().is_some() as u16
     }
@@ -449,12 +467,19 @@ impl Data for Sample {
     }
 
     fn events(&self) -> u16 {
-        if self.events_cleared.get() { 0 } else { EVENTS.len() as u16 }
+        self.logged.get() + if self.events_cleared.get() { 0 } else { EVENTS.len() as u16 }
     }
     fn event(&self, i: u16) -> Option<Event> {
         if i >= self.events() {
             return None;
         }
+        let n = self.logged.get();
+        if i < n {
+            let mut text = Buf::<64>::from(b"*7");
+            text.push(&[b'0' + ((n - 1 - i) % 10) as u8, b'#']);
+            return Some(Event { src: Src::Dtmf, ago_s: 0, freq: mhz(146) + 52_000, slot: 0, unread: true, id: 0, x: 0, y: 0, pos: None, name: Buf::new(), text });
+        }
+        let i = i - n;
         let (src, ago_s, freq, slot, unread, id, x, y, pos, name, text) = EVENTS[i as usize];
         let unread = unread && self.events_read.get() & 1 << i == 0;
         Some(Event { src, ago_s, freq, slot, unread, id, x, y, pos, name: txt(name), text: txt(text) })
@@ -526,12 +551,15 @@ impl Data for Sample {
     fn waypoint(&self, i: u16) -> Option<Waypoint> {
         // Marked ones first (newest first), then the stored ones; deleted ones skipped.
         let k = (0..WAYPOINTS.len() as u16 + self.marked()).filter(|&k| self.wp_gone.get() & 1 << k == 0).nth(i as usize)?;
+        if let Some((_, w)) = self.wp_over.get().into_iter().flatten().find(|o| o.0 == k) {
+            return Some(w);
+        }
         let fix = self.fix.get().map_or(HERE, |f| f.pos);
         let mut m = self.marked();
         let mut k = k;
-        if let Some((pos, name)) = self.wp_typed.get() {
+        if let Some(w) = self.wp_typed.get() {
             if k == 0 {
-                return Some(Waypoint { name, pos, src: WpSrc::Grid });
+                return Some(w);
             }
             (k, m) = (k - 1, m - 1);
         }
@@ -712,23 +740,46 @@ impl Data for Sample {
                 let ok = self.fix.get().is_some() && self.wp_saved.get().is_none() && self.wp_typed.get().is_none() && self.wp_marked.get() < 9;
                 if ok {
                     self.wp_marked.set(self.wp_marked.get() + 1);
-                    self.wp_gone.set(self.wp_gone.get() << 1);
+                    self.wp_added();
                 }
                 ok
             }
             Op::AddWaypoint(pos, name) => {
                 let ok = self.wp_typed.get().is_none() && self.marked() == 0;
                 if ok {
-                    self.wp_typed.set(Some((pos, name)));
-                    self.wp_gone.set(self.wp_gone.get() << 1);
+                    self.wp_typed.set(Some(Waypoint { name, pos, src: WpSrc::Grid }));
+                    self.wp_added();
                 }
                 ok
             }
+            // LINK-55: one replaced in its place (four at most here), or one added (as a typed one)
+            Op::PutWaypoint(i, w) => match (0..WAYPOINTS.len() as u16 + self.marked()).filter(|&k| self.wp_gone.get() & 1 << k == 0).nth(i as usize) {
+                Some(k) => {
+                    let mut o = self.wp_over.get();
+                    let ok = match o.iter().position(|x| x.is_some_and(|x| x.0 == k)).or_else(|| o.iter().position(Option::is_none)) {
+                        Some(j) => {
+                            o[j] = Some((k, w));
+                            true
+                        }
+                        None => false,
+                    };
+                    self.wp_over.set(o);
+                    ok
+                }
+                None => {
+                    let ok = self.wp_typed.get().is_none() && self.marked() == 0;
+                    if ok {
+                        self.wp_typed.set(Some(w));
+                        self.wp_added();
+                    }
+                    ok
+                }
+            },
             Op::SaveStation(i) => {
                 let ok = self.station(i).is_some_and(|s| s.pos.is_some()) && self.marked() == 0;
                 if ok {
                     self.wp_saved.set(Some(i));
-                    self.wp_gone.set(self.wp_gone.get() << 1);
+                    self.wp_added();
                 }
                 ok
             }
@@ -825,6 +876,7 @@ impl Data for Sample {
                 self.heard_cleared.set(true);
                 self.msgs_gone.set(true);
                 self.wp_gone.set(u32::MAX);
+                self.wp_over.set([None; 4]);
                 self.quick.set([None; crate::words::QUICK]);
                 self.draft.set(Draft::default());
                 self.aprs.clear();

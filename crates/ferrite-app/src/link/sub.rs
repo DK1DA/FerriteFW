@@ -47,6 +47,8 @@ pub struct Sub {
     heard: u32,
     msgs: [(u16, u8); WATCHED],
     msgs_n: u16,
+    /// LINK-57: the event log's next sequence number to send.
+    log: u32,
     /// Live View: when the last UI update was looked for, the redraws and input then; more of one to send; start
     /// over with the whole state.
     ui_at: u32,
@@ -60,7 +62,7 @@ pub struct Sub {
 
 impl Sub {
     pub const fn new() -> Self {
-        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false }
+        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, log: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false }
     }
 }
 
@@ -89,6 +91,11 @@ fn msg_id(m: &Message) -> u16 {
     (h ^ h >> 16) as u16
 }
 
+/// The event log's next sequence number (the newest's + 1; 0 when empty), as `LOG_READ` gives it (LINK-42).
+fn log_top(d: &dyn crate::data::Data) -> u32 {
+    d.event_seq(0).map_or(0, |s| s.wrapping_add(1))
+}
+
 fn heard_sig(d: &dyn crate::data::Data) -> u32 {
     match d.station(0) {
         Some(s) => fnv(fnv(FNV0, s.call.as_bytes()), &[s.times as u8, (s.times >> 8) as u8, d.stations() as u8]),
@@ -110,7 +117,7 @@ fn watched(d: &dyn crate::data::Data) -> ([(u16, u8); WATCHED], u16) {
 impl Session {
     /// `SUBSCRIBE` (LINK-46): the mask, then optionally the UI's least gap (100 ms units) and flags.
     pub(super) fn subscribe<S: ChannelStore>(&mut self, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
-        let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI) == 0) else { return Status::BadArg };
+        let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI | ev::SUB_LOG) == 0) else { return Status::BadArg };
         let texts = p.get(2).is_some_and(|f| f & ev::TEXTS != 0);
         let renew = p.get(2).is_some_and(|f| f & ev::RENEW != 0) && mask == self.sub.mask && texts == self.sub.texts;
         let gap = match p.get(1) {
@@ -122,7 +129,7 @@ impl Session {
             let d = st.data();
             let (msgs, msgs_n) = watched(d);
             let ui_start = mask & ev::SUB_UI != 0;
-            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, ui_at: now, ui_start, texts, ..Sub::new() };
+            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, log: log_top(d), ui_at: now, ui_start, texts, ..Sub::new() };
         }
         self.sub.gap_ms = gap;
         o.put(&[mask, DICT_VERSION]);
@@ -202,6 +209,9 @@ impl Session {
             if self.sub.mask & ev::SUB_MSGS != 0 {
                 self.message_event(d, out);
             }
+            if self.sub.mask & ev::SUB_LOG != 0 {
+                self.log_event(d, out);
+            }
         }
         if let Some(t) = ui.filter(|_| self.sub.mask & ev::SUB_UI != 0) {
             let since = now.wrapping_sub(self.sub.ui_at);
@@ -277,6 +287,29 @@ impl Session {
             self.sub.msgs_n += 1;
         } else {
             self.sub.msgs[i] = now[i];
+        }
+        self.sub.dirty = true; // look again: more may be waiting
+    }
+
+    /// LINK-57: the oldest event logged since the last one sent (or since the subscription), as `LOG_READ` gives it;
+    /// one a call, the rest next time. Events the log has already dropped are skipped; a log cleared on the radio
+    /// says nothing.
+    fn log_event(&mut self, d: &dyn crate::data::Data, out: &mut impl Sink) {
+        let (top, kept) = (log_top(d), d.events() as u32);
+        let want = self.sub.log.max(top.saturating_sub(kept));
+        if want >= top {
+            self.sub.log = self.sub.log.min(top);
+            return;
+        }
+        let i = (top - 1 - want) as u16;
+        let (Some(e), Some(seq)) = (d.event(i), d.event_seq(i)) else { return };
+        let mut p = [0u8; MAX_PAYLOAD];
+        let mut o = Out { a: &mut p, n: 0 };
+        o.put(&[ev::LOG]);
+        super::log_record(&mut o, seq, &e);
+        let len = o.n;
+        if self.emit(&p[..len], out) {
+            self.sub.log = seq.wrapping_add(1);
         }
         self.sub.dirty = true; // look again: more may be waiting
     }

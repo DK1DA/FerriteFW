@@ -704,11 +704,19 @@ impl Waypoints {
 
     /// Waypoint `i`, newest first.
     pub fn get<N: Nor>(&self, f: &Flash<N>, i: u16) -> Option<Waypoint> {
-        wp_decode(&self.0.get(f, self.0.len().checked_sub(1 + i)?)?)
+        wp_decode(&self.0.get(f, self.0.len().checked_sub(i)?.checked_sub(1)?)?)
     }
 
     pub async fn add<N: Nor>(&self, f: &Flash<N>, w: &Waypoint) -> Result<bool> {
         self.0.insert(f, self.0.len(), &wp_encode(w)).await
+    }
+
+    /// Replaces the newest waypoint equal to `old` with `new` in its slot (LINK-55): its sector rewritten once.
+    pub async fn replace<N: Nor>(&self, f: &Flash<N>, old: &Waypoint, new: &Waypoint) -> Result<bool> {
+        match (0..self.0.len()).rev().find(|&s| self.0.get(f, s).and_then(|b| wp_decode(&b)).as_ref() == Some(old)) {
+            Some(k) => self.0.set(f, k, &wp_encode(new)).await,
+            None => Ok(false),
+        }
     }
 
     /// Deletes the newest waypoint equal to `w`: the later ones move down a slot.
