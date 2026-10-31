@@ -1,7 +1,7 @@
 //! LINK-54 – LINK-56 (decision 327): the quick messages, waypoints and DTMF memories by `READ_MANY` and `WRITE_MANY`.
 
 use super::*;
-use crate::data::{Data, Dtmf, Pos, Waypoint, WpSrc};
+use crate::data::{Data, Dtmf, Pos, RangePreset, Waypoint, WpSrc};
 use ferrite_core::link::{ADD, QUICK_OWN};
 
 /// Every record of `w` by `READ_MANY` from 0: (index, record).
@@ -178,4 +178,54 @@ fn lists_go_by_many_only() {
         assert_eq!(pc.ask(msg::READ, &[w, 0, 0, 0, 0, 100]).0, Status::BadArg as u8);
         assert_eq!(pc.write_parts(w, 0, &[1, 2], 200).0, Status::Refused as u8);
     }
+}
+
+fn skips_rec(f: &[u32]) -> Vec<u8> {
+    f.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+/// LINK-58, SCAN-10 (decision 329): a range preset's skipped frequencies, listed for the presets that have any; a
+/// list replaced whole (more than one store write's worth), read back, cleared; out of range, twice or 49 refused
+/// with the reasons; the list stays with its preset when a preset before it is deleted (its index moves, its place
+/// doesn't); `USED` of them refused.
+#[test]
+fn preset_skips_over_the_link() {
+    let mut pc = Pc::new(true);
+    let have: Vec<u16> = (0..pc.st.presets() as u16).filter(|&i| pc.st.preset(i as u8).unwrap().skips > 0).collect();
+    let got = all(&mut pc, what::PRESET_SKIPS);
+    assert_eq!(got.iter().map(|g| g.0).collect::<Vec<_>>(), have);
+    for (i, r) in &got {
+        let n = pc.st.preset(*i as u8).unwrap().skips;
+        assert_eq!(r, &skips_rec(&(0..n).map(|j| pc.st.preset_skip(*i as u8, j).unwrap()).collect::<Vec<_>>()));
+    }
+    let p = pc.st.preset(1).unwrap(); // 70 cm
+    let list: Vec<u32> = (0..20).map(|j| p.start + 2_500 * (j + 1)).collect();
+    assert_eq!(pc.write_many(what::PRESET_SKIPS, &[(1, skips_rec(&list))]), (0, std::vec![1]));
+    assert_eq!(pc.st.preset(1).unwrap().skips, 20);
+    assert_eq!((0..20).map(|j| pc.st.preset_skip(1, j).unwrap()).collect::<Vec<_>>(), list);
+    assert_eq!(all(&mut pc, what::PRESET_SKIPS).into_iter().find(|g| g.0 == 1).unwrap().1, skips_rec(&list), "read back");
+    assert!(pc.st.preset(1).map(|q| RangePreset { skips: p.skips, ..q }) == Some(p), "the preset itself as it was");
+    // refused, with the reasons
+    let ver = pc.st.version();
+    for (r, why) in [
+        (skips_rec(&[p.end + 1]), "within the range"),
+        (skips_rec(&[p.start, p.start]), "once"),
+        (skips_rec(&(0..49).map(|j| p.start + j).collect::<Vec<_>>()), "48"),
+    ] {
+        let (s, a) = pc.write_many(what::PRESET_SKIPS, &[(1, r)]);
+        assert_eq!(s, Status::Invalid as u8, "{why}");
+        assert!(std::str::from_utf8(&a[1..]).unwrap().contains(why), "{a:?}");
+    }
+    assert_eq!(pc.write_many(what::PRESET_SKIPS, &[(1, std::vec![1, 2, 3])]).0, Status::BadArg as u8);
+    assert_eq!(pc.write_many(what::PRESET_SKIPS, &[(pc.st.presets() as u16, Vec::new())]).0, Status::NotFound as u8);
+    assert_eq!(pc.write_many(what::PRESET_SKIPS, &[(1, skips_rec(&list))]).0, 0);
+    assert_eq!(pc.st.version(), ver, "as stored: nothing written");
+    // the preset before it deleted: the list goes with its preset, now index 0
+    assert_eq!(pc.ask(msg::DELETE, &[what::PRESET, 0, 0]).0, 0);
+    assert_eq!(pc.st.preset(0).map(|q| q.name), Some(p.name));
+    assert_eq!((0..20).map(|j| pc.st.preset_skip(0, j).unwrap()).collect::<Vec<_>>(), list, "with its preset");
+    // cleared
+    assert_eq!(pc.write_many(what::PRESET_SKIPS, &[(0, Vec::new())]).0, 0);
+    assert_eq!((pc.st.preset(0).unwrap().skips, pc.st.preset_skip(0, 0)), (0, None));
+    assert_eq!(pc.ask(msg::USED, &[what::PRESET_SKIPS]).0, Status::BadArg as u8);
 }

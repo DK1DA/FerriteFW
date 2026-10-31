@@ -209,3 +209,28 @@ fn console_writes_the_lists() {
     let n: u32 = worst(&before, &s.nor().erases).iter().filter(|(s, _)| region(*s) != "scratch ring").map(|x| x.1).sum();
     assert_eq!(n, 1, "a quick message: one erase of one APRS record copy");
 }
+
+/// LINK-58 (decision 329): a range preset's 48 skipped frequencies written from the link go as four store writes,
+/// each rewriting the presets' sector once; the list lives in the preset's own record, so deleting the preset before
+/// it moves its index, never its list.
+#[test]
+fn console_writes_preset_skips() {
+    use ferrite_app::data::{RangePreset, SKIP_CHUNK};
+    let s: Store = FlashStore::mount(SimFlash::new(), NoData);
+    let pr = |n: &[u8], start: u32| RangePreset { name: Buf::from(n), start, end: start + 400_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
+    assert!(s.add_preset(&pr(b"2 m", 14_400_000)) && s.add_preset(&pr(b"70 cm", 43_000_000)));
+    let list: Vec<u32> = (0..48).map(|j| 43_000_000 + 2_500 * (j + 1)).collect();
+    let before = s.nor().erases.clone();
+    for at in (0..48).step_by(SKIP_CHUNK) {
+        let mut f = [0; SKIP_CHUNK];
+        f.copy_from_slice(&list[at..at + SKIP_CHUNK]);
+        assert!(s.request(Op::PresetSkips { preset: 1, at: at as u8, count: 48, f }));
+    }
+    let w = worst(&before, &s.nor().erases);
+    println!("48 skipped frequencies: {w:?}");
+    let most = w.iter().filter(|(s, _)| region(*s) == "other").map(|x| x.1).max().unwrap_or(0);
+    assert!(most <= 4, "the presets' sector took {most} erases: {w:?}");
+    assert_eq!((0..48).map(|j| s.preset_skip(1, j).unwrap()).collect::<Vec<_>>(), list);
+    assert!(s.request(Op::DeletePreset(0)));
+    assert_eq!((s.preset(0).map(|p| p.skips), s.preset_skip(0, 47)), (Some(48), Some(list[47])), "with its preset");
+}

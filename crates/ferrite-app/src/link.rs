@@ -688,7 +688,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS]); // LINK-35.2
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS]); // LINK-35.2: two bytes
         Status::Ok
     }
 
@@ -771,7 +771,7 @@ impl Session {
     /// assembled is dropped.
     fn write_many(&mut self, p: &[u8]) -> Status {
         let Some((&w, recs)) = p.split_first() else { return Status::BadArg };
-        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION | what::QUICK | what::WAYPOINT | what::DTMF) {
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION | what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS) {
             return Status::BadArg; // the settings are one record, larger than a frame: WRITE
         }
         let mut r = recs;
@@ -1176,7 +1176,7 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             }
             None => return Status::NotFound,
         },
-        what::QUICK | what::WAYPOINT | what::DTMF => return lists::record(st, w, idx, win), // LINK-54 – LINK-56
+        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => return lists::record(st, w, idx, win), // LINK-54 – LINK-56, LINK-58
         _ => return Status::BadArg,
     }
     Status::Ok
@@ -1224,7 +1224,7 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
         what::CHANNEL | what::POSITION => st.zone_of(i).is_some(),
         what::ZONE => st.zone_name(i as u8).is_some(),
         what::CONTACT => i < st.data().contacts(),
-        what::QUICK | what::WAYPOINT | what::DTMF => lists::held(st, w, i),
+        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => lists::held(st, w, i),
         _ => st.data().preset(i as u8).is_some(),
     }
 }
@@ -1516,7 +1516,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             request(st, Op::SaveContact(c))
         }
-        what::QUICK | what::WAYPOINT | what::DTMF => lists::apply(st, w, idx, rec, o), // LINK-54 – LINK-56
+        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => lists::apply(st, w, idx, rec, o), // LINK-54 – LINK-56, LINK-58
         _ => Status::Refused, // nothing else is written over the link (LINK-3)
     }
 }

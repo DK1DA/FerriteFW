@@ -188,7 +188,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;

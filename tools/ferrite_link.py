@@ -101,7 +101,9 @@ CAP_POSITION = 64  # LINK-53: HELLO's caps say POSITION
 QUICK, WAYPOINT, DTMF = 8, 9, 10  # LINK-54 - LINK-56: flags + text; name(16) <ii lat, lon, source; len + symbols + name
 WP_ADD = 0xFFFF  # LINK-55: WRITE_MANY's index for a new waypoint
 CAP_LISTS = 128  # LINK-54 - LINK-57: HELLO's caps say QUICK, WAYPOINT, DTMF and SUBSCRIBE's log
-ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT, POSITION, QUICK, WAYPOINT, DTMF)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
+PRESET_SKIPS = 11  # LINK-58: a range preset's skipped frequencies, <I each (10 Hz), 0-48; b"" clears
+CAP2_PRESET_SKIPS = 1  # LINK-35.2: HELLO's second caps byte
+ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT, POSITION, QUICK, WAYPOINT, DTMF, PRESET_SKIPS)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
 # SUBSCRIBE's mask and flags, EVENT's kinds (Appendix G)
 SUB_HEARD, SUB_MSGS, SUB_UI, SUB_LOG, RENEW = 1, 2, 4, 8, 1
 EV_HEARD, EV_MSG, EV_MSG_STATE, EV_UI, EV_LOG = 1, 2, 3, 4, 5

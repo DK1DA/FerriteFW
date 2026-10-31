@@ -1065,7 +1065,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::Renumber(n, to) => to < MAX_CHANNELS && !exists(to) && exists(n),
             Op::NewZone => self.zones.get() < MAX_ZONES,
             Op::DeleteZone(z) | Op::Zone(z, _) | Op::RenameZone(z, _) => z < self.zones.get(),
-            Op::Preset(i, _) | Op::DeletePreset(i) => self.preset_slot(i).is_some(),
+            Op::Preset(i, _) | Op::DeletePreset(i) | Op::PresetSkips { preset: i, .. } => self.preset_slot(i).is_some(),
             Op::NewPreset => self.presets() < MAX_PRESETS,
             // The next one is created: a zone up to the last, a preset while there is room.
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
@@ -1132,6 +1132,21 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                     self.put_rec(preset_addr(k), &preset_encode(&RangePreset { skips, ..p })).await
                 }
                 None => self.new_preset(&RangePreset { skips: 0, ..p }).await,
+            },
+            // LINK-58: the skip list lives in the preset's own record, after its 32 bytes, so it stays with the preset
+            // whatever its index becomes; the record is rewritten whole, once per op
+            Op::PresetSkips { preset, at, count, f } => match self.preset_slot(preset) {
+                Some(k) => {
+                    let mut b = [0xFFu8; PRESET_LEN];
+                    self.f.read(preset_addr(k), &mut b)?;
+                    let p = preset_decode(&b).ok_or(NorError)?;
+                    b[..32].copy_from_slice(&preset_encode(&RangePreset { skips: count, ..p }));
+                    for (j, v) in f.iter().enumerate().map(|(j, v)| (at as usize + j, v)).filter(|(j, _)| *j < count as usize) {
+                        b[32 + 4 * j..36 + 4 * j].copy_from_slice(&v.to_le_bytes());
+                    }
+                    self.put_rec(preset_addr(k), &b).await
+                }
+                None => Err(NorError),
             },
             Op::Dtmf(i, Some(m)) => self.put_rec(dtmf_addr(i), &dtmf_encode(&m)).await,
             Op::Dtmf(i, None) => {
@@ -1758,6 +1773,15 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
     fn preset(&self, i: u8) -> Option<RangePreset> {
         self.read_preset(self.preset_slot(i)?)
+    }
+    fn preset_skip(&self, i: u8, j: u8) -> Option<Freq10> {
+        let k = self.preset_slot(i)?;
+        if j >= self.read_preset(k)?.skips || j as usize >= ferrite_core::link::PRESET_SKIPS_MAX {
+            return None;
+        }
+        let mut b = [0u8; 4];
+        self.f.read(preset_addr(k) + 32 + 4 * j as u32, &mut b).ok()?;
+        Some(u32::from_le_bytes(b))
     }
     fn skips(&self) -> u16 {
         self.extra.skips()

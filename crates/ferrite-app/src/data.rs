@@ -278,6 +278,9 @@ pub struct Dtmf {
     pub d: [u8; 8],
 }
 
+/// The skipped frequencies one [`Op::PresetSkips`] carries (LINK-58): four make a whole list of 48.
+pub const SKIP_CHUNK: usize = 12;
+
 /// DTMF memories: 16 of up to 16 symbols (0 8 5 2).
 pub const DTMF_MEMS: u8 = 16;
 /// The DTMF symbols by nibble.
@@ -394,6 +397,9 @@ pub enum Op {
     DtmfName(u8, Buf<10>),
     /// A waypoint typed as a grid square, at its centre, named with it (GPS-21).
     AddWaypoint(Pos, Buf<16>),
+    /// From the link (LINK-58): range preset i's skipped frequencies `at`.. (up to [`SKIP_CHUNK`] of `f`, those
+    /// below `count`), and the list's length set to `count` (0 clears it). A whole list goes as up to four of these.
+    PresetSkips { preset: u8, at: u8, count: u8, f: [Freq10; SKIP_CHUNK] },
     /// From the link (LINK-55): waypoint i (newest first) replaced, or with i [`ferrite_core::link::ADD`] (any i
     /// past the last) added as the newest; refused when the store is full.
     PutWaypoint(u16, Waypoint),
@@ -530,6 +536,11 @@ pub trait Data {
     }
     fn zone_cfg(&self, _zone: u8) -> ZoneCfg {
         ZoneCfg { shown: true, ..ZoneCfg::default() }
+    }
+
+    /// Range preset `i`'s skipped frequency `j` (SCAN-10), below its `skips`.
+    fn preset_skip(&self, _i: u8, _j: u8) -> Option<Freq10> {
+        None
     }
 
     /// DTMF memory i (0-15), None when empty.

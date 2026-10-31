@@ -203,6 +203,13 @@ pub mod caps {
     pub const LISTS: u8 = 128;
 }
 
+/// The second capability byte, after [`caps`]' (LINK-35.2); absent: none of these.
+pub mod caps2 {
+    /// A range preset's skipped frequencies by `READ_MANY` and `WRITE_MANY` of [`super::what::PRESET_SKIPS`]
+    /// (LINK-58, decision 329).
+    pub const PRESET_SKIPS: u8 = 1;
+}
+
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
 pub mod event {
     /// Mask bits.
@@ -388,7 +395,14 @@ pub mod what {
     /// A DTMF memory, 0-15 (LINK-56, DTMF-12): the symbols (length u8, then 1-16 of `0-9 A-D * #`), then the name
     /// (the rest, 0-10 bytes). Only the memories set are listed; a record of length 0 clears one.
     pub const DTMF: u8 = 10;
+    /// A range preset's skipped frequencies (LINK-58, SCAN-10), by the preset's index (as [`PRESET`]): u32 each, 10 Hz,
+    /// 0-48 of them. `READ_MANY` lists the presets that have any; a `WRITE_MANY` record replaces the list (length 0
+    /// clears it). Only from radios that say [`super::caps2::PRESET_SKIPS`].
+    pub const PRESET_SKIPS: u8 = 11;
 }
+
+/// A range preset's skipped frequencies at most (SCAN-10, LINK-58).
+pub const PRESET_SKIPS_MAX: usize = 48;
 
 /// A quick message record's flags (LINK-54): the text is the owner's own (clear: the factory text).
 pub const QUICK_OWN: u8 = 1;

@@ -2,13 +2,15 @@
 //! (GPS-10) and the DTMF memories with their names (DTMF-12), by `READ_MANY` and `WRITE_MANY` as the channels go,
 //! each record checked as the radio's own editors check it and written through the store's queue only when it
 //! changes. Only from radios whose `HELLO` says [`ferrite_core::link::caps::LISTS`]; older ones answer `bad argument`.
+//! A range preset's skipped frequencies (LINK-58, SCAN-10) go the same way, from radios whose second caps byte says
+//! [`ferrite_core::link::caps2::PRESET_SKIPS`].
 
 use super::{name_of, request, Out, Window};
 use crate::chan::ChannelStore;
-use crate::data::{Dtmf, Op, Pos, Waypoint, WpSrc, DTMF_MEMS};
+use crate::data::{Dtmf, Op, Pos, Waypoint, WpSrc, DTMF_MEMS, SKIP_CHUNK};
 use crate::persist::Sink as PSink;
 use crate::words::QUICK;
-use ferrite_core::link::{what, Status, ADD, QUICK_OWN, WAYPOINT_LEN};
+use ferrite_core::link::{what, Status, ADD, PRESET_SKIPS_MAX, QUICK_OWN, WAYPOINT_LEN};
 use ferrite_ui::text::Buf;
 
 /// GPS-10's store.
@@ -22,6 +24,7 @@ pub(super) fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
         what::QUICK => Some(QUICK as u16),
         what::WAYPOINT => Some(st.data().waypoints()),
         what::DTMF => Some(DTMF_MEMS as u16),
+        what::PRESET_SKIPS => Some(st.data().presets() as u16),
         _ => None,
     }
 }
@@ -32,6 +35,7 @@ pub(super) fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
     match w {
         what::QUICK => (i as usize) < QUICK,
         what::WAYPOINT => i < st.data().waypoints(),
+        what::PRESET_SKIPS => st.data().preset(i as u8).is_some_and(|p| p.skips > 0),
         _ => i < DTMF_MEMS as u16 && st.data().dtmf(i as u8).is_some(),
     }
 }
@@ -66,6 +70,15 @@ pub(super) fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window)
                 win.put(&[b.len() as u8]);
                 win.put(b.as_bytes());
                 win.put(d.dtmf_name(idx as u8).as_bytes());
+            }
+            None => return Status::NotFound,
+        },
+        // LINK-58: the skipped frequencies, u32 each
+        what::PRESET_SKIPS => match d.preset(idx as u8).filter(|p| idx < 256 && p.skips > 0) {
+            Some(p) => {
+                for j in 0..p.skips.min(PRESET_SKIPS_MAX as u8) {
+                    win.put(&d.preset_skip(idx as u8, j).unwrap_or(0).to_le_bytes());
+                }
             }
             None => return Status::NotFound,
         },
@@ -147,6 +160,42 @@ pub(super) fn apply<S: ChannelStore>(st: &S, w: u8, idx: u16, rec: &[u8], o: &mu
                 return request(st, Op::DtmfName(i, nm));
             }
             Status::Ok
+        }
+        // LINK-58: the whole list replaced (length 0 clears it), each within the range (SCAN-17 adds only hits in
+        // it), none twice; in chunks of SKIP_CHUNK through the store's queue, only when it changed
+        what::PRESET_SKIPS if idx < d.presets() as u16 => {
+            let Some(p) = d.preset(idx as u8) else { return Status::NotFound };
+            if !rec.len().is_multiple_of(4) {
+                return Status::BadArg;
+            }
+            let n = rec.len() / 4;
+            if n > PRESET_SKIPS_MAX {
+                return invalid(o, "48 skipped frequencies at most");
+            }
+            let f = |j: usize| u32::from_le_bytes([rec[4 * j], rec[4 * j + 1], rec[4 * j + 2], rec[4 * j + 3]]);
+            if (0..n).any(|j| !(p.start..=p.end).contains(&f(j))) {
+                return invalid(o, "skip: within the range's start and end");
+            }
+            if (0..n).any(|j| (0..j).any(|k| f(k) == f(j))) {
+                return invalid(o, "skip: each frequency once");
+            }
+            if p.skips as usize == n && (0..n).all(|j| d.preset_skip(idx as u8, j as u8) == Some(f(j))) {
+                return Status::Ok;
+            }
+            let mut at = 0;
+            loop {
+                let mut c = [0; SKIP_CHUNK];
+                for (k, v) in c.iter_mut().enumerate().take(n.saturating_sub(at)) {
+                    *v = f(at + k);
+                }
+                if request(st, Op::PresetSkips { preset: idx as u8, at: at as u8, count: n as u8, f: c }) != Status::Ok {
+                    return Status::Busy;
+                }
+                at += SKIP_CHUNK;
+                if at >= n {
+                    return Status::Ok;
+                }
+            }
         }
         _ => Status::NotFound,
     }

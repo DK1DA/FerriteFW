@@ -186,6 +186,8 @@ pub struct Sample {
     zone_cfg: [Cell<ZoneCfg>; 8],
     zone_names: [Cell<Name>; 8],
     presets: [Cell<Option<RangePreset>>; 16],
+    /// Each preset place's skipped frequencies (SCAN-10, LINK-58): they stay with the preset in its place.
+    preset_skips: [Cell<[Freq10; 48]>; 16],
     dtmf: [Cell<Option<Dtmf>>; DTMF_MEMS as usize],
     dtmf_names: [Cell<Buf<10>>; DTMF_MEMS as usize],
     events_read: Cell<u32>,
@@ -245,6 +247,7 @@ impl Sample {
             zones: Cell::new(ZONES_AT_START as u8),
             zone_cfg: core::array::from_fn(|z| Cell::new(zc(z))),
             zone_names: core::array::from_fn(|z| Cell::new(Name::from(ZONES[z]))),
+            preset_skips: core::array::from_fn(|i| Cell::new(core::array::from_fn(|j| PRESETS.get(i).map_or(0, |p| p.1 + (j as u32 + 1) * 2_500)))),
             presets: core::array::from_fn(|i| {
                 Cell::new(PRESETS.get(i).map(|&(n, start, end, step, mode, narrow, skips)| RangePreset { name: txt(n), start, end, step, mode, narrow, skips,
                     // Airband resumes when the carrier drops (SCAN-24); the rest follow 0 1 5.
@@ -593,6 +596,10 @@ impl Data for Sample {
     fn preset(&self, i: u8) -> Option<RangePreset> {
         self.presets.iter().filter_map(|p| p.get()).nth(i as usize)
     }
+    fn preset_skip(&self, i: u8, j: u8) -> Option<Freq10> {
+        let k = (0..16).filter(|&k| self.presets[k].get().is_some()).nth(i as usize)?;
+        (j < self.presets[k].get()?.skips && j < 48).then(|| self.preset_skips[k].get()[j as usize])
+    }
     fn skips(&self) -> u16 {
         (0..SKIPS.len()).filter(|&i| self.skips_gone.get() & 1 << i == 0).count() as u16
     }
@@ -724,6 +731,18 @@ impl Data for Sample {
                     None => false,
                 }
             }
+            Op::PresetSkips { preset, at, count, f } => match (0..16).filter(|&k| self.presets[k].get().is_some()).nth(preset as usize) {
+                Some(k) => {
+                    let mut l = self.preset_skips[k].get();
+                    for (j, v) in f.iter().enumerate().map(|(j, v)| (at as usize + j, *v)).filter(|(j, _)| *j < (count as usize).min(48)) {
+                        l[j] = v;
+                    }
+                    self.preset_skips[k].set(l);
+                    self.presets[k].set(self.presets[k].get().map(|p| RangePreset { skips: count, ..p }));
+                    true
+                }
+                None => false,
+            },
             Op::ClearSkips => {
                 self.skips_gone.set(u32::MAX);
                 true
