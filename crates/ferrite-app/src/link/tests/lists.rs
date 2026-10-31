@@ -77,7 +77,7 @@ fn wp_rec(name: &[u8], lat: i32, lon: i32, src: u8) -> Vec<u8> {
     r
 }
 
-/// LINK-55, GPS-10: the waypoints newest first as the list shows them; one replaced in its place, one added as the
+/// LINK-55, GPS-10, GPS-13: the waypoints newest first as the list shows them; one replaced in its place, one added as the
 /// newest (index 0xFFFF), one deleted by its index; names, positions and sources checked with the reasons; a
 /// record of another length malformed; an index past the list `not found`.
 #[test]

@@ -364,7 +364,7 @@ fn message_delete() {
     assert_eq!(pc.ask(msg::MSG_DELETE, &[1, 3, b'A']).0, Status::BadArg as u8);
 }
 
-/// LINK-57: subscribed to the event log, the session is sent each event logged after the subscription, oldest
+/// LINK-57, INBOX-11: subscribed to the event log, the session is sent each event logged after the subscription, oldest
 /// first, as `LOG_READ` gives it (its sequence number first, the next after the one before); none of the ones
 /// before it; nothing without the bit.
 #[test]

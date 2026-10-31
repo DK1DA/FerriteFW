@@ -27,7 +27,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT msgs                       # APRS messages in and out, newest first (LINK-44)
     python3 tools/ferrite_link.py PORT msg-send CALL "TEXT"       # queue an APRS message as compose does (LINK-45)
     python3 tools/ferrite_link.py PORT msg-delete in|out CALL "TEXT"  # delete the newest such message (LINK-52)
-    python3 tools/ferrite_link.py PORT subscribe [heard,msgs,ui] [--seconds N] [--screen]   # print pushed events
+    python3 tools/ferrite_link.py PORT subscribe [heard,msgs,ui,log] [--seconds N] [--screen]   # print pushed events (log: LINK-57)
     python3 tools/ferrite_link.py PORT audio [SECONDS [FILE.wav]]   # receive audio over the cable to a WAV (LINK-13.4)
     python3 tools/ferrite_link.py PORT audio SECONDS FILE.wav --raw [12000|16000]   # bench builds: the decoders' samples, 12-bit PCM (LINK-13.9)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
@@ -98,10 +98,13 @@ SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
 CONTACT = 6  # APRS-42
 POSITION = 7  # LINK-53: a channel's position by number, <ii lat, lon in 1e-7 degree; b"" clears it
 CAP_POSITION = 64  # LINK-53: HELLO's caps say POSITION
-ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT, POSITION)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
+QUICK, WAYPOINT, DTMF = 8, 9, 10  # LINK-54 - LINK-56: flags + text; name(16) <ii lat, lon, source; len + symbols + name
+WP_ADD = 0xFFFF  # LINK-55: WRITE_MANY's index for a new waypoint
+CAP_LISTS = 128  # LINK-54 - LINK-57: HELLO's caps say QUICK, WAYPOINT, DTMF and SUBSCRIBE's log
+ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT, POSITION, QUICK, WAYPOINT, DTMF)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
 # SUBSCRIBE's mask and flags, EVENT's kinds (Appendix G)
-SUB_HEARD, SUB_MSGS, SUB_UI, RENEW = 1, 2, 4, 1
-EV_HEARD, EV_MSG, EV_MSG_STATE, EV_UI = 1, 2, 3, 4
+SUB_HEARD, SUB_MSGS, SUB_UI, SUB_LOG, RENEW = 1, 2, 4, 8, 1
+EV_HEARD, EV_MSG, EV_MSG_STATE, EV_UI, EV_LOG = 1, 2, 3, 4, 5
 WHATS = {"channel": CHANNEL, "zone": ZONE, "preset": PRESET}
 # KEY's remote PTT (Appendix G): key 0x80, then the action (0 off, 1 on + slot, 2 keepalive); slot 0xFF: the active one
 PTT, PTT_OFF, PTT_ON, PTT_ALIVE, ACTIVE = 0x80, 0, 1, 2, 0xFF
@@ -623,22 +626,28 @@ class Link:
             top, kept, n = struct.unpack("<IHB", a[:7])
             r = a[7:]
             for _ in range(n):
-                seq, ago, src, slot, flags, freq, ident, x, y = struct.unpack("<IIBBBIIHH", r[:23])
-                r = r[23:]
-                pos = None
-                if flags & 2:
-                    lat, lon = struct.unpack("<ii", r[:8])
-                    pos, r = (lat / 1e7, lon / 1e7), r[8:]
-                name, r = text(r)
-                txt, r = text(r)
-                out.append({"seq": seq, "ago_s": ago, "src": LOG_SOURCES[src] if src < len(LOG_SOURCES) else src,
-                            "slot": slot, "unread": bool(flags & 1), "freq": freq, "id": ident, "x": x, "y": y,
-                            "pos": pos, "name": name, "text": txt})
-                before = seq
+                e, r = parse_log(r)
+                out.append(e)
+                before = e["seq"]
                 if most and len(out) >= most:
                     return out
             if n == 0:
                 return out
+
+
+def parse_log(r):
+    """One event log record (LINK-42, and EVENT kind 5, LINK-57): a dict, and the bytes after it."""
+    seq, ago, src, slot, flags, freq, ident, x, y = struct.unpack("<IIBBBIIHH", r[:23])
+    r = r[23:]
+    pos = None
+    if flags & 2:
+        lat, lon = struct.unpack("<ii", r[:8])
+        pos, r = (lat / 1e7, lon / 1e7), r[8:]
+    name, r = text(r)
+    txt, r = text(r)
+    return ({"seq": seq, "ago_s": ago, "src": LOG_SOURCES[src] if src < len(LOG_SOURCES) else src, "slot": slot,
+             "unread": bool(flags & 1), "freq": freq, "id": ident, "x": x, "y": y, "pos": pos, "name": name,
+             "text": txt}, r)
 
 
 def why(status, rest):
@@ -1069,7 +1078,7 @@ class LiveView:
 
 def subscribe(link, what, seconds, screen):
     """LINK-46: subscribe, then print each event for `seconds`, renewing every 5 s; the UI's bytes a second."""
-    mask = sum({"heard": SUB_HEARD, "msgs": SUB_MSGS, "ui": SUB_UI}[w] for w in what)
+    mask = sum({"heard": SUB_HEARD, "msgs": SUB_MSGS, "ui": SUB_UI, "log": SUB_LOG}[w] for w in what)
     r = link.ok(SUBSCRIBE, bytes([mask]))
     if mask & SUB_UI and r[1] != LV_DICT_VERSION:
         sys.exit(f"Live View dictionary {r[1]}: this tool knows {LV_DICT_VERSION}")
@@ -1087,6 +1096,9 @@ def subscribe(link, what, seconds, screen):
                     m, _ = parse_message(body[2:])
                     what_ = "message" if kind == EV_MSG else "message state"
                     print(f"{what_}: {'from' if m['in'] else 'to'} {m['peer']}: {m['text']!r} [{m['state']}]")
+                elif kind == EV_LOG:
+                    e, _ = parse_log(body)
+                    print(f"log #{e['seq']}: {e['src']} {e['name']} {e['text']!r}")
                 elif kind == EV_UI:
                     ui_bytes, ui_n = ui_bytes + len(p) + 6, ui_n + 1
                     if not lv.apply(body):
