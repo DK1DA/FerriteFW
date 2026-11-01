@@ -769,7 +769,8 @@ impl AprsLive {
                 h.pos = Some(Pos { lat: pos.lat.saturating_mul(10), lon: pos.lon.saturating_mul(10) });
                 h.sym = sym(pos.table, pos.code);
                 d.course = pos.course.map(|c| (c, pos.speed.map_or(0, |k| (k as u32 * 1852 / 1000) as u16)));
-                d.alt_m = pos.altitude.map(|ft| ft * 3048 / 10_000);
+                // in i64: `/A=999999` (any 6 digits) times 3048 passes i32 (found by fuzzing, Oct 31)
+                d.alt_m = pos.altitude.map(|ft| (ft as i64 * 3048 / 10_000) as i32);
                 d.known |= DET_COURSE;
                 // APRS-23: a weather report's fields stay at the start of the comment for the station screen.
                 for b in comment.bytes().take(40) {
@@ -1463,6 +1464,19 @@ mod tests {
         a.receive(&f[..n], 60, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert_eq!(a.station(0).unwrap().comment.as_bytes(), b"Parked");
         assert_eq!(a.row_of(0), Some((100, DET_COURSE)), "course and altitude from its row");
+    }
+
+    /// Fuzzing (Oct 31): an altitude as large as `/A=` can carry (6 digits) converts to metres without overflow.
+    #[test]
+    fn huge_altitude_converts() {
+        let a = AprsLive::new();
+        for (alt, m) in [(&b"999999"[..], 304_799), (b"-99999", -30_479)] {
+            let mut info = b"!4525.51N/07554.20W>/A=".to_vec();
+            info.extend_from_slice(alt);
+            let (f, n) = frame(b"VE3AA", b"APRS", &[], &info);
+            a.receive(&f[..n], 1, b"VE3XYZ", &AprsCfg::DEFAULT);
+            assert_eq!(a.station(0).unwrap().alt_m, Some(m));
+        }
     }
 
     #[test]
