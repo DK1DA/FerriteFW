@@ -531,18 +531,28 @@ impl ChanSpan {
     }
 }
 
-/// One answer kept: under slot `slot`, position `pos` receives on `rx` (0: not a stop: a Skip-flagged, HF or empty
-/// channel) and transmits on `tx` (0: the same).
+/// One answer kept: under slot `slot - 1` (0: an empty place, so an empty cache is all zeros and is set up without
+/// a table from slow flash: tools/slowcheck.py), position `pos` receives on `rx` (0: not a stop: a Skip-flagged, HF
+/// or empty channel) and transmits on `tx` (0: the same).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
-    pub slot: u8,
+    slot: u8,
     pub pos: u16,
     pub rx: Freq10,
     pub tx: Freq10,
 }
 
 impl Entry {
-    const NONE: Entry = Entry { slot: 0xFF, pos: NO_WANT, rx: 0, tx: 0 };
+    const NONE: Entry = Entry { slot: 0, pos: 0, rx: 0, tx: 0 };
+
+    /// The slot it is for.
+    pub fn slot(&self) -> u8 {
+        self.slot.wrapping_sub(1)
+    }
+
+    fn is(&self, slot: u8, pos: u16) -> bool {
+        self.slot == slot.wrapping_add(1) && self.pos == pos
+    }
 }
 
 /// The channel scans' frequencies by (slot, position), shared by the slots.
@@ -565,13 +575,13 @@ impl FreqCache {
     }
 
     pub fn get(&self, slot: u8, pos: u16) -> Option<Entry> {
-        self.e.iter().find(|e| e.slot == slot && e.pos == pos).copied()
+        self.e.iter().find(|e| e.is(slot, pos)).copied()
     }
 
     /// A position's receive frequency arrived (0: not a stop). `keep` are (slot, position) pairs not to be
     /// replaced (the stops being listened on and the priority channels).
     pub fn put_rx(&mut self, slot: u8, pos: u16, rx: Freq10, keep: &[(u8, u16)]) {
-        if let Some(e) = self.e.iter_mut().find(|e| e.slot == slot && e.pos == pos) {
+        if let Some(e) = self.e.iter_mut().find(|e| e.is(slot, pos)) {
             (e.rx, e.tx) = (rx, 0);
             return;
         }
@@ -579,8 +589,8 @@ impl FreqCache {
             let i = self.next as usize % CACHE;
             self.next = ((i + 1) % CACHE) as u8;
             let x = self.e[i];
-            if x.pos == NO_WANT || !keep.contains(&(x.slot, x.pos)) {
-                self.e[i] = Entry { slot, pos, rx, tx: 0 };
+            if x.slot == 0 || !keep.contains(&(x.slot(), x.pos)) {
+                self.e[i] = Entry { slot: slot.wrapping_add(1), pos, rx, tx: 0 };
                 return;
             }
         }
@@ -588,7 +598,7 @@ impl FreqCache {
 
     /// The position's transmit frequency (SCAN-22), after its receive one.
     pub fn put_tx(&mut self, slot: u8, pos: u16, tx: Freq10) {
-        if let Some(e) = self.e.iter_mut().find(|e| e.slot == slot && e.pos == pos) {
+        if let Some(e) = self.e.iter_mut().find(|e| e.is(slot, pos)) {
             e.tx = tx;
         }
     }
@@ -597,8 +607,8 @@ impl FreqCache {
     pub fn clear_slot(&mut self, slot: u8) {
         // field by field: a whole `Entry::NONE` would be copied from a constant in slow flash, read here from the
         // Radio task's interrupt context (tools/slowcheck.py)
-        for e in self.e.iter_mut().filter(|e| e.slot == slot) {
-            (e.slot, e.pos, e.rx, e.tx) = (0xFF, NO_WANT, 0, 0);
+        for e in self.e.iter_mut().filter(|e| e.slot == slot.wrapping_add(1)) {
+            (e.slot, e.pos, e.rx, e.tx) = (0, 0, 0, 0);
         }
     }
 
