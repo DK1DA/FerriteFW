@@ -51,7 +51,16 @@ fn main() {
     if let Some(secs) = arg("--term-headless").and_then(|s| s.parse::<u64>().ok()) {
         // No window: the radio and its cable only, for scripted terminal checks (`--term-tcp PORT` for TCP).
         let tcp = arg("--term-tcp").and_then(|s| s.parse::<u16>().ok());
-        let mut sim = ferrite_sim::simcore::SimCore::new(1, false);
+        // `--flash FILE`: the flash as FILE holds it ([`ferrite_sim::simcore::FLASH_IMAGE`]'s bytes, as the window keeps
+        // them), not the sample: Ferrite Console's end-to-end test starts a radio whose data is in layout 2 (UPD-16)
+        // and finishes the update over the link (LINK-59 – LINK-62).
+        let mut sim = match arg("--flash") {
+            Some(f) => {
+                let img = std::fs::read(f).expect("the flash image");
+                ferrite_sim::simcore::SimCore::with_flash(1, false, ferrite_sim::simcore::Stored::Image(img))
+            }
+            None => ferrite_sim::simcore::SimCore::new(1, false),
+        };
         // `--no-ssb-patch`: a radio without the SSB patch (HF-20, SELF-6, INST-14; the UI tests' sim_args).
         if args.iter().any(|a| a == "--no-ssb-patch") {
             sim.device_mut().selftest.ssb_patch = false;
