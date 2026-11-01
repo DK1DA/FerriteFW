@@ -1,0 +1,88 @@
+# Fuzz targets for the packet decoders (tools/fuzz.sh; FUZZING.md). Its own workspace: never part of `cargo test`,
+# clippy or the firmware build.
+[package]
+name = "ferrite-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "PolyForm-Noncommercial-1.0.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+uaprs = { path = "../digimodes/uaprs" }
+ufx25 = { path = "../digimodes/ufx25" }
+uafsk = { path = "../digimodes/uafsk" }
+ferrite-core = { path = "../crates/ferrite-core" }
+ferrite-app = { path = "../crates/ferrite-app" }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "aprs_parse"
+path = "fuzz_targets/aprs_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ax25_frame"
+path = "fuzz_targets/ax25_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kiss"
+path = "fuzz_targets/kiss.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fx25_block"
+path = "fuzz_targets/fx25_block.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fx25_bits"
+path = "fuzz_targets/fx25_bits.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hdlc_bits"
+path = "fuzz_targets/hdlc_bits.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "afsk_audio"
+path = "fuzz_targets/afsk_audio.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "aprs_live"
+path = "fuzz_targets/aprs_live.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "seeds"
+path = "src/bin/seeds.rs"
+test = false
+doc = false
+bench = false
