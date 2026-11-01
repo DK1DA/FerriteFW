@@ -4,14 +4,20 @@
 //! which writes only inside the driver's own writable ranges (never calibration or the update area), until
 //! `FINISH` resets into the bootloader for the stock `.BTF`. Turning the radio off is the only other way out.
 
+use crate::board::{LED_ACTIVE_HIGH, LED_GREEN};
 use crate::chan::{TERM_IN, TERM_OUT};
 use crate::store::{self, Store};
 use embassy_time::Timer;
 use ferrite_core::link::{self as wire, msg, Status, MAX_PAYLOAD, MAX_WIRE};
+use ferrite_app::lights::{xfer_flash, XFER_LINGER_MS};
 use ferrite_core::VERSION;
 use ferrite_store::restore::{serve, start, After};
 use ferrite_ui::boot::{self, BootInfo};
 use ferrite_ui::panel::Panel;
+
+fn now_ms() -> u32 {
+    embassy_time::Instant::now().as_millis() as u32
+}
 
 fn screen(lcd: &mut impl Panel, note: &[u8]) {
     let b = BootInfo { version: VERSION, callsign: None, line: Some(b"Back to stock: keep the cable in"), owner: None, checks: &[], note: Some(note) };
@@ -33,7 +39,8 @@ async fn send(ty: u8, seq: u8, ans: &[u8]) {
 
 /// Serves the restore from the accepted `START` (its seq) on; never returns.
 #[allow(clippy::await_holding_refcell_ref)] // see the idle wait: no other borrower is left
-pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8) -> ! {
+/// `leds`: 0 7 6 isn't Off, so the green LED flashes while frames come (DISP-30).
+pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8, leds: bool) -> ! {
     // Whatever Ferrite had queued is written first (the restore overwrites it anyway), so the chip is free.
     store::wake(store);
     // Until the Storage task is idle: from here on nothing queues another job (only the UI task does, and it
@@ -50,8 +57,13 @@ pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8) -> ! {
     let mut rx = [0u8; MAX_WIRE];
     let mut rn = 0usize;
     let mut overflow = false;
+    let mut last = now_ms();
     loop {
         let Some(b) = TERM_IN.get() else {
+            // DISP-30: the transfer flash while frames come, off XFER_LINGER_MS after the last
+            let now = now_ms();
+            let on = leds && now.wrapping_sub(last) < XFER_LINGER_MS && xfer_flash(now).0;
+            LED_GREEN.write(on == LED_ACTIVE_HIGH);
             Timer::after_millis(1).await;
             continue;
         };
@@ -88,6 +100,7 @@ pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8) -> ! {
             }
         };
         send(ty, seq, &ans[..n]).await;
+        last = now_ms();
         if after == After::Reset {
             screen(lcd, b"Done: restarting");
             while TERM_OUT.count() > 0 {

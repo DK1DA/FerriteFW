@@ -11,7 +11,8 @@
 //!   (DISP-16, DISP-23).
 //! - **LEDs:** red while transmitting, green while a slot receives; while the screen is dark, a heartbeat in the
 //!   battery's colour (green above 80 %, yellow = both between the low warning and 80 %, red at or below it):
-//!   one short flash every 5 s, or a double flash every 2 s while a message or alert is unread.
+//!   one short flash every 5 s, or a double flash every 2 s while a message or alert is unread. A big link transfer
+//!   (Console reading or writing records) flashes green while it runs and for a moment after (DISP-30).
 
 use crate::settings::{AUTO_LOCK_TIMES, AUTO_OFF_TIMES, BACKLIGHT_TIMES};
 use crate::App;
@@ -37,6 +38,20 @@ const WANT_OFF: u8 = 4;
 const SWALLOW: u8 = 8;
 /// Keyed with 0 7 4 3 off: dark while keyed (DISP-26), the timeout left as it was.
 const TX_DARK: u8 = 16;
+/// A big link transfer was seen (DISP-30): [`App::xfer`] holds when.
+const XFER: u8 = 32;
+
+/// DISP-30: the transfer flash goes on this long after the last frame of a big transfer.
+pub const XFER_LINGER_MS: u32 = 1000;
+/// DISP-30: its period, half on, half off (twice the heartbeat's flash: quick, but not the steady green of receive).
+pub const XFER_FLASH_MS: u32 = 2 * FLASH_MS;
+
+/// DISP-30: whether the transfer flash is on at `now` (ms), and how long until it changes. Shared with the stock
+/// restore's own loop, which runs without the App.
+pub fn xfer_flash(now: u32) -> (bool, u32) {
+    let t = now % XFER_FLASH_MS;
+    if t < FLASH_MS { (true, FLASH_MS - t) } else { (false, XFER_FLASH_MS - t) }
+}
 
 /// A flash's length, and the two heartbeat periods.
 const FLASH_MS: u32 = 120; // DISP-21.2: 80 ms looked dim (Alex, Oct 22, 2026)
@@ -103,6 +118,23 @@ impl App {
         w
     }
 
+    /// DISP-30: a frame of a big link transfer (records read or written) came now: the LED flashes green while they
+    /// come and for [`XFER_LINGER_MS`] after the last.
+    pub(crate) fn link_transfer(&mut self, now: u32) {
+        self.xfer = now;
+        self.lit |= XFER;
+    }
+
+    /// DISP-30: a big link transfer is running (its last frame under [`XFER_LINGER_MS`] ago).
+    pub fn transferring(&self) -> bool {
+        self.lit & XFER != 0 && self.xfer_ago() < XFER_LINGER_MS
+    }
+
+    /// How long ago the last transfer frame came (0 when the link's clock ran ahead of the App's last tick).
+    fn xfer_ago(&self) -> u32 {
+        if after(self.xfer, self.now) { 0 } else { self.now.wrapping_sub(self.xfer) }
+    }
+
     /// The LEDs (0 7 6).
     pub fn leds(&self, live: &LiveAll, dev: &Device) -> Leds {
         let mode = self.set.leds;
@@ -114,6 +146,13 @@ impl App {
         }
         if live.slots.iter().any(|s| s.squelch_open) {
             return Leds { green: true, ..Leds::default() };
+        }
+        // DISP-30: a big link transfer flashes green, lit screen or dark, over the heartbeat; the flash ends
+        // XFER_LINGER_MS after the last frame (next_ms brings the tick back for it).
+        if self.transferring() {
+            let (green, next) = xfer_flash(self.now);
+            let left = XFER_LINGER_MS - self.xfer_ago();
+            return Leds { red: false, green, next_ms: next.min(left).max(1) };
         }
         if mode < 2 || !self.dark() {
             return Leds::default();
@@ -186,6 +225,9 @@ impl App {
     pub(crate) fn lights_tick(&mut self, now: u32, live: &LiveAll) {
         let rx = live.slots.iter().any(|s| s.squelch_open);
         let tx = live.tx.keyed;
+        if !self.transferring() {
+            self.lit &= !XFER; // DISP-30: over (so the clock wrapping round never brings it back)
+        }
         // Auto off counts any activity, whatever wakes the screen.
         if rx || tx {
             self.awake = now;

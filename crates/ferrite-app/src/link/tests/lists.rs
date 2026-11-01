@@ -229,3 +229,24 @@ fn preset_skips_over_the_link() {
     assert_eq!((pc.st.preset(0).unwrap().skips, pc.st.preset_skip(0, 0)), (0, None));
     assert_eq!(pc.ask(msg::USED, &[what::PRESET_SKIPS]).0, Status::BadArg as u8);
 }
+
+/// LINK-58.1: blank skip entries (erased flash's 0xFFFFFFFF, or 0) are left out of a `what` 11 record; a preset whose
+/// entries are all blank isn't listed.
+#[test]
+fn preset_skips_leave_blank_entries_out() {
+    use crate::data::{Op, SKIP_CHUNK};
+    let mut pc = Pc::new(true);
+    let p = pc.st.preset(0).unwrap();
+    let (a, b) = (p.start + 2_500, p.start + 5_000);
+    let mut f = [0u32; SKIP_CHUNK];
+    f[..4].copy_from_slice(&[a, u32::MAX, 0, b]);
+    assert!(pc.st.request(Op::PresetSkips { preset: 0, at: 0, count: 4, f }));
+    assert_eq!(pc.st.preset(0).unwrap().skips, 4, "four slots in use, two blank");
+    let got = all(&mut pc, what::PRESET_SKIPS);
+    assert_eq!(got.iter().find(|g| g.0 == 0).unwrap().1, skips_rec(&[a, b]), "the blanks left out");
+    assert!(got.iter().flat_map(|g| g.1.chunks(4)).all(|c| c != [0xFF; 4] && c != [0; 4]), "no blank anywhere");
+    // all blank: not listed
+    let f = [u32::MAX; SKIP_CHUNK];
+    assert!(pc.st.request(Op::PresetSkips { preset: 0, at: 0, count: 3, f }));
+    assert!(all(&mut pc, what::PRESET_SKIPS).iter().all(|g| g.0 != 0), "nothing to send for it");
+}

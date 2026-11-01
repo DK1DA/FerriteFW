@@ -361,7 +361,9 @@ pub struct App {
     /// or knob step, the waking one too, for the keypad light's "on key press" (DISP-22).
     awake: u32,
     pressed: u32,
-    /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed.
+    /// The last link frame of a big transfer, for the LED's transfer flash (DISP-30, [`lights`]).
+    xfer: u32,
+    /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed, a transfer seen.
     lit: u8,
     /// The APRS settings from the APRS store ([`aprs`]), and whether they were loaded and need writing back.
     aprs: aprs::AprsCfg,
@@ -489,6 +491,7 @@ impl App {
             seen: 0,
             awake: 0,
             pressed: 0,
+            xfer: 0,
             lit: 0,
             aprs: aprs::AprsCfg::DEFAULT,
             aprs_st: 0,

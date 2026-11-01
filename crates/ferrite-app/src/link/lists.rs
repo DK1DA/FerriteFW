@@ -35,7 +35,7 @@ pub(super) fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
     match w {
         what::QUICK => (i as usize) < QUICK,
         what::WAYPOINT => i < st.data().waypoints(),
-        what::PRESET_SKIPS => st.data().preset(i as u8).is_some_and(|p| p.skips > 0),
+        what::PRESET_SKIPS => i < 256 && preset_skips(st.data(), i as u8, |_| ()) > 0,
         _ => i < DTMF_MEMS as u16 && st.data().dtmf(i as u8).is_some(),
     }
 }
@@ -74,17 +74,22 @@ pub(super) fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window)
             None => return Status::NotFound,
         },
         // LINK-58: the skipped frequencies, u32 each
-        what::PRESET_SKIPS => match d.preset(idx as u8).filter(|p| idx < 256 && p.skips > 0) {
-            Some(p) => {
-                for j in 0..p.skips.min(PRESET_SKIPS_MAX as u8) {
-                    win.put(&d.preset_skip(idx as u8, j).unwrap_or(0).to_le_bytes());
-                }
-            }
-            None => return Status::NotFound,
-        },
+        what::PRESET_SKIPS if idx < 256 && preset_skips(d, idx as u8, |f| win.put(&f.to_le_bytes())) > 0 => {}
         _ => return Status::NotFound,
     }
     Status::Ok
+}
+
+/// LINK-58.1: preset `i`'s skipped frequencies as stored, each to `put`, blank entries (erased flash's 0xFFFFFFFF, or
+/// 0: never a frequency) left out; how many went.
+fn preset_skips(d: &dyn crate::data::Data, i: u8, mut put: impl FnMut(u32)) -> usize {
+    let n = d.preset(i).map_or(0, |p| p.skips.min(PRESET_SKIPS_MAX as u8));
+    let mut k = 0;
+    for f in (0..n).filter_map(|j| d.preset_skip(i, j)).filter(|&f| f != u32::MAX && f != 0) {
+        put(f);
+        k += 1;
+    }
+    k
 }
 
 /// Printable ASCII but `|`, `~` and `{` (APRS-7: what a message can carry, as `MSG_SEND` checks, LINK-45).

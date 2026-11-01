@@ -262,3 +262,97 @@ fn contacts_edges() {
     assert_eq!(pc.st.data().version(), v, "the same contact: nothing written");
     assert_eq!(pc.write_many(what::CONTACT, &[(0, std::vec![b'V'; 5])]).0, Status::BadArg as u8);
 }
+
+/// The App's clock brought to the link's and the LEDs then.
+fn leds_now(pc: &mut Pc, live: &LiveAll) -> crate::lights::Leds {
+    pc.app.tick(pc.now, live, &pc.st);
+    pc.app.leds(live, &pc.dev)
+}
+
+/// How many times the green LED comes on over `ms`, sampled every 10 ms; and whether red ever lit.
+fn flashes(pc: &mut Pc, live: &LiveAll, ms: u32) -> (u32, bool) {
+    let (mut n, mut on, mut red) = (0, false, false);
+    for _ in 0..ms / 10 {
+        let l = leds_now(pc, live);
+        n += (l.green && !on) as u32;
+        (on, red) = (l.green, red || l.red);
+        pc.now += 10;
+    }
+    (n, red)
+}
+
+/// DISP-30 (decision 332): records read or written over the link (here `READ_MANY`, `WRITE_MANY`, a `STREAM` of
+/// them) flash the green LED, lit screen or dark, and for a second after the last frame; the screen readback (`UI`,
+/// a `STREAM` of it), keys and commands don't. Receive's steady green and transmit's red win; 0 7 6 Off shows
+/// nothing. On Bluetooth with the PIN lock on, a refused request flashes nothing, and a `STREAM` is refused before
+/// AUTH as everything else is (LINK-30).
+#[test]
+fn big_transfers_flash_the_led() {
+    let quiet = LiveAll::default();
+    let mut pc = Pc::new(true);
+    assert_eq!(pc.ask(msg::HELLO, &[PROTOCOL]).0, 0);
+    assert_eq!(pc.ask(msg::UI, &[0]).0, 0);
+    assert_eq!(pc.ask(msg::CMD, b"slot").0, 0);
+    assert!(!pc.app.transferring(), "hello, the readback and a command aren't transfers");
+    assert_eq!(leds_now(&mut pc, &quiet), crate::lights::Leds::default());
+    let rm = |first: u16| {
+        let mut p = std::vec![what::CHANNEL];
+        p.extend_from_slice(&first.to_le_bytes());
+        p.extend_from_slice(&1000u16.to_le_bytes());
+        p
+    };
+    assert_eq!(pc.ask(msg::READ_MANY, &rm(0)).0, 0);
+    assert!(pc.app.transferring());
+    let l = leds_now(&mut pc, &quiet);
+    assert!(l.next_ms > 0 && !l.red, "a flash with its next change");
+    let (n, red) = flashes(&mut pc, &quiet, 1000);
+    assert!(n >= 3 && !red, "green flashes while it lingers: {n}");
+    let l = leds_now(&mut pc, &quiet);
+    assert!(!pc.app.transferring() && l == crate::lights::Leds::default(), "over a second after the last frame");
+    // a stream of records: on; a stream of the readback: off
+    stream(&mut pc, 40, &[&[msg::READ_MANY][..], &rm(0)].concat());
+    assert!(pc.app.transferring(), "a stream of records");
+    pc.now += 1100;
+    assert!(!leds_now(&mut pc, &quiet).green);
+    stream(&mut pc, 60, &[msg::UI, 0]);
+    assert!(!pc.app.transferring(), "the readback streamed");
+    // a write
+    let c = pc.st.by_number(0).unwrap();
+    let rec = pc.read(what::CHANNEL, c.num).unwrap();
+    pc.now += 1100;
+    assert!(!leds_now(&mut pc, &quiet).green);
+    assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
+    assert!(pc.app.transferring(), "a write");
+    // receive and transmit win
+    let mut rx = LiveAll::default();
+    rx.slots[0].squelch_open = true;
+    assert!((0..30).all(|_| {
+        pc.now += 10;
+        leds_now(&mut pc, &rx).green
+    }), "receive: steady green");
+    let mut tx = LiveAll::default();
+    tx.tx.keyed = true;
+    let l = leds_now(&mut pc, &tx);
+    assert!(l.red && !l.green, "transmit: red");
+    // 0 7 6 Off: nothing
+    pc.app.set.leds = 0;
+    assert_eq!(pc.ask(msg::READ_MANY, &rm(0)).0, 0);
+    assert_eq!(flashes(&mut pc, &quiet, 500), (0, false), "LEDs off");
+    // the dark screen flashes too, over the heartbeat
+    pc.app.set.leds = 2;
+    pc.app.backlight_out();
+    pc.now += 1100;
+    leds_now(&mut pc, &quiet);
+    assert!(pc.app.dark());
+    assert_eq!(pc.ask(msg::READ_MANY, &rm(0)).0, 0);
+    assert!(flashes(&mut pc, &quiet, 1000).0 >= 3, "dark: the transfer flash");
+    // Bluetooth with the PIN lock, before AUTH
+    let mut bt = Pc::new(false);
+    (bt.app.set.pin, bt.app.set.pin_len, bt.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(bt.ask(msg::READ_MANY, &rm(0)).0, Status::NotAuthorised as u8);
+    assert!(!bt.app.transferring(), "a refused read flashes nothing");
+    let got = stream(&mut bt, 70, &[&[msg::READ_MANY][..], &rm(0)].concat());
+    assert_eq!(got.len(), 1, "one answer");
+    assert_eq!(got[0].1, [Status::NotAuthorised as u8], "LINK-30: no stream before AUTH");
+    assert!(!bt.app.transferring());
+}

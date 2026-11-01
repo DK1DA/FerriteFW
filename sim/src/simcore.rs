@@ -1259,6 +1259,15 @@ fn seed(store: &Store) {
     for i in 0..sample.presets() {
         if let Some(p) = sample.preset(i) {
             store.add_preset(&p);
+            // LINK-58.1: and its skipped frequencies, so no entry is left blank (erased flash)
+            let mut f = [0; ferrite_app::data::SKIP_CHUNK];
+            let n = (p.skips as usize).min(f.len());
+            for (j, v) in f.iter_mut().enumerate().take(n) {
+                *v = sample.preset_skip(i, j as u8).unwrap_or(0);
+            }
+            if n > 0 {
+                store.request(ferrite_app::data::Op::PresetSkips { preset: i, at: 0, count: n as u8, f });
+            }
         }
     }
     // The event log, messages and waypoints, oldest first, each as old as the sample says.
@@ -1305,6 +1314,23 @@ mod tests {
         for t in (from..=to).step_by(20) {
             s.step(t);
         }
+    }
+
+    /// LINK-58.1: the seeded sample's range presets hold their skipped frequencies, each within its range: none
+    /// left blank (erased flash), so `what` 11 sends what the sample has.
+    #[test]
+    fn seeded_preset_skips_have_no_blank_entries() {
+        let s = SimCore::new(1, false);
+        let mut seen = 0;
+        for i in 0..s.store.presets() {
+            let p = s.store.preset(i).unwrap();
+            for j in 0..p.skips {
+                let f = s.store.preset_skip(i, j).unwrap();
+                assert!((p.start..=p.end).contains(&f), "preset {i} skip {j}: {f:#x}");
+                seen += 1;
+            }
+        }
+        assert!(seen > 0, "the sample has some");
     }
 
     #[test]

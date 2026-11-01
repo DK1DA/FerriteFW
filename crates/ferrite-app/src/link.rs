@@ -315,6 +315,9 @@ impl Session {
             // as many frames as the port has room for (the cable's ring holds four), so a pass isn't a frame
             while self.stream.is_some() && out.room() >= MAX_WIRE && !store.data().busy() {
                 self.last = now;
+                if self.stream.is_some_and(|s| s.ty != msg::UI) {
+                    app.link_transfer(now); // DISP-30
+                }
                 self.stream_frame(app, store, dev, live, out);
             }
             return;
@@ -345,11 +348,22 @@ impl Session {
                 let pl = f.payload.len();
                 p[..pl].copy_from_slice(f.payload);
                 (self.last, self.seen) = (now, true);
+                if transfer(ty, &p[..pl]) && self.authorised(app) {
+                    app.link_transfer(now); // DISP-30: the LED flashes
+                }
                 if ty == msg::STREAM {
                     // LINK-50: its first frame now; the rest as the port has room (the top of `poll`)
                     let inner = p[..pl].first().copied().unwrap_or(0);
-                    if !matches!(inner, msg::READ_MANY | msg::HEARD | msg::MSGS | msg::LOG_READ | msg::UI) || pl > 6 {
-                        ans[0] = Status::BadArg as u8;
+                    // LINK-30: on Bluetooth with the PIN lock on, no stream before AUTH either
+                    let refused = if !self.authorised(app) {
+                        Some(Status::NotAuthorised)
+                    } else if !matches!(inner, msg::READ_MANY | msg::HEARD | msg::MSGS | msg::LOG_READ | msg::UI) || pl > 6 {
+                        Some(Status::BadArg)
+                    } else {
+                        None
+                    };
+                    if let Some(r) = refused {
+                        ans[0] = r as u8;
                         self.send(ty, seq, &ans[..1], out);
                         return;
                     }
@@ -465,6 +479,7 @@ impl Session {
     /// A `WRITE_MANY`'s next record (LINK-41), and its answer once the last is applied or one is refused.
     fn many_poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, now: u32, out: &mut impl Sink) {
         self.last = now;
+        app.link_transfer(now); // DISP-30: a long `WRITE_MANY` keeps the LED flashing
         let seq = self.many.map_or(0, |m| m.seq);
         let mut ans = [0u8; MAX_PAYLOAD];
         while write_room(app, store, self.many.map_or(0, |m| m.what)) {
@@ -1142,6 +1157,17 @@ fn name_of<const N: usize>(b: &[u8]) -> Option<Buf<N>> {
         return None;
     }
     Some(Buf::from(&b[..n]))
+}
+
+/// DISP-30: the requests of a big transfer, records read or written (channels, zones, presets, settings, the lists,
+/// APRS heard and messages, the event log, a stock restore), which flash the LED; not the screen readback, keys,
+/// commands, events or audio.
+fn transfer(ty: u8, p: &[u8]) -> bool {
+    match ty {
+        msg::READ | msg::WRITE | msg::DELETE | msg::BEGIN | msg::USED | msg::READ_MANY | msg::WRITE_MANY | msg::LOG_READ | msg::HEARD | msg::MSGS | msg::STOCK_RESTORE => true,
+        msg::STREAM => p.first().is_some_and(|&t| t != msg::UI),
+        _ => false,
+    }
 }
 
 /// Channel, zone or preset `idx`, as `READ_MANY` gives it, into `win`: `not found` when there is none.

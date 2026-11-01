@@ -617,7 +617,7 @@ pub async fn task() {
             // BACKUP-7 (decision 261): the way back to stock has the cable from here until it resets.
             if let Some(seq) = ports.take_restore() {
                 send_shutdown(&mut app, &mut held).await;
-                super::restore::run(store, &mut lcd, seq).await;
+                super::restore::run(store, &mut lcd, seq, app.settings().leds != 0).await; // DISP-30: LEDs per 0 7 6
             }
             if ports.take_reboot() {
                 // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
