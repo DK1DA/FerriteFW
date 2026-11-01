@@ -15,7 +15,7 @@ fn br(t: &T) -> Browse {
 /// The picker on the view `name` (after the zones).
 fn view(t: &mut T, k: u16) {
     t.open(Dest::Browse);
-    let z = t.s.zones() as u16;
+    let z = t.s.zones();
     t.app.screen = Screen::Browse(Browse { view: PICKER, cur: crate::screens::lists::Cursor { sel: z + k, top: z + k - 8.min(z + k) }, ..Browse::new() });
     t.draw();
 }
@@ -85,7 +85,7 @@ fn renumber_and_move() {
     t.tap(Key::Menu);
     t.app.toast = None;
     let z = t.s.by_num(free).unwrap().0.zone;
-    t.app.screen = Screen::Browse(Browse { mode: Mode::Move(z), ..br(&t) });
+    t.app.screen = Screen::Browse(Browse { mode: Mode::Move, cur: crate::screens::lists::Cursor { top: z, ..br(&t).cur }, ..br(&t) });
     t.tap(Key::Menu);
     assert_eq!(t.toast(), "", "the same zone: no move");
     assert_eq!(br(&t).mode, Mode::List);

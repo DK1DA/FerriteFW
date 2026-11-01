@@ -20,15 +20,20 @@ pub fn rx_ok(f: Freq10) -> bool {
 /// A zone's (or channel's) name: 16 bytes at most (CHAN-5).
 pub type Name = ferrite_ui::text::Buf<16>;
 
-/// Zone numbers 0-254; this one means "no zone".
-pub const NO_ZONE: u8 = 255;
+/// A zone's number: 2 bytes (decision 333). Stored zones are 0 to [`MAX_ZONES`] - 1; [`NO_ZONE`] and Local
+/// ([`crate::local::LOCAL`]) sit at the top, out of their way.
+pub type ZoneId = u16;
+/// This zone number means "no zone" (CHAN-6).
+pub const NO_ZONE: ZoneId = 0xFFFF;
+/// How many zones the store holds (CHAN-6): numbers 0 to this - 1.
+pub const MAX_ZONES: ZoneId = 254;
 
 /// One channel: what home and edit-in-place show of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Channel {
     /// 0-999, shown as 1-1000 ("CH 012" is number 11).
     pub num: u16,
-    pub zone: u8,
+    pub zone: ZoneId,
     pub rx: Freq10,
     /// Name: 16 bytes, all shown on home (CHAN-5, HOME-4.3); unused bytes are 0.
     pub name: [u8; 16],
@@ -76,7 +81,7 @@ pub enum ChanWrite {
     /// Remove a channel (CHAN-13, from the browser).
     Delete(u16),
     /// Remove a zone: its channels move to no zone and stay in All (CHAN-12).
-    DeleteZone(u8),
+    DeleteZone(ZoneId),
     /// Every channel (settings reset, its second confirm: PIN-6).
     EraseAll,
 }
@@ -146,11 +151,11 @@ pub trait ChannelStore {
         false
     }
     /// How many zones exist (zone numbers 0..zones()).
-    fn zones(&self) -> u8;
+    fn zones(&self) -> ZoneId;
     /// A zone's name, None if it doesn't exist. By value: the firmware's store reads it from SPI flash.
-    fn zone_name(&self, zone: u8) -> Option<Name>;
+    fn zone_name(&self, zone: ZoneId) -> Option<Name>;
     /// A zone's name for display: `none` for no zone, `missing` when it doesn't exist.
-    fn zone_label(&self, zone: u8, none: &[u8], missing: &[u8]) -> Name {
+    fn zone_label(&self, zone: ZoneId, none: &[u8], missing: &[u8]) -> Name {
         match self.zone_name(zone) {
             _ if zone == NO_ZONE => Name::from(none),
             _ if zone == crate::local::LOCAL => Name::from(b"Local".as_slice()), // CHAN-34
@@ -159,9 +164,9 @@ pub trait ChannelStore {
         }
     }
     /// How many channels a zone holds.
-    fn zone_len(&self, zone: u8) -> u16;
+    fn zone_len(&self, zone: ZoneId) -> u16;
     /// The i-th channel of a zone, by number.
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel>;
+    fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel>;
     /// Channels stored in all.
     fn count(&self) -> u16;
 
@@ -182,7 +187,7 @@ pub trait ChannelStore {
 
     /// The zone of channel `n` (NO_ZONE for none), None when there is no such channel: a channel scan's set
     /// ([`crate::chanscan`]) asks this of every number. The firmware's store answers from its zone map in RAM.
-    fn zone_of(&self, n: u16) -> Option<u8> {
+    fn zone_of(&self, n: u16) -> Option<ZoneId> {
         self.get(n).map(|c| c.zone)
     }
 
@@ -299,16 +304,16 @@ impl Default for RecentList {
 pub struct NoChannels;
 
 impl ChannelStore for NoChannels {
-    fn zones(&self) -> u8 {
+    fn zones(&self) -> ZoneId {
         0
     }
-    fn zone_name(&self, _: u8) -> Option<Name> {
+    fn zone_name(&self, _: ZoneId) -> Option<Name> {
         None
     }
-    fn zone_len(&self, _: u8) -> u16 {
+    fn zone_len(&self, _: ZoneId) -> u16 {
         0
     }
-    fn zone_at(&self, _: u8, _: u16) -> Option<Channel> {
+    fn zone_at(&self, _: ZoneId, _: u16) -> Option<Channel> {
         None
     }
     fn count(&self) -> u16 {
@@ -323,16 +328,16 @@ pub struct Table<'a> {
 }
 
 impl ChannelStore for Table<'_> {
-    fn zones(&self) -> u8 {
-        self.zones.len() as u8
+    fn zones(&self) -> ZoneId {
+        self.zones.len() as ZoneId
     }
-    fn zone_name(&self, zone: u8) -> Option<Name> {
+    fn zone_name(&self, zone: ZoneId) -> Option<Name> {
         self.zones.get(zone as usize).map(|z| Name::from(z))
     }
-    fn zone_len(&self, zone: u8) -> u16 {
+    fn zone_len(&self, zone: ZoneId) -> u16 {
         self.channels.iter().filter(|c| c.zone == zone).count() as u16
     }
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel> {
         self.channels.iter().filter(|c| c.zone == zone).nth(i as usize).copied()
     }
     fn count(&self) -> u16 {
@@ -345,7 +350,7 @@ impl ChannelStore for Table<'_> {
 }
 
 /// A channel record from its parts (for tables).
-pub const fn channel(num: u16, zone: u8, rx: Freq10, name: &str, cfg: SlotCfg) -> Channel {
+pub const fn channel(num: u16, zone: ZoneId, rx: Freq10, name: &str, cfg: SlotCfg) -> Channel {
     let mut n = [0u8; 16];
     let b = name.as_bytes();
     let mut i = 0;

@@ -82,7 +82,7 @@ import struct
 import sys
 import time
 
-PROTOCOL = 2
+PROTOCOL = 3
 HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE, UI = (
     0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
 USED, READ_MANY, WRITE_MANY, LOG_READ = 0x15, 0x17, 0x18, 0x40  # LINK-39 - LINK-42
@@ -939,8 +939,8 @@ def text(b):
 
 
 def channel_fields(rec):
-    num, zone, rx = struct.unpack("<HBI", rec[:7])
-    name = rec[7:23].split(b"\x00")[0].decode("ascii", "replace")
+    num, zone, rx = struct.unpack("<HHI", rec[:8])  # protocol 3: the zone is 2 bytes (0xFFFF none; decision 333)
+    name = rec[8:24].split(b"\x00")[0].decode("ascii", "replace")
     return num, zone, rx, name
 
 
@@ -1413,8 +1413,8 @@ def run(link, a):
     elif a.cmd == "info":
         r = link.ok(INFO)
         ver, r = text(r)
-        chans, zones, presets, slen, region = struct.unpack("<HBBHB", r[:7])
-        call, rest = text(r[7:])
+        chans, zones, presets, slen, region = struct.unpack("<HHBHB", r[:8])
+        call, rest = text(r[8:])
         uid = uid_text(rest[1:13])
         print(f"firmware {ver} ({build_name(rest)}{', bench' if build_bench(rest) else ''}); {chans} channels, {zones} zones, {presets} presets; "
               f"settings {slen} B; region {region}; callsign {call or '-'}; unique ID {uid or 'not given'}")
@@ -1430,15 +1430,15 @@ def run(link, a):
         n = int(a.args[0]) - 1
         rec = link.read(CHANNEL, n)
         num, zone, rx, name = channel_fields(rec)
-        print(f"channel {num + 1}: {name!r} {rx / 100000:.5f} MHz zone {zone if zone != 255 else 'none'}; "
+        print(f"channel {num + 1}: {name!r} {rx / 100000:.5f} MHz zone {zone if zone != 0xFFFF else 'none'}; "
               f"{len(rec)} bytes: {rec.hex()}")
     elif a.cmd == "write-channel":
         n = int(a.args[0]) - 1
         rec = bytearray(link.read(CHANNEL, n))
         if a.name is not None:
-            rec[7:23] = a.name.encode("ascii")[:16].ljust(16, b"\x00")
+            rec[8:24] = a.name.encode("ascii")[:16].ljust(16, b"\x00")
         if a.rx is not None:
-            rec[3:7] = struct.pack("<I", round(a.rx * 100000))
+            rec[4:8] = struct.pack("<I", round(a.rx * 100000))
         link.ok(BEGIN, struct.pack("<H", 1))
         link.write(CHANNEL, n, bytes(rec))
         link.ok(END)

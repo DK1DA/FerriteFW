@@ -11,6 +11,7 @@
 //! [`NoData`], and every list shows empty. [`crate::sample::Sample`] fills them for the simulator and tests.
 
 pub use crate::aprs::AprsCfg;
+use crate::chan::ZoneId;
 use ferrite_core::freq::Freq10;
 use ferrite_ui::text::Buf;
 
@@ -344,18 +345,18 @@ pub enum Op {
     Skip(u16, bool),
     /// Hidden from the channel lists, or shown again (decision 63).
     Hide(u16, bool),
-    Move(u16, u8),
+    Move(u16, crate::chan::ZoneId),
     Renumber(u16, u16),
     NewZone,
     /// CHAN-12: its channels go to no zone.
-    DeleteZone(u8),
-    Zone(u8, ZoneCfg),
+    DeleteZone(ZoneId),
+    Zone(ZoneId, ZoneCfg),
     /// A zone's new name (from text entry).
-    RenameZone(u8, crate::chan::Name),
+    RenameZone(ZoneId, crate::chan::Name),
     Preset(u8, RangePreset),
     NewPreset,
     /// A zone written whole, created when it is the next one (the terminal's `zone` command and `load`, TERM-13).
-    PutZone(u8, crate::chan::Name, ZoneCfg),
+    PutZone(ZoneId, crate::chan::Name, ZoneCfg),
     /// A range preset written whole, created when it is the next one (TERM-13); its skips are kept.
     PutPreset(u8, RangePreset),
     DeletePreset(u8),
@@ -534,7 +535,7 @@ pub trait Data {
     fn skip(&self, _i: u16) -> Option<Freq10> {
         None
     }
-    fn zone_cfg(&self, _zone: u8) -> ZoneCfg {
+    fn zone_cfg(&self, _zone: ZoneId) -> ZoneCfg {
         ZoneCfg { shown: true, ..ZoneCfg::default() }
     }
 

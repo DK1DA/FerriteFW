@@ -4,7 +4,7 @@
 //! implement ([`ChannelStore`], [`Data`]); requests ([`Op`]) change them, so deleting, skipping or marking
 //! shows on screen. Host memory only: nothing here is linked into the firmware (it doesn't use it).
 
-use crate::chan::{channel, ChanWrite, Channel, ChannelStore, Name, FLAG_SKIP, NO_ZONE};
+use crate::chan::{channel, ChanWrite, Channel, ChannelStore, Name, FLAG_SKIP, NO_ZONE, ZoneId};
 use crate::data::*;
 use crate::settings::Settings;
 use crate::slot::{SlotCfg, DCS_FLAG, DEFAULT_CFG};
@@ -182,7 +182,7 @@ pub struct Sample {
     chans: [Cell<Option<Channel>>; CHANNELS.len() + 16],
     /// Recent (CHAN-25).
     recent: crate::chan::RecentList,
-    zones: Cell<u8>,
+    zones: Cell<ZoneId>,
     zone_cfg: [Cell<ZoneCfg>; 8],
     zone_names: [Cell<Name>; 8],
     presets: [Cell<Option<RangePreset>>; 16],
@@ -244,7 +244,7 @@ impl Sample {
         Sample {
             chans: core::array::from_fn(|i| Cell::new(CHANNELS.get(i).copied())),
             recent: crate::chan::RecentList::new(),
-            zones: Cell::new(ZONES_AT_START as u8),
+            zones: Cell::new(ZONES_AT_START as ZoneId),
             zone_cfg: core::array::from_fn(|z| Cell::new(zc(z))),
             zone_names: core::array::from_fn(|z| Cell::new(Name::from(ZONES[z]))),
             preset_skips: core::array::from_fn(|i| Cell::new(core::array::from_fn(|j| PRESETS.get(i).map_or(0, |p| p.1 + (j as u32 + 1) * 2_500)))),
@@ -432,16 +432,16 @@ impl ChannelStore for Sample {
     fn tuned(&self, num: u16) {
         self.recent.tuned(num);
     }
-    fn zones(&self) -> u8 {
+    fn zones(&self) -> ZoneId {
         self.zones.get()
     }
-    fn zone_name(&self, zone: u8) -> Option<Name> {
+    fn zone_name(&self, zone: ZoneId) -> Option<Name> {
         (zone < self.zones.get()).then(|| self.zone_names[zone as usize].get())
     }
-    fn zone_len(&self, zone: u8) -> u16 {
+    fn zone_len(&self, zone: ZoneId) -> u16 {
         self.live().filter(|c| c.zone == zone).count() as u16
     }
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel> {
         self.nth(i, |c| c.zone == zone)
     }
     fn count(&self) -> u16 {
@@ -606,7 +606,7 @@ impl Data for Sample {
     fn skip(&self, i: u16) -> Option<Freq10> {
         (0..SKIPS.len()).filter(|&k| self.skips_gone.get() & 1 << k == 0).nth(i as usize).map(|k| SKIPS[k])
     }
-    fn zone_cfg(&self, zone: u8) -> ZoneCfg {
+    fn zone_cfg(&self, zone: ZoneId) -> ZoneCfg {
         self.zone_cfg.get(zone as usize).map_or_else(ZoneCfg::default, |c| c.get())
     }
 
@@ -663,7 +663,7 @@ impl Data for Sample {
             Op::Renumber(n, to) => self.slot_of(to).is_none() && edit(n, &|c| c.num = to),
             Op::NewZone => {
                 let z = self.zones.get();
-                (z < ZONES.len() as u8).then(|| self.zones.set(z + 1)).is_some()
+                (z < ZONES.len() as ZoneId).then(|| self.zones.set(z + 1)).is_some()
             }
             Op::DeleteZone(z) => {
                 for c in &self.chans {

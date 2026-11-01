@@ -6,7 +6,7 @@
 //! A change works on a copy and is kept only when the whole channel still passes [`check_edit`] (CHAN-22, CHAN-26,
 //! TX-37); a refusal names its field, so each caller heads it its own way ("Power: ...", `power: ...`).
 
-use crate::chan::{rx_ok, Channel, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
+use crate::chan::{rx_ok, Channel, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE, ZoneId};
 use crate::slot::{band_near, band_step, Item, BANDS, SLOT_MODES, STEPS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::txplan::Region;
@@ -34,7 +34,7 @@ pub enum ChField {
 /// What a step needs besides the channel: how many zones exist, and the region (a band's step, VFO-18).
 #[derive(Clone, Copy)]
 pub struct Ctx {
-    pub zones: u8,
+    pub zones: ZoneId,
     pub region: Option<Region>,
 }
 
@@ -225,7 +225,7 @@ impl ChField {
                 let z = cx.zones as i32 + 1;
                 let i = if c.zone == NO_ZONE { z - 1 } else { c.zone as i32 };
                 let k = (i + d).rem_euclid(z);
-                n.zone = if k == z - 1 { NO_ZONE } else { k as u8 };
+                n.zone = if k == z - 1 { NO_ZONE } else { k as ZoneId };
             }
             (ChField::Rx, Op::Step(d)) => n.rx = freq_step(c.rx, d, cx.region),
             (ChField::Tx, Op::Step(d)) if c.cfg.split => {

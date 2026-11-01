@@ -19,7 +19,7 @@ fn step(f: ChField, mut c: Channel, d: i32) -> Result<Channel, Refusal> {
 #[test]
 fn zone_wraps_through_none() {
     let mut c = ch(mhz(146) + 52_000);
-    let seen: std::vec::Vec<u8> = (0..5)
+    let seen: std::vec::Vec<crate::chan::ZoneId> = (0..5)
         .map(|_| {
             c = step(ChField::Zone, c, 1).unwrap();
             c.zone

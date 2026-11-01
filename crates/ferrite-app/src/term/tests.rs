@@ -627,16 +627,16 @@ impl Apply for Blank {
 }
 
 impl ChannelStore for Blank {
-    fn zones(&self) -> u8 {
-        self.zones.borrow().len() as u8
+    fn zones(&self) -> crate::chan::ZoneId {
+        self.zones.borrow().len() as crate::chan::ZoneId
     }
-    fn zone_name(&self, zone: u8) -> Option<Name> {
+    fn zone_name(&self, zone: crate::chan::ZoneId) -> Option<Name> {
         self.zones.borrow().get(zone as usize).map(|z| z.0)
     }
-    fn zone_len(&self, zone: u8) -> u16 {
+    fn zone_len(&self, zone: crate::chan::ZoneId) -> u16 {
         self.chans.borrow().values().filter(|c| c.zone == zone).count() as u16
     }
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, zone: crate::chan::ZoneId, i: u16) -> Option<Channel> {
         self.chans.borrow().values().filter(|c| c.zone == zone).nth(i as usize).copied()
     }
     fn count(&self) -> u16 {
@@ -665,7 +665,7 @@ impl Data for Blank {
     fn preset(&self, i: u8) -> Option<RangePreset> {
         self.presets.borrow().get(i as usize).copied()
     }
-    fn zone_cfg(&self, zone: u8) -> ZoneCfg {
+    fn zone_cfg(&self, zone: crate::chan::ZoneId) -> ZoneCfg {
         self.zones.borrow().get(zone as usize).map_or(ZoneCfg { shown: true, ..ZoneCfg::default() }, |z| z.1)
     }
     fn request(&self, op: Op) -> bool {
@@ -984,7 +984,7 @@ fn dump_load_1000_channels() {
         let mut n = Name::new();
         let _ = uwrite!(n, "Zone \"{}\\", z);
         let cfg = ZoneCfg { scan_all: z % 2 == 0, shown: z % 3 != 0, by_distance: z % 5 == 0, resume: z % 13, dwell: if z % 4 == 0 { 255 } else { z }, pri: [Some(z as u16 * 3), if z % 2 == 1 { Some(999) } else { None }] };
-        assert!(full.request(Op::PutZone(z, n, cfg)));
+        assert!(full.request(Op::PutZone(z as crate::chan::ZoneId, n, cfg)));
     }
     for i in 0..16u8 {
         let p = RangePreset { name: Buf::from(&b"Range 1234567"[..12 - (i as usize % 3)]), start: mhz(140) + i as u32 * 1_000_000, end: mhz(150) + i as u32 * 1_000_000, step: i % 14, mode: i % 3, narrow: i % 2 == 0, skips: 0, resume: i % 13 };
@@ -1016,7 +1016,7 @@ fn dump_load_1000_channels() {
             split: n % 7 == 3,
         };
         let cfg = if cfg.split { SlotCfg { offset: mhz(146) as i32 + (n as i32 % 40) * 1250, power: 0, ..cfg } } else { cfg };
-        let mut c = Channel { num: n, zone: if n % 31 == 30 { NO_ZONE } else { (n % 31) as u8 }, rx, name: [0; 16], cfg, flags: (n % 8) as u8 & (FLAG_SKIP | FLAG_APRS | FLAG_RX_ONLY), tones: (n % 7) as u8 | ((n % 3) as u8) << 3 };
+        let mut c = Channel { num: n, zone: if n % 31 == 30 { NO_ZONE } else { n % 31 }, rx, name: [0; 16], cfg, flags: (n % 8) as u8 & (FLAG_SKIP | FLAG_APRS | FLAG_RX_ONLY), tones: (n % 7) as u8 | ((n % 3) as u8) << 3 };
         let mut name = Buf::<16>::new();
         let _ = uwrite!(name, "{}{}", if n % 9 == 0 { "q\"\\ " } else { "Ch " }, n);
         c.set_name(name.as_bytes());

@@ -5,7 +5,7 @@
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::ChannelStore;
+use crate::chan::{ChannelStore, ZoneId};
 use crate::local::LOCAL;
 use crate::data::Data;
 use crate::keys::{KeyEvent, Press};
@@ -971,7 +971,7 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         let from = app.slots[a].zone;
         let zones = store.zones() as i32;
         let ring = zones + crate::local::on(app) as i32;
-        let zone = |r: i32| if r == zones { LOCAL } else { r as u8 };
+        let zone = |r: i32| if r == zones { LOCAL } else { r as ZoneId };
         let mut r = if from == LOCAL { zones } else { from as i32 };
         for _ in 0..ring {
             r = (r + d).rem_euclid(ring);
@@ -1053,7 +1053,7 @@ pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
 }
 
 /// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26); Local's nearest (CHAN-34).
-fn first_slot_channel(app: &App, store: &impl ChannelStore, z: u8) -> Option<u16> {
+fn first_slot_channel(app: &App, store: &impl ChannelStore, z: ZoneId) -> Option<u16> {
     (0..app.zlen(store, z)).find(|&i| app.zat(store, z, i).is_some_and(|c| !c.is_hf()))
 }
 

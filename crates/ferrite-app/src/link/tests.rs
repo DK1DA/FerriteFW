@@ -190,7 +190,7 @@ fn hello_and_info_give_the_build() {
         let v = 4 + a[3] as usize;
         assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58)");
         let (_, a) = pc.ask(msg::INFO, &[]);
-        let v = 1 + a[0] as usize + 7;
+        let v = 1 + a[0] as usize + 8;
         let c = v + 1 + a[v] as usize;
         assert_eq!(a[c], b, "INFO");
         assert_eq!(a[c + 1..], [0; 12], "LINK-35.1: the unique ID follows, zeros until read");
@@ -226,20 +226,20 @@ fn channel_round_trip_and_checks() {
     let mut pc = Pc::new(true);
     let c = pc.st.by_number(0).unwrap();
     let mut rec = pc.read(what::CHANNEL, c.num).unwrap();
-    assert_eq!(&rec[7..7 + c.name().len()], c.name());
-    rec[7] = b'Z';
+    assert_eq!(&rec[8..8 + c.name().len()], c.name());
+    rec[8] = b'Z';
     assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
     assert_eq!(pc.st.get(c.num).unwrap().name[0], b'Z');
     // CHAN-31: printable characters outside the name set are mapped to '-', not refused
-    rec[7..10].copy_from_slice(b"@*?");
+    rec[8..11].copy_from_slice(b"@*?");
     assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
     assert_eq!(&pc.st.get(c.num).unwrap().name[..3], b"---");
     let mut bad = rec.clone();
-    bad[3..7].copy_from_slice(&70_000_000u32.to_le_bytes()); // 700 MHz: no chip receives it
+    bad[4..8].copy_from_slice(&70_000_000u32.to_le_bytes()); // 700 MHz: no chip receives it
     let (s, why) = pc.write(what::CHANNEL, c.num, &bad, 240);
     assert_eq!(s, Status::Invalid as u8);
     assert!(std::str::from_utf8(&why).unwrap().contains("756-1300 MHz"), "{why:?}");
-    bad[3..7].copy_from_slice(&1_000_000u32.to_le_bytes()); // 10 MHz: an HF channel, but NFM isn't HF mode's
+    bad[4..8].copy_from_slice(&1_000_000u32.to_le_bytes()); // 10 MHz: an HF channel, but NFM isn't HF mode's
     let (s, why) = pc.write(what::CHANNEL, c.num, &bad, 240);
     assert_eq!(s, Status::Invalid as u8);
     assert!(std::str::from_utf8(&why).unwrap().contains("an HF channel is AM"), "{why:?}");
@@ -1526,7 +1526,7 @@ fn used_maps_channels() {
     }
     assert_eq!(n, pc.st.count());
     let (s, a) = pc.ask(msg::USED, &[what::ZONE]);
-    assert_eq!((s, u16::from_le_bytes([a[0], a[1]])), (0, pc.st.zones() as u16));
+    assert_eq!((s, u16::from_le_bytes([a[0], a[1]])), (0, pc.st.zones()));
     assert!((0..pc.st.zones()).all(|i| a[2 + i as usize / 8] >> (i % 8) & 1 != 0));
     assert_eq!(pc.ask(msg::USED, &[what::SETTINGS]).0, Status::BadArg as u8);
     assert_eq!(pc.ask(msg::USED, &[]).0, Status::BadArg as u8);
@@ -1537,7 +1537,7 @@ fn used_maps_channels() {
 #[test]
 fn read_many_matches_read() {
     let mut pc = Pc::new(true);
-    for (w, count) in [(what::CHANNEL, MAX_CHANNELS), (what::ZONE, pc.st.zones() as u16), (what::PRESET, pc.st.data().presets() as u16)] {
+    for (w, count) in [(what::CHANNEL, MAX_CHANNELS), (what::ZONE, pc.st.zones()), (what::PRESET, pc.st.data().presets() as u16)] {
         let (got, asks) = pc.read_all(w, count);
         let want: Vec<(u16, Vec<u8>)> = (0..count).filter_map(|i| pc.read(w, i).ok().map(|r| (i, r))).collect();
         assert_eq!(got, want, "what {w}");

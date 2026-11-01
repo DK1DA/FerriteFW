@@ -108,7 +108,7 @@ fn zones_page_keys() {
     let mut r = Rig::main();
     r.send(b"2");
     assert_eq!(r.term.page(), Page::Zones);
-    let n = r.store.zones() as u16 + 2;
+    let n = r.store.zones() + 2;
     r.send(b"\x1b[A");
     assert_eq!(r.term.zone_sel, n - 1);
     r.send(b"\x1b[B");

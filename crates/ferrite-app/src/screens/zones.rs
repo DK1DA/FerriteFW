@@ -18,7 +18,7 @@
 use super::lists::*;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, MAX_CHANNELS};
+use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, MAX_CHANNELS, ZoneId};
 use crate::data::{Op, Pos, ZoneCfg};
 use crate::keys::{KeyEvent, Press};
 use crate::local::LOCAL;
@@ -199,7 +199,7 @@ pub(crate) struct ZoneRow {
 }
 
 impl ZoneRow {
-    pub(crate) fn of(app: &App, store: &impl ChannelStore, z: u8) -> ZoneRow {
+    pub(crate) fn of(app: &App, store: &impl ChannelStore, z: ZoneId) -> ZoneRow {
         let s = app.slot(app.active);
         if z == LOCAL {
             // CHAN-34: no settings of its own, so no SCAN or HID; dimmed while empty (no position, none in range)
@@ -384,7 +384,7 @@ fn pv_row(app: &App, store: &impl ChannelStore, c: &Channel, here: Option<Pos>, 
 /// ones drawn, every one counted for "+N more" and the bands. Header right: "scan on", else the bands; footer: "+N
 /// more", then "★ NAME" for the first priority channel while in scan (the star, not the word "priority", so a full
 /// name fits 240 px without scrolling: decision 157), or "scan off".
-pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: u8) -> Preview {
+pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: ZoneId) -> Preview {
     if z == LOCAL {
         return preview_local(app, store);
     }
@@ -542,7 +542,7 @@ impl App {
 
 /// "6 zones · 21 ch": the zones shown and every channel stored.
 pub(crate) fn head_text(store: &impl ChannelStore) -> Buf<32> {
-    let n = (0..store.zones() as u16).filter(|&i| keep(store, false)(i)).count();
+    let n = (0..store.zones()).filter(|&i| keep(store, false)(i)).count();
     let mut l = Buf::<32>::new();
     let _ = uwrite!(l, "{} {} \u{b7} {} ch", n, if n == 1 { "zone" } else { "zones" }, store.count());
     l
@@ -571,21 +571,21 @@ const DEFAULT: ZoneCfg = ZoneCfg { scan_all: false, shown: true, by_distance: fa
 
 /// The list's rows that exist: the stored zones, and Local after them when it is on (CHAN-34).
 pub(crate) fn keep(store: &impl ChannelStore, local: bool) -> impl Fn(u16) -> bool + '_ {
-    move |i| store.zone_name(i as u8).is_some() || local && i == store.zones() as u16
+    move |i| store.zone_name(i).is_some() || local && i == store.zones()
 }
 
 /// The list's length and whether Local is in it (after the stored zones, CHAN-34).
 pub(crate) fn list_n(app: &App, store: &impl ChannelStore) -> (u16, bool) {
     let local = crate::local::on(app);
-    (store.zones() as u16 + local as u16, local)
+    (store.zones() + local as u16, local)
 }
 
 /// The zone on list row `i`: a stored zone's number, or Local after them (CHAN-34).
-pub(crate) fn zid(store: &impl ChannelStore, i: u16) -> u8 {
-    if i == store.zones() as u16 { LOCAL } else { i as u8 }
+pub(crate) fn zid(store: &impl ChannelStore, i: u16) -> ZoneId {
+    if i == store.zones() { LOCAL } else { i }
 }
 
-fn value(store: &impl ChannelStore, z: u8, c: &ZoneCfg, row: usize, b: &mut Buf<24>) {
+fn value(store: &impl ChannelStore, z: ZoneId, c: &ZoneCfg, row: usize, b: &mut Buf<24>) {
     let on = |v: bool| if v { "On" } else { "Off" };
     b.clear();
     let _ = match row {
@@ -623,7 +623,7 @@ fn value(store: &impl ChannelStore, z: u8, c: &ZoneCfg, row: usize, b: &mut Buf<
 pub(crate) const EDITOR_ROWS: usize = ROWS.len();
 
 /// Editor row `i`: its label, value and whether it differs from the default (MENU-12).
-pub(crate) fn editor_row(store: &impl ChannelStore, z: u8, i: usize) -> (&'static str, Buf<24>, bool) {
+pub(crate) fn editor_row(store: &impl ChannelStore, z: ZoneId, i: usize) -> (&'static str, Buf<24>, bool) {
     let c = store.data().zone_cfg(z);
     let (mut v, mut dv) = (Buf::<24>::new(), Buf::<24>::new());
     value(store, z, &c, i, &mut v);
@@ -632,7 +632,7 @@ pub(crate) fn editor_row(store: &impl ChannelStore, z: u8, i: usize) -> (&'stati
 }
 
 /// A setting stepped by d.
-fn change(store: &impl ChannelStore, z: u8, c: &mut ZoneCfg, row: usize, d: i32) {
+fn change(store: &impl ChannelStore, z: ZoneId, c: &mut ZoneCfg, row: usize, d: i32) {
     match row {
         1 => c.scan_all = !c.scan_all,
         2 => c.shown = !c.shown,
@@ -697,7 +697,7 @@ impl View for Zones {
         use Press::*;
         let near = self.edit().is_none() && nearby(app, store).is_some();
         let mut s = self.settled(near);
-        let z = if s.edit().is_some() { s.cur.sel as u8 } else { zid(store, s.cur.sel) };
+        let z = if s.edit().is_some() { s.cur.sel }  else { zid(store, s.cur.sel) };
         let d = store.data();
         match (e.key, e.press, s.edit()) {
             (Key::Up | Key::Down, Short | Repeat, _) => {
@@ -719,12 +719,14 @@ impl View for Zones {
             (Key::Hash, Short, None) => {
                 if d.request(Op::NewZone) {
                     let (n, local) = list_n(app, store);
-                    let made = store.zones() as u16 - 1;
+                    let made = store.zones() - 1;
                     s.cur = Cursor { sel: made, top: s.cur.top }.shown(n, zone_rows(near), &keep(store, local));
                     s.mode = 0;
-                    app.show_toast(b"New zone", store.zone_name(made as u8).unwrap_or_default().as_bytes(), false);
+                    app.show_toast(b"New zone", store.zone_name(made).unwrap_or_default().as_bytes(), false);
                 } else {
-                    app.show_toast(b"No room", b"255 zones at most", false);
+                    let mut m = Buf::<24>::new();
+                    let _ = uwrite!(m, "{} zones at most", crate::chan::MAX_ZONES);
+                    app.show_toast(b"No room", m.as_bytes(), false);
                 }
             }
             // CHAN-12, MENU-23: the shared confirm asks.
@@ -754,7 +756,7 @@ impl View for Zones {
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         match self.edit() {
             Some(r) if r > 0 => {
-                let z = self.cur.sel as u8;
+                let z = self.cur.sel;
                 let mut c = store.data().zone_cfg(z);
                 change(store, z, &mut c, r as usize, d);
                 store.data().request(Op::Zone(z, c));
@@ -783,7 +785,7 @@ impl View for Zones {
         if !app.gate((self, data.version(), fix, at, app.set.units, app.set.show_hidden, app.local)) {
             return;
         }
-        let z = self.cur.sel as u8;
+        let z = self.cur.sel;
         if let Some(row) = self.edit() {
             let c = data.zone_cfg(z);
             let mut r = Buf::<16>::new();
@@ -860,7 +862,7 @@ impl View for Zones {
 /// channel there when it was last on this zone (`zone` and `pos` stay while it is on its VFO), else the zone's first
 /// channel a slot can sit on in number order (CHAN-10): listed (CHAN-24: hidden ones only with "show hidden") and
 /// not an HF channel (CHAN-26). None: no such channel.
-pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: u8) -> Option<u16> {
+pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: ZoneId) -> Option<u16> {
     let hidden = app.set.show_hidden;
     let usable = |p: u16| app.zat(store, z, p).is_some_and(|c| !c.is_hf() && listed(&c, hidden));
     let s = app.slot(app.active);
@@ -874,7 +876,7 @@ pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: u8) -> Option<
 /// home, where ◀▶ and the knob go on from there (NAV-1). The APRS slot refuses (APRS-19, KISS-9) and an empty zone
 /// says so; both stay on the page. A retune ends a scan on the slot, as ◀▶ on home does; a slot already on that
 /// channel is left as it is.
-fn accept(app: &mut App, store: &impl ChannelStore, z: u8) {
+fn accept(app: &mut App, store: &impl ChannelStore, z: ZoneId) {
     let a = app.active;
     if app.aprs_refuse(a) {
         return;
@@ -900,7 +902,7 @@ fn accept(app: &mut App, store: &impl ChannelStore, z: u8) {
 
 /// After the shared confirm deleted a zone: the list again from its first zone.
 pub(crate) fn after_delete(store: &impl ChannelStore) -> Zones {
-    Zones { mode: 0, cur: Cursor::first(store.zones() as u16, &keep(store, false)) }
+    Zones { mode: 0, cur: Cursor::first(store.zones(), &keep(store, false)) }
 }
 
 #[cfg(test)]

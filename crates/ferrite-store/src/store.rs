@@ -24,7 +24,7 @@ use crate::settings::{self, FlashSource, MAX_PAYLOAD};
 use crate::{block, scratch, Crc32, Nor, NorError, Result, SECTOR};
 use ferrite_app::aprs::AprsCfg;
 use core::cell::{Cell, RefCell};
-use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
+use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, ZoneId, MAX_CHANNELS, NO_ZONE};
 use ferrite_app::data::*;
 use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
@@ -50,8 +50,8 @@ const STATE_MAX: usize = 512;
 /// Saves wait this long after the last change (a turning knob doesn't wear the flash).
 pub const SAVE_DELAY_MS: u32 = 2000;
 
-/// The zone map's mark for a number with no channel (zones are 0-253, 255 is "no zone").
-const EMPTY: u8 = 254;
+/// The zone map's mark for a number with no channel (not a zone, not "no zone", not Local).
+const EMPTY: ZoneId = 0xFFFC;
 /// The weather zone's first channel record (WX-1): channels 991-997 as shown, out of the way of your own numbering.
 pub const WX_FIRST: u16 = 990;
 
@@ -136,9 +136,9 @@ pub struct FlashStore<N: Nor, D: Data> {
     f: Flash<N>,
     /// The records not in flash yet (see the module comment).
     pub extra: D,
-    zones: Cell<u8>,
+    zones: Cell<ZoneId>,
     /// Each channel number's zone, or [`EMPTY`].
-    zmap: [Cell<u8>; MAX_CHANNELS as usize],
+    zmap: [Cell<ZoneId>; MAX_CHANNELS as usize],
     /// Recent (CHAN-25): 10 channel numbers in RAM, not saved.
     recent: ferrite_app::chan::RecentList,
     ver: Cell<u32>,
@@ -245,7 +245,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             let mut b = [0u8; CH_LEN];
             for num in 0..MAX_CHANNELS {
                 self.f.raw_read(ch_addr(num), &mut b)?;
-                self.zmap[num as usize].set(if ch_valid(&b) { zkey(b[18]) } else { EMPTY });
+                self.zmap[num as usize].set(if ch_valid(&b) { zkey(ch_zone(&b)) } else { EMPTY });
             }
             let mut n = 0;
             let mut z = [0u8; ZONE_LEN];
@@ -717,7 +717,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         b
     }
 
-    fn read_zone(&self, z: u8) -> Option<(Name, ZoneCfg)> {
+    fn read_zone(&self, z: ZoneId) -> Option<(Name, ZoneCfg)> {
         if z >= MAX_ZONES || !self.ok() {
             return None;
         }
@@ -740,7 +740,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     /// The `i`th channel number (in number order) whose zone map entry passes `f`.
-    fn nth_num(&self, i: u16, f: impl Fn(u8) -> bool) -> Option<u16> {
+    fn nth_num(&self, i: u16, f: impl Fn(ZoneId) -> bool) -> Option<u16> {
         (0..MAX_CHANNELS).filter(|&n| f(self.zmap[n as usize].get())).nth(i as usize)
     }
 
@@ -785,7 +785,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         })
         .await?;
         for &(num, rec) in more[..n].iter().flatten() {
-            self.zmap[num as usize].set(rec.map_or(EMPTY, |r| zkey(r[18])));
+            self.zmap[num as usize].set(rec.map_or(EMPTY, |r| zkey(ch_zone(&r))));
         }
         Ok(())
     }
@@ -909,7 +909,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if *rec != self.raw_ch(num)? {
             self.put_rec(ch_addr(num), rec).await?;
         }
-        self.zmap[num as usize].set(zkey(rec[18]));
+        self.zmap[num as usize].set(zkey(ch_zone(rec)));
         Ok(())
     }
 
@@ -1002,7 +1002,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// CHAN-12: the zone's channels go to no zone (they stay in All); the last zone's record goes, an earlier
     /// one stays as an empty zone (zone numbers don't move).
-    async fn delete_zone(&self, z: u8) -> Result {
+    async fn delete_zone(&self, z: ZoneId) -> Result {
         for num in 0..MAX_CHANNELS {
             if self.zmap[num as usize].get() != z {
                 continue;
@@ -1020,7 +1020,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         Ok(())
     }
 
-    async fn write_zone(&self, z: u8, name: &[u8], cfg: &ZoneCfg) -> Result {
+    async fn write_zone(&self, z: ZoneId, name: &[u8], cfg: &ZoneCfg) -> Result {
         self.put_rec(zone_addr(z), &zone_encode(name, cfg)).await
     }
 
@@ -1479,7 +1479,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 }
 
 /// The zone map's key for a channel's zone byte (anything past the last zone counts as no zone).
-fn zkey(z: u8) -> u8 {
+fn zkey(z: ZoneId) -> ZoneId {
     if z < MAX_ZONES { z } else { NO_ZONE }
 }
 
@@ -1594,11 +1594,11 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
         self.recent.tuned(num);
     }
 
-    fn zones(&self) -> u8 {
+    fn zones(&self) -> ZoneId {
         self.zones.get()
     }
 
-    fn zone_name(&self, zone: u8) -> Option<Name> {
+    fn zone_name(&self, zone: ZoneId) -> Option<Name> {
         if zone >= self.zones.get() {
             return None;
         }
@@ -1606,11 +1606,11 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
         Some(self.read_zone(zone).map_or_else(Name::new, |z| z.0))
     }
 
-    fn zone_len(&self, zone: u8) -> u16 {
+    fn zone_len(&self, zone: ZoneId) -> u16 {
         self.zmap.iter().filter(|z| z.get() == zone).count() as u16
     }
 
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel> {
         let num = self.nth_num(i, |z| z == zone)?;
         ch_decode(num, &self.read_ch(num))
     }
@@ -1630,7 +1630,7 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
         (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.zmap[n as usize].get() == EMPTY)
     }
 
-    fn zone_of(&self, n: u16) -> Option<u8> {
+    fn zone_of(&self, n: u16) -> Option<ZoneId> {
         self.zmap.get(n as usize).map(Cell::get).filter(|&z| z != EMPTY)
     }
 
@@ -1789,7 +1789,7 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn skip(&self, i: u16) -> Option<Freq10> {
         self.extra.skip(i)
     }
-    fn zone_cfg(&self, zone: u8) -> ZoneCfg {
+    fn zone_cfg(&self, zone: ZoneId) -> ZoneCfg {
         self.read_zone(zone).map(|z| z.1).unwrap_or(NEW_ZONE)
     }
     fn dtmf(&self, i: u8) -> Option<Dtmf> {
@@ -1839,9 +1839,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
 }
 
 /// "Zone 7" for zone number 6.
-fn zone_name(b: &mut Buf<16>, z: u8) {
+fn zone_name(b: &mut Buf<16>, z: ZoneId) {
     b.set(b"Zone ");
-    let n = z as u16 + 1;
+    let n = z as u32 + 1;
     if n >= 100 {
         b.push(&[b'0' + (n / 100) as u8]);
     }
@@ -1938,11 +1938,11 @@ mod tests {
         assert_eq!((c.fx25, c.sound, c.symbol, c.txdelay, c.tx_level, c.ambiguity, c.mic_e), (d.fx25, d.sound, d.symbol, d.txdelay, d.tx_level, 0, d.mic_e));
     }
 
-    /// Zone names count from 1: "Zone 1", "Zone 10", "Zone 100", "Zone 254".
+    /// Zone names count from 1: "Zone 1", "Zone 10", "Zone 100", "Zone 512".
     #[test]
     fn new_zone_names() {
         let mut b = Buf::<16>::new();
-        for (z, want) in [(0u8, &b"Zone 1"[..]), (9, b"Zone 10"), (99, b"Zone 100"), (253, b"Zone 254")] {
+        for (z, want) in [(0u16, &b"Zone 1"[..]), (9, b"Zone 10"), (99, b"Zone 100"), (511, b"Zone 512")] {
             zone_name(&mut b, z);
             assert_eq!(b.as_bytes(), want);
         }

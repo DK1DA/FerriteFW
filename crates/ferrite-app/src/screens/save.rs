@@ -12,7 +12,7 @@ use super::nav::Dest;
 use super::shared::*;
 use super::text::TextFor;
 use super::{Cx, Hints, View};
-use crate::chan::{ChanWrite, Channel, ChannelStore, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{ChanWrite, Channel, ChannelStore, MAX_CHANNELS, NO_ZONE, ZoneId};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{band_near, chan_label, offset_text, tone_at, tone_index, tone_text, SlotCfg, BANDS, DEFAULT_CFG, SQ_GLOBAL, STEPS};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
@@ -41,7 +41,7 @@ pub struct Save {
     pub row: u8,
     /// The new channel's number ([`UNSET`] until the store has been asked).
     pub num: u16,
-    pub zone: u8,
+    pub zone: ZoneId,
     /// Add repeater: output frequency, shift and TX tone.
     pub freq: Freq10,
     pub offset: i32,
@@ -293,7 +293,7 @@ fn change(mut s: Save, app: &App, store: &impl ChannelStore, d: i32) -> Save {
             let n = store.zones() as i32 + 1;
             let i = if s.zone == NO_ZONE { n - 1 } else { s.zone as i32 };
             let k = (i + d).rem_euclid(n);
-            s.zone = if k == n - 1 { NO_ZONE } else { k as u8 };
+            s.zone = if k == n - 1 { NO_ZONE } else { k as ZoneId };
         }
         F::Name | F::Save => {}
     }

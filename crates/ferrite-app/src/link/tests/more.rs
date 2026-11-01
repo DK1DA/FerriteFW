@@ -18,9 +18,9 @@ fn zones_written() {
     r[..5].copy_from_slice(b"Hills");
     assert_eq!(pc.write(what::ZONE, 0, &r, 0).0, 0);
     assert_eq!(pc.st.zone_name(0).unwrap().as_bytes(), b"Hills");
-    let n = pc.st.zones() as u16;
+    let n = pc.st.zones();
     assert_eq!(pc.write(what::ZONE, n, &r, 0).0, 0, "the next number adds a zone");
-    assert_eq!(pc.st.zones() as u16, n + 1);
+    assert_eq!(pc.st.zones(), n + 1);
     let mut bad = z.clone();
     bad[..16].fill(0);
     let (s, a) = pc.write(what::ZONE, 0, &bad, 0);

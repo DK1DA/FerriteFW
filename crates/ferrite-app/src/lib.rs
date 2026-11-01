@@ -47,6 +47,7 @@ pub mod words;
 pub mod term;
 pub mod uistate;
 
+use crate::chan::ZoneId;
 use chan::{ChanWrite, Channel, ChannelStore};
 use screens::alert::AlertInfo;
 use settings::Settings;
@@ -105,7 +106,7 @@ pub struct Slot {
     pub cfg: SlotCfg,
     /// The VFO's last frequency on each band (VFO-1).
     pub mem: [Freq10; BANDS.len()],
-    pub zone: u8,
+    pub zone: ZoneId,
     /// Position in the zone.
     pub pos: u16,
     /// A copy of the channel it is on, edits included.
@@ -195,7 +196,7 @@ struct ChUndo {
     /// The number (0-999, 10 bits) and, above it, the end tone and tail byte (5 bits, decision 86): one u16
     /// keeps the undo record 8 bytes.
     num: u16,
-    zone: u8,
+    zone: ZoneId,
     flags: u8,
     rx: Freq10,
 }
@@ -746,7 +747,7 @@ impl App {
 
     /// CHAN-12.1: zone `z` was deleted (on the radio or over the link): the slots in it, and their copies of its
     /// channels, are in no zone now, so a later edit of the channel doesn't write the old zone back.
-    pub(crate) fn zone_deleted(&mut self, z: u8) {
+    pub(crate) fn zone_deleted(&mut self, z: ZoneId) {
         for s in self.slots.iter_mut().filter(|s| s.zone == z) {
             s.zone = chan::NO_ZONE;
             if let Some(c) = &mut s.ch {
@@ -820,9 +821,9 @@ impl App {
 
     /// A channel scan's channel on `f` as (zone, position): the slot's zone first, then the zones added to the
     /// scan (SCAN-3).
-    pub(crate) fn scan_chan(&self, slot: u8, f: Freq10, store: &impl ChannelStore) -> Option<(u8, u16)> {
+    pub(crate) fn scan_chan(&self, slot: u8, f: Freq10, store: &impl ChannelStore) -> Option<(ZoneId, u16)> {
         let s = self.slots[slot as usize % SLOTS];
-        let zones = core::iter::once(s.zone).chain((0..10u8).filter(|z| self.radio.zones & 1 << z != 0));
+        let zones = core::iter::once(s.zone).chain((0..10 as ZoneId).filter(|z| self.radio.zones & 1 << z != 0));
         for z in zones {
             if let Some(pos) = (0..self.zlen(store, z)).find(|&i| self.zat(store, z, i).is_some_and(|c| c.rx == f)) {
                 return Some((z, pos));
@@ -832,7 +833,7 @@ impl App {
     }
 
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
-    pub fn set_channel(&mut self, slot: u8, zone: u8, pos: u16, store: &impl ChannelStore) {
+    pub fn set_channel(&mut self, slot: u8, zone: ZoneId, pos: u16, store: &impl ChannelStore) {
         match self.zat(store, zone, pos) {
             Some(c) if c.is_hf() => screens::hf::recall(self, &c), // CHAN-26: HF mode's, not a slot's
             Some(c) => {

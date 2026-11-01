@@ -849,10 +849,10 @@ impl Session {
                 app.delete_channel(idx, st);
                 Status::Ok
             }
-            what::ZONE if idx < st.zones() as u16 => {
-                let s = request(st, Op::DeleteZone(idx as u8));
+            what::ZONE if idx < st.zones() => {
+                let s = request(st, Op::DeleteZone(idx));
                 if s == Status::Ok {
-                    app.zone_deleted(idx as u8); // CHAN-12.1, as the radio's own delete
+                    app.zone_deleted(idx); // CHAN-12.1, as the radio's own delete
                 }
                 s
             }
@@ -1038,7 +1038,8 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status
 fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status {
     o.text(VERSION.as_bytes());
     o.put(&st.count().to_le_bytes());
-    o.put(&[st.zones(), st.data().presets()]);
+    o.put(&st.zones().to_le_bytes());
+    o.put(&[st.data().presets()]);
     o.put(&(settings_record(app, &mut Window { b: &mut [], from: 0, n: 0 }) as u16).to_le_bytes());
     o.put(&[app.set.region]);
     o.text(app.set.callsign.as_bytes());
@@ -1177,8 +1178,8 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             Some(c) => channel_save(&c, win),
             None => return Status::NotFound,
         },
-        what::ZONE => match st.zone_name(idx as u8).filter(|_| idx < st.zones() as u16) {
-            Some(n) => zone_save(n.as_bytes(), &st.data().zone_cfg(idx as u8), win),
+        what::ZONE => match st.zone_name(idx).filter(|_| idx < st.zones()) {
+            Some(n) => zone_save(n.as_bytes(), &st.data().zone_cfg(idx), win),
             None => return Status::NotFound,
         },
         what::PRESET => match st.data().preset(idx as u8).filter(|_| idx < 256) {
@@ -1236,7 +1237,7 @@ fn read(app: &App, p: &[u8], o: &mut Out) -> Status {
 fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
     match w {
         what::CHANNEL | what::POSITION => Some(MAX_CHANNELS),
-        what::ZONE => Some(st.zones() as u16),
+        what::ZONE => Some(st.zones()),
         what::PRESET => Some(st.data().presets() as u16),
         what::CONTACT => Some(st.data().contacts()),
         _ => lists::indexes(st, w),
@@ -1249,7 +1250,7 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
     match w {
         // LINK-53: a stored channel; whether it has a position is its record's (read by `READ_MANY` only)
         what::CHANNEL | what::POSITION => st.zone_of(i).is_some(),
-        what::ZONE => st.zone_name(i as u8).is_some(),
+        what::ZONE => st.zone_name(i).is_some(),
         what::CONTACT => i < st.data().contacts(),
         what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => lists::held(st, w, i),
         _ => st.data().preset(i as u8).is_some(),
@@ -1465,7 +1466,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             Status::Ok
         }
-        what::ZONE if idx <= st.zones() as u16 && idx < 254 => {
+        what::ZONE if idx <= st.zones() && idx < crate::chan::MAX_ZONES => {
             let mut r = Rd { b: rec, n: 0 };
             let mut name = [0u8; 16];
             if !r.take(&mut name) {
@@ -1483,7 +1484,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if c.resume > 12 {
                 return invalid(o, "resume out of range".as_bytes());
             }
-            request(st, Op::PutZone(idx as u8, nm, c))
+            request(st, Op::PutZone(idx, nm, c))
         }
         what::PRESET if idx <= st.data().presets() as u16 && idx < 16 => {
             let mut r = Rd { b: rec, n: 0 };

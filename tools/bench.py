@@ -475,8 +475,8 @@ class Radio:
         if s != 0:
             raise BenchError(f"INFO: {fl.why(s, r)}")
         ver, r = fl.text(r)
-        chans, zones, presets, slen, region = struct.unpack("<HBBHB", r[:7])
-        call, _ = fl.text(r[7:])
+        chans, zones, presets, slen, region = struct.unpack("<HHBHB", r[:8])  # protocol 3: zones are 2 bytes
+        call, _ = fl.text(r[8:])
         return dict(version=ver, channels=chans, zones=zones, presets=presets, region=region, callsign=call)
 
     def term(self, line):

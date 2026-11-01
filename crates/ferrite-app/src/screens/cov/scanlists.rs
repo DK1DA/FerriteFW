@@ -102,16 +102,16 @@ impl Data for OneSkip {
 }
 
 impl crate::chan::ChannelStore for OneSkip {
-    fn zones(&self) -> u8 {
+    fn zones(&self) -> crate::chan::ZoneId {
         0
     }
-    fn zone_name(&self, _: u8) -> Option<crate::chan::Name> {
+    fn zone_name(&self, _: crate::chan::ZoneId) -> Option<crate::chan::Name> {
         None
     }
-    fn zone_len(&self, _: u8) -> u16 {
+    fn zone_len(&self, _: crate::chan::ZoneId) -> u16 {
         0
     }
-    fn zone_at(&self, _: u8, _: u16) -> Option<crate::chan::Channel> {
+    fn zone_at(&self, _: crate::chan::ZoneId, _: u16) -> Option<crate::chan::Channel> {
         None
     }
     fn count(&self) -> u16 {

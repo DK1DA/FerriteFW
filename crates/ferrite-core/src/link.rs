@@ -7,7 +7,9 @@
 //! the same seq, and a payload that starts with a [`Status`] byte: every frame is acknowledged (LINK-1).
 
 /// The protocol version in `HELLO` and its answer. 2: no approval tokens; `AUTH` with the radio's PIN (decision 104).
-pub const PROTOCOL: u8 = 2;
+/// 3 (decision 333): zone numbers are 2 bytes (the channel record, `INFO`'s zone count), a zone record ends with
+/// its channel count, and the raw SPI data messages (`DATA_READ`, `DATA_WRITE`) are there.
+pub const PROTOCOL: u8 = 3;
 /// The most payload in a frame (BLE chunks stay small: LINK-16).
 pub const MAX_PAYLOAD: usize = 240;
 /// The most body bytes: type, seq, payload, CRC.

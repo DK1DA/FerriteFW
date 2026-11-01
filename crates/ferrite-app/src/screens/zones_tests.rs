@@ -93,7 +93,7 @@ impl T {
     }
 
     /// A channel added to the sample, with a position or none.
-    fn put(&mut self, num: u16, zone: u8, rx: Freq10, name: &str, pos: Option<Pos>) {
+    fn put(&mut self, num: u16, zone: crate::chan::ZoneId, rx: Freq10, name: &str, pos: Option<Pos>) {
         let mut c = Channel { num, zone, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
         c.set_name(name.as_bytes());
         self.s.apply(ChanWrite::PutPos { ch: c, pos });

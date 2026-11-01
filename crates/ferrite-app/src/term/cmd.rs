@@ -6,7 +6,7 @@
 //! Nothing is buffered whole: [`dump_line`] makes one line at a time from where [`DumpPos`] says it is.
 
 use super::{blocked, mhz5, parse_mhz};
-use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE, ZoneId};
 use crate::data::{Op, Pos, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SUBS};
 use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
@@ -720,7 +720,7 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
             c.zone = if same(v, b"none") {
                 NO_ZONE
             } else {
-                let z = index(v, 254, "zone")? as u8;
+                let z = index(v, crate::chan::MAX_ZONES as u32, "zone")? as ZoneId;
                 if z >= st.zones() {
                     return Err(msg!("zone: zone {} doesn't exist; the radio has {}", z as u32 + 1, st.zones()));
                 }
@@ -879,9 +879,9 @@ fn secs(w: &[u8], max: u32, what: &str) -> Result<u8, Msg> {
     }
 }
 
-fn zone_line<S: ChannelStore>(z: u8, st: &S, out: &mut Line) {
+fn zone_line<S: ChannelStore>(z: ZoneId, st: &S, out: &mut Line) {
     let c = st.data().zone_cfg(z);
-    head(b"zone ", z as u16, st.zone_label(z, b"", b"").as_bytes(), out);
+    head(b"zone ", z, st.zone_label(z, b"", b"").as_bytes(), out);
     let o = |b: bool| if b { "on" } else { "off" };
     for (k, b) in [(" scan=", c.scan_all), (" shown=", c.shown), (" distance=", c.by_distance)] {
         out.push(k.as_bytes());
@@ -920,7 +920,7 @@ fn kv<'a>(t: &mut Toks<'a>, what: &str, eg: &str) -> Result<Option<Kv<'a>>, Msg>
 }
 
 /// Zones and presets are numbered in order: `n` (0-based) may replace one up to `have`, or add the next.
-fn in_order(what: &str, n: u8, have: u8) -> Result<(), Msg> {
+fn in_order(what: &str, n: u16, have: u16) -> Result<(), Msg> {
     if n > have {
         return Err(msg!("{} {}: {}s are made in order; the radio has {}, so the next is {} {}", what, n as u32 + 1, what, have, what, have as u32 + 1));
     }
@@ -928,7 +928,7 @@ fn in_order(what: &str, n: u8, have: u8) -> Result<(), Msg> {
 }
 
 /// Hands a zone or preset to the store, unless it is already what the store holds.
-fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u8, same_as_stored: bool, op: Op) -> Result<Done, Msg> {
+fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u16, same_as_stored: bool, op: Op) -> Result<Done, Msg> {
     if same_as_stored {
         return Ok(Done::Said(msg!("{} {} unchanged", cap, n as u32 + 1)));
     }
@@ -941,7 +941,7 @@ fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u8, same_as_stored: bo
 const ZONE_KEYS: [&str; 7] = ["scan", "shown", "distance", "resume", "dwell", "pri1", "pri2"];
 
 fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
-    let z = index(t.word("zone: which zone, e.g. zone 2 \"Repeaters\"")?, 254, "zone")? as u8;
+    let z = index(t.word("zone: which zone, e.g. zone 2 \"Repeaters\"")?, crate::chan::MAX_ZONES as u32, "zone")? as ZoneId;
     let have = st.zones();
     in_order("zone", z, have)?;
     let Some(Tok::Quoted(q)) = t.next()? else {
@@ -983,7 +983,7 @@ fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
 fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let d = st.data();
     let i = index(t.word("preset: which one, e.g. preset 1 \"2 m\" 144 148")?, 16, "preset")? as u8;
-    in_order("preset", i, d.presets())?;
+    in_order("preset", i as u16, d.presets() as u16)?;
     let Some(Tok::Quoted(q)) = t.next()? else { return Err(msg!("preset: its name in quotes, then start and end in MHz")) };
     let name: Buf<12> = unquote(q, "name")?;
     let start = freq(t.word("preset: the start in MHz after the name")?, "start")?;
@@ -1012,7 +1012,7 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
         }
     }
     let stored = d.preset(i).is_some_and(|o| RangePreset { skips: o.skips, ..p } == o);
-    put(st, "Preset", "preset", i, stored, Op::PutPreset(i, p))
+    put(st, "Preset", "preset", i as u16, stored, Op::PutPreset(i, p))
 }
 
 /// TEXT-7: `quick N` shows quick message N (1-9, "factory" after the factory text), `quick N "text"` sets it (up
@@ -1046,7 +1046,7 @@ fn quick<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     if t.next()?.is_some() {
         return Err(msg!("{}", usage));
     }
-    put(st, "Quick message", "quick", i, d.quick(i as usize) == new, Op::Quick(i, new))
+    put(st, "Quick message", "quick", i as u16, d.quick(i as usize) == new, Op::Quick(i, new))
 }
 
 // ---- Settings ----
@@ -2236,8 +2236,8 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 out.push("# Zones (a channel's zone=N is one of these)".as_bytes());
                 return true;
             }
-            2 if i <= st.zones() as u16 => {
-                zone_line(i as u8 - 1, st, out);
+            2 if i <= st.zones() => {
+                zone_line(i as ZoneId - 1, st, out);
                 return true;
             }
             3 if i == 0 => {

@@ -8,7 +8,7 @@ use super::forms::para;
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{ChanWrite, ChannelStore};
+use crate::chan::{ChanWrite, ChannelStore, ZoneId};
 use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{chan_label, tone_text};
@@ -29,7 +29,7 @@ pub enum Ask {
     /// Delete a channel, by number (CHAN-13).
     DeleteChannel(u16),
     /// Delete a zone (CHAN-12).
-    DeleteZone(u8),
+    DeleteZone(ZoneId),
     /// Delete a range preset, by index (MENU 0 1 4).
     DeletePreset(u8),
     /// The tone hint's tone is the RX tone now: set it as the TX tone too (TSRCH-16, as tone search's TSRCH-4).

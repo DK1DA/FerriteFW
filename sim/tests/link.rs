@@ -41,12 +41,12 @@ fn link_over_the_cable() {
     assert_eq!(&r[3..5], &[0, 0], "channel 1 exists in the sample");
     let total = r[5] as usize;
     let mut rec = r[6..6 + total].to_vec();
-    rec[7] = b'Q';
+    rec[8] = b'Q';
     let mut p = vec![what::CHANNEL, 0, 0, total as u8];
     p.extend_from_slice(&rec);
     assert_eq!(ask(&mut sim, &mut t, msg::WRITE_MANY, 3, &p)[..2], [0, 1]);
     let r = ask(&mut sim, &mut t, msg::READ_MANY, 4, &[what::CHANNEL, 0, 0, 1, 0]);
-    assert_eq!(r[6 + 7], b'Q');
+    assert_eq!(r[6 + 8], b'Q');
     // quiet past the link's hold: Enter is the terminal's again
     t += 11_000;
     sim.step(t);

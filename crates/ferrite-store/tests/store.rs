@@ -103,7 +103,7 @@ fn seeded() -> SimFlash {
         assert!(s.add_zone(n, &zc));
     }
     for (i, num) in [0u16, 1, 2, 9, 11, 14, 63, 64, 65, 130, 999].iter().enumerate() {
-        let c = channel(*num, (i % 4) as u8 % 3, 14_400_000 + i as u32 * 2500, "Chan", cfg_with(1000, if i % 2 == 0 { 60_000 } else { 0 }));
+        let c = channel(*num, (i % 4) as u16 % 3, 14_400_000 + i as u32 * 2500, "Chan", cfg_with(1000, if i % 2 == 0 { 60_000 } else { 0 }));
         assert!(s.put_with_position(c, None));
     }
     assert!(s.add_preset(&RangePreset { name: Buf::from(b"Air"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 0, resume: 0 }));
@@ -244,7 +244,7 @@ fn power_cuts_during_channel_zone_and_preset_changes() {
         let pick = r.below(9);
         let num = [0u16, 1, 2, 9, 11, 14, 63, 64, 65, 130, 999, 5, 300][r.below(13) as usize];
         let to = r.below(MAX_CHANNELS as u64) as u16;
-        let z = r.below(4) as u8;
+        let z = r.below(4) as u16;
         let freq = 14_400_000 + r.below(400) as u32 * 1250;
         let op = move |s: &Store| {
             match pick {

@@ -12,7 +12,7 @@
 use super::activity::Hit;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{ChannelStore, FLAG_SKIP};
+use crate::chan::{ChannelStore, FLAG_SKIP, ZoneId};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{band_name, chan_label, BANDS, band_near};
 use crate::App;
@@ -402,7 +402,7 @@ fn lasting_skip(app: &mut App, s: u8, store: &impl ChannelStore) {
     if !sl.on_channel() {
         return app.show_toast(b"No skip list", b"* skips it once", false);
     }
-    let zones = core::iter::once(sl.zone).chain((0..10u8).filter(|z| app.radio.zones & 1 << z != 0));
+    let zones = core::iter::once(sl.zone).chain((0..10 as ZoneId).filter(|z| app.radio.zones & 1 << z != 0));
     let Some(mut c) = zones.filter_map(|z| channel_on(app, store, z, f)).next() else {
         return app.show_toast(b"Nothing to skip", b"", false);
     };
@@ -416,7 +416,7 @@ fn lasting_skip(app: &mut App, s: u8, store: &impl ChannelStore) {
 }
 
 /// The zone's channel on this frequency, if any (Local's too, CHAN-34).
-fn channel_on(app: &App, store: &impl ChannelStore, zone: u8, f: u32) -> Option<crate::chan::Channel> {
+fn channel_on(app: &App, store: &impl ChannelStore, zone: ZoneId, f: u32) -> Option<crate::chan::Channel> {
     (0..app.zlen(store, zone)).filter_map(|i| app.zat(store, zone, i)).find(|c| c.rx == f)
 }
 

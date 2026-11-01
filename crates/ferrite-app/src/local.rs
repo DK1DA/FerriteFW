@@ -8,17 +8,17 @@
 //! range, so one at the edge doesn't come and go as the fix wanders. Without a position the zone is there but empty
 //! and says so ("no position"), and a scan of it is refused.
 //!
-//! The zone is number [`LOCAL`] (254, never a stored zone's: those are 0-253, CHAN-6), last after the stored zones
+//! The zone is number [`LOCAL`] (0xFFFE, never a stored zone's: those are 0 to `MAX_ZONES` - 1, CHAN-6), last after the stored zones
 //! on ◀▶ and on the zones page: a stored zone keeps its place in both, as the browser's computed views follow the
 //! zones in its picker (CHAN-14). Screens that step through a slot's zone ask the App ([`App::zlen`],
 //! [`App::zat`]) rather than the store, which knows nothing of it.
 
-use crate::chan::{Channel, ChannelStore, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, ZoneId, MAX_CHANNELS, NO_ZONE};
 use crate::data::Pos;
 use crate::App;
 
-/// Local's zone number: not a stored zone's (0-253), not "no zone" (255).
-pub const LOCAL: u8 = 254;
+/// Local's zone number: not a stored zone's (0 to `MAX_ZONES` - 1), not "no zone" (0xFFFF): 0xFFFE (decision 333).
+pub const LOCAL: ZoneId = 0xFFFE;
 const _: () = assert!(LOCAL != NO_ZONE);
 /// The most channels Local holds: the nearest this many within the range.
 pub const LOCAL_MAX: usize = 48;
@@ -182,12 +182,12 @@ pub(crate) fn refuse(app: &mut App) {
 
 impl App {
     /// How many channels zone `z` holds: Local's from its list (CHAN-34), a stored zone's from the store.
-    pub(crate) fn zlen(&self, store: &impl ChannelStore, z: u8) -> u16 {
+    pub(crate) fn zlen(&self, store: &impl ChannelStore, z: ZoneId) -> u16 {
         if z == LOCAL { self.local.len() } else { store.zone_len(z) }
     }
 
     /// The i-th channel of zone `z`: Local's nearest first (CHAN-34), a stored zone's in number order (CHAN-10).
-    pub(crate) fn zat(&self, store: &impl ChannelStore, z: u8, i: u16) -> Option<Channel> {
+    pub(crate) fn zat(&self, store: &impl ChannelStore, z: ZoneId, i: u16) -> Option<Channel> {
         if z == LOCAL { self.local.num(i).and_then(|n| store.get(n)) } else { store.zone_at(z, i) }
     }
 

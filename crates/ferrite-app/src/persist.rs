@@ -178,8 +178,10 @@ persist!(Settings {
     lpm, lpm_below, spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
 } bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, spare_lock, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx, aprs_share, local });
 
-/// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
-pub const STATE_VERSION: u8 = 1;
+/// The format of [`App::save_state`]; a reader of a different one keeps the defaults. 2 (decision 333): a slot's
+/// zone is 2 bytes; version 1's one byte (255 no zone, 254 Local) still reads, so a settings record copied over
+/// from layout 2 by Console's update keeps its slots.
+pub const STATE_VERSION: u8 = 2;
 
 impl App {
     /// The App's part of what survives a power cycle: the active slot, watch, Battery Save and each slot (VFO or
@@ -209,7 +211,7 @@ impl App {
         let (mut ver, mut n) = (0u8, 0u8);
         ver.load(r);
         n.load(r);
-        if ver != STATE_VERSION || n as usize != SLOTS {
+        if !(1..=STATE_VERSION).contains(&ver) || n as usize != SLOTS {
             return;
         }
         // MODE-6.5: everything App::new queued for the Radio task goes again below; its copies would overflow the
@@ -226,7 +228,17 @@ impl App {
             sl.vfo.load(r);
             sl.cfg.load(r);
             sl.mem.load(r);
-            sl.zone.load(r);
+            if ver == 1 {
+                let mut z = 0u8;
+                z.load(r);
+                sl.zone = match z {
+                    255 => crate::chan::NO_ZONE,
+                    254 => crate::local::LOCAL,
+                    z => z as crate::chan::ZoneId,
+                };
+            } else {
+                sl.zone.load(r);
+            }
             sl.pos.load(r);
             let mut num: Option<u16> = None;
             num.load(r);

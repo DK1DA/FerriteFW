@@ -19,16 +19,16 @@ impl ChannelStore for Queued {
         self.got.borrow_mut().push(w);
         true
     }
-    fn zones(&self) -> u8 {
+    fn zones(&self) -> crate::chan::ZoneId {
         self.t.zones()
     }
-    fn zone_name(&self, z: u8) -> Option<Name> {
+    fn zone_name(&self, z: crate::chan::ZoneId) -> Option<Name> {
         self.t.zone_name(z)
     }
-    fn zone_len(&self, z: u8) -> u16 {
+    fn zone_len(&self, z: crate::chan::ZoneId) -> u16 {
         self.t.zone_len(z)
     }
-    fn zone_at(&self, z: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, z: crate::chan::ZoneId, i: u16) -> Option<Channel> {
         self.t.zone_at(z, i)
     }
     fn count(&self) -> u16 {

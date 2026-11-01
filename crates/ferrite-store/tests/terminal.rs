@@ -52,7 +52,7 @@ fn source() -> (App, Store) {
         n.push(b"Zone ");
         n.push(&[b'A' + z]);
         let cfg = ZoneCfg { scan_all: z % 2 == 0, shown: z % 3 != 0, resume: z % 13, dwell: if z % 4 == 0 { 255 } else { z }, pri: [Some(z as u16), None], ..ZoneCfg::default() };
-        assert!(s.request(Op::PutZone(z, n, cfg)));
+        assert!(s.request(Op::PutZone(z as u16, n, cfg)));
     }
     for i in 0..10u8 {
         let p = RangePreset { name: Buf::from(b"Range"), start: mhz(140) + i as u32 * 100_000, end: mhz(150), step: i, mode: i % 3, narrow: i % 2 == 0, skips: 0, resume: i % 13 };
@@ -82,7 +82,7 @@ fn source() -> (App, Store) {
         };
         // a split: TX on 70 cm while RX is on 2 m, low power (the 1.25 m cap goes by TX)
         let cfg = if cfg.split { SlotCfg { offset: mhz(446) as i32 + (n as i32 % 16) * 1250, ..cfg } } else { cfg };
-        let mut c = Channel { num: n * 3, zone: if n % 21 == 20 { NO_ZONE } else { (n % 21) as u8 }, rx: mhz(144) + (k * 1250) % 400_000, name: [0; 16], cfg, flags: (n % 8) as u8, tones: 0 };
+        let mut c = Channel { num: n * 3, zone: if n % 21 == 20 { NO_ZONE } else { n % 21 }, rx: mhz(144) + (k * 1250) % 400_000, name: [0; 16], cfg, flags: (n % 8) as u8, tones: 0 };
         c.set_name(format!("{}\"{}", if n % 7 == 0 { "q\\" } else { "C" }, n).as_bytes());
         assert!(s.apply(ChanWrite::Put { ch: c, from: None }));
     }

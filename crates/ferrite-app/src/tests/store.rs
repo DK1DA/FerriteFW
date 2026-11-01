@@ -11,16 +11,16 @@ use ferrite_ui::text::Buf;
 struct Zoned(std::vec::Vec<Channel>);
 
 impl ChannelStore for Zoned {
-    fn zones(&self) -> u8 {
+    fn zones(&self) -> crate::chan::ZoneId {
         2
     }
-    fn zone_name(&self, z: u8) -> Option<Name> {
+    fn zone_name(&self, z: crate::chan::ZoneId) -> Option<Name> {
         (z < 2).then(|| Name::from(&b"Z"[..]))
     }
-    fn zone_len(&self, z: u8) -> u16 {
+    fn zone_len(&self, z: crate::chan::ZoneId) -> u16 {
         self.0.iter().filter(|c| c.zone == z).count() as u16
     }
-    fn zone_at(&self, z: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, z: crate::chan::ZoneId, i: u16) -> Option<Channel> {
         let mut v: std::vec::Vec<_> = self.0.iter().filter(|c| c.zone == z).copied().collect();
         v.sort_by_key(|c| c.num);
         v.get(i as usize).copied()

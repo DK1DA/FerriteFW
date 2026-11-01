@@ -126,7 +126,7 @@ fn ev(n: u32) -> Event {
     Event { src: Src::Aprs, ago_s: 0, freq: 14_439_000, slot: 0, unread: true, id: n, x: 0, y: 0, pos: None, name: Buf::from(b"VE3KPW-9"), text: Buf::from(b"QSL?") }
 }
 
-fn ch(num: u16, zone: u8, name: &str) -> Channel {
+fn ch(num: u16, zone: ferrite_app::chan::ZoneId, name: &str) -> Channel {
     channel(num, zone, 14_652_000 + num as u32 * 100, name, DEFAULT_CFG)
 }
 

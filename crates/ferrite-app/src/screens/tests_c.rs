@@ -620,7 +620,8 @@ fn states_are_small() {
     for (name, n) in sizes {
         // compose keeps multi-tap timing, predictive entry's pick, case, mark and quick list (TEXT-2) and the
         // cursor (TEXT-12): 14 bytes, still inside the 16 of a Screen
-        assert!(n <= if name == "compose" { 14 } else { 8 }, "{name}: {n} bytes");
+        // browse: 10 since zone numbers are 2 bytes (decision 333)
+        assert!(n <= match name { "compose" => 14, "browse" => 10, _ => 8 }, "{name}: {n} bytes");
     }
 }
 

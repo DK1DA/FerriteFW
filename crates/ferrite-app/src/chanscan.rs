@@ -37,7 +37,7 @@ pub fn start(app: &mut App, slot: u8) {
 }
 
 /// The zone set: the slot's zone, and zones 0-15 added with digits (SCAN-3).
-fn in_set(app: &App, slot: u8, z: u8) -> bool {
+fn in_set(app: &App, slot: u8, z: crate::chan::ZoneId) -> bool {
     z == app.slot(slot).zone || z < 16 && app.radio.zones & 1 << z != 0
 }
 

@@ -8,7 +8,7 @@
 use super::forms::{field_box, keypad, para};
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::ChannelStore;
+use crate::chan::{ChannelStore, ZoneId};
 use crate::keys::{KeyEvent, Press};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
@@ -29,7 +29,7 @@ pub enum TextFor {
     /// The new channel in Save as channel or Add repeater (A9, A10): the form reads the buffer.
     SaveName,
     /// A zone by number: rename in the zone editor (A12).
-    Zone(u8),
+    Zone(ZoneId),
     /// A range preset by index: its name in the preset editor (A11).
     Preset(u8),
     /// 0 8 6 1 (SETUP-12).

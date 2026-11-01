@@ -976,7 +976,7 @@ fn zones_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, z: screens::zones::Zones,
     let st = cx.store;
     if let Some(r) = z.edit() {
         for i in 0..EDITOR_ROWS {
-            let (label, v, dot) = editor_row(st, z.cur.sel as u8, i);
+            let (label, v, dot) = editor_row(st, z.cur.sel, i);
             row(d, 0, label.as_bytes(), v.as_bytes(), i as u8 == r, dot, false);
         }
         return;

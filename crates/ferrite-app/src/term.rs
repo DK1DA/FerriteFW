@@ -13,7 +13,7 @@
 //! [`cmd`]; a command that answers in several lines (a dump, a load's report, help) uses the console, which
 //! streams lines and then waits for Enter. Not yet: marking or colour (TERM-14, 18).
 
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE, ZoneId};
 pub(crate) use crate::chfield::parse_mhz;
 use crate::chfield::{ChField as F, Ctx, Op};
 use crate::screens::advanced::GROUPS;
@@ -160,7 +160,7 @@ const FIELDS: [F; 16] = [
 ];
 
 /// The channel list's "every channel" filter.
-const ALL: u8 = 254;
+const ALL: ZoneId = 0xFFFD;
 /// The main menu (TERM screens), with what each opens.
 const MAIN: [(&str, Page); 7] = [
     ("Channels", Page::Channels),
@@ -215,7 +215,7 @@ pub struct Term {
     bye: bool,
     main_sel: u8,
     /// Channel list: the filter (a zone, [`NO_ZONE`] or [`ALL`]), selection and first row shown.
-    zone: u8,
+    zone: ZoneId,
     chan_sel: u16,
     chan_top: u16,
     from_zones: bool,
@@ -713,7 +713,7 @@ impl Term {
             Page::Channels => self.channels_key(app, k, store),
             Page::Edit => self.edit_key(app, k, store),
             Page::Zones => {
-                let n = store.zones() as u16 + 2;
+                let n = store.zones() + 2;
                 match k {
                     K::Up => self.zone_sel = (self.zone_sel + n - 1) % n,
                     K::Down => self.zone_sel = (self.zone_sel + 1) % n,
@@ -862,7 +862,7 @@ impl Term {
     }
 
     /// A field's change through its rules: saved, Home set, or the refusal said.
-    fn apply(&mut self, app: &mut App, c: Channel, f: F, op: Op, zones: u8) {
+    fn apply(&mut self, app: &mut App, c: Channel, f: F, op: Op, zones: ZoneId) {
         let (mut n, mut home) = (c, app.set.home_ch);
         if let Err(r) = f.change(&mut n, &mut home, op, Ctx { zones, region: app.set.region() }) {
             let mut m = Buf::<96>::new();
@@ -1573,7 +1573,7 @@ impl Term {
 
     fn zones_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         let st = cx.store;
-        let n = st.zones() as u16 + 2;
+        let n = st.zones() + 2;
         match b {
             0 => {
                 w.s(b" ");
@@ -1964,26 +1964,26 @@ fn ago(s: u32, b: &mut Buf<16>) {
 }
 
 /// The zones list's i-th entry: every channel, each zone, then no zone.
-fn zone_of<S: ChannelStore>(i: u16, st: &S) -> u8 {
+fn zone_of<S: ChannelStore>(i: u16, st: &S) -> ZoneId {
     match i {
         0 => ALL,
-        _ if i <= st.zones() as u16 => (i - 1) as u8,
+        _ if i <= st.zones() => i - 1,
         _ => NO_ZONE,
     }
 }
 
-fn zone_name<S: ChannelStore>(z: u8, st: &S) -> Buf<16> {
+fn zone_name<S: ChannelStore>(z: ZoneId, st: &S) -> Buf<16> {
     if z == ALL {
         return Buf::from(b"All channels");
     }
     st.zone_label(z, b"No zone", b"?")
 }
 
-fn list_len<S: ChannelStore>(z: u8, st: &S) -> u16 {
+fn list_len<S: ChannelStore>(z: ZoneId, st: &S) -> u16 {
     if z == ALL { st.count() } else { st.zone_len(z) }
 }
 
-fn chan_at<S: ChannelStore>(z: u8, i: u16, st: &S) -> Option<Channel> {
+fn chan_at<S: ChannelStore>(z: ZoneId, i: u16, st: &S) -> Option<Channel> {
     if z == ALL { st.by_number(i) } else { st.zone_at(z, i) }
 }
 

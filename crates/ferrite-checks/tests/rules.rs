@@ -345,6 +345,6 @@ fn channels_are_read_on_demand() {
     let body = store.split("pub struct FlashStore").nth(1).unwrap().split("\n}").next().unwrap();
     let per_channel: Vec<_> = body.lines().filter(|l| l.contains("MAX_CHANNELS")).collect();
     assert_eq!(per_channel.len(), 1, "one per-channel field: {per_channel:?}");
-    assert!(per_channel[0].contains("Cell<u8>"), "it is one byte per channel: {}", per_channel[0]);
+    assert!(per_channel[0].contains("Cell<ZoneId>"), "it is one zone number per channel: {}", per_channel[0]);
     assert!(!body.contains("Channel;") && !body.contains("[Channel"), "no channel array in the store");
 }

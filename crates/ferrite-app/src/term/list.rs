@@ -8,7 +8,7 @@
 //! (TERM-13).
 
 use super::{cmd::Msg, list_len, Page, Term};
-use crate::chan::{Channel, ChannelStore, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, MAX_CHANNELS, NO_ZONE, ZoneId};
 use crate::screens::Screen;
 use crate::App;
 use core::cmp::Ordering;
@@ -41,7 +41,7 @@ pub(super) enum Ask {
 pub(super) enum Op {
     Delete,
     /// To this zone ([`NO_ZONE`]: none).
-    Move(u8),
+    Move(ZoneId),
     /// To free numbers from this one up.
     Copy(u16),
     /// To consecutive numbers from this one, in number order.
@@ -427,8 +427,8 @@ impl Term {
             Ask::Move => {
                 let z = if s.eq_ignore_ascii_case(b"none") || s == b"0" {
                     Some(NO_ZONE)
-                } else if let Some(n) = number(s).filter(|&n| n < st.zones() as u16) {
-                    Some(n as u8)
+                } else if let Some(n) = number(s).filter(|&n| n < st.zones()) {
+                    Some(n)
                 } else {
                     (0..st.zones()).find(|&z| st.zone_name(z).is_some_and(|nm| nm.as_bytes().eq_ignore_ascii_case(s)))
                 };

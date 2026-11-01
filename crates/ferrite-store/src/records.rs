@@ -6,7 +6,7 @@
 //! list) are kept as they were when a record is rewritten.
 
 use crate::{crc16, u16_at, u32_at, SECTOR};
-use ferrite_app::chan::{Channel, Name, NO_ZONE};
+use ferrite_app::chan::{Channel, Name, ZoneId, NO_ZONE};
 use ferrite_app::data::{Dtmf, Pos, RangePreset, ZoneCfg, DTMF_MEMS};
 use ferrite_app::slot::{band_near, SlotCfg, BANDS, DEFAULT_CFG, SQ_GLOBAL};
 use ferrite_core::layout::{CHANNELS, PRESETS, ZONES};
@@ -15,8 +15,12 @@ use ferrite_ui::text::Buf;
 // ---- channels ----
 
 pub const CH_LEN: usize = 64;
-/// The record's format, at offset 60.
-const CH_VERSION: u8 = 1;
+/// The record's format, at offset 60. 2 (decision 333): the zone is 2 bytes, its low byte at 18 and its high byte
+/// at 61 (0xFFFF no zone); version 1 had one byte at 18 (255 no zone) and 61 spare (0xFF).
+pub const CH_VERSION: u8 = 2;
+/// Where a channel record keeps its zone: the low byte, and the high byte.
+pub const CH_ZONE_LO: usize = 18;
+pub const CH_ZONE_HI: usize = 61;
 /// Flag bits the UI's `Channel::flags` carries (0-2 skip, APRS, RX-only; 5-6 talkaround, hidden); 3-4 are
 /// busy lockout (bit 3; a nonzero bit 4 from the old three-way setting reads as on), 7 "has position" (kept), 9 reverse, 10 split (TX at bytes 4-7 is the
 /// transmit frequency itself, not RX plus a shift: CHAN-2); 8 and 11-15 are kept as they were. A record from
@@ -82,7 +86,7 @@ pub fn ch_decode(num: u16, b: &[u8; CH_LEN]) -> Option<Channel> {
     let ui = (flags & UI_FLAGS) as u8 | if flags & PRIORITY != 0 { ferrite_app::chan::FLAG_PRIORITY } else { 0 };
     // Byte 31 (decision 86): end tone bits 0-2, tail bits 3-4; 0 (every record before it) is Global for both,
     // and so is a value out of range.
-    let mut c = Channel { num, zone: b[18], rx, name: [0; 16], cfg, flags: ui, tones: b[31] & 0x1F };
+    let mut c = Channel { num, zone: ch_zone(b), rx, name: [0; 16], cfg, flags: ui, tones: b[31] & 0x1F };
     // A name stored before CHAN-31 reads in the name set, as it would be written now.
     let name = &b[32..48];
     c.set_name(&name[..name.iter().position(|&x| x == 0).unwrap_or(16)]);
@@ -128,15 +132,20 @@ pub fn ch_encode(ch: &Channel, old: &[u8; CH_LEN]) -> [u8; CH_LEN] {
         | if c.reverse { REVERSE } else { 0 }
         | if c.split { SPLIT } else { 0 };
     b[16..18].copy_from_slice(&flags.to_le_bytes());
-    b[18] = ch.zone;
+    b[CH_ZONE_LO] = ch.zone as u8;
     b[19] = if c.squelch >= SQ_GLOBAL { 0 } else { c.squelch + 1 };
     b[31] = ch.end_tone() | ch.tail() << 3;
     b[32..48].copy_from_slice(&ch.name);
     b[60] = CH_VERSION;
-    b[61] = 0xFF;
+    b[CH_ZONE_HI] = (ch.zone >> 8) as u8;
     let crc = crc16(&b[..62]);
     b[62..64].copy_from_slice(&crc.to_le_bytes());
     b
+}
+
+/// The zone a channel record names (whatever it holds: check [`ch_valid`] first).
+pub fn ch_zone(b: &[u8; CH_LEN]) -> ZoneId {
+    u16::from_le_bytes([b[CH_ZONE_LO], b[CH_ZONE_HI]])
 }
 
 /// A channel's position, if its record has one (CHAN-2, CHAN-15).
@@ -182,12 +191,13 @@ pub fn pos_rec(b: &[u8; CH_LEN], pos: Option<Pos>) -> Option<[u8; CH_LEN]> {
 pub const ZONE_LEN: usize = 32;
 /// Zones in one sector.
 pub const ZONES_PER_SECTOR: u32 = 127;
-/// Zones 0-253: two sectors of 127 (255 is "no zone").
-pub const MAX_ZONES: u8 = 254;
-const _: () = assert!(MAX_ZONES < NO_ZONE);
+/// Zones 0 to `MAX_ZONES` - 1 (CHAN-6; 0xFFFF is "no zone").
+pub use ferrite_app::chan::MAX_ZONES;
+const _: () = assert!(MAX_ZONES < NO_ZONE && MAX_ZONES < ferrite_app::local::LOCAL);
+const _: () = assert!(MAX_ZONES as u32 <= (ZONES.end - ZONES.start) / SECTOR * ZONES_PER_SECTOR);
 
 /// Zone `z`'s record: sector z / 127, slot z % 127.
-pub fn zone_addr(z: u8) -> u32 {
+pub fn zone_addr(z: ZoneId) -> u32 {
     let z = z as u32;
     ZONES.start + z / ZONES_PER_SECTOR * SECTOR + z % ZONES_PER_SECTOR * ZONE_LEN as u32
 }

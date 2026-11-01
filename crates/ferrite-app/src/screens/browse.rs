@@ -11,7 +11,7 @@ use super::lists::*;
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, NO_ZONE, ZoneId};
 use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{chan_label, shift_text, tone_text, MODES};
@@ -57,8 +57,9 @@ pub enum Mode {
     List,
     /// The actions menu, its row.
     Actions(u8),
-    /// Picking a zone to move to (NO_ZONE: none).
-    Move(u8),
+    /// Picking a zone to move to: it is kept in `cur.top` meanwhile (NO_ZONE: none), as [`Mode::Renumber`]'s
+    /// number is, so the state stays small with 2-byte zone numbers (decision 333).
+    Move,
     /// Picking a new number: it is kept in `cur.top` meanwhile (the list isn't shown), so the state stays
     /// eight bytes.
     Renumber,
@@ -68,7 +69,7 @@ pub enum Mode {
 pub struct Browse {
     /// [`PICKER`]: picking a view (C8); 0: a zone's channels; else 1 + an index into VIEWS.
     pub view: u8,
-    pub zone: u8,
+    pub zone: ZoneId,
     pub cur: Cursor,
     pub mode: Mode,
 }
@@ -83,7 +84,7 @@ impl Browse {
 struct ViewOf<'a, S: ChannelStore> {
     store: &'a S,
     view: u8,
-    zone: u8,
+    zone: ZoneId,
     /// Hidden channels are listed too (the list's options; decision 63).
     hidden: bool,
 }
@@ -173,11 +174,11 @@ fn view_of<'a, S: ChannelStore>(store: &'a S, b: &Browse, hidden: bool) -> ViewO
 
 /// The picker's rows: the zones that exist, then the views.
 fn picker_n(store: &impl ChannelStore) -> u16 {
-    store.zones() as u16 + VIEWS.len() as u16
+    store.zones() + VIEWS.len() as u16
 }
 
 fn picker_keep(store: &impl ChannelStore, i: u16) -> bool {
-    i >= store.zones() as u16 || store.zone_name(i as u8).is_some()
+    i >= store.zones() || store.zone_name(i).is_some()
 }
 
 impl View for Browse {
@@ -217,9 +218,9 @@ impl View for Browse {
             }
             // C8: open a zone or a view
             (Key::Menu, Short, Mode::List) if self.view == PICKER => {
-                let z = store.zones() as u16;
+                let z = store.zones();
                 let i = self.cur.sel;
-                (s.view, s.zone) = if i < z { (0, i as u8) } else { (1 + (i - z) as u8, 0) };
+                (s.view, s.zone) = if i < z { (0, i) } else { (1 + (i - z) as u8, 0) };
                 let v = view_of(store, &s, app.set.show_hidden);
                 s.cur = Cursor::first(v.n(), &|i| v.keep(i));
             }
@@ -237,7 +238,7 @@ impl View for Browse {
                         return app.open(Dest::ChannelEdit);
                     }
                     1 => return super::text::open(app, super::text::TextFor::Channel(c.num), store),
-                    2 => s.mode = Mode::Move(c.zone),
+                    2 => (s.mode, s.cur.top) = (Mode::Move, c.zone),
                     3 => (s.mode, s.cur.top) = (Mode::Renumber, c.num),
                     4 => {
                         copy_to_slot(app, store, &c);
@@ -264,12 +265,14 @@ impl View for Browse {
                     }
                 }
             }
-            (Key::Menu, Short, Mode::Move(z)) => {
+            (Key::Menu, Short, Mode::Move) => {
+                let z = self.cur.top;
                 let Some(c) = ch else { return };
                 if z != c.zone && store.data().request(Op::Move(c.num, z)) {
                     app.show_toast(c.name(), zone_name(store, z).as_bytes(), false);
                 }
                 s.mode = Mode::List;
+                s.cur.top = s.cur.sel;
             }
             (Key::Menu, Short, Mode::Renumber) => {
                 let n = self.cur.top;
@@ -285,7 +288,7 @@ impl View for Browse {
             }
             (Key::Exit, Short, Mode::List) if self.view != PICKER => {
                 // back to the picker, on this view's row
-                let row = if self.view == 0 { self.zone as u16 } else { store.zones() as u16 + self.view as u16 - 1 };
+                let row = if self.view == 0 { self.zone } else { store.zones() + self.view as u16 - 1 };
                 s = Browse { view: PICKER, cur: Cursor { sel: row, top: 0 }.shown(picker_n(store), ROWS1, &|i| picker_keep(store, i)), ..Browse::new() };
             }
             (Key::Exit, Short, Mode::List) => return app.back(),
@@ -293,7 +296,7 @@ impl View for Browse {
             // back to the actions, on the one it came from
             (Key::Exit, Short, m) => {
                 s.mode = Mode::Actions(match m {
-                    Mode::Move(_) => 2,
+                    Mode::Move => 2,
                     Mode::Renumber => 3,
                     _ => 6,
                 });
@@ -313,19 +316,20 @@ impl View for Browse {
                 s.cur = self.cur.step(d, v.n(), ROWS2, &|i| v.keep(i));
             }
             Mode::Actions(a) => s.mode = Mode::Actions((a as i32 + d).rem_euclid(ACTIONS.len() as i32) as u8),
-            Mode::Move(z) => {
+            Mode::Move => {
+                let z = self.cur.top;
                 // the zones that exist, then "none"
                 let n = store.zones() as i32 + 1;
                 let mut i = if z == NO_ZONE { n - 1 } else { z as i32 };
                 for _ in 0..n {
                     i = (i + d.signum()).rem_euclid(n);
-                    if i == n - 1 || store.zone_name(i as u8).is_some() {
+                    if i == n - 1 || store.zone_name(i as ZoneId).is_some() {
                         break;
                     }
                 }
-                s.mode = Mode::Move(if i == n - 1 { NO_ZONE } else { i as u8 });
+                s.cur.top = if i == n - 1 { NO_ZONE } else { i as ZoneId };
             }
-            Mode::Renumber => s.cur.top = (self.cur.top as i32 + d).clamp(0, 999) as u16,
+            Mode::Renumber => s.cur.top = (self.cur.top as i32 + d).clamp(0, crate::chan::MAX_CHANNELS as i32 - 1) as u16,
         }
         app.screen = Screen::Browse(s);
     }
@@ -434,13 +438,13 @@ impl View for Browse {
             (V_BROADCAST, Mode::List) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Listen"), ("BACK", "Views")]),
             (_, Mode::List) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Actions"), ("BACK", "Views")]),
             (_, Mode::Actions(_)) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Do it"), ("BACK", "List")]),
-            (_, Mode::Move(_)) => Hints::new(&[("Knob", "Zone"), ("OK", "Move"), ("BACK", "Cancel")]),
+            (_, Mode::Move) => Hints::new(&[("Knob", "Zone"), ("OK", "Move"), ("BACK", "Cancel")]),
             (_, Mode::Renumber) => Hints::new(&[("Knob", "Number"), (ARROWS_LR, "10"), ("OK", "Set")]),
         }
     }
 }
 
-fn zone_name(store: &impl ChannelStore, z: u8) -> Buf<16> {
+fn zone_name(store: &impl ChannelStore, z: ZoneId) -> Buf<16> {
     store.zone_label(z, b"No zone", b"No zone")
 }
 
@@ -471,12 +475,12 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
     let mut l = Buf::<24>::new();
     let _ = uwrite!(l, "{} channels", store.count());
     app.list_head(lcd, l.as_bytes(), b"zones and views");
-    let z = store.zones() as u16;
+    let z = store.zones();
     let rows = cur.rows(picker_n(store), ROWS1, &|i| picker_keep(store, i), |row, i| {
         let mut v = Buf::<12>::new();
         let name: Buf<16> = if i < z {
             // a zone as the zones page shows it: chips and count, dimmed when empty (CHAN-27, CHAN-30)
-            let r = super::zones::ZoneRow::of(app, store, i as u8);
+            let r = super::zones::ZoneRow::of(app, store, i);
             let sel = i == cur.sel;
             if app.dirty(R_ROW + row, hash(&(2u8, &r, sel))) {
                 super::zones::zone_row(lcd, LIST_Y + row as i32 * ROW1_H, ROW1_H, &r, sel, app.cue());
@@ -534,7 +538,7 @@ fn actions(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, b: Br
         }
         let (sel, val) = match b.mode {
             Mode::Actions(a) => (a as usize == i, v),
-            Mode::Move(z) if i == 2 => (true, Buf::from(zone_name(store, z).as_bytes())),
+            Mode::Move if i == 2 => (true, Buf::from(zone_name(store, b.cur.top).as_bytes())),
             Mode::Renumber if i == 3 => {
                 let mut t = Buf::<32>::new();
                 chan_label(b.cur.top, &mut t);
@@ -546,7 +550,7 @@ fn actions(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, b: Br
     }
     let help: &[u8] = match b.mode {
         Mode::Actions(a) => ACTIONS[a as usize].1.as_bytes(),
-        Mode::Move(_) => b"Knob picks the zone; OK moves it",
+        Mode::Move => b"Knob picks the zone; OK moves it",
         _ => b"Knob steps 1, left and right 10; OK sets it",
     };
     app.help_box(lcd, 300 - 38, 34, help, b"");
