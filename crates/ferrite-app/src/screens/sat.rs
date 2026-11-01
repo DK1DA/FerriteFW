@@ -131,6 +131,22 @@ fn khz(d: i32, b: &mut Buf<12>) {
 }
 
 /// A tone in 0.1 Hz as "67.0".
+/// The downlink's S-meter (0-9, 6 dB a unit from -127 dBm) and whether its squelch is open, from the snapshot.
+fn s_level(live: &LiveAll) -> (i16, bool) {
+    let (rssi, open) = match live.mode {
+        ModeLive::Sat { rssi, open } => (rssi, open),
+        _ => (-127, false),
+    };
+    (((rssi + 127) / 6).clamp(0, 9), open)
+}
+
+/// `secs` as m:ss after what `b` holds.
+fn mmss_after<const N: usize>(b: &mut Buf<N>, secs: u32) {
+    let mut m = Buf::<8>::new();
+    crate::screens::activity::mmss(secs, &mut m);
+    b.push(m.as_bytes());
+}
+
 fn tone(t: u16, b: &mut Buf<12>) {
     let _ = uwrite!(b, "{}.{}", t / 10, t % 10);
 }
@@ -678,9 +694,8 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
         let _ = uwrite!(lines[1], "El {}\u{b0}", l.el.max(0.0) as u32);
         let top = p.aos + p.tmax as u32;
         if now < top {
-            let mut m = Buf::<8>::new();
-            crate::screens::activity::mmss(top - now, &mut m);
-            let _ = uwrite!(lines[2], "Max {}\u{b0} in {}", p.max_el, crate::screens::lists::Txt(m.as_bytes()));
+            let _ = uwrite!(lines[2], "Max {}\u{b0} in ", p.max_el);
+            mmss_after(&mut lines[2], top - now);
         } else {
             let _ = uwrite!(lines[2], "Max {}\u{b0} passed", p.max_el);
         }
@@ -725,11 +740,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
             lcd.text4(32 + wd, 176, sh.as_bytes(), &UI_12, SUB, BG);
         });
     }
-    let (rssi, open) = match live.mode {
-        ModeLive::Sat { rssi, open } => (rssi, open),
-        _ => (-127, false),
-    };
-    let su = ((rssi + 127) / 6).clamp(0, 9);
+    let (su, open) = s_level(live);
     if app.dirty(4, H::new().n(up as u32 | (open as u32) << 1).n(su as u32).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 183, 240, 10, BG, |lcd| {
             if up {
@@ -895,11 +906,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
             bars(lcd, 76, 158, 150, 6, 5, pw, RED);
         });
     }
-    let (rssi, open) = match live.mode {
-        ModeLive::Sat { rssi, open } => (rssi, open),
-        _ => (-127, false),
-    };
-    let su = ((rssi + 127) / 6).clamp(0, 9);
+    let (su, open) = s_level(live);
     let mut df = Buf::<12>::new();
     mhz(down, true, &mut df);
     let mut ds = Buf::<12>::new();
@@ -924,15 +931,32 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     }
     let to = app.settings().tx_timeout_s().saturating_sub(secs);
     let mut b = Buf::<48>::new();
-    let mut m = Buf::<8>::new();
-    crate::screens::activity::mmss(to, &mut m);
-    let _ = uwrite!(b, "Doppler on \u{b7} timeout {}", crate::screens::lists::Txt(m.as_bytes()));
+    b.set("Doppler on \u{b7} timeout ".as_bytes());
+    mmss_after(&mut b, to);
     if app.dirty(10, H::new().b(b.as_bytes()).get()) {
         w::field(lcd, 8, 224, 278, 296, 291, Align::Left, b.as_bytes(), &UI_12, SUB, BG);
     }
 }
 
 // ---- the pointing page (B24, SAT-17 to SAT-19) ----
+
+/// One of the pointing page's two blocks from `y` (azimuth at 24, 86 high; elevation at 112, 84 high): its label,
+/// the angle large with its degree ring and `side` after it, and the line under it in green.
+#[inline(never)]
+fn big_angle(lcd: &mut impl Panel, y: i32, label: &[u8], deg: u32, side: &[u8], under: &[u8]) {
+    let h = if y == 24 { 86 } else { 84 };
+    ferrite_ui::canvas::banded(lcd, 0, y, 240, h, BG, |lcd| {
+        lcd.text4(16, y + 16, label, &UI_12, SUB, BG);
+        let mut b = Buf::<4>::new();
+        let _ = uwrite!(b, "{}", deg);
+        let wd = lcd.text4(14, y + 66, b.as_bytes(), &DIG_46, TEXT, BG);
+        deg_ring(lcd, 15 + wd, y + 23, 5, TEXT);
+        if !side.is_empty() {
+            lcd.text4(34 + wd, y + 64, side, &NAME_22, SUB, BG);
+        }
+        lcd.text4(16, y + 82, under, &UI_12, GREEN, BG);
+    });
+}
 
 #[inline(never)]
 fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
@@ -967,35 +991,19 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
         let _ = uwrite!(mv, "moving {}", if daz > 0.0 { "right" } else { "left" });
     }
     if app.dirty(1, H::new().n(az).b(mv.as_bytes()).get()) {
-        ferrite_ui::canvas::banded(lcd, 0, 24, 240, 86, BG, |lcd| {
-            lcd.text4(16, 40, b"Azimuth \xc2\xb7 point to", &UI_12, SUB, BG);
-            let mut b = Buf::<4>::new();
-            let _ = uwrite!(b, "{}", az);
-            let wd = lcd.text4(14, 90, b.as_bytes(), &DIG_46, TEXT, BG);
-            deg_ring(lcd, 15 + wd, 47, 5, TEXT);
-            lcd.text4(34 + wd, 88, look::point16(l.az).as_bytes(), &NAME_22, SUB, BG);
-            lcd.text4(16, 106, mv.as_bytes(), &UI_12, GREEN, BG);
-        });
+        big_angle(lcd, 24, b"Azimuth \xc2\xb7 point to", az, look::point16(l.az).as_bytes(), mv.as_bytes());
     }
     let el = l.el.max(0.0) as u32;
     let mut em = Buf::<32>::new();
     let top = p.aos + p.tmax as u32;
     if now < top {
-        let mut m = Buf::<8>::new();
-        crate::screens::activity::mmss(top - at, &mut m);
-        let _ = uwrite!(em, "rising \u{b7} max {}\u{b0} in {}", p.max_el, crate::screens::lists::Txt(m.as_bytes()));
+        let _ = uwrite!(em, "rising \u{b7} max {}\u{b0} in ", p.max_el);
+        mmss_after(&mut em, top - at);
     } else {
         em.set(b"falling");
     }
     if app.dirty(2, H::new().n(el).b(em.as_bytes()).get()) {
-        ferrite_ui::canvas::banded(lcd, 0, 112, 240, 84, BG, |lcd| {
-            lcd.text4(16, 128, b"Elevation \xc2\xb7 tilt up", &UI_12, SUB, BG);
-            let mut b = Buf::<4>::new();
-            let _ = uwrite!(b, "{}", el);
-            let wd = lcd.text4(14, 178, b.as_bytes(), &DIG_46, TEXT, BG);
-            deg_ring(lcd, 15 + wd, 135, 5, TEXT);
-            lcd.text4(16, 194, em.as_bytes(), &UI_12, GREEN, BG);
-        });
+        big_angle(lcd, 112, b"Elevation \xc2\xb7 tilt up", el, b"", em.as_bytes());
     }
     // SAT-18: the compass bearing; SAT-19: from the sun while it is over 10°
     let decl = app.sat_data().declination();
@@ -1043,13 +1051,12 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
     mhz(down, true, &mut fm);
     f.set(fm.as_bytes());
     let mut r = Buf::<16>::new();
-    let mut m = Buf::<8>::new();
     if p.up(now) {
-        crate::screens::activity::mmss(p.los() - now, &mut m);
-        let _ = uwrite!(r, "sets {}", crate::screens::lists::Txt(m.as_bytes()));
+        r.set(b"sets ");
+        mmss_after(&mut r, p.los() - now);
     } else if now < p.aos {
-        crate::screens::activity::mmss(p.aos - now, &mut m);
-        let _ = uwrite!(r, "rises {}", crate::screens::lists::Txt(m.as_bytes()));
+        r.set(b"rises ");
+        mmss_after(&mut r, p.aos - now);
     }
     if app.dirty(4, H::new().b(f.as_bytes()).b(r.as_bytes()).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 266, 240, 32, BG, |lcd| {
