@@ -42,6 +42,14 @@ pub struct Members {
 impl Members {
     pub const EMPTY: Members = Members { zone: FREE, n: 0, over: false, nums: [0; ZONE_CAP as usize] };
 
+    /// An empty list for `zone`, built as all zeros and then given its zone: copied from [`Members::EMPTY`] it was a
+    /// 518-byte constant in slow flash (flash audit, Nov 1, 2026).
+    pub fn empty(zone: ZoneId) -> Members {
+        let mut m = Members { zone: 0, n: 0, over: false, nums: [0; ZONE_CAP as usize] };
+        m.zone = zone;
+        m
+    }
+
     fn find(&self, num: u16) -> core::result::Result<usize, usize> {
         self.nums[..self.n as usize].binary_search(&num)
     }
@@ -355,7 +363,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// List `k` built for zone `z`: one pass over the channel records.
     #[inline(never)]
     pub(crate) fn build(&self, k: usize, z: ZoneId) {
-        let mut l = Members { zone: z, ..Members::EMPTY };
+        let mut l = Members::empty(z);
         if self.ok() {
             for num in 0..MAX_CHANNELS {
                 if self.member(z, num).is_some() {

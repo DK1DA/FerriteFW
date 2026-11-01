@@ -213,7 +213,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             f: Flash::new(nor),
             extra,
             zones: Cell::new(0),
-            lists: RefCell::new([Members::EMPTY; 3]),
+            lists: RefCell::new([Members::empty(FREE), Members::empty(FREE), Members::empty(FREE)]),
             slot_zones: Cell::new([FREE; 3]),
             count: Cell::new(0),
             loose: Cell::new(0),
@@ -298,7 +298,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         // written again once things are quiet); the slots' lists are built when the App names their zones.
         self.mount_counts()?;
         self.counts_at.set(self.first_dirty().map(|_| 0));
-        *self.lists.borrow_mut() = [Members::EMPTY; 3];
+        *self.lists.borrow_mut() = [Members::empty(FREE), Members::empty(FREE), Members::empty(FREE)];
         self.slot_zones.set([FREE; 3]);
         self.events.mount(&self.f).await?;
         self.msgs.mount(&self.f).await?;
@@ -1063,7 +1063,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.at_all.set(At::NONE);
         self.at_zone.set(At::NONE);
         for l in self.lists.borrow_mut().iter_mut() {
-            *l = Members { zone: l.zone, ..Members::EMPTY };
+            *l = Members::empty(l.zone);
         }
         self.bump();
         self.cver.set(self.cver.get().wrapping_add(1));
