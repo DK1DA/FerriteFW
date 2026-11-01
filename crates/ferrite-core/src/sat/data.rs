@@ -24,19 +24,21 @@ pub enum State {
 }
 
 /// The per-satellite choices: the downlink trim in 10 Hz (SAT-8), half duplex (SAT-11), Doppler on the 70 cm
-/// side only (SAT-8), the transponder picked (1-5 on the pass page).
+/// side only (SAT-8), the transponder picked (1-5 on the pass page), the uplink's power (TX-9 levels: 0 Low, the
+/// default, 1 Mid, 2 High; the options page, SAT-22).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Prefs {
     pub trim: i16,
     pub hd: bool,
     pub uhf_only: bool,
     pub tp: u8,
+    pub power: u8,
 }
 
 impl Prefs {
     /// The starting choices from the satellite's flags (Console's, SAT-11).
     pub fn of(s: &Sat) -> Prefs {
-        Prefs { trim: 0, hd: s.flags & Sat::HD != 0, uhf_only: s.flags & Sat::UHF_ONLY != 0, tp: 0 }
+        Prefs { trim: 0, hd: s.flags & Sat::HD != 0, uhf_only: s.flags & Sat::UHF_ONLY != 0, tp: 0, power: 0 }
     }
 }
 
@@ -115,7 +117,6 @@ impl SatData for NoData {
 pub struct Live<S: SatSource> {
     pub src: S,
     plan: Plan,
-    prefs: [Option<Prefs>; SATS],
     /// The tracker last used by [`SatData::look`] (one satellite's constants, about 150 bytes).
     track: Cell<Option<(u8, Tracker)>>,
     obs: Option<Observer>,
@@ -135,7 +136,7 @@ const JUMP_S: u32 = 60;
 
 impl<S: SatSource> Live<S> {
     pub fn new(src: S) -> Self {
-        Live { src, plan: Plan::new(), prefs: [None; SATS], track: Cell::new(None), obs: None, expect: None, version: 1, no_clock: true, open: false, alarm: None, refining: false }
+        Live { src, plan: Plan::new(), track: Cell::new(None), obs: None, expect: None, version: 1, no_clock: true, open: false, alarm: None, refining: false }
     }
 
     /// The prediction's own counters (propagations, satellites done): for the speed check.
@@ -260,22 +261,40 @@ impl<S: SatSource> SatData for Live<S> {
         self.src.declination()
     }
     fn prefs(&self, sat: u8) -> Prefs {
-        match self.prefs.get(sat as usize).copied().flatten() {
-            Some(p) => p,
-            None => self.src.get(sat).map(|s| Prefs::of(&s)).unwrap_or_default(),
-        }
+        prefs_of(&self.src, sat)
     }
     fn set_prefs(&mut self, sat: u8, p: Prefs) {
-        if let Some(slot) = self.prefs.get_mut(sat as usize) {
-            *slot = Some(p);
-        }
+        self.src.set_prefs(sat, p);
     }
+}
+
+/// A satellite's choices: as kept (the store's, SAT-2), else the starting ones from its flags.
+pub fn prefs_of<S: SatSource>(src: &S, sat: u8) -> Prefs {
+    src.prefs(sat).or_else(|| src.get(sat).map(|s| Prefs::of(&s))).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::{tle, List, Sat};
     use super::*;
+
+    /// A source that keeps one satellite's choices, as the store does.
+    struct Kept<'a>(List<'a>, Cell<Option<Prefs>>);
+
+    impl SatSource for Kept<'_> {
+        fn count(&self) -> u8 {
+            self.0.count()
+        }
+        fn get(&self, i: u8) -> Option<Sat> {
+            self.0.get(i)
+        }
+        fn prefs(&self, _i: u8) -> Option<Prefs> {
+            self.1.get()
+        }
+        fn set_prefs(&self, _i: u8, p: Prefs) {
+            self.1.set(Some(p));
+        }
+    }
 
     const L1: &[u8] = b"1 25544U 98067A   26304.75703384  .00006360  00000+0  12291-3 0  9994";
     const L2: &[u8] = b"2 25544  51.6332 344.2755 0007028 332.5119  27.5497 15.49131714592920";
@@ -285,16 +304,16 @@ mod tests {
     #[test]
     fn predicts_while_open_and_keeps_only_the_alarm() {
         let sats = [Sat { id: 25_544, el: tle::parse(L1, L2).unwrap(), ..Default::default() }];
-        let mut d = Live::new(List(&sats));
+        let mut d = Live::new(Kept(List(&sats), Cell::new(None)));
         let here = Observer::new(453_000_000, -757_000_000, 70);
         let now = 1_793_480_000;
         d.tick(None, Some(here), true, 100);
         assert_eq!(d.state(), State::NoClock);
-        let mut d = Live::new(List(&sats));
+        let mut d = Live::new(Kept(List(&sats), Cell::new(None)));
         d.tick(Some(now), None, true, 100);
         assert_eq!(d.state(), State::NoPosition);
         assert_eq!(d.passes(), 0);
-        let mut d = Live::new(List(&sats));
+        let mut d = Live::new(Kept(List(&sats), Cell::new(None)));
         d.tick(Some(now), Some(here), false, 100);
         assert_eq!(d.passes(), 0, "nothing predicted while closed");
         d.tick(Some(now), Some(here), true, 100);

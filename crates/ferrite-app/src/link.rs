@@ -538,6 +538,7 @@ impl Session {
                 None => Status::BadArg,
             },
             msg::DATA_READ => data_read(st, p, &mut o),
+            msg::CLOCK => clock(app, p, &mut o), // LINK-65
             // LINK-60: raw writes from the cable only, not while the other port writes
             msg::DATA_WRITE if self.by != crate::remote::BY_CABLE => Status::Refused,
             msg::DATA_WRITE if self.other_writing => Status::Busy,
@@ -644,7 +645,7 @@ impl Session {
             Ok(Done::List(l)) => Run::List(l, 0),
             Ok(Done::Dump) => Run::Dump(DumpPos::default()),
             Ok(Done::Debug(j)) => Run::Debug(j),
-            Ok(Done::Load) => {
+            Ok(Done::Load | Done::SatPaste) => {
                 o.put(b"load: not over the link; write the records, or load in the terminal");
                 return Status::Invalid;
             }
@@ -713,7 +714,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA]); // LINK-35.2: two bytes
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS]); // LINK-35.2: two bytes
         layouts(st, o); // LINK-62
         Status::Ok
     }
@@ -797,7 +798,7 @@ impl Session {
     /// assembled is dropped.
     fn write_many(&mut self, p: &[u8]) -> Status {
         let Some((&w, recs)) = p.split_first() else { return Status::BadArg };
-        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION | what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS) {
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT | what::POSITION | what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS | what::SAT | what::SAT_INFO) {
             return Status::BadArg; // the settings are one record, larger than a frame: WRITE
         }
         let mut r = recs;
@@ -897,6 +898,32 @@ pub fn route(cable_port: u8, link_active: bool, b: u8) -> Route {
 
 fn le16(b: &[u8]) -> u16 {
     u16::from_le_bytes([b[0], b[1]])
+}
+
+/// The earliest and latest clock `CLOCK` takes (2020 to 2099).
+const CLOCK_RANGE: core::ops::Range<u32> = 1_577_836_800..4_102_444_800;
+
+/// `CLOCK` (LINK-65, GPS-23, SAT-3): UTC seconds set the clock as 0 6 6 does by hand; the answer is the clock now
+/// and its source.
+fn clock(app: &mut App, p: &[u8], o: &mut Out) -> Status {
+    let (now, src) = match p {
+        [] => match app.sat_now() {
+            Some(t) => (t, if app.sat.by_gps { 1 } else { 2 }),
+            None => (0, 0),
+        },
+        [a, b, c, d] => {
+            let t = u32::from_le_bytes([*a, *b, *c, *d]);
+            if !CLOCK_RANGE.contains(&t) {
+                return Status::BadArg;
+            }
+            app.set_clock_by_hand(t);
+            (t, 2)
+        }
+        _ => return Status::BadArg,
+    };
+    o.put(&now.to_le_bytes());
+    o.put(&[src]);
+    Status::Ok
 }
 
 fn request<S: ChannelStore>(st: &S, op: Op) -> Status {
@@ -1328,7 +1355,7 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             }
             None => return Status::NotFound,
         },
-        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => return lists::record(st, w, idx, win), // LINK-54 – LINK-56, LINK-58
+        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS | what::SAT | what::SAT_INFO => return lists::record(st, w, idx, win), // LINK-54 – LINK-56, LINK-58, LINK-63, LINK-64
         _ => return Status::BadArg,
     }
     Status::Ok
@@ -1376,7 +1403,7 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
         what::CHANNEL | what::POSITION => st.zone_of(i).is_some(),
         what::ZONE => st.zone_name(i).is_some(),
         what::CONTACT => i < st.data().contacts(),
-        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => lists::held(st, w, i),
+        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS | what::SAT | what::SAT_INFO => lists::held(st, w, i),
         _ => st.data().preset(i as u8).is_some(),
     }
 }
@@ -1682,7 +1709,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             request(st, Op::SaveContact(c))
         }
-        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS => lists::apply(st, w, idx, rec, o), // LINK-54 – LINK-56, LINK-58
+        what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS | what::SAT | what::SAT_INFO => lists::apply(st, w, idx, rec, o), // LINK-54 – LINK-56, LINK-58, LINK-63, LINK-64
         _ => Status::Refused, // nothing else is written over the link (LINK-3)
     }
 }

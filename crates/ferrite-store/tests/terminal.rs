@@ -142,3 +142,62 @@ fn dump_load_through_the_terminal_into_flash() {
     let again = FlashStore::mount(s.into_parts().0, NoData);
     assert_eq!(dump(&b, &again), text);
 }
+
+/// SAT-3: `:sat add` through the terminal, the writes queued as on the radio: a pasted TLE adds the ISS (no
+/// transponders), OMM CSV gives it new elements (its name and place kept) and adds SO-50; `sat` lists them; a TLE
+/// with a broken line 2 is refused and named; `sat del 2` deletes one.
+#[test]
+fn sat_paste_through_the_terminal() {
+    let s = FlashStore::mount(SimFlash::new(), NoData);
+    s.set_deferred(true);
+    let mut b = app();
+    let mut term = Term::new();
+    let mut out = Out(Vec::new());
+    let mut now = 1000u32;
+    let input = concat!(
+        "\r\r:sat add\r",
+        "ISS (ZARYA)\r\n",
+        "1 25544U 98067A   26304.75703384  .00006360  00000+0  12291-3 0  9994\r\n",
+        "2 25544  51.6332 344.2755 0007028 332.5119  27.5497 15.49131714592920\r\n",
+        "OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT\r\n",
+        "ISS (ZARYA),1998-067A,2026-11-01T06:00:00.000000,15.49131714,.0007028,51.6332,344.2755,332.5119,27.5497,0,U,25544,999,59292,.12291E-3,.6360E-4,0\r\n",
+        "SO-50,2002-058C,2026-10-31T19:53:55.491936,14.83296838,.0068979,64.5527,66.1378,237.1936,122.2515,0,U,27607,999,28472,.12403E-3,.904E-5,0\r\n",
+        "1 99999U 98067A   26304.75703384  .00006360  00000+0  12291-3 0  9994\r\n",
+        "2 junk\r\n",
+        "end\r\n",
+    );
+    for &c in input.as_bytes() {
+        while !term.ready() {
+            poll(&mut b, &mut term, &s, &mut out, &mut now);
+        }
+        term.feed(&mut b, c, now, &s);
+        poll(&mut b, &mut term, &s, &mut out, &mut now);
+    }
+    for _ in 0..20 {
+        poll(&mut b, &mut term, &s, &mut out, &mut now);
+    }
+    let shown = String::from_utf8_lossy(&out.0).to_string();
+    assert!(shown.contains("Paste satellites"), "{shown}");
+    assert!(shown.contains("3 applied, 1 refused"), "{}", &shown[shown.len().saturating_sub(400)..]);
+    let iss = s.sat_rec(0).unwrap();
+    assert_eq!((iss.id, iss.name(), iss.ntp), (25_544, &b"ISS (ZARYA)"[..], 0));
+    assert_eq!(iss.el.epoch % 86_400, 6 * 3600, "the CSV's newer elements");
+    assert_eq!(s.sat_rec(1).unwrap().id, 27_607);
+    let dev = Device::default();
+    let mut l = cmd::Line::new();
+    let list = |i| {
+        let mut l2 = cmd::Line::new();
+        cmd::list_line(&b, &s, &dev, &LiveAll::default(), cmd::List::Sats, i, &mut l2).then(|| String::from_utf8_lossy(l2.as_bytes()).to_string())
+    };
+    assert!(list(0).unwrap().starts_with("1 ISS (ZARYA) #25544"), "{:?}", list(0));
+    assert!(list(1).unwrap().starts_with("2 SO-50 #27607"));
+    assert!(list(2).is_none());
+    l.clear();
+    let mut a = app();
+    assert!(matches!(cmd::run(&mut a, &s, &dev, b"sat del 2", false), Ok(cmd::Done::Said(_))));
+    while let Some(j) = s.next_job() {
+        assert!(block(s.run(j)));
+    }
+    assert_eq!(s.sat_places(), 1);
+    assert!(!cmd::writes(b"sat") && cmd::writes(b"sat add"));
+}

@@ -23,11 +23,10 @@ pub const ARM_MS: u32 = 2_000;
 /// SAT-8: the uplink is retuned this often while keyed (seconds): every 5 s until the bench shows the BK4829
 /// retunes cleanly while keyed, then every second.
 pub const TX_RETUNE_S: u32 = 5;
-/// The uplink's power (TX-9 levels: 0 Low, 1 Mid, 2 High): High for now, as a hand-held Yagi's usual 5 W
-/// (the mock-ups drew Low; a per-satellite choice is for phase 2), its name and meter bars on the keyed page.
-pub const POWER: u8 = 2;
-pub const POWER_NAME: &str = "HIGH";
-pub const POWER_BARS: i32 = 5;
+/// The uplink's power names and meter bars on the keyed page, by TX-9 level (0 Low, the default, 1 Mid, 2 High:
+/// the satellite's choice, SAT-22).
+pub const POWER_NAMES: [&str; 3] = ["LOW", "MID", "HIGH"];
+pub const POWER_BARS: [i32; 3] = [2, 3, 5];
 /// SAT-12: the alarm's toast stays this long (OK on it opens the pass page).
 pub const TOAST_MS: u32 = 8_000;
 
@@ -51,14 +50,14 @@ pub struct SatUi {
     /// SAT-10: the rise time of the pass whose arming tone went out (0 none), and when the arming tone ends.
     pub armed: u32,
     pub arm_until: u32,
-    /// What the Radio task has: downlink, uplink, tone, half duplex; and the UTC second of the last retune.
-    pub sent: (Freq10, Freq10, u16, bool),
+    /// What the Radio task has: downlink, uplink, tone, half duplex, power; and the UTC second of the last retune.
+    pub sent: (Freq10, Freq10, u16, bool, u8),
     pub sent_s: u32,
 }
 
 impl SatUi {
     pub const fn new() -> SatUi {
-        SatUi { utc: None, by_gps: false, here: None, lead: LEAD_START, alarm_lead: 0, fired: false, toast_at: 0, cur: None, armed: 0, arm_until: 0, sent: (0, 0, 0, false), sent_s: 0 }
+        SatUi { utc: None, by_gps: false, here: None, lead: LEAD_START, alarm_lead: 0, fired: false, toast_at: 0, cur: None, armed: 0, arm_until: 0, sent: (0, 0, 0, false, 0), sent_s: 0 }
     }
 }
 
@@ -233,15 +232,15 @@ impl App {
         if up != was.1 || force {
             self.out.push(RadioCmd::SatUp(up));
         }
-        if tone != was.2 || pr.hd != was.3 || force {
-            self.out.push(RadioCmd::SatTone { tone, hd: pr.hd });
+        if tone != was.2 || pr.hd != was.3 || pr.power != was.4 || force {
+            self.out.push(RadioCmd::SatTone { tone, hd: pr.hd, power: pr.power });
         }
-        self.sat.sent = (down, up, tone, pr.hd);
+        self.sat.sent = (down, up, tone, pr.hd, pr.power);
     }
 
     /// The mode's start and stop (MODE-2): both chips taken with the downlink tuned, or given back (SAT-1).
     pub(crate) fn sat_start(&mut self) {
-        self.sat.sent = (ferrite_core::msg::SAT_IDLE, 0, 0, false);
+        self.sat.sent = (ferrite_core::msg::SAT_IDLE, 0, 0, false, 0);
         match self.sat_now() {
             Some(now) if self.sat.cur.is_some() => self.sat_retune(now, true),
             _ => self.out.push(RadioCmd::SatRx(ferrite_core::msg::SAT_IDLE)),
@@ -360,9 +359,18 @@ pub fn sample() -> [Sat; 4] {
 /// the sample's elements.
 pub const SIM_T0: u32 = 1_793_541_600;
 
-/// The simulator's source: the sample, predicted on the host as on the radio (SAT-6), with the declination at
-/// the sample's fix (Ottawa, about 13° W).
-pub struct SimSats(pub [Sat; 4]);
+/// The declination at the sample's fix (Ottawa, about 13° W), 0.1° east positive (SAT-18).
+pub const SIM_DECL: i16 = -130;
+
+/// The sample in RAM, its choices with it (the App's tests; the simulator's `--sats` fixture), predicted on the
+/// host as on the radio (SAT-6). The simulator itself keeps its satellites in its store, as the radio does.
+pub struct SimSats(pub [Sat; 4], core::cell::Cell<[Option<Prefs>; 4]>);
+
+impl SimSats {
+    pub fn new(list: [Sat; 4]) -> SimSats {
+        SimSats(list, core::cell::Cell::new([None; 4]))
+    }
+}
 
 impl ferrite_core::sat::SatSource for SimSats {
     fn count(&self) -> u8 {
@@ -372,7 +380,17 @@ impl ferrite_core::sat::SatSource for SimSats {
         self.0.get(i as usize).copied()
     }
     fn declination(&self) -> Option<i16> {
-        Some(-130)
+        Some(SIM_DECL)
+    }
+    fn prefs(&self, i: u8) -> Option<Prefs> {
+        self.1.get().get(i as usize).copied().flatten()
+    }
+    fn set_prefs(&self, i: u8, p: Prefs) {
+        let mut a = self.1.get();
+        if let Some(x) = a.get_mut(i as usize) {
+            *x = Some(p);
+        }
+        self.1.set(a);
     }
 }
 

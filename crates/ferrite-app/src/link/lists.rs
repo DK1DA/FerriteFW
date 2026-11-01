@@ -3,14 +3,16 @@
 //! each record checked as the radio's own editors check it and written through the store's queue only when it
 //! changes. Only from radios whose `HELLO` says [`ferrite_core::link::caps::LISTS`]; older ones answer `bad argument`.
 //! A range preset's skipped frequencies (LINK-58, SCAN-10) go the same way, from radios whose second caps byte says
-//! [`ferrite_core::link::caps2::PRESET_SKIPS`].
+//! [`ferrite_core::link::caps2::PRESET_SKIPS`]. Satellite mode's records (LINK-63, LINK-64, SAT-2) too, from radios
+//! that say [`ferrite_core::link::caps2::SATS`].
 
 use super::{name_of, request, Out, Window};
 use crate::chan::ChannelStore;
 use crate::data::{Dtmf, Op, Pos, Waypoint, WpSrc, DTMF_MEMS, SKIP_CHUNK};
 use crate::persist::Sink as PSink;
 use crate::words::QUICK;
-use ferrite_core::link::{what, Status, ADD, PRESET_SKIPS_MAX, QUICK_OWN, WAYPOINT_LEN};
+use ferrite_core::link::{what, Status, ADD, PRESET_SKIPS_MAX, QUICK_OWN, SATS_MAX, SAT_INFO_LEN, SAT_LEN, WAYPOINT_LEN};
+use ferrite_core::sat::wire;
 use ferrite_ui::text::Buf;
 
 /// GPS-10's store (decision 333: 16 sectors of 127).
@@ -25,6 +27,8 @@ pub(super) fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
         what::WAYPOINT => Some(st.data().waypoints()),
         what::DTMF => Some(DTMF_MEMS as u16),
         what::PRESET_SKIPS => Some(st.data().presets() as u16),
+        what::SAT => Some(SATS_MAX),
+        what::SAT_INFO => Some(1),
         _ => None,
     }
 }
@@ -36,6 +40,8 @@ pub(super) fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
         what::QUICK => (i as usize) < QUICK,
         what::WAYPOINT => i < st.data().waypoints(),
         what::PRESET_SKIPS => i < 256 && preset_skips(st.data(), i as u8, |_| ()) > 0,
+        what::SAT => i < SATS_MAX && st.data().sat_places() & 1 << i != 0,
+        what::SAT_INFO => i == 0 && st.data().sat_info().is_some(),
         _ => i < DTMF_MEMS as u16 && st.data().dtmf(i as u8).is_some(),
     }
 }
@@ -75,6 +81,15 @@ pub(super) fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window)
         },
         // LINK-58: the skipped frequencies, u32 each
         what::PRESET_SKIPS if idx < 256 && preset_skips(d, idx as u8, |f| win.put(&f.to_le_bytes())) > 0 => {}
+        // LINK-63, LINK-64: a satellite, the satellites' info
+        what::SAT => match d.sat_rec(idx.min(255) as u8).filter(|_| idx < SATS_MAX) {
+            Some(s) => win.put(&wire::encode(&s)),
+            None => return Status::NotFound,
+        },
+        what::SAT_INFO => match d.sat_info().filter(|_| idx == 0) {
+            Some(i) => win.put(&i.encode()),
+            None => return Status::NotFound,
+        },
         _ => return Status::NotFound,
     }
     Status::Ok
@@ -201,6 +216,44 @@ pub(super) fn apply<S: ChannelStore>(st: &S, w: u8, idx: u16, rec: &[u8], o: &mu
                     return Status::Ok;
                 }
             }
+        }
+        // LINK-63: replaced in its place (checked as SAT-2 and SAT-13 say), deleted with an empty record, all deleted
+        // with an empty record at ADD; nothing written when it is as stored
+        what::SAT if idx == ADD && rec.is_empty() => if d.sat_places() == 0 { Status::Ok } else { request(st, Op::ClearSats) },
+        what::SAT if idx < SATS_MAX => {
+            let k = idx as u8;
+            if rec.is_empty() {
+                return if d.sat_places() & 1 << k == 0 { Status::Ok } else { request(st, Op::DeleteSat(k)) };
+            }
+            if rec.len() != SAT_LEN {
+                return Status::BadArg;
+            }
+            let s = match wire::decode(rec) {
+                Ok(s) => s,
+                Err(why) => return invalid(o, why),
+            };
+            if d.sat_rec(k) == Some(s) {
+                return Status::Ok;
+            }
+            if !d.sat_stage(&s) {
+                return Status::Busy;
+            }
+            request(st, Op::PutSat(k))
+        }
+        // LINK-64: the declination and the list's stamps; an empty record clears them
+        what::SAT_INFO if idx == 0 => {
+            let new = match rec.len() {
+                0 => None,
+                SAT_INFO_LEN => match wire::Info::decode(rec) {
+                    Ok(i) => Some(i),
+                    Err(why) => return invalid(o, why),
+                },
+                _ => return Status::BadArg,
+            };
+            if d.sat_info() == new {
+                return Status::Ok;
+            }
+            request(st, Op::SatInfo(new))
         }
         _ => Status::NotFound,
     }

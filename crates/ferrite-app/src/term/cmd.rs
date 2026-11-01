@@ -153,6 +153,8 @@ pub enum Done {
     List(List),
     Dump,
     Load,
+    /// `sat add` (SAT-3): the lines that follow are a TLE or OMM CSV to paste, until `end` ([`sat_line`]).
+    SatPaste,
     /// A debug command: its lines come from the firmware's answers (TERM-21).
     Debug(super::debug::Job),
 }
@@ -175,6 +177,8 @@ pub enum List {
     UiStatus,
     /// The readback with the screen as drawn after it (LINK-19.5, the link's `UI` what=3): the link only.
     UiTexts,
+    /// The satellites held (`sat`, SAT-2), one line each.
+    Sats,
 }
 
 // ---- Words ----
@@ -1360,6 +1364,126 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
     out.push(path_name(p).as_bytes());
 }
 
+// ---- Satellites (SAT-3) ----
+
+/// `sat`: the satellites held; `sat add`: paste a TLE or OMM CSV next; `sat del N`: the satellite in place N goes.
+fn sat<S: ChannelStore>(st: &S, t: &mut Toks, loading: bool) -> Result<Done, Msg> {
+    const USE: &str = "sat lists them; sat add pastes a TLE or OMM CSV; sat del N deletes one";
+    match t.next()? {
+        None => Ok(Done::List(List::Sats)),
+        Some(Tok::Word(w)) if same(w, b"add") && loading => Err(msg!("sat add can't be in a load")),
+        Some(Tok::Word(w)) if same(w, b"add") => Ok(Done::SatPaste),
+        Some(Tok::Word(w)) if same(w, b"del") => {
+            let n = t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }).filter(|n| (1..=32).contains(n)).ok_or_else(|| msg!("sat del N: N as sat lists it, 1-32"))?;
+            let k = n as u8 - 1;
+            let Some(x) = st.data().sat_rec(k) else { return Err(msg!("No satellite at {}", n)) };
+            if st.data().request(Op::DeleteSat(k)) {
+                Ok(Done::Said(msg!("{} deleted", Bytes(x.name()))))
+            } else {
+                Err(msg!("busy: try again"))
+            }
+        }
+        _ => Err(msg!("{}", USE)),
+    }
+}
+
+/// `sat`'s line `i`: place, name, catalogue number, the elements' age, transponders.
+fn sat_list_line<S: ChannelStore>(st: &S, i: u16, out: &mut Line) -> bool {
+    let d = st.data();
+    let held = d.sat_places();
+    if held == 0 {
+        if i == 0 {
+            out.push("No satellites. Load them from Ferrite Console, or sat add to paste a TLE.".as_bytes());
+        }
+        return i == 0;
+    }
+    let Some(k) = (0..32u8).filter(|k| held & 1 << k != 0).nth(i as usize) else { return false };
+    let Some(x) = d.sat_rec(k) else { return false };
+    let mut l = Line::new();
+    l.fill("{} {} #{} epoch day {} ({} transponders)", &[Arg::N(k as u32 + 1), Arg::B(x.name()), Arg::N(x.id), Arg::N(x.el.epoch / 86_400), Arg::N(x.ntp as u32)]);
+    out.push(l.as_bytes());
+    true
+}
+
+/// What `sat add` holds between lines: a name line, and line 1 of a TLE as read (catalogue number, epoch, B*).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct SatPaste {
+    name: Buf<16>,
+    l1: Option<(u32, ferrite_core::sat::Elements)>,
+}
+
+/// A TLE's catalogue number (columns 3-7), alpha-5 too ("A0001" is 100001; I and O aren't used).
+fn tle_id(l1: &[u8]) -> Option<u32> {
+    let f = l1.get(2..7)?;
+    let lead = match f[0] {
+        b'0'..=b'9' | b' ' => 0,
+        c @ b'A'..=b'H' => (c - b'A' + 10) as u32,
+        c @ b'J'..=b'N' => (c - b'J' + 18) as u32,
+        c @ b'P'..=b'Z' => (c - b'P' + 23) as u32,
+        _ => return None,
+    };
+    let digits = |b: &[u8]| b.iter().filter(|&&c| c != b' ').try_fold(0u32, |a, &c| c.is_ascii_digit().then(|| a * 10 + (c - b'0') as u32));
+    Some(if lead == 0 { digits(f)? } else { lead * 10_000 + digits(&f[1..])? })
+}
+
+fn trim_sp(s: &[u8]) -> &[u8] {
+    let a = s.iter().position(|c| !c.is_ascii_whitespace()).unwrap_or(s.len());
+    let b = s.iter().rposition(|c| !c.is_ascii_whitespace()).map_or(a, |k| k + 1);
+    &s[a..b]
+}
+
+/// A line of `sat add` (SAT-3): a name, TLE line 1 and line 2 (three lines), or OMM CSV (CelesTrak's columns; the
+/// header line is skipped). A satellite held with the same catalogue number gets the new elements (its name,
+/// transponders and choices stay); another is added in the first free place, with no transponders (passes and
+/// pointing only: Console adds the frequencies).
+pub fn sat_line<S: ChannelStore>(st: &S, p: &mut SatPaste, line: &[u8]) -> Result<Done, Msg> {
+    use ferrite_core::sat::{tle, Sat, Status};
+    let line = trim_sp(line);
+    let (id, name, el) = if line.is_empty() || line.starts_with(b"OBJECT_NAME") {
+        return Ok(Done::Nothing);
+    } else if line.starts_with(b"1 ") && line.len() >= 61 {
+        p.l1 = Some((tle_id(line).ok_or_else(|| msg!("not a TLE: catalogue number"))?, tle::parse_l1(line).ok_or_else(|| msg!("not a TLE: line 1"))?));
+        return Ok(Done::Nothing);
+    } else if let (true, Some((id, l1))) = (line.starts_with(b"2 "), p.l1.take()) {
+        let el = tle::parse_l2(&l1, line).ok_or_else(|| msg!("not a TLE: line 1, then line 2"))?;
+        (id, core::mem::take(&mut p.name), el)
+    } else if let Some((id, name, el)) = line.contains(&b',').then(|| tle::parse_csv(line)).flatten() {
+        (id, Buf::from(name), el)
+    } else if line.contains(&b',') {
+        return Err(msg!("not OMM CSV: CelesTrak's columns, NAME,ID,EPOCH,..."));
+    } else {
+        p.name.set(&line[..line.len().min(16)]);
+        return Ok(Done::Nothing);
+    };
+    let d = st.data();
+    let held = d.sat_places();
+    let same_id = (0..32u8).find(|&k| d.sat_rec(k).is_some_and(|x| x.id == id));
+    let (k, s) = match same_id {
+        Some(k) => (k, Sat { el, ..d.sat_rec(k).unwrap_or_default() }),
+        None => {
+            let k = (0..32u8).find(|k| held & 1 << k == 0).ok_or_else(|| msg!("32 satellites held: sat del N first"))?;
+            let mut nm = [0u8; 16];
+            let n = name.as_bytes().iter().map(|&c| if (0x20..0x7F).contains(&c) { c } else { b'?' });
+            for (o, c) in nm.iter_mut().zip(n) {
+                *o = c;
+            }
+            if nm[0] == 0 {
+                let mut b = Buf::<16>::new();
+                b.push(super::digits(id, &mut [0; 10]));
+                nm[..b.len()].copy_from_slice(b.as_bytes());
+            }
+            (k, Sat { id, name: nm, status: Status::Unknown, el, ..Default::default() })
+        }
+    };
+    if ferrite_core::sat::wire::decode(&ferrite_core::sat::wire::encode(&s)).is_err() {
+        return Err(msg!("elements out of range"));
+    }
+    if !d.sat_stage(&s) || !d.request(Op::PutSat(k)) {
+        return Err(msg!("busy: paste it again"));
+    }
+    Ok(Done::Said(if same_id.is_some() { msg!("{}: new elements", Bytes(s.name())) } else { msg!("{} added at {} (no transponders)", Bytes(s.name()), k as u32 + 1) }))
+}
+
 // ---- Running a line ----
 
 /// Runs one line: typed after `:`, or read by `load` (`loading`: only the lines a dump holds).
@@ -1383,6 +1507,7 @@ pub fn writes(line: &[u8]) -> bool {
     let shows = shows || same(c, b"fsk") && rest == 0; // TERM-43: `fsk` alone shows the counts
     let shows = shows || same(c, b"meter") && rest == 0; // TERM-44: `meter` alone shows the bins
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
+    let shows = shows || same(c, b"sat") && rest == 0; // SAT-3: `sat` alone lists the satellites
     !(reads || shows)
 }
 
@@ -1460,6 +1585,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         #[cfg(not(feature = "bench"))]
         _ if BENCH_ONLY.iter().any(|b| same(c, b.as_bytes())) => Err(not_in_build(c)),
         _ if same(c, b"load") => Ok(Done::Load),
+        _ if same(c, b"sat") => sat(st, &mut t, loading),
         _ if same(c, b"clear") => {
             if !same(t.word("clear channels N: deletes every channel")?, b"channels") {
                 return Err(msg!("clear channels N: deletes every channel"));
@@ -2321,6 +2447,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
                 None => false,
             }
         }
+        List::Sats => sat_list_line(st, i, out),
         List::Slots => {
             if i as usize >= ferrite_core::msg::SLOTS {
                 return false;
@@ -2357,6 +2484,7 @@ const HELP: &str = concat!(
     "  quick 3 \"On my way\"   quick message 3; quick 3 shows it, quick 3 factory resets it\n",
     "  dump                   everything, as these lines; save it with your terminal's log\n",
     "  load                   read a dump back: send the file, it ends at the line end\n",
+    "  sat                    the satellites; sat add pastes a TLE or OMM CSV, sat del N\n",
     "  clear channels N       delete every channel (N: how many there are)\n",
     "  gps                    the GPS module's last GGA sentence, its age and heights\n",
     "  xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it",

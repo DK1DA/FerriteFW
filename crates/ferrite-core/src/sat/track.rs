@@ -3,7 +3,7 @@
 //! cubic through the four nearest samples (Catmull-Rom). The firmware built without `sat-predict` links this in
 //! place of SGP4 and the predictor ([`super::data::Live`]).
 
-use super::data::{Prefs, SatData, State, SATS};
+use super::data::{Prefs, SatData, State};
 use super::look::{Look, Observer};
 use super::pass::Pass;
 use super::{Sat, SatSource};
@@ -110,14 +110,13 @@ pub fn look_at(st: &dyn TrackStore, i: u8, t: u32) -> Option<Look> {
 pub struct Tracks<S: SatSource, T: TrackStore> {
     pub src: S,
     pub store: T,
-    prefs: [Option<Prefs>; SATS],
     now: Option<u32>,
     alarm: Option<Pass>,
 }
 
 impl<S: SatSource, T: TrackStore> Tracks<S, T> {
     pub fn new(src: S, store: T) -> Self {
-        Tracks { src, store, prefs: [None; SATS], now: None, alarm: None }
+        Tracks { src, store, now: None, alarm: None }
     }
 }
 
@@ -169,15 +168,10 @@ impl<S: SatSource, T: TrackStore> SatData for Tracks<S, T> {
         self.src.declination()
     }
     fn prefs(&self, sat: u8) -> Prefs {
-        match self.prefs.get(sat as usize).copied().flatten() {
-            Some(p) => p,
-            None => self.src.get(sat).map(|s| Prefs::of(&s)).unwrap_or_default(),
-        }
+        super::data::prefs_of(&self.src, sat)
     }
     fn set_prefs(&mut self, sat: u8, p: Prefs) {
-        if let Some(slot) = self.prefs.get_mut(sat as usize) {
-            *slot = Some(p);
-        }
+        self.src.set_prefs(sat, p);
     }
 }
 

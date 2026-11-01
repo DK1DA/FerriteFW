@@ -11,6 +11,7 @@ pub mod pass;
 pub mod sgp4;
 pub mod tle;
 pub mod track;
+pub mod wire;
 
 use crate::freq::Freq10;
 
@@ -193,7 +194,8 @@ impl Sat {
     }
 }
 
-/// Where the satellites come from: a list in RAM for now, the SPI flash region (SAT-2) and the link in phase 2.
+/// Where the satellites come from: the store's SPI flash region on the radio (SAT-2, written over the link or by
+/// the terminal's `:sat`), a list in RAM in the tests and the simulator's fixture.
 pub trait SatSource {
     fn count(&self) -> u8;
     fn get(&self, i: u8) -> Option<Sat>;
@@ -206,6 +208,12 @@ pub trait SatSource {
     fn declination(&self) -> Option<i16> {
         None
     }
+    /// Satellite `i`'s choices as kept (None: none kept, its flags' starting ones apply).
+    fn prefs(&self, _i: u8) -> Option<data::Prefs> {
+        None
+    }
+    /// Keeps satellite `i`'s choices (the store writes them a little later: a turning knob doesn't wear the flash).
+    fn set_prefs(&self, _i: u8, _p: data::Prefs) {}
 }
 
 /// No satellites (the default until something loads them).

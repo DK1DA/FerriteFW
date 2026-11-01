@@ -243,6 +243,8 @@ pub struct Term {
     cmd: bool,
     /// A whole line waits in the buffer for the next poll to run it (after the store has caught up).
     pending: bool,
+    /// `sat add` (SAT-3): the load's lines are a TLE or OMM CSV, and what the paste holds between them.
+    sat: Option<cmd::SatPaste>,
     /// A load's line was longer than the buffer; the line before was ended by CR (its LF is no new line).
     long: bool,
     cr: bool,
@@ -318,6 +320,7 @@ impl Term {
             clast: 0,
             cmd: false,
             pending: false,
+            sat: None,
             long: false,
             cr: false,
             con: Con::Off,
@@ -1077,6 +1080,8 @@ impl Term {
             line += 1;
             let r = if core::mem::take(&mut self.long) {
                 Err(cmd::Msg::from("too long: 255 characters at most".as_bytes()))
+            } else if let Some(p) = self.sat.as_mut() {
+                cmd::sat_line(store, p, &self.cbuf[..n])
             } else {
                 cmd::run(app, store, dev, &self.cbuf[..n], true)
             };
@@ -1104,9 +1109,10 @@ impl Term {
             Ok(cmd::Done::List(l)) => return self.con = Con::Start(Body::List(l, 0)),
             Ok(cmd::Done::Dump) => return self.con = Con::Start(Body::Dump(cmd::DumpPos::default())),
             Ok(cmd::Done::Debug(j)) => return self.con = Con::Start(Body::Debug(j)),
-            Ok(cmd::Done::Load) => {
+            Ok(d @ (cmd::Done::Load | cmd::Done::SatPaste)) => {
                 // The buffer takes the load's lines from here: the command that started it is gone.
                 (self.clen, self.clast, self.cr, self.long) = (0, 0, false, false);
+                self.sat = matches!(d, cmd::Done::SatPaste).then(cmd::SatPaste::default);
                 return self.con = Con::Start(Body::Load { line: 0, ok: 0, bad: 0, end: 0 });
             }
             Err(m) => (m, true),
@@ -1125,7 +1131,9 @@ impl Term {
                     return;
                 }
                 out.put(b"\x1b[0m\x1b[2J\x1b[H");
-                if let Body::Load { .. } = b {
+                if let (Body::Load { .. }, Some(_)) = (b, self.sat) {
+                    out.put("Paste satellites: a TLE (name, line 1, line 2) or OMM CSV lines. One with a catalogue number\r\nheld gets the new elements; another is added. It ends at \"end\" or Ctrl-D; Ctrl-C stops.\r\n\r\n".as_bytes());
+                } else if let Body::Load { .. } = b {
                     out.put("Load: send the dump now. A bad line is skipped and named. It ends at \"end\" or Ctrl-D;\r\nCtrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n".as_bytes());
                 }
                 self.con = Con::Run(b);
@@ -1135,6 +1143,7 @@ impl Term {
                 if end != 0 && !self.pending && out.room() >= LINE_ROOM {
                     let mut l = cmd::Line::new();
                     let how = if end == 2 { "Stopped" } else { "Done" };
+                    self.sat = None;
                     put!(l, "\r\x1b[K  {}: {} lines read, {} applied, {} refused.\r\n", how, line, ok, bad);
                     out.put(l.as_bytes());
                     self.done(out);
@@ -1169,6 +1178,7 @@ impl Term {
                 if out.room() >= LINE_ROOM {
                     out.put("\r\n  Stopped.\r\n".as_bytes());
                     self.pending = false;
+                    self.sat = None;
                     self.done(out);
                 }
             }

@@ -407,6 +407,17 @@ pub enum Op {
     /// A contact added, or renamed by its callsign (APRS-37); refused when the book is full.
     SaveContact(Contact),
     DeleteContact(Buf<10>),
+    /// Satellite mode (SAT-2, LINK-63): the record staged by [`Data::sat_stage`] into place i (0-31).
+    PutSat(u8),
+    /// Place i's satellite deleted.
+    DeleteSat(u8),
+    /// Every satellite deleted (their choices kept by catalogue number): one rewrite, so a whole list written
+    /// after it only programs erased bytes.
+    ClearSats,
+    /// The satellites' info (SAT-18, SAT-21, LINK-64): the declination and where the list came from; None clears it.
+    SatInfo(Option<ferrite_core::sat::wire::Info>),
+    /// A satellite's choices kept by its catalogue number (the store's own, written 2 s after the last change).
+    SatPrefs(u32, ferrite_core::sat::data::Prefs),
 }
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
@@ -563,6 +574,33 @@ pub trait Data {
     /// DTMF memory i's name (DTMF-12), empty when it has none.
     fn dtmf_name(&self, _i: u8) -> Buf<10> {
         Buf::new()
+    }
+
+    /// Satellite mode's records (SAT-2): which of the 32 places hold a satellite, a bit each.
+    fn sat_places(&self) -> u32 {
+        0
+    }
+    /// The satellite in place `i` (0-31).
+    fn sat_rec(&self, _i: u8) -> Option<ferrite_core::sat::Sat> {
+        None
+    }
+    /// The satellites' info (SAT-18, SAT-21), None when none is kept.
+    fn sat_info(&self) -> Option<ferrite_core::sat::wire::Info> {
+        None
+    }
+    /// Moves on whenever a satellite record or the info changes (prediction starts again, SAT-6).
+    fn sat_version(&self) -> u32 {
+        0
+    }
+    /// The choices kept for the satellite with this catalogue number (SAT-8, SAT-11, SAT-22).
+    fn sat_prefs(&self, _id: u32) -> Option<ferrite_core::sat::data::Prefs> {
+        None
+    }
+    /// Satellite choices changed (the pass page's keys, the options page): kept now, written a little later.
+    fn sat_prefs_set(&self, _id: u32, _p: ferrite_core::sat::data::Prefs) {}
+    /// Stages a satellite record for [`Op::PutSat`] (one at a time: false while one waits to be written).
+    fn sat_stage(&self, _s: &ferrite_core::sat::Sat) -> bool {
+        false
     }
 
     /// A change, to the record's owner.

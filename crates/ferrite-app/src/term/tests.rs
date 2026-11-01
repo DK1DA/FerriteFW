@@ -567,12 +567,12 @@ fn frequencies() {
 /// command's one answer (64 bytes of memory at most, TERM-22, or a GGA sentence of 80, TERM-30: about 100 bytes)
 /// and the channel list's tools (TERM-14: marks, a bit per channel, 125 bytes; a sorted page of up to 56 channel
 /// numbers, 112 bytes; Oct 6, 2026) on top. The GGA answer added 16 bytes (Oct 13, 2026); 4,000 channels' marks
-/// 375 more (decision 333).
+/// 375 more (decision 333); `sat add`'s paste 64 more (a name and a TLE's line 1 as read, SAT-3; decision 340).
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375, "Term is {n} bytes");
+    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375 + 64, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----

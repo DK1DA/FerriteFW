@@ -191,9 +191,9 @@ pub enum RadioCmd {
     SatRx(Freq10),
     /// Satellite mode: the uplink frequency for the next key-up and, keyed, to retune to (SAT-8).
     SatUp(Freq10),
-    /// Satellite mode: the uplink's CTCSS tone in 0.1 Hz (the arming tone while it plays, SAT-10), and half duplex
-    /// (the downlink muted while keyed, SAT-11).
-    SatTone { tone: u16, hd: bool },
+    /// Satellite mode: the uplink's CTCSS tone in 0.1 Hz (the arming tone while it plays, SAT-10), half duplex
+    /// (the downlink muted while keyed, SAT-11), and the uplink's power for the next key-up (TX-9 levels, SAT-22).
+    SatTone { tone: u16, hd: bool, power: u8 },
 }
 
 /// [`RadioCmd::SatRx`]: satellite mode on with nothing tuned (no pass open yet).

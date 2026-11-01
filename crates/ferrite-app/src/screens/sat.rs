@@ -37,20 +37,21 @@ const TX: u8 = 0x80;
 /// No satellite filter.
 const ALL: u8 = 0xFF;
 
-/// The screen's state (8 bytes): the page, the satellite filter, the alarm picker (0 closed, else 1 + the lead
-/// highlighted), and the pass selected or open, by identity (satellite and rise), so the selection stays on it
-/// while prediction adds rows (SAT-6).
+/// The screen's state (12 bytes): the page, the satellite filter, the alarm picker (0 closed, else 1 + the lead
+/// highlighted), the options page (SAT-22: 0 closed, else 1 + the row selected), and the pass selected or open, by
+/// identity (satellite and rise), so the selection stays on it while prediction adds rows (SAT-6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SatScr {
     pub page: u8,
     pub filter: u8,
     pub picker: u8,
+    pub opt: u8,
     pub sat: u8,
     pub aos: u32,
 }
 
 impl SatScr {
-    pub const LIST: SatScr = SatScr { page: LIST, filter: ALL, picker: 0, sat: 0, aos: 0 };
+    pub const LIST: SatScr = SatScr { page: LIST, filter: ALL, picker: 0, opt: 0, sat: 0, aos: 0 };
 
     /// The pass page on a pass.
     pub fn pass_of(p: &Pass) -> SatScr {
@@ -201,6 +202,9 @@ impl View for SatScr {
             return;
         }
         let mut s = self;
+        if s.opt != 0 {
+            return opts_key(app, s, e.key);
+        }
         if s.picker != 0 {
             match e.key {
                 Key::Up => s.picker = (s.picker - 1).max(1),
@@ -277,20 +281,20 @@ impl View for SatScr {
             Key::Exit if tx == 0 => s.page = LIST,
             _ => {}
         }
-        if pr != app.sat_data().prefs(s.sat) {
-            if let Some(d) = app.sat_data_mut() {
-                d.set_prefs(s.sat, pr);
-            }
-            if let Some(now) = app.sat_now() {
-                app.sat_retune(now, true);
-            }
-        }
+        set_prefs(app, s.sat, pr);
         app.screen = Screen::Sat(s);
     }
 
+    /// SAT-22: hold MENU on the pass list or a pass page opens the satellite's options (not while keyed or picking).
+    fn options(self, app: &mut App) -> bool {
+        let Some(p) = target(app, self).filter(|_| self.picker == 0 && self.page & TX == 0) else { return false };
+        app.screen = Screen::Sat(SatScr { opt: 1, sat: p.sat, aos: if self.page() == LIST { p.aos } else { self.aos }, ..self });
+        true
+    }
+
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
-        // the list: a pass; the pages: the trim (as ◀▶)
-        let key = match (self.page() == LIST, d > 0) {
+        // the list and the options: a row; the pages: the trim (as ◀▶)
+        let key = match (self.page() == LIST || self.opt != 0, d > 0) {
             (true, true) => Key::Down,
             (true, false) => Key::Up,
             (false, true) => Key::Right,
@@ -345,7 +349,10 @@ impl View for SatScr {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        app.page(lcd, (self.page, self.picker != 0, self.filter));
+        app.page(lcd, (self.page, self.picker != 0, self.filter, self.opt != 0));
+        if self.opt != 0 {
+            return opts_page(app, lcd, self);
+        }
         match self.page() {
             LIST => list(app, lcd, self),
             POINT => point(app, lcd, self, cx.live),
@@ -358,7 +365,9 @@ impl View for SatScr {
 
     fn hints(self, app: &App) -> Hints {
         let keyed = self.page & TX != 0;
-        if self.picker != 0 {
+        if self.opt != 0 {
+            Hints::new(&[("OK", if self.opt == OPT_TRIM { "Reset" } else { "Change" }), ("0", "Full menu"), ("BACK", "Back")])
+        } else if self.picker != 0 {
             Hints::new(&[("OK", "Set"), (ARROWS_UD, "Choose"), ("BACK", "Cancel")])
         } else if self.page() == LIST {
             Hints::new(&[("OK", "Open"), ("#", "Alarm"), (ARROWS_LR, "Satellite")])
@@ -373,6 +382,91 @@ impl View for SatScr {
             Hints::new(&[("1-5", "Mode"), ("#", if on { "Alarm on" } else { "Alarm" }), ("BACK", "Back")])
         }
     }
+}
+
+// ---- the satellite's options (SAT-22) ----
+
+/// The rows: Doppler, the uplink's power, duplex, the transponder, the trim; 1 + the row in `SatScr::opt`.
+pub(crate) const OPT_ROWS: [(&str, &str); 5] = [
+    ("Doppler", "Both sides, or the 70 cm side only"),
+    ("Uplink power", "Low to start: a Yagi needs little"),
+    ("Duplex", "Half mutes the downlink while you talk"),
+    ("Transponder", "Which mode PTT and the page use"),
+    ("Trim", "Downlink fine tune; OK sets it to 0"),
+];
+const OPT_TRIM: u8 = 5;
+
+/// A satellite's choices changed: kept (the store writes them, SAT-2) and the radio retuned.
+fn set_prefs(app: &mut App, sat: u8, pr: ferrite_core::sat::data::Prefs) {
+    if pr == app.sat_data().prefs(sat) {
+        return;
+    }
+    if let Some(d) = app.sat_data_mut() {
+        d.set_prefs(sat, pr);
+    }
+    if let Some(now) = app.sat_now() {
+        app.sat_retune(now, true);
+    }
+}
+
+/// Row `i`'s value now.
+pub(crate) fn opt_value(app: &App, sat: u8, i: u8, b: &mut Buf<16>) {
+    let pr = app.sat_data().prefs(sat);
+    match i {
+        1 => b.set(if pr.uhf_only { b"70 cm only" } else { b"Both sides" }),
+        2 => b.set([&b"Low"[..], b"Mid", b"High"][pr.power.min(2) as usize]),
+        3 => b.set(if pr.hd { b"Half" } else { b"Full" }),
+        4 => {
+            let kind = app.sat_data().sat(sat).and_then(|s| s.tp(pr.tp).map(|t| t.kind.name())).unwrap_or("none");
+            let _ = uwrite!(b, "{} {}", pr.tp + 1, kind);
+        }
+        _ => {
+            let mut k = Buf::<12>::new();
+            khz(pr.trim as i32, &mut k);
+            b.set(k.as_bytes());
+            b.push(b"Hz");
+        }
+    }
+}
+
+fn opts_key(app: &mut App, mut s: SatScr, key: Key) {
+    let n = OPT_ROWS.len() as u8;
+    let mut pr = app.sat_data().prefs(s.sat);
+    let ntp = app.sat_data().sat(s.sat).map_or(0, |x| x.ntp);
+    let change = |pr: &mut ferrite_core::sat::data::Prefs, row: u8| match row {
+        1 => pr.uhf_only = !pr.uhf_only,
+        2 => pr.power = (pr.power + 1) % 3,
+        3 => pr.hd = !pr.hd,
+        4 => pr.tp = if pr.tp + 1 < ntp { pr.tp + 1 } else { 0 },
+        _ => pr.trim = 0,
+    };
+    match key {
+        Key::Up => s.opt = if s.opt > 1 { s.opt - 1 } else { n },
+        Key::Down => s.opt = if s.opt < n { s.opt + 1 } else { 1 },
+        Key::Digit(0) => {
+            app.screen = Screen::Sat(SatScr { opt: 0, ..s });
+            return app.open(super::nav::Dest::Advanced);
+        }
+        // MENU-25: a digit picks its row; OK changes it (a press each, round the values)
+        Key::Digit(d) if d <= n => s.opt = d,
+        Key::Menu => change(&mut pr, s.opt),
+        Key::Exit => s.opt = 0,
+        _ => {}
+    }
+    set_prefs(app, s.sat, pr);
+    app.screen = Screen::Sat(s);
+}
+
+fn opts_page(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
+    let mut vals = [Buf::<16>::new(); 5];
+    for (i, v) in vals.iter_mut().enumerate() {
+        opt_value(app, s.sat, i as u8 + 1, v);
+    }
+    super::opts::options_page(app, lcd, OPT_ROWS.iter().zip(vals.iter()).map(|((l, _), v)| (l.as_bytes(), v.as_bytes())), s.opt - 1);
+    let mut p = Buf::<24>::new();
+    p.set(name_of(app, s.sat).as_bytes());
+    p.push(b" MENU");
+    app.help_box(lcd, super::opts::OPTS_HELP_Y, 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1.as_bytes(), p.as_bytes());
 }
 
 // ---- drawing parts ----
@@ -857,7 +951,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     let secs = app.now.wrapping_sub(app.radio.t0) / 1000;
     let mut tt = Buf::<8>::new();
     crate::screens::activity::mmss(secs, &mut tt);
-    if app.dirty(9, H::new().b(tt.as_bytes()).get()) {
+    if app.dirty(9, H::new().b(tt.as_bytes()).n(pr.power as u32).get()) {
         // the status bar's place: the red bar (the screen draws its own while keyed)
         ferrite_ui::canvas::banded(lcd, 0, 0, 240, w::SBAR_H, RED, |lcd| {
             let mut n = Buf::<20>::new();
@@ -865,7 +959,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
             n.push(sat.name());
             w::field(lcd, 8, 100, 0, 20, 15, Align::Left, n.as_bytes(), &UI_12B, BLACK, RED);
             w::field(lcd, 108, 44, 0, 20, 15, Align::Center, tt.as_bytes(), &UI_12B, BLACK, RED);
-            w::field(lcd, 152, 80, 0, 20, 15, Align::Right, crate::sat::POWER_NAME.as_bytes(), &UI_12B, BLACK, RED);
+            w::field(lcd, 152, 80, 0, 20, 15, Align::Right, crate::sat::POWER_NAMES[pr.power.min(2) as usize].as_bytes(), &UI_12B, BLACK, RED);
         });
         lcd.fill(0, w::SBAR_H, 2, w::HINT_Y - w::SBAR_H, RED);
         lcd.fill(238, w::SBAR_H, 2, w::HINT_Y - w::SBAR_H, RED);
@@ -894,7 +988,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
         sh.push(b" \xc2\xb7 ");
         sh.push(tn.as_bytes());
     }
-    let pw = crate::sat::POWER_BARS;
+    let pw = crate::sat::POWER_BARS[pr.power.min(2) as usize];
     if app.dirty(3, H::new().b(f.as_bytes()).b(sh.as_bytes()).n(pw as u32).get()) {
         let bg = rgb565(0x2A, 0x0F, 0x0F);
         ferrite_ui::canvas::banded(lcd, 4, 117, 232, 54, BG, |lcd| {
@@ -1118,6 +1212,7 @@ pub(crate) fn pass_freqs(app: &App) -> Option<(Freq10, Freq10)> {
 /// The readback's screen id (LINK-19): the page open, keyed apart.
 pub(crate) fn page_id(s: &SatScr) -> &'static str {
     match s.page() {
+        _ if s.opt != 0 => "SatOptions",
         _ if s.picker != 0 => "SatAlarm",
         LIST => "SatList",
         _ if s.page & TX != 0 => "SatKeyed",

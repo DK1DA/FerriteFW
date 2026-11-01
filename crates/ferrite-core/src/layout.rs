@@ -25,7 +25,8 @@ pub const TRIMS: Range<u32> = 0x00_3000..0x00_4000;
 pub const PRESETS: Range<u32> = 0x00_4000..0x00_5000;
 /// HF mode's state (planned).
 pub const HF_STATE: Range<u32> = 0x00_5000..0x00_6000;
-/// Satellites (planned, chapter 28a).
+/// Satellites (SAT-2, chapter 28a; ferrite-store `sats`): 32 records of 192 B, the info and the per-satellite
+/// choices in logs after them, 16 records a sector.
 pub const SATELLITES: Range<u32> = 0x00_6000..0x00_8000;
 /// The SI4732 SSB patch (15,832 B with its 64-byte header): imported from the owner's stock firmware, never shipped.
 pub const SSB_PATCH: Range<u32> = 0x00_8000..0x00_C000;
@@ -99,7 +100,7 @@ pub const REGIONS: [(&str, Range<u32>); 26] = [
     ("User trims", TRIMS),
     ("Range presets and DTMF memories", PRESETS),
     ("HF state (planned)", HF_STATE),
-    ("Satellites (planned)", SATELLITES),
+    ("Satellites", SATELLITES),
     ("SSB patch", SSB_PATCH),
     ("Free: config growth", CONFIG_FREE),
     ("Migration mark", MIGRATE_MARK),

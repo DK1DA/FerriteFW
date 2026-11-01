@@ -33,7 +33,7 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, LAYOUT_MOVING, MESSAGES, MIGRATE_MARK, PRESETS, SETTINGS, TRIMS, V2_HEADER, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, LAYOUT_MOVING, MESSAGES, MIGRATE_MARK, PRESETS, SATELLITES, SETTINGS, TRIMS, V2_HEADER, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
@@ -213,6 +213,8 @@ pub struct FlashStore<N: Nor, D: Data> {
     /// The clock is UTC (GPS, or set by hand), and what it was at mount: this power-on's own frame (INBOX-6.1).
     utc: Cell<bool>,
     boot0: Cell<u32>,
+    /// Satellite mode's records (SAT-2, [`crate::sats`]).
+    pub(crate) sats: crate::sats::SatState,
 }
 
 impl<N: Nor, D: Data> FlashStore<N, D> {
@@ -263,6 +265,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             now_ms: Cell::new(0),
             utc: Cell::new(false),
             boot0: Cell::new(TIME0),
+            sats: crate::sats::SatState::new(),
         }
     }
 
@@ -338,6 +341,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         self.heard.mount(&self.f).await?;
         self.wps.mount(&self.f).await?;
+        self.sat_mount()?;
         self.contacts.0.mount(&self.f).await?;
         let t = [self.events.newest_time(&self.f), self.msgs.newest_time(&self.f), self.heard.newest_time(&self.f)].into_iter().flatten().max();
         self.time0.set(t.map_or(TIME0, |t| t.saturating_add(1)).max(TIME0));
@@ -482,7 +486,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// skipped; never calibration, the SSB patch or the update area), then the header (a cut before it formats
     /// again next time). Stock's old codeplug, record and voice prompts are in the install's backup (decision 333).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, MIGRATE_MARK, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG] {
+        for r in [LAYOUT_HEADER, MIGRATE_MARK, SETTINGS, TRIMS, PRESETS, SATELLITES, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
@@ -831,6 +835,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if self.aprs_changed.get().is_some_and(|t| now.wrapping_sub(t) >= SAVE_DELAY_MS) && self.ok() && self.submit(Job::AprsSave) {
             self.aprs_changed.set(None);
         }
+        self.sat_prefs_due(Some(now));
         let c = state_crc(app);
         if c != self.seen.get() {
             self.seen.set(c);
@@ -853,6 +858,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if self.aprs_changed.get().is_some() && self.ok() && self.submit(Job::AprsSave) {
             self.aprs_changed.set(None);
         }
+        self.sat_prefs_due(None);
         let c = state_crc(app);
         self.seen.set(c);
         c != self.saved.get() && self.save(app)
@@ -956,14 +962,14 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     /// Erases `len` bytes of records.
-    async fn clear(&self, addr: u32, len: u32) -> Result {
+    pub(crate) async fn clear(&self, addr: u32, len: u32) -> Result {
         if self.f.blank(addr, len)? {
             return Ok(());
         }
         self.splice(addr, None, len).await
     }
 
-    async fn splice(&self, addr: u32, new: Option<&[u8]>, len: u32) -> Result {
+    pub(crate) async fn splice(&self, addr: u32, new: Option<&[u8]>, len: u32) -> Result {
         let sector = addr - addr % SECTOR;
         let off = addr - sector;
         // Decision 227: channel writes queued behind this one for the same sector go in the same rewrite.
@@ -1235,7 +1241,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// zone as on a new radio.
     async fn wipe(&self) -> Result {
         self.zones.set(0);
-        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS, HEARD, MESSAGES] {
+        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS, HEARD, MESSAGES, SATELLITES] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase_blanked(s).await?;
@@ -1248,6 +1254,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.heard.forget();
         self.wps.forget();
         self.contacts.0.forget();
+        self.sats.held.set(0);
+        self.sats.info.set(None);
+        self.sats.prefs.set(None);
+        self.sats.pending.set(None);
         self.aprs.set(AprsCfg::DEFAULT);
         self.aprs_changed.set(None);
         self.draft.set(Draft::default());
@@ -1360,7 +1370,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::Dtmf(i, _) | Op::DtmfName(i, _) => i < DTMF_MEMS,
             Op::Wipe | Op::ReadAll | Op::ClearLog | Op::MessagesReadAll | Op::ClearMessages | Op::ClearHeard => true,
             Op::Quick(i, _) => (i as usize) < ferrite_app::words::QUICK,
-            _ => return None,
+            _ => return self.sat_accepts(op),
         })
     }
 
@@ -1474,6 +1484,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 self.msgs.clear(&self.f).await
             }
             Op::Quick(i, t) => self.aprs_save(Some((i, t))).await,
+            Op::PutSat(_) | Op::DeleteSat(_) | Op::ClearSats | Op::SatInfo(_) | Op::SatPrefs(..) => self.sat_perform(op).await,
             _ => Ok(()),
         }
     }
@@ -2227,6 +2238,28 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         self.layout_found().unwrap_or(0)
     }
 
+    fn sat_places(&self) -> u32 {
+        if self.ok() { self.sats.held.get() } else { 0 }
+    }
+    fn sat_rec(&self, i: u8) -> Option<ferrite_core::sat::Sat> {
+        self.sat_rec_at(i)
+    }
+    fn sat_info(&self) -> Option<ferrite_core::sat::wire::Info> {
+        self.sats.info.get()
+    }
+    fn sat_version(&self) -> u32 {
+        self.sats.ver.get()
+    }
+    fn sat_prefs(&self, id: u32) -> Option<ferrite_core::sat::data::Prefs> {
+        self.sat_prefs_get(id)
+    }
+    fn sat_prefs_set(&self, id: u32, p: ferrite_core::sat::data::Prefs) {
+        self.sat_prefs_later(id, p)
+    }
+    fn sat_stage(&self, s: &ferrite_core::sat::Sat) -> bool {
+        self.sat_stage_rec(s)
+    }
+
     fn request(&self, op: Op) -> bool {
         if matches!(op, Op::Wipe | Op::ClearHeard | Op::ClearMessages) {
             self.extra.request(op); // its records go too (the heard list in RAM; messages tried no more, APRS-46)
@@ -2238,7 +2271,13 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
             return ok;
         }
         match self.accepts(&op) {
-            Some(ok) => self.ok() && ok && self.submit(Job::Op(op)),
+            Some(ok) => {
+                let done = self.ok() && ok && self.submit(Job::Op(op));
+                if !done && matches!(op, Op::PutSat(_)) {
+                    self.sats.staged.set(false); // refused: the next record may stage
+                }
+                done
+            }
             None => self.extra.request(op),
         }
     }

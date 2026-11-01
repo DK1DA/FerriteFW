@@ -1,52 +1,24 @@
-//! Satellite mode's data on the radio (chapter 28a), phase 1: the satellites (the bench builds' sample from
-//! data.ferritefw.dev's fixture; none in a user build until the SPI flash region and Console's transfer come, SAT-2,
-//! SAT-15) and their passes: predicted here with `sat-predict` (SGP4 and the pass predictor, SAT-4, SAT-6), else
-//! Console's interpolated tracks (none yet).
+//! Satellite mode's data on the radio (chapter 28a): the satellites from the store's SPI flash region (SAT-2,
+//! written by Console over the link or by the terminal's `:sat`; `ferrite_store::sats`) and their passes: predicted
+//! here with `sat-predict` (SGP4 and the pass predictor, SAT-4, SAT-6), else Console's interpolated tracks (none
+//! yet).
 
+use crate::store::Store;
 use ferrite_core::sat::data::SatData;
-use ferrite_core::sat::{Sat, SatSource};
+use ferrite_store::sats::StoreSats;
 
-/// The satellites the radio holds.
-pub struct RadioSats {
-    #[cfg(feature = "bench")]
-    list: [Sat; 4],
-}
-
-impl SatSource for RadioSats {
-    fn count(&self) -> u8 {
-        #[cfg(feature = "bench")]
-        return self.list.len() as u8;
-        #[cfg(not(feature = "bench"))]
-        0
-    }
-    fn get(&self, i: u8) -> Option<Sat> {
-        #[cfg(feature = "bench")]
-        return self.list.get(i as usize).copied();
-        #[cfg(not(feature = "bench"))]
-        {
-            let _ = i;
-            None
-        }
-    }
-}
-
-fn sats() -> RadioSats {
-    RadioSats {
-        #[cfg(feature = "bench")]
-        list: ferrite_app::sat::sample(),
-    }
-}
-
-/// The App's satellite data, once at start-up.
-pub fn data() -> &'static mut dyn SatData {
+/// The App's satellite data, once at start-up, on the store (a singleton: the store is only read through it).
+#[allow(clippy::mut_from_ref)]
+pub fn data(store: &'static Store) -> &'static mut dyn SatData {
+    let sats = StoreSats(store);
     #[cfg(feature = "sat-predict")]
     {
         use ferrite_core::sat::data::Live;
-        cortex_m::singleton!(: Live<RadioSats> = Live::new(sats())).unwrap()
+        cortex_m::singleton!(: Live<StoreSats<'static, crate::store::Chip, ferrite_app::radio_data::RadioData>> = Live::new(sats)).unwrap()
     }
     #[cfg(not(feature = "sat-predict"))]
     {
         use ferrite_core::sat::track::{NoTracks, Tracks};
-        cortex_m::singleton!(: Tracks<RadioSats, NoTracks> = Tracks::new(sats(), NoTracks)).unwrap()
+        cortex_m::singleton!(: Tracks<StoreSats<'static, crate::store::Chip, ferrite_app::radio_data::RadioData>, NoTracks> = Tracks::new(sats, NoTracks)).unwrap()
     }
 }

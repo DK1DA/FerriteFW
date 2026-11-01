@@ -206,7 +206,8 @@ pub struct SimCore {
     audio: ferrite_core::rxaudio::Packer,
     audio_ms: u32,
     app: App,
-    store: Store,
+    /// Boxed so it stays put: the App's satellite source reads it (SAT-2, [`power_on`]).
+    store: Box<Store>,
     radio: FakeRadio,
     dev: Device,
     lcd: Counting,
@@ -364,7 +365,7 @@ impl SimCore {
         // a kept image from another layout (its length): the sample, as if none was kept
         let sample = matches!(&stored, Stored::Sample) || matches!(&stored, Stored::Image(img) if !img.is_empty() && img.len() != ferrite_store::sim::IMAGE_LEN);
         let stored = if sample { Stored::Sample } else { stored };
-        let store = FlashStore::mount(nor, Sample::new());
+        let store = Box::new(FlashStore::mount(nor, Sample::new()));
         if matches!(stored, Stored::Sample) && store.first_boot() {
             seed(&store);
         }
@@ -544,7 +545,7 @@ impl SimCore {
             }
         }
         if self.live() {
-            let (app, radio, store, dev) = (&mut self.app, &mut self.radio, &self.store, &mut self.dev);
+            let (app, radio, store, dev) = (&mut self.app, &mut self.radio, &*self.store, &mut self.dev);
             let (log, cmds) = (self.log_cmds, &mut self.cmds);
             let mut send = |radio: &mut FakeRadio, c| {
                 if log {
@@ -761,7 +762,7 @@ impl SimCore {
                 self.tx = Some(if n < 3 { n } else { 0 });
             }
             if self.live() {
-                self.app.key_down(key, self.now, &self.store);
+                self.app.key_down(key, self.now, &*self.store);
             }
         } else {
             if let Some(i) = part {
@@ -771,7 +772,7 @@ impl SimCore {
                 self.tx = None;
             }
             if self.live() {
-                self.app.key_up(key, self.now, &self.store);
+                self.app.key_up(key, self.now, &*self.store);
             }
         }
     }
@@ -780,7 +781,7 @@ impl SimCore {
     pub fn knob(&mut self, d: i8) {
         self.knob_flash = (d, self.now + 150);
         if self.live() {
-            self.app.knob(d, self.now, &self.store);
+            self.app.knob(d, self.now, &*self.store);
         }
     }
 
@@ -800,7 +801,7 @@ impl SimCore {
                     let key = key_of(h.part);
                     self.last_key = format!("{key:?} (mouse)");
                     if self.live() {
-                        self.app.key_down(key, self.now, &self.store);
+                        self.app.key_down(key, self.now, &*self.store);
                     }
                     self.mouse = Some(i);
                 }
@@ -811,7 +812,7 @@ impl SimCore {
                     self.tx = None;
                 }
                 if self.live() {
-                    self.app.key_up(key_of(self.face.hits[i].part), self.now, &self.store);
+                    self.app.key_up(key_of(self.face.hits[i].part), self.now, &*self.store);
                 }
             }
         }
@@ -837,14 +838,14 @@ impl SimCore {
                     match self.ports.route(&self.app, port, b, self.now) {
                         To::Kiss if self.kiss_in.len() < 4096 => self.kiss_in.push(b),
                         To::Kiss => {}
-                        to => self.ports.feed(&mut self.app, &self.store, to, b, self.now),
+                        to => self.ports.feed(&mut self.app, &*self.store, to, b, self.now),
                     }
                     while let Some(w) = self.app.pop_write() {
                         self.store.apply(w); // one channel write per key
                     }
                 }
             }
-            self.ports.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
+            self.ports.poll(&mut self.app, &*self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
             if let Some(r) = self.ports.debug_req() {
                 self.ports.debug_answer(self.radio.debug(r));
             }
@@ -860,7 +861,7 @@ impl SimCore {
     /// Everything as the terminal's `dump` writes it (TERM-13): text, one command per line, ending with `end`.
     pub fn dump_text(&self) -> Vec<u8> {
         let (mut p, mut l, mut v) = (cmd::DumpPos::default(), cmd::Line::new(), Vec::new());
-        while cmd::dump_line(&self.app, &self.store, &self.dev, &mut p, &mut l) {
+        while cmd::dump_line(&self.app, &*self.store, &self.dev, &mut p, &mut l) {
             v.extend_from_slice(l.as_bytes());
             v.push(b'\n');
         }
@@ -883,7 +884,7 @@ impl SimCore {
             let r = if line.len() > cmd::LINE_MAX {
                 Err(cmd::Msg::from(b"too long: 255 characters at most"))
             } else {
-                cmd::run(&mut self.app, &self.store, &self.dev, line, true)
+                cmd::run(&mut self.app, &*self.store, &self.dev, line, true)
             };
             match r {
                 Ok(cmd::Done::Nothing) => {}
@@ -943,8 +944,8 @@ impl SimCore {
     fn power_switch(&mut self) {
         if self.off {
             // On: RAM is gone, so the app starts again from what the flash kept.
-            let flash = std::mem::replace(&mut self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
-            self.store = FlashStore::mount(flash, Sample::new());
+            let flash = std::mem::replace(&mut *self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
+            *self.store = FlashStore::mount(flash, Sample::new()); // the same place: the App's satellite source reads it
             self.radio = FakeRadio::new();
             self.app = power_on(&self.store, &mut self.radio);
             (self.off, self.boot_end) = (false, self.now + BOOT_MS);
@@ -984,8 +985,8 @@ impl SimCore {
         if cut {
             self.cut_restart = false;
         }
-        let flash = std::mem::replace(&mut self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
-        self.store = FlashStore::mount(flash, Sample::new());
+        let flash = std::mem::replace(&mut *self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
+        *self.store = FlashStore::mount(flash, Sample::new()); // the same place: the App's satellite source reads it
         self.radio = FakeRadio::new();
         self.app = power_on(&self.store, &mut self.radio);
         (self.off, self.off_at, self.booting, self.boot_end) = (false, None, true, self.now + BOOT_MS);
@@ -1218,7 +1219,7 @@ impl SimCore {
     /// The UI readback (LINK-19, `ui`), as the link sends it.
     pub fn readback(&self) -> String {
         let (mut out, mut l, mut i) = (String::new(), ferrite_app::term::cmd::Line::new(), 0);
-        while ferrite_app::uistate::line(&self.app, &self.store, &self.dev, &self.radio.live, i, &mut l) {
+        while ferrite_app::uistate::line(&self.app, &*self.store, &self.dev, &self.radio.live, i, &mut l) {
             out.push_str(&String::from_utf8_lossy(l.as_bytes()));
             out.push('\n');
             i += 1;
@@ -1234,7 +1235,7 @@ impl SimCore {
     /// LINK-19.5: the readback with the screen's texts, as a session that asked for them gets it (`UI` what=3).
     pub fn readback_texts(&mut self) -> String {
         let (mut out, mut l, mut i) = (String::new(), ferrite_app::term::cmd::Line::new(), 0);
-        while ferrite_app::uistate::line_all(&mut self.app, &self.store, &self.dev, &self.radio.live, true, i, &mut l) {
+        while ferrite_app::uistate::line_all(&mut self.app, &*self.store, &self.dev, &self.radio.live, true, i, &mut l) {
             out.push_str(&String::from_utf8_lossy(l.as_bytes()));
             out.push('\n');
             i += 1;
@@ -1271,8 +1272,12 @@ fn power_on(store: &Store, radio: &mut FakeRadio) -> App {
     store.load_settings(set);
     let alert = Box::leak(Box::new(ferrite_app::screens::alert::AlertInfo::NONE));
     let mut app = App::new(set, alert);
-    // Satellite mode: the sample satellites, predicted on the host as on the radio (SAT-6).
-    let sats = ferrite_core::sat::data::Live::new(ferrite_app::sat::SimSats(ferrite_app::sat::sample()));
+    // Satellite mode: the satellites in the store (SAT-2, the sample's seeded), predicted on the host as on the
+    // radio (SAT-6).
+    // SAFETY: the store is boxed in the SimCore with this App, and replaced only together with it (a restart makes a
+    // new App on the new store); nothing reads the old App's source after.
+    let st: &'static Store = unsafe { &*(store as *const Store) };
+    let sats = ferrite_core::sat::data::Live::new(ferrite_store::sats::StoreSats(st));
     app.sat_attach(Box::leak(Box::new(sats)));
     store.restore(&mut app);
     while let Some(c) = app.pop_cmd() {
@@ -1314,6 +1319,15 @@ fn seed(store: &Store) {
             }
         }
     }
+    // Satellite mode's sample (SAT-2): data.ferritefw.dev's fixture as Console would write it, with the declination
+    // at the sample's fix.
+    store.request(ferrite_app::data::Op::ClearSats);
+    for (k, s) in ferrite_app::sat::sample().iter().enumerate() {
+        store.sat_stage(s);
+        store.request(ferrite_app::data::Op::PutSat(k as u8));
+    }
+    let info = ferrite_core::sat::wire::Info { decl: Some(ferrite_app::sat::SIM_DECL), stamp: 1_793_500_000, written: ferrite_app::sat::SIM_T0 };
+    store.request(ferrite_app::data::Op::SatInfo(Some(info)));
     // The event log, messages and waypoints, oldest first, each as old as the sample says.
     for i in (0..sample.events()).rev() {
         if let Some(e) = sample.event(i) {

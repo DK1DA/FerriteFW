@@ -22,6 +22,7 @@ pub mod logs;
 pub mod members;
 pub mod records;
 pub mod restore;
+pub mod sats;
 pub mod scratch;
 pub mod settings;
 pub mod ssb;

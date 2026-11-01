@@ -19,10 +19,10 @@ pub fn run(scale: u32) {
     app.settings_mut().backlight = 0;
     fake::sample(&mut app, &store, &mut radio);
     app.settings_mut().tz = 14; // UTC (TIME_ZONES[14]), as the status bar's clock here
-    app.sat_attach(Box::leak(Box::new(Live::new(ferrite_app::sat::SimSats(ferrite_app::sat::sample())))));
+    app.sat_attach(Box::leak(Box::new(Live::new(ferrite_app::sat::SimSats::new(ferrite_app::sat::sample())))));
     let here = store.fix.get().map(|f| (f.pos.lat, f.pos.lon, f.alt_m));
     // the first pass over 40° after the sample's day starts: the shots' clock is set around it
-    let mut look = Live::new(ferrite_app::sat::SimSats(ferrite_app::sat::sample()));
+    let mut look = Live::new(ferrite_app::sat::SimSats::new(ferrite_app::sat::sample()));
     let obs = here.map(|(a, o, h)| Observer::new(a, o, h));
     look.tick(Some(ferrite_app::sat::SIM_T0), obs, true, u32::MAX);
     let high = (0..look.passes()).filter_map(|i| look.pass(i)).find(|p| p.max_el > 40).expect("a high pass in 24 h");

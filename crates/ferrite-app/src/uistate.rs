@@ -895,7 +895,8 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
 /// band="31 m" rx="SI4732" mode="AM" step="5 kHz" bw="6 kHz" bfo="" signal="SNR 12 dB" entry="" tx=0 seek=0`.
 /// Satellite mode (chapter 28a): `sat state=ready done=4 all=4 passes=25`, the list's rows on the page
 /// (`row N "ISS" "15:02 72° 11"`, the selected one `sel`; " bell=5" with an alarm), or on a pass `pass "ISS"
-/// down=437.8042 up=145.9886 tone=67.0 hd=0 trim=0 tp=1 up_now=1`.
+/// down=437.8042 up=145.9886 tone=67.0 hd=0 trim=0 tp=1 power=0 uhf_only=0 up_now=1`; the options (SAT-22) as
+/// numbered rows, as the options pages give theirs.
 fn sat_lines(app: &App, s: &screens::sat::SatScr, d: &mut Desc) {
     use ferrite_core::sat::data::State;
     let sh = screens::sat::shown_list(app, s);
@@ -914,6 +915,16 @@ fn sat_lines(app: &App, s: &screens::sat::SatScr, d: &mut Desc) {
         kn(l, "passes", sh.rows as u32);
         kn(l, "alarm", app.sat.alarm_lead as u32);
         kn(l, "picker", s.picker as u32);
+    }
+    // SAT-22: the satellite's options, as the options pages give theirs
+    if s.opt != 0 {
+        for (i, (name, _)) in screens::sat::OPT_ROWS.iter().enumerate() {
+            let mut v = Buf::<16>::new();
+            screens::sat::opt_value(app, s.sat, i as u8 + 1, &mut v);
+            row(d, i as u8 + 1, name.as_bytes(), v.as_bytes(), i as u8 + 1 == s.opt, false, false);
+        }
+        row(d, 0, b"Full menu", b">", false, false, false);
+        return;
     }
     if screens::sat::page_id(s) == "SatList" || screens::sat::page_id(s) == "SatAlarm" {
         for i in sh.top as usize..(sh.top as usize + 11).min(sh.rows as usize) {
@@ -939,6 +950,8 @@ fn sat_lines(app: &App, s: &screens::sat::SatScr, d: &mut Desc) {
         kn(l, "hd", pr.hd as u32);
         let _ = uwrite!(l, " trim={}", pr.trim as i32 * 10);
         kn(l, "tp", pr.tp as u32 + 1);
+        kn(l, "power", pr.power as u32);
+        kn(l, "uhf_only", pr.uhf_only as u32);
         kn(l, "up_now", p.up(now) as u32);
         kn(l, "max", p.max_el as u32);
     }

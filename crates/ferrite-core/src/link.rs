@@ -185,6 +185,11 @@ pub mod msg {
     /// LINK-60: the data range written raw, a sector erased or bytes programmed, and the layout header stamped last
     /// ([`super::data`]): the cable only.
     pub const DATA_WRITE: u8 = 0x62;
+    /// The radio's clock (LINK-65, GPS-23): with a payload, UTC seconds (u32) set it as 0 6 6 does by hand (GPS time
+    /// takes over at the next fix while 0 6 6 says "from GPS"); empty, it is read. The answer either way: UTC seconds
+    /// now (u32, 0 while the radio has no time), then its source (u8: 0 none, 1 GPS, 2 set by hand or the link).
+    /// Only from radios that say [`super::caps2::SATS`].
+    pub const CLOCK: u8 = 0x63;
 }
 
 /// `DATA_READ` and `DATA_WRITE` (LINK-59 – LINK-62, decision 333): their ops and limits. Both refuse calibration
@@ -254,6 +259,9 @@ pub mod caps2 {
     /// data messages `DATA_READ` and `DATA_WRITE` (LINK-59 – LINK-62); `HELLO` and `INFO` end with the layout
     /// versions (the firmware's, the chip's).
     pub const DATA: u8 = 2;
+    /// Satellite mode's records (LINK-63 – LINK-65, decision 340): [`super::what::SAT`], [`super::what::SAT_INFO`]
+    /// by `READ_MANY` and `WRITE_MANY`, and [`super::msg::CLOCK`].
+    pub const SATS: u8 = 4;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -459,7 +467,25 @@ pub mod what {
     /// 0-48 of them. `READ_MANY` lists the presets that have any; a `WRITE_MANY` record replaces the list (length 0
     /// clears it). Only from radios that say [`super::caps2::PRESET_SKIPS`].
     pub const PRESET_SKIPS: u8 = 11;
+    /// A satellite, 0-31 (LINK-63, SAT-2): the record of `ferrite_core::sat::wire` ([`super::SAT_LEN`] bytes: status,
+    /// flags, transponders used, catalogue number, name, elements, five transponders). `READ_MANY` lists the ones
+    /// held; a `WRITE_MANY` record replaces the satellite at its index (the per-satellite choices stay with its
+    /// catalogue number), length 0 deletes it, and length 0 at [`super::ADD`] deletes them all (one rewrite of the
+    /// region, so the whole list's writes after it only program erased bytes). A transponder outside 144-148 or
+    /// 430-440 MHz is refused (`invalid`, SAT-13).
+    pub const SAT: u8 = 12;
+    /// The satellites' info, index 0 (LINK-64, SAT-18, SAT-21): declination (i16, 0.1 degree, east positive, 0x7FFF
+    /// none), 2 bytes 0, the satellite data's build time (u32, UTC seconds), when Console wrote it (u32), 4 bytes
+    /// 0: [`super::SAT_INFO_LEN`] bytes.
+    pub const SAT_INFO: u8 = 13;
 }
+
+/// A satellite record's length (LINK-63).
+pub const SAT_LEN: usize = crate::sat::wire::REC_LEN;
+/// The satellites' info record's length (LINK-64).
+pub const SAT_INFO_LEN: usize = crate::sat::wire::INFO_LEN;
+/// The most satellites (SAT-2).
+pub const SATS_MAX: u16 = 32;
 
 /// A range preset's skipped frequencies at most (SCAN-10, LINK-58).
 pub const PRESET_SKIPS_MAX: usize = 48;

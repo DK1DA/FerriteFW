@@ -836,6 +836,8 @@ impl Data for Sample {
                 self.contacts.set(all);
                 true
             }
+            // satellites live in the flash store only (SAT-2)
+            Op::PutSat(_) | Op::DeleteSat(_) | Op::ClearSats | Op::SatInfo(_) | Op::SatPrefs(..) => false,
             Op::Draft(d) => {
                 self.draft.set(d);
                 true

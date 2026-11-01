@@ -282,7 +282,7 @@ impl Radio {
             }
             RadioCmd::SatRx(f) => self.sat_rx(f).await,
             RadioCmd::SatUp(f) => self.sat_up(f),
-            RadioCmd::SatTone { tone, hd } => self.sat_tone(tone, hd),
+            RadioCmd::SatTone { tone, hd, power } => self.sat_tone(tone, hd, power),
             #[cfg(feature = "tx")]
             RadioCmd::Transmit { slot: sat::SAT_SLOT, on } if self.sat.is_some() => {
                 if on {

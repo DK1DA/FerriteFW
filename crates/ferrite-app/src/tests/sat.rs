@@ -13,7 +13,7 @@ const HERE: (i32, i32, i32) = (454_000_000, -757_000_000, 70);
 
 /// A pass of satellite `sat` (the sample's index) over 30°, from the start of the sample's day.
 fn a_pass(sat: u8) -> Pass {
-    let mut d = Live::new(crate::sat::SimSats(crate::sat::sample()));
+    let mut d = Live::new(crate::sat::SimSats::new(crate::sat::sample()));
     d.tick(Some(crate::sat::SIM_T0), Some(Observer::new(HERE.0, HERE.1, HERE.2)), true, u32::MAX);
     (0..d.passes()).filter_map(|i| d.pass(i)).find(|p| p.sat == sat && p.max_el > 30).expect("a high pass")
 }
@@ -24,7 +24,7 @@ fn sat_app(utc: u32) -> T {
     t.app.set.backlight = 0;
     t.app.set.extend_tx = true;
     t.app.radio.tx_built = true;
-    t.app.sat_attach(std::boxed::Box::leak(std::boxed::Box::new(Live::new(crate::sat::SimSats(crate::sat::sample())))));
+    t.app.sat_attach(std::boxed::Box::leak(std::boxed::Box::new(Live::new(crate::sat::SimSats::new(crate::sat::sample())))));
     t.app.sat_clock(Some(utc), true, Some(HERE));
     t
 }
@@ -51,22 +51,22 @@ fn working_so50_overhead() {
     let s = store();
     t.app.key_down(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
     let c = sat_cmds(&mut t);
-    assert!(c.contains(&RadioCmd::SatTone { tone: 744, hd: false }), "the arming tone first: {c:?}");
+    assert!(c.contains(&RadioCmd::SatTone { tone: 744, hd: false, power: 0 }), "the arming tone first: {c:?}");
     let up = c.iter().find_map(|c| if let RadioCmd::TxPlan { tx, .. } = c { Some(*tx) } else { None }).expect("the uplink planned");
     assert!(up.abs_diff(14_585_000) < 400 && up != 14_585_000, "145.850 corrected: {up}");
     assert!(c.contains(&RadioCmd::Transmit { slot: crate::sat::SAT_SLOT, on: true }));
     assert_eq!(t.app.radio.keyed, Some(crate::sat::SAT_SLOT));
     t.wait(2500);
     let c = sat_cmds(&mut t);
-    assert!(c.contains(&RadioCmd::SatTone { tone: 670, hd: false }), "then the access tone: {c:?} {:?} {:?} {:?}", t.app.radio.keyed, (t.app.sat.arm_until, t.app.now, t.app.sat.sent), t.app.screen());
+    assert!(c.contains(&RadioCmd::SatTone { tone: 670, hd: false, power: 0 }), "then the access tone: {c:?} {:?} {:?} {:?}", t.app.radio.keyed, (t.app.sat.arm_until, t.app.now, t.app.sat.sent), t.app.screen());
     t.tap(Key::Star);
-    assert!(sat_cmds(&mut t).contains(&RadioCmd::SatTone { tone: 670, hd: true }), "* while keyed: half duplex");
+    assert!(sat_cmds(&mut t).contains(&RadioCmd::SatTone { tone: 670, hd: true, power: 0 }), "* while keyed: half duplex");
     t.app.key_up(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
     t.wait(200);
     assert!(sat_cmds(&mut t).contains(&RadioCmd::Transmit { slot: crate::sat::SAT_SLOT, on: false }));
     t.app.key_down(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
     let c = sat_cmds(&mut t);
-    assert!(!c.contains(&RadioCmd::SatTone { tone: 744, hd: true }), "no arming tone the second time: {c:?}");
+    assert!(!c.contains(&RadioCmd::SatTone { tone: 744, hd: true, power: 0 }), "no arming tone the second time: {c:?}");
     t.app.key_up(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
     t.wait(1100);
     let _ = t.cmds();
@@ -103,4 +103,39 @@ fn alarm_toast_and_mark() {
     t.hold(Key::Exit);
     t.wait(200);
     assert_eq!(t.app.sat_mark(), 0, "gone after the pass");
+}
+
+/// SAT-22: hold MENU on a pass page opens the satellite's options: Doppler on the 70 cm side only, the uplink's
+/// power (Low to start, a press each: Mid, High), duplex, the transponder, the trim back to 0; each kept with the
+/// satellite and sent to the radio at once; BACK returns to the page.
+#[test]
+fn options_page() {
+    let p = a_pass(1);
+    let mut t = sat_app(p.aos + 120);
+    t.open(crate::screens::nav::Dest::Satellites);
+    t.wait(3000);
+    t.app.sat.cur = Some(p);
+    t.app.screen = Screen::Sat(SatScr::pass_of(&p));
+    t.wait(1100);
+    t.tap(Key::Right);
+    let _ = t.cmds();
+    t.hold(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 1), "{:?}", t.app.screen());
+    assert_eq!(t.app.sat_data().prefs(1).power, 0, "Low to start");
+    t.tap(Key::Digit(2));
+    t.tap(Key::Menu);
+    assert_eq!(t.app.sat_data().prefs(1).power, 1);
+    assert!(sat_cmds(&mut t).contains(&RadioCmd::SatTone { tone: 670, hd: false, power: 1 }), "the next key-up's power");
+    t.tap(Key::Up);
+    t.tap(Key::Menu);
+    assert!(t.app.sat_data().prefs(1).uhf_only, "Doppler on the 70 cm side only");
+    t.tap(Key::Digit(3));
+    t.tap(Key::Menu);
+    assert!(t.app.sat_data().prefs(1).hd);
+    t.tap(Key::Digit(5));
+    assert_eq!(t.app.sat_data().prefs(1).trim, 10);
+    t.tap(Key::Menu);
+    assert_eq!(t.app.sat_data().prefs(1).trim, 0, "OK on the trim: back to 0");
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 0 && s.page == 1), "back on the pass page");
 }

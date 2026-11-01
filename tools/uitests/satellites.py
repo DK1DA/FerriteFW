@@ -1,7 +1,7 @@
 """Satellite mode (chapter 28a: SAT-*): the pass list filling in as it predicts, the alarm picker, the pass page's
 keys and the pointing page, by the readback's `sat`, `row` and `pass` lines. Needs satellites: the simulator's
-sample (data.ferritefw.dev's fixture, a fixed day when its clock isn't set); on the radio a bench build's sample
-until Console loads them (phase 2).
+sample (data.ferritefw.dev's fixture in its store, a fixed day when its clock isn't set); on the radio the
+satellites Console or `:sat add` loaded (SAT-2).
 """
 import time
 
@@ -135,3 +135,47 @@ def pass_page_trim_duplex_and_pointing(t):
     t.eq(u.id, "SatPass", "0 again: the plot")
     u = t.keys("BACK")
     t.eq(u.id, "SatList", "BACK: the list")
+
+
+@test("SAT-22", pages=("SatList", "SatPass", "SatOptions"))
+def options_page_per_satellite(t):
+    """Hold MENU on a pass: the satellite's options (Doppler, uplink power Low to start, duplex, transponder,
+    trim); OK on a row changes it, kept with the satellite (the pass line says so); BACK returns to the page."""
+    open_list(t)
+    ready(t)
+    u = t.keys("MENU")
+    t.eq(u.id, "SatPass", "OK opens the pass")
+    u = t.press("MENU", long=True)
+    t.eq(u.id, "SatOptions", "hold MENU: the satellite's options")
+    t.eq(u.names()[:5], ["Doppler", "Uplink power", "Duplex", "Transponder", "Trim"], "the rows")
+    t.eq(u.num(2)["value"], "Low", "the uplink at Low to start")
+    u = t.keys("2 MENU")
+    t.eq(u.num(2)["value"], "Mid", "OK: Mid")
+    u = t.keys("1 MENU")
+    t.eq(u.num(1)["value"], "70 cm only", "Doppler on the 70 cm side only")
+    u = t.keys("BACK")
+    t.eq(u.id, "SatPass", "BACK: the pass page")
+    p = u["pass"] or {}
+    t.eq((p.get("power"), p.get("uhf_only")), (1, 1), "kept with the satellite")
+    u = t.press("MENU", long=True)
+    u = t.keys("1 MENU 2 MENU MENU BACK")
+    p = u["pass"] or {}
+    t.eq((p.get("power"), p.get("uhf_only")), (0, 0), "back as they were")
+
+
+@test("SAT-2", "SAT-3", pages=("SatList",))
+def sat_command_lists_and_deletes(t):
+    """`sat` lists the satellites held (place, name, catalogue number); `sat add` is the terminal's (pasting
+    needs the terminal itself, not the link); `sat del N` deletes one and the pass list follows."""
+    out = t.cmd("sat")
+    t.check("ISS #25544" in out and "SO-50 #27607" in out, "the sample's satellites", out)
+    ok, why = t.cmd_err("sat add")
+    t.check(not ok and "not over the link" in why, "sat add is refused over the link", why)
+    n = sum(1 for ln in out.splitlines() if "#" in ln)
+    out = t.cmd(f"sat del {n}")
+    t.check("deleted" in out, "sat del", out)
+    out = t.cmd("sat")
+    t.eq(sum(1 for ln in out.splitlines() if "#" in ln), n - 1, "one fewer")
+    u = open_list(t)
+    u = ready(t)
+    t.eq(sat_line(u).get("all"), n - 1, "the pass list predicts the satellites held")
