@@ -221,6 +221,20 @@ impl TxSeq {
         Ok(())
     }
 
+    /// Satellite mode's full-duplex key-up (SAT-11): the same checks, then the path machine's full-duplex key-up,
+    /// the downlink's chip left receiving (`r.rx`, its receiver selected first). A person's voice key-up.
+    pub fn key_fd(&mut self, r: &Req, path: &mut Path, now: u32, out: &mut Steps) -> Result<(), Refusal> {
+        self.check(r, path, now)?;
+        path.key_up_fd(Sel::rx(r.rx), Sel::tx(r.tx), now, out).map_err(|b| match b {
+            Blocked::Keyed => Refusal::InProgress,
+            Blocked::NeedsRelay | Blocked::TooOften => Refusal::RelayMismatch,
+        })?;
+        self.since = Some((now, r.kind));
+        self.weight = DUTY_WEIGHT[r.power.min(2) as usize] as u8;
+        (self.alerted, self.batt_low) = (false, None);
+        Ok(())
+    }
+
     /// Every PTT input released (TX-25): unkey if keyed, and a timed-out PTT may key again.
     pub fn release(&mut self, cfg: &Cfg, path: &mut Path, now: u32, out: &mut Steps) {
         self.held = false;

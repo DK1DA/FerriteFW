@@ -62,6 +62,14 @@ pub trait SatData {
     fn set_alarm(&mut self, p: Option<Pass>);
     fn prefs(&self, sat: u8) -> Prefs;
     fn set_prefs(&mut self, sat: u8, p: Prefs);
+    /// SAT-6: while predicting, satellites done and in all ("Predicting 7 of 19").
+    fn progress(&self) -> Option<(u8, u8)> {
+        None
+    }
+    /// SAT-18: the magnetic declination at the radio, 0.1° east positive (Console's, with the satellites).
+    fn declination(&self) -> Option<i16> {
+        None
+    }
 }
 
 /// No satellites (a build without satellite data).
@@ -245,6 +253,12 @@ impl<S: SatSource> SatData for Live<S> {
     fn set_alarm(&mut self, p: Option<Pass>) {
         self.alarm = p;
     }
+    fn progress(&self) -> Option<(u8, u8)> {
+        (self.state() == State::Busy && !self.refining).then(|| self.plan.progress())
+    }
+    fn declination(&self) -> Option<i16> {
+        self.src.declination()
+    }
     fn prefs(&self, sat: u8) -> Prefs {
         match self.prefs.get(sat as usize).copied().flatten() {
             Some(p) => p,
@@ -285,7 +299,7 @@ mod tests {
         assert_eq!(d.state(), State::Busy);
         let mut k = 0;
         while d.state() == State::Busy {
-            d.tick(Some(now + 1), Some(here), true, 500);
+            d.tick(Some(now + 1), Some(here), true, 100);
             k += 1;
         }
         assert!(k > 3, "in slices");

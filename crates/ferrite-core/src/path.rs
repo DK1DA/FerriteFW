@@ -503,6 +503,31 @@ impl Path {
         Ok(())
     }
 
+    /// Satellite mode's full duplex (SAT-11): the uplink chip transmits while the downlink chip keeps receiving,
+    /// its receive select on and unmuted, as the crossband key-up but with the microphone (no repeat audio). Only on
+    /// a different chip from the receive select and on the relay state as it is (both ends on 2 m and 70 cm,
+    /// SAT-13, SAFE-20). The unkey is the crossband's (the receive select cleared while keyed, the next tick
+    /// selects it again): `xb` 1 is "keyed with the microphone selected".
+    pub fn key_up_fd(&mut self, rx: Sel, tx: Sel, now: u32, out: &mut Steps) -> Result<(), Blocked> {
+        if self.tx.is_some() {
+            return Err(Blocked::Keyed);
+        }
+        let (rx, tx) = (rx.to_rx(), tx.to_tx());
+        if rx.chip() == tx.chip() || tx.relay() != self.relay || rx.relay() != self.relay {
+            return Err(Blocked::NeedsRelay);
+        }
+        self.rx(Rx::Bk(rx), Cause::Auto, now, out)?;
+        if self.both_live() {
+            out.push(Act::Sel(other(rx), false));
+        }
+        out.push(Act::PaZero);
+        out.push(Act::Sel(tx, true));
+        out.push(Act::ChipTx(tx.chip()));
+        out.push(Act::PaRamp);
+        (self.tx, self.xb) = (Some(tx), 1);
+        Ok(())
+    }
+
     /// Keyed by the crossband repeater.
     pub fn keyed_xb(&self) -> bool {
         self.xb != 0
@@ -919,6 +944,34 @@ mod tests {
         let mut s = Steps::default();
         p.safe(0, &mut s);
         assert!(s.as_slice().contains(&Act::RepeatAudio(false)));
+    }
+
+    /// SAT-11: full duplex keeps the downlink's receiver on and unmuted, with the microphone (never the repeat
+    /// audio), and unkeys as the crossband does; never the receiving chip, never the relay.
+    #[test]
+    fn full_duplex_keeps_the_downlink() {
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        assert_eq!(p.key_up_fd(Sel::UhfRx, Sel::UhfTx, 0, &mut s), Err(Blocked::NeedsRelay), "never the receiving chip");
+        assert_eq!(p.key_up_fd(Sel::UhfRx, Sel::HfTx, 0, &mut s), Err(Blocked::NeedsRelay), "never the relay");
+        assert!(s.is_empty());
+        p.key_up_fd(Sel::UhfRx, Sel::VhfTx, 0, &mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::PaZero, Act::Sel(Sel::VhfTx, true), Act::ChipTx(0), Act::PaRamp]);
+        assert_eq!(p.rx_now(), Rx::Bk(Sel::UhfRx));
+        assert!(!s.as_slice().iter().any(|a| matches!(a, Act::Mute(true) | Act::RepeatAudio(_))));
+        let mut s = Steps::default();
+        p.xb_drop(&mut s);
+        assert!(s.is_empty(), "no repeat audio to drop");
+        let mut s = Steps::default();
+        p.unkey(0, &mut s);
+        assert_eq!(s.as_slice(), [Act::Sel(Sel::UhfRx, false), Act::PaZero, Act::Wait(100), Act::ChipRx(0), Act::Sel(Sel::VhfTx, false)]);
+        assert!(p.keyed().is_none() && !p.keyed_xb());
+        // the safe state from it: no repeat audio to switch off
+        p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut Steps::default()).unwrap();
+        p.key_up_fd(Sel::UhfRx, Sel::VhfTx, 0, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        p.safe(0, &mut s);
+        assert!(!s.as_slice().contains(&Act::RepeatAudio(false)));
     }
 
     /// XB-5, decision 163 (black radio, Oct 15, 2026: "xb refused 12"): the repeater hops its receive path, and

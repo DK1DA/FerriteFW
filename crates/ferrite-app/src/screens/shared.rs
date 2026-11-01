@@ -211,6 +211,7 @@ impl App {
             alerts_paused: hf && self.set.same_on(),
             dry: self.dry_tx(), // SBAR-22, TX-48
             lpm: self.low_power(), // SBAR-24, PWR-24
+            sat: self.sat_mark(), // SAT-20
         }
     }
 

@@ -154,8 +154,10 @@ fn ram_is_small() {
     // the slots turned off (HOME-15.1: a byte), 8 with padding, to 1632; the Local zone (CHAN-34: 48 channel
     // numbers, their count and state, the range, where and for which channels it was found), 112, to 1744; the last link transfer
     // frame's time for the LED's flash (DISP-30: 4 bytes), 8 with padding, to 1752; the channel version a running
-    // channel scan's list was sent for and the slots whose list goes again (SCAN-25: 5 bytes), 8 with padding, to 1760
-    assert!(n <= 1760, "App is {n} bytes");
+    // channel scan's list was sent for and the slots whose list goes again (SCAN-25: 5 bytes), 8 with padding, to 1760;
+    // satellite mode (chapter 28a: the source's pointer, 16 on the PC and 8 on the radio, and the App's own clock,
+    // observer, alarm, open pass and what the Radio task was sent, 72), 96 with padding, to 1856
+    assert!(n <= 1856, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -669,7 +671,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 64, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226; C3a sent beacons: APRS-53; C19 FM presets: decision 258; D25 finish the update: decision 333)");
+    assert_eq!(ids.len(), 65, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226; C3a sent beacons: APRS-53; C19 FM presets: decision 258; D25 finish the update: decision 333; B22 satellites: chapter 28a)");
 }
 
 mod group_a;

@@ -294,7 +294,7 @@ impl Radio {
 
     /// The sequencer's settings from what the UI has sent: the keyed slot's end tone and tail, CW ID with a
     /// callsign (VOX-10); none of the end tone or ID after a dialled sequence (TONE-11).
-    fn tx_cfg(&self) -> txseq::Cfg {
+    pub(super) fn tx_cfg(&self) -> txseq::Cfg {
         let s = self.tx.slot as usize % 4;
         let voice = !self.tx.dialled;
         txseq::Cfg {
@@ -427,7 +427,7 @@ impl Radio {
         log(b"tx unkey", 0);
     }
 
-    fn refuse(&mut self, slot: u8, why: Refusal) {
+    pub(super) fn refuse(&mut self, slot: u8, why: Refusal) {
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice, ptt_stuck: self.live.tx.ptt_stuck };
         log(b"tx refused ", why as u32);
     }

@@ -14,6 +14,10 @@ test = false
 bench = false
 
 [features]
+# Satellite mode predicts passes on the radio (SGP4 and the pass predictor, SAT-4, SAT-6); without it the radio
+# only reads the passes and tracks Console computes (`ferrite_core::sat::track`).
+default = ["sat-predict"]
+sat-predict = []
 # Transmit. Off until milestone 4: without it the build has no transmit code at all (the bk4829 crate's tx feature).
 tx = ["bk4829/tx", "ferrite-radio/tx"]
 # The bench radio's build (decision 193): the full-power transmit build with the bench commands, starting every

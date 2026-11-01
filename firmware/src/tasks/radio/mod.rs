@@ -88,6 +88,7 @@ mod same;
 mod dtmf;
 mod bcast;
 mod hf;
+mod sat;
 mod beep;
 mod counter;
 mod scope;
@@ -290,6 +291,8 @@ struct Radio {
     /// The DAC beep's level (1-11, `hal::tone`), from the beep volume (SND-3: Low, Mid, High -> 5, 7, 9).
     beep_level: u8,
     hf: Option<HfOn>,
+    /// Satellite mode (SAT-1), while the satellite screen is open.
+    sat: Option<sat::SatRun>,
     /// HF-31, BCR-18: an SI4732 seek running (HF mode's or FM broadcast's), polled by the tick (MODE-7: no command
     /// waits for it).
     seek: Option<SiSeek>,
@@ -766,6 +769,7 @@ pub async fn task() {
         beep_gain: tonegen::beep_gain(3), // Mid
         beep_level: 7,
         hf: None,
+        sat: None,
         seek: None,
         counter: None,
         tsearch: None,
@@ -862,12 +866,12 @@ pub async fn task() {
         // Wake for the next command, the next Battery Save phase change, or (awake) the next tick. HF mode's tick
         // never steps Battery Save, so its deadline isn't waited on there (decision 163: a deadline the tick doesn't
         // move goes past and the wait fires every 1 ms, starving the UI and the link).
-        let mut at = r.save.deadline().filter(|_| r.hf.is_none()).unwrap_or(u64::MAX);
+        let mut at = r.save.deadline().filter(|_| r.hf.is_none()).unwrap_or(u64::MAX); // satellite mode steps it (busy)
         // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
         // SCAN-21: a fast scan step's end ticks on time too (on the 10 ms tick alone a step waited for the next), but
         // only a due time still ahead of the last tick's start, and never within MIN_GAP_MS of its end
         // (`scan::tick_wake`, decision 165: a due time the tick didn't move woke it every 1 ms and hung the radio).
-        let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() || r.seek.is_some()).then(|| {
+        let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.sat.is_some() || r.fm.is_some() || r.seek.is_some()).then(|| {
             let period = if r.busy() { TICK_MS } else { POLL_MS };
             ferrite_core::scan::tick_wake(started, ticked, period, r.scan_due(now_ms()))
         });

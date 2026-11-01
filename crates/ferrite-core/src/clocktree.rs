@@ -250,8 +250,10 @@ pub mod why {
     pub const LINK: u16 = 1 << 6;
     /// PWR-26.4: audio capture or playback running, or about to start (a task waiting for the speed).
     pub const AUDIO: u16 = 1 << 7;
+    /// PWR-26.1, SAT-6: satellite passes being predicted.
+    pub const PREDICT: u16 = 1 << 8;
     /// Their names, bit 0 first (the cable log and the readback's `why`).
-    pub const NAMES: [&str; 8] = ["input", "decode", "scan", "mode", "tx", "alert", "link", "audio"];
+    pub const NAMES: [&str; 9] = ["input", "decode", "scan", "mode", "tx", "alert", "link", "audio", "predict"];
 }
 
 /// PWR-26.1: a key or the knob keeps the build's speed this long (as Low Power Mode's boost, PWR-24.10).
@@ -315,8 +317,8 @@ mod tests {
         assert!(input_holds(0, false) && input_holds(2_999, false));
         assert!(!input_holds(3_000, false), "3 s on");
         assert!(!input_holds(100, true), "dark screen");
-        assert_eq!(why::NAMES.len(), 8);
-        assert_eq!(why::AUDIO, 1 << (why::NAMES.len() - 1));
+        assert_eq!(why::NAMES.len(), 9);
+        assert_eq!(why::PREDICT, 1 << (why::NAMES.len() - 1));
     }
 
     /// PWR-26.4: audio running never switches, whatever else wants; PWR-26.5: Fixed is the build's speed always;

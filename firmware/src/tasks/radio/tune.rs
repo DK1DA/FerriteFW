@@ -120,6 +120,8 @@ impl Radio {
                 let m = self.scope.as_ref().map_or(0, |sc| sc.mode);
                 SlotRx { freq: f, am: m == 2, narrow: m == 1, ..SlotRx::DEFAULT }
             }
+            // Satellite mode's downlink (SAT-8): wide FM, the default squelch.
+            sat::SAT_TUNED => SlotRx { freq: f, ..SlotRx::DEFAULT },
             // HF mode on chip 1 (18-64 MHz): AM is the mode's own (Param::Mode 2); FM otherwise.
             _ => SlotRx { freq: f, am: self.hf.is_some_and(|h| h.mode == 2), ..SlotRx::DEFAULT },
         };

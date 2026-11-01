@@ -57,6 +57,7 @@ const PUBLISH_MS: u32 = 500;
 /// GPS-22 (TX audit F15): PB10 driven low now, by the Radio task just before a key-up, as stock's PTT press does
 /// (0x0801C6D4) before its key-up; the GPS task's next look keeps it low while keyed, or hands it back.
 #[cfg(feature = "tx")]
+#[inline(always)] // called from the Radio task (fast flash): inlined there, never a call into this task's slow code
 pub fn pb10_low_now() {
     GPS_TX.output(false, Mode::OutPp);
     crate::chan::PB10_FORCED.store(true, Relaxed);
@@ -468,6 +469,12 @@ impl GpsUi {
             }
         }
         let utc = self.clock.map(|(u, at)| u.wrapping_add(now.wrapping_sub(at) / 1000));
+        // SAT-5: satellite mode's clock (GPS time, else by hand: "time ±1 min") and observer (the fix, else the
+        // fixed position).
+        let by_gps = set.clock_gps && g.utc_now().is_some();
+        let here = g.fix().map(|f| (f.pos.lat, f.pos.lon, f.alt_m));
+        app.sat_clock(utc, by_gps, here);
+        let set = app.settings();
         match utc {
             Some(u) => {
                 let (min, is_utc) = ferrite_app::gpsdata::local_clock(u, set.tz);

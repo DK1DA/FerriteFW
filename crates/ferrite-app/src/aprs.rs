@@ -429,7 +429,8 @@ impl App {
     /// APRS mode is on (0 5 3).
     pub fn aprs_on(&self) -> bool {
         // PWR-24: no APRS in Low Power Mode. KISS-10: KISS on suspends it (the app does APRS; the setting is kept).
-        self.set.aprs_mode && !self.low_power() && !self.set.kiss_on()
+        // SAT-14: and it pauses while the satellite screen is open.
+        self.set.aprs_mode && !self.low_power() && !self.set.kiss_on() && !self.sat_open()
     }
 
     /// APRS-22: without APRS mode, the active slot is on a channel flagged APRS, so what it receives is decoded

@@ -239,6 +239,9 @@ impl App {
         if matches!(self.screen, Screen::Alert(_)) {
             r |= why::ALERT;
         }
+        if self.sat_busy() {
+            r |= why::PREDICT;
+        }
         r
     }
 }

@@ -39,6 +39,7 @@ pub mod ports;
 pub mod radio_data;
 pub mod remote;
 pub mod sample;
+pub mod sat;
 pub mod screens;
 pub mod slotctl;
 pub mod settings;
@@ -428,6 +429,9 @@ pub struct App {
     pub(crate) alert_info: &'static mut AlertInfo,
     /// The user's answer to a link write approval, for the Link task.
     link_answer: Option<screens::link::LinkAnswer>,
+    /// Satellite mode (chapter 28a): the platform's satellites and passes, and the App's own few bytes.
+    satd: Option<&'static mut dyn ferrite_core::sat::data::SatData>,
+    pub(crate) sat: sat::SatUi,
 }
 
 /// Screens remembered for BACK: menu, group, item and one more.
@@ -525,6 +529,8 @@ impl App {
             set,
             alert_info: alert,
             link_answer: None,
+            satd: None,
+            sat: sat::SatUi::new(),
         };
         app.region_steps(); // VFO-18: the region's step on 2 m and 1.25 m (saved slots bring their own)
         for s in 0..SLOTS as u8 {
@@ -1331,6 +1337,7 @@ impl App {
         }
         self.aprs_tick(store.data());
         self.radio_tick(live);
+        self.sat_tick(); // SAT-6, SAT-8, SAT-12
         self.screen.tick(self, live);
         self.remote_tick(now, store); // LINK-20: after the screen's own unkeys (TX-30, the Radio task's stops)
         self.remote_keys_tick(now, store); // LINK-19: a remote long press let go on time
@@ -1426,6 +1433,10 @@ impl App {
                 (Key::Up | Key::Down, Short | Repeat) if sides && self.side1_squelch() => self.screen.key(self, e, store),
                 _ => self.locked_toast(),
             }
+            return;
+        }
+        // SAT-12: OK on the pass alarm's toast opens the pass page.
+        if (e.key, e.press) == (Key::Menu, Short) && self.sat_toast_ok() {
             return;
         }
         // MENU-25: hold MENU is this screen's options, on every screen the same way.

@@ -108,6 +108,10 @@ impl Radio {
             }
             return;
         }
+        // Satellite mode owns both chips while its screen is open (SAT-1, SAT-14): no watch, scan or decoders.
+        if self.sat.is_some() {
+            return self.sat_tick().await;
+        }
         // The crossband repeater owns both chips while it runs (XB-13: no watch, scan or Battery Save); local PTT
         // holds it (XB-14), and that transmission runs as any other.
         #[cfg(feature = "tx")]

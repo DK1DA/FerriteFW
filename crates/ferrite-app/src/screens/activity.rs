@@ -22,6 +22,8 @@ pub enum Mode {
     Fm,
     Hf,
     Xb,
+    /// Satellite mode (SAT-1): both chips, the downlink tuned.
+    Sat,
 }
 
 /// One remembered hit: what (a frequency, or a tone word), when it was last heard and when that stop began
@@ -266,10 +268,11 @@ impl App {
                 Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_) if self.low_power() => continue,
                 Screen::Fm(_) => Mode::Fm,
                 Screen::Hf(_) => Mode::Hf,
+                Screen::Sat(_) => Mode::Sat,
                 Screen::Crossband(_) if self.radio.xb_on => Mode::Xb,
                 _ => continue,
             };
-            return if keyed && !matches!(m, Mode::Hf | Mode::Xb) { Mode::Off } else { m };
+            return if keyed && !matches!(m, Mode::Hf | Mode::Xb | Mode::Sat) { Mode::Off } else { m };
         }
         if keyed || self.low_power() {
             return Mode::Off; // TX-24: the broadcast stops before the key-up and starts again after; PWR-24.4
@@ -354,6 +357,7 @@ impl App {
             Mode::Counter => self.out.push(RadioCmd::Counter(true)),
             Mode::Fm => {} // the broadcast's start is the reconciler's (MODE-5)
             Mode::Hf => super::hf::send(self),
+            Mode::Sat => self.sat_start(),
             Mode::Xb => {
                 super::xb::send_start(self);
                 self.radio.xb_log = Some(super::xb::XbLog { on: true, by: self.radio.xb_by, why: 0 }); // XB-20.6
@@ -379,6 +383,7 @@ impl App {
             Mode::Counter => self.out.push(RadioCmd::Counter(false)),
             Mode::Fm => {} // the broadcast's stop is the reconciler's (MODE-5)
             Mode::Hf => self.out.push(RadioCmd::Hf { freq: self.set.hf.freq, mode: self.set.hf.mode, on: false }),
+            Mode::Sat => self.out.push(RadioCmd::SatRx(0)),
             Mode::Xb => {
                 self.out.push(RadioCmd::Crossband(None));
                 if self.radio.xb_by & super::xb::LISTEN != 0 {

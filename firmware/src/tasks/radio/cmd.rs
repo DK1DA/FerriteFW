@@ -280,6 +280,17 @@ impl Radio {
                 self.tx.plan = Some((tx, r, extend, confirmed));
                 self.tx.region = Some((r, extend));
             }
+            RadioCmd::SatRx(f) => self.sat_rx(f).await,
+            RadioCmd::SatUp(f) => self.sat_up(f),
+            RadioCmd::SatTone { tone, hd } => self.sat_tone(tone, hd),
+            #[cfg(feature = "tx")]
+            RadioCmd::Transmit { slot: sat::SAT_SLOT, on } if self.sat.is_some() => {
+                if on {
+                    self.sat_key().await;
+                } else {
+                    self.sat_unkey().await;
+                }
+            }
             #[cfg(feature = "tx")]
             RadioCmd::Transmit { slot, on } => {
                 // XB-14: local PTT interrupts a pass (unkeyed first) and holds the repeater until it's released.

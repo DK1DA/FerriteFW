@@ -620,6 +620,10 @@ impl SimCore {
             if dev.battery_mv != 0 {
                 app.battery(dev.battery_pct);
             }
+            // Satellite mode (SAT-5): the clock (a fixed day when the simulator's isn't set) and the fix or fixed position.
+            let sat_t = if secs < 1_700_000_000 { ferrite_app::sat::SIM_T0 + now / 1000 } else { secs as u32 };
+            let here = store.extra.fix.get().map(|f| (f.pos.lat, f.pos.lon, f.alt_m));
+            app.sat_clock(Some(sat_t), true, here);
             app.tick(now, &radio.live, store);
             while let Some(c) = app.pop_cmd() {
                 send(radio, c);
@@ -1138,6 +1142,14 @@ impl SimCore {
     pub fn device(&self) -> &Device {
         &self.dev
     }
+    /// `--sats N`: N satellites (the sample over and over), so a test can watch the pass list fill in (SAT-6).
+    pub fn many_sats(&mut self, n: usize) {
+        let s = ferrite_app::sat::sample();
+        let v: Vec<ferrite_core::sat::Sat> = (0..n.min(32)).map(|i| ferrite_core::sat::Sat { id: s[i % 4].id + i as u32 * 100_000, ..s[i % 4] }).collect();
+        let list = ferrite_core::sat::List(Box::leak(v.into_boxed_slice()));
+        self.app.sat_attach(Box::leak(Box::new(ferrite_core::sat::data::Live::new(list))));
+    }
+
     pub fn device_mut(&mut self) -> &mut Device {
         &mut self.dev
     }
@@ -1234,6 +1246,9 @@ fn power_on(store: &Store, radio: &mut FakeRadio) -> App {
     store.load_settings(set);
     let alert = Box::leak(Box::new(ferrite_app::screens::alert::AlertInfo::NONE));
     let mut app = App::new(set, alert);
+    // Satellite mode: the sample satellites, predicted on the host as on the radio (SAT-6).
+    let sats = ferrite_core::sat::data::Live::new(ferrite_app::sat::SimSats(ferrite_app::sat::sample()));
+    app.sat_attach(Box::leak(Box::new(sats)));
     store.restore(&mut app);
     while let Some(c) = app.pop_cmd() {
         radio.cmd(c);

@@ -16,6 +16,7 @@ use ferrite_sim::fake;
 
 mod shots_aprs;
 mod shots_d;
+mod shots_sat;
 mod termport;
 mod window;
 
@@ -54,6 +55,10 @@ fn main() {
         // `--no-ssb-patch`: a radio without the SSB patch (HF-20, SELF-6, INST-14; the UI tests' sim_args).
         if args.iter().any(|a| a == "--no-ssb-patch") {
             sim.device_mut().selftest.ssb_patch = false;
+        }
+        // `--sats N`: N satellites, for the pass list's prediction to take a few seconds (SAT-6's UI test).
+        if let Some(n) = arg("--sats").and_then(|s| s.parse::<usize>().ok()) {
+            sim.many_sats(n);
         }
         let mut cable = match tcp {
             Some(p) => termport::Port::tcp(p),
@@ -530,6 +535,7 @@ fn main() {
     }
     shots_d::run(scale);
     shots_aprs::run(scale);
+    shots_sat::run(scale);
     themed(scale);
 }
 

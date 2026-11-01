@@ -69,13 +69,14 @@ const G2: [Entry; 5] = [
     Entry("Channel display|Name|Name, number or frequency on home."),
     Entry("Local zone|50 km|A zone of the channels within this range of you, nearest first. Needs a GPS fix or the fixed position (0 6 9)."),
 ];
-const G3: [Entry; 6] = [
+const G3: [Entry; 7] = [
     Entry("FM broadcast||Listen now; hold MENU there for its settings."),
     Entry("Band scope|60 bars|Bars, step, speed, trigger, waterfall."),
     Entry("Frequency counter||Find a nearby transmitter's frequency."),
     Entry("HF mode||Below 64 MHz. Everything else pauses."),
     Entry("Crossband repeater||Repeat one slot's band on another's."),
     Entry("Tone search||Find the CTCSS or DCS in use."),
+    Entry("Satellites||Passes, pointing and Doppler for FM satellites."),
 ];
 const G4: [Entry; 5] = [
     Entry("Event log||Every decode and alert."),

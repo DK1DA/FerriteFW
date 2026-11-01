@@ -165,6 +165,9 @@ impl<S: SatSource, T: TrackStore> SatData for Tracks<S, T> {
     fn set_alarm(&mut self, p: Option<Pass>) {
         self.alarm = p;
     }
+    fn declination(&self) -> Option<i16> {
+        self.src.declination()
+    }
     fn prefs(&self, sat: u8) -> Prefs {
         match self.prefs.get(sat as usize).copied().flatten() {
             Some(p) => p,

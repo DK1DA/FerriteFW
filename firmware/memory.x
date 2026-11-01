@@ -129,6 +129,9 @@ SECTIONS
      * manager (GPS-26 to GPS-33) and the GGA copy for the terminal's `gps` (TERM-30). */
     *(.text.*7ferrite5tasks3gps*);
     *(.text.*12ferrite_core3gps*);
+    /* satellite mode's prediction, geometry and tracks (chapter 28a): the UI task's, never per sample */
+    *(.text.*12ferrite_core3sat*);
+    *(.text.*7ferrite3sat*);
     *(.text.*8gpspower*);
     *(.text.*7ferrite5debug3gga*);
     /* Helpers only the UI task uses: the SSB patch check's SHA-256, `str` search (entry::commit) and UTF-8

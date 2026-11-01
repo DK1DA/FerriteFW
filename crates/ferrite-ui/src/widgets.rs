@@ -884,7 +884,14 @@ pub struct StatusBar {
     pub dry: bool,
     /// Low Power Mode (PWR-24, SBAR-24): "LOW" left of those.
     pub lpm: bool,
+    /// SAT-20: a pass alarm set: 0 none; else [`SAT_UP`] while overhead, or the minutes to the rise (up to
+    /// [`SAT_UP`] - 1), with [`SAT_TEXT`] while the time shows instead of the satellite (every other 2 s).
+    pub sat: u16,
 }
+
+/// [`StatusBar::sat`]: the satellite overhead now; the time shown, not the icon.
+pub const SAT_UP: u16 = 0x3FFF;
+pub const SAT_TEXT: u16 = 0x8000;
 
 impl StatusBar {
     fn left_eq(&self, o: &Self) -> bool {
@@ -893,8 +900,8 @@ impl StatusBar {
     }
 
     fn right_eq(&self, o: &Self) -> bool {
-        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_tier, self.battery_cutoff, self.blink_off, self.dry, self.lpm)
-            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_tier, o.battery_cutoff, o.blink_off, o.dry, o.lpm)
+        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_tier, self.battery_cutoff, self.blink_off, self.dry, self.lpm, self.sat)
+            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_tier, o.battery_cutoff, o.blink_off, o.dry, o.lpm, o.sat)
     }
 
     /// Draws what differs from `old` (everything with None).
@@ -1026,7 +1033,41 @@ impl StatusBar {
             x -= w + 4;
             field(lcd, x, w, 0, SBAR_H - 1, 14, Align::Left, b"LOW", &UI_12B, BATT, BG);
         }
+        // SAT-20: the pass alarm: a satellite riding a dashed arc, every other 2 s the time to the rise ("12",
+        // "3H") or UP; white over an hour away, amber within it, green overhead. 16 px, left of the others.
+        if self.sat != 0 {
+            x -= 20;
+            let m = self.sat & SAT_UP;
+            let c = if m == SAT_UP { GREEN } else if m <= 60 { AMBER } else { TEXT };
+            if self.sat & SAT_TEXT != 0 {
+                let mut b = Buf::<4>::new();
+                if m == SAT_UP {
+                    b.set(b"UP");
+                } else if m <= 99 {
+                    let _ = ufmt::uwrite!(b, "{}", crate::text::Zero(m as u32, 2));
+                } else {
+                    let _ = ufmt::uwrite!(b, "{}H", (m / 60).min(9));
+                }
+                field(lcd, x, 18, 0, SBAR_H - 1, 14, Align::Center, b.as_bytes(), &UI_12B, c, BG);
+            } else {
+                sat_icon(lcd, x + 2, 3, c);
+            }
+        }
     }
+}
+
+/// SAT-20's mark, 15 x 12 from rectangles: a dashed arc (its path's dots, two on, two off) with the satellite's
+/// body and panels at the top.
+fn sat_icon(lcd: &mut impl Panel, x: i32, y: i32, c: u16) {
+    for k in 0..=13 {
+        // y = 10 - 16 t (1 - t) along x = 1 + 13 t, in 1/13 steps
+        if k % 4 < 2 {
+            lcd.fill(x + 1 + k, y + 10 - 16 * k * (13 - k) / 169, 1, 1, DIM);
+        }
+    }
+    lcd.fill(x + 5, y + 2, 5, 4, c);
+    lcd.fill(x + 1, y + 3, 3, 2, c);
+    lcd.fill(x + 11, y + 3, 3, 2, c);
 }
 
 #[cfg(test)]

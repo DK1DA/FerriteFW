@@ -70,6 +70,8 @@ enum Fake {
     /// The crossband repeater: the real engine, fed made-up signals (decision 93); or the radio's refusal.
     Xb { t0: f32, rep: ferrite_core::xb::Repeater },
     XbStopped(u8),
+    /// Satellite mode (SAT-1): the downlink heard, and the uplink a key-up goes out on.
+    Sat { up: Freq10 },
 }
 
 /// Carriers the scope and counter "hear": frequency and level (dBm).
@@ -253,6 +255,7 @@ impl FakeRadio {
     fn key(&mut self, slot: u8, kind: Kind) {
         let f = match self.mode {
             Fake::Hf { freq, .. } if slot == 3 => freq,
+            Fake::Sat { up } if slot == 4 => up,
             _ => self.live.slots[slot as usize % 3].freq,
         };
         let req = Req {
@@ -423,6 +426,13 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Crossband(None) => self.set(Fake::Off),
+            RadioCmd::SatRx(0) => self.set(Fake::Off),
+            RadioCmd::SatRx(_) if !matches!(self.mode, Fake::Sat { .. }) => self.set(Fake::Sat { up: 0 }),
+            RadioCmd::SatUp(f) => {
+                if let Fake::Sat { up } = &mut self.mode {
+                    *up = f;
+                }
+            }
             RadioCmd::DtmfTiming { ms, delay_10ms } => self.dtmf = (ms, delay_10ms),
             RadioCmd::Beep { hz, ms } if !self.live.tx.keyed => {
                 self.beeps += 1;
@@ -571,6 +581,10 @@ impl FakeRadio {
                 ModeLive::Xb(rep.live)
             }
             Fake::XbStopped(stopped) => ModeLive::Xb(XbLive { stopped, ..Default::default() }),
+            Fake::Sat { .. } => {
+                let rssi = -97 + ((t * 0.9).sin() * 9.0) as i16;
+                ModeLive::Sat { rssi, open: rssi > -100 }
+            }
         };
         // Transmit: speech, the mic level wandering 30-85%.
         if self.live.tx.keyed {

@@ -25,6 +25,7 @@ mod hal;
 mod report;
 #[allow(dead_code)]
 mod ring;
+mod sat;
 mod store;
 mod tasks;
 

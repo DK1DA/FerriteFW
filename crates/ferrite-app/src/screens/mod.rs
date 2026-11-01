@@ -82,6 +82,7 @@ pub mod quick;
 pub mod recall;
 pub mod save;
 pub mod samecodes;
+pub mod sat;
 pub mod scan;
 pub mod scanlists;
 pub mod scope;
@@ -167,6 +168,8 @@ pub enum Screen {
     PosEntry(posentry::PosEntry),
     SameCodes(samecodes::SameCodes),
     Dtmf(dtmf::DtmfPad),
+    /// Satellite mode (chapter 28a): the pass list, pass page and pointing page.
+    Sat(sat::SatScr),
 }
 
 /// Runs `$e` with `$s` bound to the screen's state: the one place that lists every variant.
@@ -225,6 +228,7 @@ macro_rules! each {
             Screen::PosEntry($s) => $e,
             Screen::SameCodes($s) => $e,
             Screen::Dtmf($s) => $e,
+            Screen::Sat($s) => $e,
         }
     };
 }

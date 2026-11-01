@@ -185,7 +185,19 @@ pub enum RadioCmd {
     /// From the input task, not the UI: the side connector's speaker mic connected or removed, debounced
     /// ([`crate::acc`], SND-12). The Radio task switches PE1 to it and holds PB8 on while it is connected.
     Accessory(bool),
+    /// Satellite mode (SAT-1, SAT-8, SAT-14): receive on the downlink (Doppler-corrected, retuned each second) with
+    /// both chips taken, watch, scans and decoders paused; [`SAT_IDLE`] takes them with nothing tuned yet (the pass
+    /// list); 0 leaves, and everything resumes. The uplink's chip waits for the key-up ([`RadioCmd::TxPlan`], then [`RadioCmd::Transmit`] with the satellite slot).
+    SatRx(Freq10),
+    /// Satellite mode: the uplink frequency for the next key-up and, keyed, to retune to (SAT-8).
+    SatUp(Freq10),
+    /// Satellite mode: the uplink's CTCSS tone in 0.1 Hz (the arming tone while it plays, SAT-10), and half duplex
+    /// (the downlink muted while keyed, SAT-11).
+    SatTone { tone: u16, hd: bool },
 }
+
+/// [`RadioCmd::SatRx`]: satellite mode on with nothing tuned (no pass open yet).
+pub const SAT_IDLE: Freq10 = 1;
 
 /// The crossband repeater's settings (manual chapter 19): small enough to ride in a [`RadioCmd`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -791,6 +803,8 @@ pub enum ModeLive {
     Hf { freq: Freq10, rssi: i16, snr: u8, si4732: bool, loading: u8 },
     /// Crossband repeater.
     Xb(XbLive),
+    /// Satellite mode: the downlink's level (dBm) and squelch.
+    Sat { rssi: i16, open: bool },
 }
 
 /// The SI4732's receive settings from the UI (BCR-32, HF-35; decision 292), packed to keep [`RadioCmd`] small.

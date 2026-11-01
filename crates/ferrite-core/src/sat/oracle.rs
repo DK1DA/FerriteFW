@@ -187,6 +187,38 @@ fn rises_within_10_s_over_14_days() {
     assert!(worst_el <= 0.6, "highest point {worst_el}°");
 }
 
+/// SAT-6: the adaptive coarse step finds the same passes as the plain 30 s step, every day for 14 days.
+#[test]
+fn adaptive_step_finds_every_pass() {
+    let fx = fixture();
+    let sats: Vec<Sat> = fx.iter().map(|(_, e)| Sat { el: *e, ..Default::default() }).collect();
+    let (mut work, mut plain_work) = (0, 0);
+    for &(lat, lon, alt) in &OBSERVERS {
+        let obs = Observer::new((lat * 1e7) as i32, (lon * 1e7) as i32, alt as i32);
+        let t0 = fx.iter().map(|(_, e)| e.epoch_unix()).max().unwrap();
+        for day in 0..14 {
+            let run = |adaptive: bool| {
+                let mut p = Plan::new();
+                p.restart(t0 + day * 86_400, 1, Some(obs));
+                p.adaptive = adaptive;
+                while !p.step(&List(&sats), 1_000) {}
+                p
+            };
+            let (a, b) = (run(true), run(false));
+            // the same passes: rise, length and azimuths; the top within 15 s and 1° (its search starts from a
+            // different coarse sample, and a low pass's top is flat to f32's noise)
+            let key = |p: &Plan| p.list().iter().map(|q| (q.sat, q.aos, q.dur, q.aos_az, q.los_az)).collect::<Vec<_>>();
+            assert_eq!(key(&a), key(&b), "day {day}");
+            for (x, y) in a.list().iter().zip(b.list()) {
+                assert!(x.tmax.abs_diff(y.tmax) <= 15 && x.max_el.abs_diff(y.max_el) <= 1, "day {day}: {x:?} {y:?}");
+            }
+            (work, plain_work) = (work + a.work, plain_work + b.work);
+        }
+    }
+    std::println!("SAT-6: adaptive step {} propagations a day for 6 satellites, plain 30 s {}", work / 28, plain_work / 28);
+    assert!(work * 2 < plain_work);
+}
+
 #[test]
 fn prediction_speed() {
     let fx = fixture();
@@ -210,6 +242,6 @@ fn prediction_speed() {
         us,
         us / p.work as f64
     );
-    // 2880 coarse steps (+ 60 back) per satellite plus about 24 per pass refined
-    assert!(p.work < sats.len() as u32 * 3_400);
+    // adaptive steps, plus about 40 per pass refined
+    assert!(p.work < sats.len() as u32 * 1_700);
 }

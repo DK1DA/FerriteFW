@@ -247,6 +247,7 @@ const BUDGET: &[(&str, u64)] = &[
     ("B11 FM broadcast", 117000),
     ("B12 HF mode", 603000),
     ("B14 Tone search", 65000),
+    ("B22 Satellites", 60000),
     ("B15 Frequency counter", 142000),
     ("B17 Alert", 2541000),
     ("B18 Crossband repeater", 135000),

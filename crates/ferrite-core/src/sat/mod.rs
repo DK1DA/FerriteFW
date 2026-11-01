@@ -201,6 +201,11 @@ pub trait SatSource {
     fn version(&self) -> u32 {
         0
     }
+    /// SAT-18: the magnetic declination at the radio in 0.1° (east positive), written by Console with the
+    /// satellites.
+    fn declination(&self) -> Option<i16> {
+        None
+    }
 }
 
 /// No satellites (the default until something loads them).

@@ -338,6 +338,7 @@ fn keyed_remote_mode(app: &App, live: &LiveAll, l: &mut Line) {
         Mode::Fm => b"fm",
         Mode::Hf => b"hf",
         Mode::Xb => b"xb",
+        Mode::Sat => b"sat",
     });
 }
 
@@ -437,6 +438,15 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "cutoff", b.battery_cutoff as u32);
         kn(l, "dry", b.dry as u32); // TX-48, SBAR-22
         kn(l, "lpm", b.lpm as u32); // PWR-24, SBAR-24
+        if b.sat != 0 {
+            // SAT-20: the pass alarm's mark: minutes to the rise, or up
+            let m = b.sat & ferrite_ui::widgets::SAT_UP;
+            if m == ferrite_ui::widgets::SAT_UP {
+                kq(l, "sat", b"up");
+            } else {
+                kn(l, "sat", m as u32);
+            }
+        }
         // PWR-26.6: the MCU clock (MHz, 0 in the simulators), switches since power on, the longest interrupts-held
         // time (us), and the governor's reasons (clocktree::why bits).
         let m = cx.dev.mcu;
@@ -711,6 +721,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             }
         }
         Screen::Hf(h) => hf_lines(app, cx, h, d),
+        Screen::Sat(s) => sat_lines(app, &s, d),
         Screen::Pin(p) => {
             // PIN-2, PIN-3: the heading, a star per digit typed (never the digits), the wait or attempts left
             if let Some(l) = d.ln() {
@@ -882,6 +893,57 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
 
 /// HF mode (HF-15): `hf loading=N` while the SSB patch loads; its options page as rows; else `hf freq=MHz
 /// band="31 m" rx="SI4732" mode="AM" step="5 kHz" bw="6 kHz" bfo="" signal="SNR 12 dB" entry="" tx=0 seek=0`.
+/// Satellite mode (chapter 28a): `sat state=ready done=4 all=4 passes=25`, the list's rows on the page
+/// (`row N "ISS" "15:02 72° 11"`, the selected one `sel`; " bell=5" with an alarm), or on a pass `pass "ISS"
+/// down=437.8042 up=145.9886 tone=67.0 hd=0 trim=0 tp=1 up_now=1`.
+fn sat_lines(app: &App, s: &screens::sat::SatScr, d: &mut Desc) {
+    use ferrite_core::sat::data::State;
+    let sh = screens::sat::shown_list(app, s);
+    if let Some(l) = d.ln() {
+        l.push(b"sat");
+        let st: &[u8] = match sh.state {
+            State::Ready => b"ready",
+            State::Busy => b"busy",
+            State::NoSats => b"no-sats",
+            State::NoPosition => b"no-position",
+            State::NoClock => b"no-clock",
+        };
+        kq(l, "state", st);
+        kn(l, "done", sh.done as u32);
+        kn(l, "all", sh.all as u32);
+        kn(l, "passes", sh.rows as u32);
+        kn(l, "alarm", app.sat.alarm_lead as u32);
+        kn(l, "picker", s.picker as u32);
+    }
+    if screens::sat::page_id(s) == "SatList" || screens::sat::page_id(s) == "SatAlarm" {
+        for i in sh.top as usize..(sh.top as usize + 11).min(sh.rows as usize) {
+            let (mut n, mut v) = (Buf::<16>::new(), Buf::<32>::new());
+            if screens::sat::row_text(app, s, i, &mut n, &mut v) {
+                row(d, i as u8 + 1, n.as_bytes(), v.as_bytes(), i == sh.sel as usize, false, false);
+            }
+        }
+        return;
+    }
+    let Some((p, sat, t, pr)) = app.sat_cur() else { return };
+    let now = app.sat_now().unwrap_or(0);
+    if let Some(l) = d.ln() {
+        l.push(b"pass ");
+        q(l, sat.name());
+        if let Some((down, up)) = screens::sat::pass_freqs(app) {
+            l.push(b" down=");
+            mhz(l, down);
+            l.push(b" up=");
+            mhz(l, up);
+        }
+        let _ = uwrite!(l, " tone={}.{}", t.tone / 10, t.tone % 10);
+        kn(l, "hd", pr.hd as u32);
+        let _ = uwrite!(l, " trim={}", pr.trim as i32 * 10);
+        kn(l, "tp", pr.tp as u32 + 1);
+        kn(l, "up_now", p.up(now) as u32);
+        kn(l, "max", p.max_el as u32);
+    }
+}
+
 fn hf_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, h: screens::hf::Hf, d: &mut Desc) {
     let v = h.shown(app, cx.live);
     if let Some(pct) = v.loading {
@@ -1292,6 +1354,7 @@ pub fn id(s: Screen) -> &'static str {
         Screen::PosEntry(_) => "PosEntry",
         Screen::SameCodes(_) => "SameCodes",
         Screen::Dtmf(_) => "Dtmf",
+        Screen::Sat(s) => screens::sat::page_id(&s),
     }
 }
 
