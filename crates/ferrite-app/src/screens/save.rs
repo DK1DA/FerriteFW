@@ -284,16 +284,22 @@ fn change(mut s: Save, app: &App, store: &impl ChannelStore, d: i32) -> Save {
             let from = if s.num < MAX_CHANNELS { s.num } else { 0 };
             if let Some(n) = (1..MAX_CHANNELS as i32)
                 .map(|k| (from as i32 + d.signum() * k).rem_euclid(MAX_CHANNELS as i32) as u16)
-                .find(|&n| store.by_num(n).is_none())
+                .find(|&n| store.get(n).is_none())
             {
                 s.num = n;
             }
         }
         F::Zone => {
+            // CHAN-35: a zone with 256 channels already is stepped over
             let n = store.zones() as i32 + 1;
             let i = if s.zone == NO_ZONE { n - 1 } else { s.zone as i32 };
-            let k = (i + d).rem_euclid(n);
-            s.zone = if k == n - 1 { NO_ZONE } else { k as ZoneId };
+            for k in 1..=n {
+                let j = (i + d * k).rem_euclid(n);
+                s.zone = if j == n - 1 { NO_ZONE } else { j as ZoneId };
+                if store.zone_room(s.zone, s.num) {
+                    break;
+                }
+            }
         }
         F::Name | F::Save => {}
     }
@@ -306,6 +312,9 @@ fn change(mut s: Save, app: &App, store: &impl ChannelStore, d: i32) -> Save {
 fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
     if let Some(why) = s.refuse(app) {
         return app.show_toast(b"Not saved:", why.split(':').next().unwrap_or(why).as_bytes(), false);
+    }
+    if !store.zone_room(s.zone, s.num) {
+        return app.show_toast(b"Not saved:", b"zone full (256)", false); // CHAN-35
     }
     let a = app.active as usize;
     let f = s.freq_of(app);

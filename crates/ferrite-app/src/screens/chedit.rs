@@ -100,7 +100,8 @@ pub(crate) fn edit(app: &mut App, f: impl FnOnce(&mut Channel)) {
 fn apply(app: &mut App, store: &impl ChannelStore, f: ChField, op: Op) {
     let Some(mut c) = app.slots[app.active as usize].ch else { return };
     let mut home = app.set.home_ch;
-    if let Err(r) = f.change(&mut c, &mut home, op, Ctx { zones: store.zones(), region: app.set.region() }) {
+    let num = c.num;
+    if let Err(r) = f.change(&mut c, &mut home, op, Ctx { zones: store.zones(), region: app.set.region(), room: &|z| store.zone_room(z, num) }) {
         return app.refusal_toast(r);
     }
     if home != app.set.home_ch {
@@ -210,7 +211,7 @@ impl View for ChEdit {
                 // The next free number that way (EDIT-5: renumbering moves the channel).
                 let free = (1..MAX_CHANNELS as i32)
                     .map(|k| (ch.num as i32 + d.signum() * k).rem_euclid(MAX_CHANNELS as i32) as u16)
-                    .find(|&n| store.by_num(n).is_none());
+                    .find(|&n| store.get(n).is_none());
                 if let Some(n) = free {
                     edit(app, |c| c.num = n);
                     place(app, store);

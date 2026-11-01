@@ -29,6 +29,9 @@ pub struct SimFlash {
     pub erases: Vec<u32>,
     /// A change since the owner last looked (the simulator saves the image when it is set).
     pub dirty: bool,
+    /// Reads so far, and the bytes they read (what a pass over the records costs on the radio's SPI bus).
+    pub reads: u64,
+    pub read_bytes: u64,
     rng: u64,
 }
 
@@ -44,7 +47,7 @@ impl SimFlash {
 
     /// A blank chip, as after installing (only calibration, which this never touches, would be left).
     pub fn new() -> Self {
-        SimFlash { mem: vec![0xFF; SIZE], ops: 0, cut_at: None, dead: false, dirty: false, erases: vec![0; CHIP / SECTOR as usize], rng: 0x9E37_79B9_7F4A_7C15 }
+        SimFlash { mem: vec![0xFF; SIZE], ops: 0, cut_at: None, dead: false, dirty: false, erases: vec![0; CHIP / SECTOR as usize], reads: 0, read_bytes: 0, rng: 0x9E37_79B9_7F4A_7C15 }
     }
 
     /// A chip holding `image` at `at` (a saved region), blank elsewhere.
@@ -105,6 +108,8 @@ impl Nor for SimFlash {
         }
         let a = Self::at(addr);
         buf.copy_from_slice(&self.mem[a..a + buf.len()]);
+        self.reads += 1;
+        self.read_bytes += buf.len() as u64;
         Ok(())
     }
 

@@ -31,11 +31,18 @@ pub enum ChField {
     Home,
 }
 
-/// What a step needs besides the channel: how many zones exist, and the region (a band's step, VFO-18).
+/// What a step needs besides the channel: how many zones exist, the region (a band's step, VFO-18), and which
+/// zones have room for the channel (CHAN-35: a full zone is stepped over).
 #[derive(Clone, Copy)]
-pub struct Ctx {
+pub struct Ctx<'a> {
     pub zones: ZoneId,
     pub region: Option<Region>,
+    pub room: &'a dyn Fn(ZoneId) -> bool,
+}
+
+/// A [`Ctx::room`] for every zone (no store to ask).
+pub fn any_room(_: ZoneId) -> bool {
+    true
 }
 
 /// Why a change was refused: [`Refusal::field`] heads it, [`Refusal::why`] says it.
@@ -210,7 +217,7 @@ impl ChField {
     ///   home. The zone, name and frequencies have none: unchanged.
     /// - [`Op::Typed`]: the name (printable ASCII, 16 at most; CHAN-31 maps the rest), RX in MHz, or the split's TX in
     ///   MHz (split on).
-    pub fn change(self, c: &mut Channel, home: &mut Option<u16>, op: Op, cx: Ctx) -> Result<(), Refusal> {
+    pub fn change(self, c: &mut Channel, home: &mut Option<u16>, op: Op, cx: Ctx<'_>) -> Result<(), Refusal> {
         let mut n = *c;
         match (self, op) {
             (ChField::Home, Op::Step(_)) => {
@@ -222,10 +229,16 @@ impl ChField {
                 return Ok(());
             }
             (ChField::Zone, Op::Step(d)) => {
+                // CHAN-35: a zone with 256 channels already is stepped over; none (no limit) always takes it
                 let z = cx.zones as i32 + 1;
                 let i = if c.zone == NO_ZONE { z - 1 } else { c.zone as i32 };
-                let k = (i + d).rem_euclid(z);
-                n.zone = if k == z - 1 { NO_ZONE } else { k as ZoneId };
+                for k in 1..=z {
+                    let j = (i + d * k).rem_euclid(z);
+                    n.zone = if j == z - 1 { NO_ZONE } else { j as ZoneId };
+                    if n.zone == NO_ZONE || n.zone == c.zone || (cx.room)(n.zone) {
+                        break;
+                    }
+                }
             }
             (ChField::Rx, Op::Step(d)) => n.rx = freq_step(c.rx, d, cx.region),
             (ChField::Tx, Op::Step(d)) if c.cfg.split => {

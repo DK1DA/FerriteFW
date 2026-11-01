@@ -615,6 +615,14 @@ impl Term {
         };
         match b.op {
             Op::Delete => app.delete_channel(x, st),
+            Op::Move(z) if c.zone != z && !st.zone_room(z, x) => {
+                // CHAN-35: the zone filled up: the rest stay where they are
+                let mut m = Msg::new();
+                put!(m, "Zone full (256 channels): moved {} of {}", b.done, b.total);
+                self.bulk = None;
+                self.vis_ok = false;
+                return self.tell(m.as_bytes(), true);
+            }
             Op::Move(z) if c.zone != z => app.put_channel(Channel { zone: z, ..c }),
             Op::Move(_) => {}
             Op::Copy(_) => match (b.free..MAX_CHANNELS).find(|&n| st.get(n).is_none()) {

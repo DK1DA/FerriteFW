@@ -4,7 +4,7 @@ use super::*;
 use crate::chan::channel;
 use crate::slot::{DEFAULT_CFG, SQ_GLOBAL};
 
-const CX: Ctx = Ctx { zones: 3, region: None };
+const CX: Ctx<'static> = Ctx { zones: 3, region: None, room: &crate::chfield::any_room };
 
 fn ch(rx: Freq10) -> Channel {
     channel(7, 0, rx, "Test", DEFAULT_CFG)

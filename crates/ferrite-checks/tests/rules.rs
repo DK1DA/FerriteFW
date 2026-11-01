@@ -337,14 +337,17 @@ fn core_sleeps_when_idle() {
     assert!(fw.contains("executor-thread") && fw.contains("executor-interrupt"));
 }
 
-/// CHAN-8, CHAN-9: no channel list in RAM and no zone index in flash: the store keeps one zone byte per channel
-/// number (its only per-channel field) and reads channel records from flash when asked.
+/// CHAN-7, CHAN-9, CHAN-36 (decision 333): no channel list in RAM and no per-channel field at all: the store keeps
+/// the member lists of the slots' zones (three, each at most a zone's 256 channels) and reads channel records from
+/// flash when asked.
 #[test]
 fn channels_are_read_on_demand() {
     let store = code(&root().join("crates/ferrite-store/src/store.rs"));
     let body = store.split("pub struct FlashStore").nth(1).unwrap().split("\n}").next().unwrap();
     let per_channel: Vec<_> = body.lines().filter(|l| l.contains("MAX_CHANNELS")).collect();
-    assert_eq!(per_channel.len(), 1, "one per-channel field: {per_channel:?}");
-    assert!(per_channel[0].contains("Cell<ZoneId>"), "it is one zone number per channel: {}", per_channel[0]);
+    assert!(per_channel.is_empty(), "no per-channel field: {per_channel:?}");
+    assert!(body.contains("lists: RefCell<[Members; 3]>"), "the slots' member lists");
+    let members = code(&root().join("crates/ferrite-store/src/members.rs"));
+    assert!(members.contains("pub nums: [u16; ZONE_CAP as usize],"), "a list holds a zone's channels at most");
     assert!(!body.contains("Channel;") && !body.contains("[Channel"), "no channel array in the store");
 }

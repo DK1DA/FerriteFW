@@ -268,7 +268,9 @@ impl View for Browse {
             (Key::Menu, Short, Mode::Move) => {
                 let z = self.cur.top;
                 let Some(c) = ch else { return };
-                if z != c.zone && store.data().request(Op::Move(c.num, z)) {
+                if z != c.zone && !store.zone_room(z, c.num) {
+                    app.show_toast(b"Zone full", b"256 channels at most", false); // CHAN-35
+                } else if z != c.zone && store.data().request(Op::Move(c.num, z)) {
                     app.show_toast(c.name(), zone_name(store, z).as_bytes(), false);
                 }
                 s.mode = Mode::List;

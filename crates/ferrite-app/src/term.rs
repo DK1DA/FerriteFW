@@ -840,7 +840,7 @@ impl Term {
             F::Tx if !c.cfg.split => return self.say("TX: Enter types a TX frequency (split)".as_bytes(), false),
             _ => {}
         }
-        self.apply(app, c, f, Op::Step(d), store.zones());
+        self.apply(app, c, f, Op::Step(d), store.zones(), &|z| store.zone_room(z, c.num));
         if f == F::It(Item::Offset) && self.edit.is_some_and(|n| n.cfg.split && !c.cfg.split) {
             // Split on today's TX, as the radio's knob: the TX row, typing another
             self.field = FIELDS.iter().position(|x| *x == F::Tx).unwrap_or(0) as u8;
@@ -851,20 +851,20 @@ impl Term {
 
     /// # on a field: its default (MENU-18).
     fn default(&mut self, app: &mut App, c: Channel, f: F) {
-        self.apply(app, c, f, Op::Reset, 0);
+        self.apply(app, c, f, Op::Reset, 0, &crate::chfield::any_room);
     }
 
     /// A typed value: the name, or the RX or split TX frequency in MHz.
     fn commit(&mut self, app: &mut App, s: &[u8]) {
         let Some(c) = self.edit else { return };
         let f = FIELDS[self.field as usize % FIELDS.len()];
-        self.apply(app, c, f, Op::Typed(s), 0);
+        self.apply(app, c, f, Op::Typed(s), 0, &crate::chfield::any_room);
     }
 
     /// A field's change through its rules: saved, Home set, or the refusal said.
-    fn apply(&mut self, app: &mut App, c: Channel, f: F, op: Op, zones: ZoneId) {
+    fn apply(&mut self, app: &mut App, c: Channel, f: F, op: Op, zones: ZoneId, room: &dyn Fn(ZoneId) -> bool) {
         let (mut n, mut home) = (c, app.set.home_ch);
-        if let Err(r) = f.change(&mut n, &mut home, op, Ctx { zones, region: app.set.region() }) {
+        if let Err(r) = f.change(&mut n, &mut home, op, Ctx { zones, region: app.set.region(), room }) {
             let mut m = Buf::<96>::new();
             r.line(&mut m);
             return self.say(m.as_bytes(), true);

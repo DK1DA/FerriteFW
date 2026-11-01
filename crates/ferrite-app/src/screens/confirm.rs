@@ -198,7 +198,7 @@ impl View for Confirm {
                     let mut l = Buf::<32>::new();
                     chan_label(n, &mut l);
                     what.push(l.as_bytes());
-                    if let Some((c, _)) = cx.store.by_num(n) {
+                    if let Some(c) = cx.store.get(n) {
                         what.push(" \u{b7} ".as_bytes());
                         what.push(c.name());
                         // The frequency only when it fits whole: a cut-off number is worse than none.

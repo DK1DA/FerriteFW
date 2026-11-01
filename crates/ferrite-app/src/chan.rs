@@ -27,6 +27,8 @@ pub type ZoneId = u16;
 pub const NO_ZONE: ZoneId = 0xFFFF;
 /// How many zones the store holds (CHAN-6): numbers 0 to this - 1.
 pub const MAX_ZONES: ZoneId = 254;
+/// CHAN-35 (decision 333): the most channels a zone holds. "No zone" has no limit.
+pub const ZONE_CAP: u16 = 256;
 
 /// One channel: what home and edit-in-place show of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -165,6 +167,14 @@ pub trait ChannelStore {
     }
     /// How many channels a zone holds.
     fn zone_len(&self, zone: ZoneId) -> u16;
+    /// CHAN-35: whether channel `num` may be in `zone`: it is there already, the zone has room (fewer than
+    /// [`ZONE_CAP`]), or it is "no zone" (no limit).
+    fn zone_room(&self, zone: ZoneId, num: u16) -> bool {
+        zone == NO_ZONE || self.zone_len(zone) < ZONE_CAP || self.zone_of(num) == Some(zone)
+    }
+    /// The zones the three slots are on now (the App says so every tick): a store that keeps their member lists
+    /// (decision 333) builds a list for a zone that hasn't one and lets go of the others.
+    fn slot_zones(&self, _zones: [ZoneId; 3]) {}
     /// The i-th channel of a zone, by number.
     fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel>;
     /// Channels stored in all.

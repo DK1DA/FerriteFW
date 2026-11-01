@@ -1432,6 +1432,9 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if c.zone != NO_ZONE && c.zone >= st.zones() {
                 return invalid(o, "zone: no such zone".as_bytes());
             }
+            if !st.zone_room(c.zone, idx) {
+                return invalid(o, crate::term::cmd::ZONE_FULL.as_bytes()); // CHAN-35
+            }
             if c.cfg.mode as usize >= SLOT_MODES || c.cfg.step as usize >= STEPS.len() {
                 return invalid(o, "mode or step out of range".as_bytes());
             }

@@ -99,7 +99,7 @@ impl TextFor {
         let s = &app.slots[app.active as usize];
         match self {
             TextFor::ChannelName => s.ch.map_or(Buf::new(), |c| Buf::from(c.name())),
-            TextFor::Channel(n) => store.by_num(n).map_or(Buf::new(), |(c, _)| Buf::from(c.name())),
+            TextFor::Channel(n) => store.get(n).map_or(Buf::new(), |c| Buf::from(c.name())),
             TextFor::SaveName => app.text,
             TextFor::Zone(z) => store.zone_name(z).unwrap_or_default(),
             TextFor::Preset(i) => store.data().preset(i).map_or(Buf::new(), |p| Buf::from(p.name.as_bytes())),
@@ -339,7 +339,7 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
         TextFor::ContactCall | TextFor::ContactName => return super::contacts::typed(app, to, t.as_bytes(), store),
         TextFor::ChannelName => super::chedit::edit(app, |c| c.set_name(t.as_bytes())),
         TextFor::Channel(n) => {
-            if let Some((mut c, _)) = store.by_num(n) {
+            if let Some(mut c) = store.get(n) {
                 c.set_name(t.as_bytes());
                 app.write(crate::chan::ChanWrite::Put { ch: c, from: None });
                 // A slot on that channel shows the new name too.

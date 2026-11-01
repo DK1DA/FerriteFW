@@ -19,6 +19,7 @@
 
 pub mod io;
 pub mod logs;
+pub mod members;
 pub mod records;
 pub mod restore;
 pub mod scratch;

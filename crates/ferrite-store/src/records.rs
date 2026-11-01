@@ -43,9 +43,13 @@ pub fn ch_addr(num: u16) -> u32 {
     CHANNELS.start + n / CH_PER_SECTOR * SECTOR + n % CH_PER_SECTOR * CH_LEN as u32
 }
 
-/// Whether a record holds a channel: a good CRC and an RX frequency.
+/// Whether a record holds a channel: a good CRC, this format, an RX frequency, and a zone that can be (one of the
+/// zones, or none).
 pub fn ch_valid(b: &[u8; CH_LEN]) -> bool {
-    u32_at(b, 0) != 0xFFFF_FFFF && crc16(&b[..62]) == u16_at(b, 62) && b[60] == CH_VERSION
+    u32_at(b, 0) != 0xFFFF_FFFF && crc16(&b[..62]) == u16_at(b, 62) && b[60] == CH_VERSION && {
+        let z = ch_zone(b);
+        z < MAX_ZONES || z == NO_ZONE
+    }
 }
 
 /// The channel in record `b` at number `num`, if it holds one.
@@ -203,7 +207,8 @@ pub fn zone_addr(z: ZoneId) -> u32 {
 }
 
 /// Name (16) · flags: scan all, shown, by distance (1) · resume (1) · dwell (1) · reserved, 0 (1; it was smart scan,
-/// now the range scans' hit list, SCAN-23) · priority channels (2 + 2, 0xFFFF none) · reserved (6) · CRC-16 (2).
+/// now the range scans' hit list, SCAN-23) · priority channels (2 + 2, 0xFFFF none) · channel count (2: CHAN-36,
+/// decision 333; 0xFFFF in a record from before it) · reserved (4) · CRC-16 (2).
 pub fn zone_decode(b: &[u8; ZONE_LEN]) -> Option<(Name, ZoneCfg)> {
     if crc16(&b[..30]) != u16_at(b, 30) || b[..30] == [0xFF; 30] {
         return None;
@@ -221,7 +226,23 @@ pub fn zone_decode(b: &[u8; ZONE_LEN]) -> Option<(Name, ZoneCfg)> {
     Some((Name::from(&b[..n]), cfg))
 }
 
-pub fn zone_encode(name: &[u8], cfg: &ZoneCfg) -> [u8; ZONE_LEN] {
+/// The channel count a zone record holds (CHAN-36), None when it has none or isn't a record.
+pub fn zone_count(b: &[u8; ZONE_LEN]) -> Option<u16> {
+    zone_decode(b)?;
+    Some(u16_at(b, ZONE_COUNT)).filter(|&n| n != 0xFFFF)
+}
+
+/// Where a zone record keeps its channel count.
+pub const ZONE_COUNT: usize = 24;
+
+/// Zone record `b` with its channel count set (and its CRC again).
+pub fn set_zone_count(b: &mut [u8; ZONE_LEN], n: u16) {
+    b[ZONE_COUNT..ZONE_COUNT + 2].copy_from_slice(&n.to_le_bytes());
+    let crc = crc16(&b[..30]);
+    b[30..32].copy_from_slice(&crc.to_le_bytes());
+}
+
+pub fn zone_encode(name: &[u8], cfg: &ZoneCfg, count: u16) -> [u8; ZONE_LEN] {
     let mut b = [0xFFu8; ZONE_LEN];
     b[..16].fill(0);
     let n = name.len().min(16);
@@ -232,6 +253,7 @@ pub fn zone_encode(name: &[u8], cfg: &ZoneCfg) -> [u8; ZONE_LEN] {
     b[19] = 0;
     b[20..22].copy_from_slice(&cfg.pri[0].unwrap_or(0xFFFF).to_le_bytes());
     b[22..24].copy_from_slice(&cfg.pri[1].unwrap_or(0xFFFF).to_le_bytes());
+    b[ZONE_COUNT..ZONE_COUNT + 2].copy_from_slice(&count.to_le_bytes());
     let crc = crc16(&b[..30]);
     b[30..32].copy_from_slice(&crc.to_le_bytes());
     b
@@ -444,8 +466,16 @@ mod tests {
     #[test]
     fn zones_and_presets_round_trip() {
         let cfg = ZoneCfg { scan_all: true, shown: false, by_distance: true, resume: 11, dwell: 3, pri: [Some(9), None] };
-        let z = zone_encode(b"Repeaters", &cfg);
+        let mut z = zone_encode(b"Repeaters", &cfg, 17);
         assert!(zone_decode(&z) == Some((Name::from(b"Repeaters"), cfg)));
+        assert_eq!(zone_count(&z), Some(17), "CHAN-36: the count");
+        set_zone_count(&mut z, 256);
+        assert!(zone_decode(&z).is_some() && zone_count(&z) == Some(256));
+        let mut old = z;
+        old[ZONE_COUNT..ZONE_COUNT + 2].fill(0xFF);
+        let c = crc16(&old[..30]);
+        old[30..32].copy_from_slice(&c.to_le_bytes());
+        assert_eq!(zone_count(&old), None, "a record from before counts has none");
         assert!(zone_decode(&[0xFF; ZONE_LEN]).is_none());
         let p = RangePreset { name: Buf::from(b"Airband"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 3, resume: 11 };
         let mut rec = [0xFFu8; PRESET_LEN];

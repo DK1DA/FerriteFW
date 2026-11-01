@@ -646,8 +646,8 @@ match self.to {
                 chan_label(num, &mut l);
                 rows[0].1.set(l.as_bytes());
                 rows[1].0 = b"Name";
-                match store.by_num(num) {
-                    Some((c, _)) => {
+                match store.get(num) {
+                    Some(c) => {
                         rows[1].1.set(if c.name().is_empty() { b"(no name)" } else { c.name() });
                         rows[2].0 = b"Zone";
                         rows[2].1.set(store.zone_label(c.zone, b"None", b"?").as_bytes());

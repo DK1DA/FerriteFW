@@ -3,9 +3,10 @@
 //! and at power off ([`FlashStore::flush`]).
 //!
 //! Mount ([`FlashStore::mount_async`]): finish a rewrite a power cut stopped; check the layout header (missing
-//! or another layout: the chip is formatted, a first boot); read every channel's zone into the zone map (one
-//! byte per channel number, the only copy in RAM); count the zones. No settings stored: a first boot (setup,
-//! BOOT-12), and the first save after setup seeds the region's range presets.
+//! or another layout: the chip is formatted, a first boot); count the zones, the channels, and each zone's
+//! channels against the count its record holds ([`crate::members`]: no zone per channel is kept in RAM, decision
+//! 333). No settings stored: a first boot (setup, BOOT-12), and the first save after setup seeds the region's
+//! range presets.
 //!
 //! Writes: in the simulator and the tests they happen at once. On the radio ([`FlashStore::set_deferred`]) the
 //! UI only queues them ([`Job`]) and the Storage task carries them out ([`FlashStore::next_job`],
@@ -19,6 +20,7 @@
 
 use crate::io::Flash;
 use crate::logs::{self, Contacts, Ring, Waypoints};
+use crate::members::{zkey, At, Members, ALL, DIRTY_WORDS, FREE, ZCACHE};
 use crate::records::*;
 use crate::settings::{self, FlashSource, MAX_PAYLOAD};
 use crate::{block, scratch, Crc32, Nor, NorError, Result, SECTOR};
@@ -50,8 +52,6 @@ const STATE_MAX: usize = 512;
 /// Saves wait this long after the last change (a turning knob doesn't wear the flash).
 pub const SAVE_DELAY_MS: u32 = 2000;
 
-/// The zone map's mark for a number with no channel (not a zone, not "no zone", not Local).
-const EMPTY: ZoneId = 0xFFFC;
 /// The weather zone's first channel record (WX-1): channels 991-997 as shown, out of the way of your own numbering.
 pub const WX_FIRST: u16 = 990;
 
@@ -70,8 +70,9 @@ pub enum Mounted {
     Failed,
 }
 
-/// A queued channel write taken into another's rewrite (decision 227): its number and record (None: deleted).
-type Merge = (u16, Option<[u8; CH_LEN]>);
+/// A queued channel write taken into another's rewrite (decision 227): its number, record (None: deleted) and the
+/// zone key of the record it replaces ([`FREE`]: none).
+type Merge = (u16, Option<[u8; CH_LEN]>, ZoneId);
 
 /// A write for the Storage task (the radio), or done at once (the simulator).
 #[derive(Clone, Copy)]
@@ -101,6 +102,8 @@ pub enum Job {
     DeleteContact(Buf<10>),
     /// The APRS settings (kept in RAM since their last change) and the quick messages.
     AprsSave,
+    /// CHAN-36: the zone records whose channel count changed get it written.
+    Counts,
 }
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
@@ -133,12 +136,24 @@ const TIME0: u32 = 1_790_000_000;
 const MSGS_GONE_WORDS: usize = 6;
 
 pub struct FlashStore<N: Nor, D: Data> {
-    f: Flash<N>,
+    pub(crate) f: Flash<N>,
     /// The records not in flash yet (see the module comment).
     pub extra: D,
-    zones: Cell<ZoneId>,
-    /// Each channel number's zone, or [`EMPTY`].
-    zmap: [Cell<ZoneId>; MAX_CHANNELS as usize],
+    pub(crate) zones: Cell<ZoneId>,
+    /// Decision 333 ([`crate::members`]): the member lists of the slots' zones, the zones the slots are on,
+    /// the channels in all and in no zone, zone counts not written yet (and which zones wait for theirs, since
+    /// when), and where the last page through flash ended (all channels, and a zone).
+    pub(crate) lists: RefCell<[Members; 3]>,
+    pub(crate) slot_zones: Cell<[ZoneId; 3]>,
+    pub(crate) count: Cell<u16>,
+    pub(crate) loose: Cell<u16>,
+    pub(crate) zcache: Cell<[(ZoneId, u16); ZCACHE]>,
+    pub(crate) zcache_next: Cell<u8>,
+    pub(crate) dirty: Cell<[u32; DIRTY_WORDS]>,
+    pub(crate) counts_at: Cell<Option<u32>>,
+    counts_queued: Cell<bool>,
+    pub(crate) at_all: Cell<At>,
+    pub(crate) at_zone: Cell<At>,
     /// Recent (CHAN-25): 10 channel numbers in RAM, not saved.
     recent: ferrite_app::chan::RecentList,
     ver: Cell<u32>,
@@ -174,7 +189,7 @@ pub struct FlashStore<N: Nor, D: Data> {
     draft: Cell<Draft>,
     /// The store's clock: seconds at uptime 0, and the uptime the UI last gave.
     time0: Cell<u32>,
-    now_ms: Cell<u32>,
+    pub(crate) now_ms: Cell<u32>,
     /// The clock is UTC (GPS, or set by hand), and what it was at mount: this power-on's own frame (INBOX-6.1).
     utc: Cell<bool>,
     boot0: Cell<u32>,
@@ -187,7 +202,17 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             f: Flash::new(nor),
             extra,
             zones: Cell::new(0),
-            zmap: core::array::from_fn(|_| Cell::new(EMPTY)),
+            lists: RefCell::new([Members::EMPTY; 3]),
+            slot_zones: Cell::new([FREE; 3]),
+            count: Cell::new(0),
+            loose: Cell::new(0),
+            zcache: Cell::new([(FREE, 0); ZCACHE]),
+            zcache_next: Cell::new(0),
+            dirty: Cell::new([0; DIRTY_WORDS]),
+            counts_at: Cell::new(None),
+            counts_queued: Cell::new(false),
+            at_all: Cell::new(At::NONE),
+            at_zone: Cell::new(At::NONE),
             recent: ferrite_app::chan::RecentList::new(),
             ver: Cell::new(0),
             mounted: Cell::new(Mounted::Failed),
@@ -242,11 +267,6 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         {
             // In a block: the buffers aren't kept across the waits below (they would grow the UI task).
-            let mut b = [0u8; CH_LEN];
-            for num in 0..MAX_CHANNELS {
-                self.f.raw_read(ch_addr(num), &mut b)?;
-                self.zmap[num as usize].set(if ch_valid(&b) { zkey(ch_zone(&b)) } else { EMPTY });
-            }
             let mut n = 0;
             let mut z = [0u8; ZONE_LEN];
             for k in 0..MAX_ZONES {
@@ -257,6 +277,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             }
             self.zones.set(n);
         }
+        // Decision 333: the channels counted, each zone's count checked against its record (a wrong one is
+        // written again once things are quiet); the slots' lists are built when the App names their zones.
+        self.mount_counts()?;
+        self.counts_at.set(self.first_dirty().map(|_| 0));
+        *self.lists.borrow_mut() = [Members::EMPTY; 3];
+        self.slot_zones.set([FREE; 3]);
         self.events.mount(&self.f).await?;
         self.msgs.mount(&self.f).await?;
         // APRS-13.5: ours left open at power-off (their tries were in RAM) end as failed, so nothing stale goes out
@@ -416,6 +442,11 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.f.program(LAYOUT_HEADER.start, &h).await
     }
 
+    /// CHAN-36: zone records wait for their channel count (the tests).
+    pub fn counts_pending(&self) -> bool {
+        self.first_dirty().is_some()
+    }
+
     pub fn mounted(&self) -> Mounted {
         self.mounted.get()
     }
@@ -446,7 +477,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         crate::ssb::install(&self.f, p, patch, source).await
     }
 
-    fn ok(&self) -> bool {
+    pub(crate) fn ok(&self) -> bool {
         self.mounted.get() != Mounted::Failed
     }
 
@@ -550,10 +581,23 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Job::Contact(c) => self.contacts.put(&self.f, &c).await.unwrap_or(false),
             Job::DeleteContact(c) => self.contacts.delete(&self.f, c.as_bytes()).await.unwrap_or(false),
             Job::AprsSave => self.aprs_save(None).await.is_ok(),
+            Job::Counts => self.write_counts().await.is_ok(),
         };
         self.bump();
         self.running.set(false);
         ok
+    }
+
+    /// CHAN-36: the zone counts' write queued (once).
+    fn queue_counts(&self) {
+        if !self.counts_queued.get() && self.ok() {
+            self.counts_queued.set(true);
+            self.counts_at.set(None);
+            if !self.submit(Job::Counts) {
+                self.counts_queued.set(false);
+                self.counts_at.set(Some(self.now_ms.get()));
+            }
+        }
     }
 
     fn submit(&self, j: Job) -> bool {
@@ -627,6 +671,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// [`SAVE_DELAY_MS`] since their last change. Returns true when it wrote (or queued the write).
     pub fn autosave(&self, now: u32, app: &App) -> bool {
         self.now_ms.set(now);
+        // CHAN-36: zone counts written once channel writes have been quiet for the save delay
+        if self.counts_at.get().is_some_and(|t| now.wrapping_sub(t) >= SAVE_DELAY_MS) && !self.has_jobs() && !self.running.get() {
+            self.queue_counts();
+        }
         if self.aprs_changed.get().is_some_and(|t| now.wrapping_sub(t) >= SAVE_DELAY_MS) && self.ok() && self.submit(Job::AprsSave) {
             self.aprs_changed.set(None);
         }
@@ -646,6 +694,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// Saves now if anything changed since the last save (power off: PWR-17; empty battery: PWR-16).
     pub fn flush(&self, app: &App) -> bool {
+        if self.counts_at.get().is_some() {
+            self.queue_counts();
+        }
         if self.aprs_changed.get().is_some() && self.ok() && self.submit(Job::AprsSave) {
             self.aprs_changed.set(None);
         }
@@ -709,7 +760,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     // ---- reading ----
 
-    fn read_ch(&self, num: u16) -> [u8; CH_LEN] {
+    pub(crate) fn read_ch(&self, num: u16) -> [u8; CH_LEN] {
         let mut b = [0xFFu8; CH_LEN];
         if num < MAX_CHANNELS && self.ok() {
             let _ = self.f.read(ch_addr(num), &mut b);
@@ -739,10 +790,6 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         (0..MAX_PRESETS).filter(|&k| self.read_preset(k).is_some()).nth(i as usize)
     }
 
-    /// The `i`th channel number (in number order) whose zone map entry passes `f`.
-    fn nth_num(&self, i: u16, f: impl Fn(ZoneId) -> bool) -> Option<u16> {
-        (0..MAX_CHANNELS).filter(|&n| f(self.zmap[n as usize].get())).nth(i as usize)
-    }
 
     // ---- writing ----
 
@@ -775,7 +822,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 if (off..off + len).contains(&a) {
                     *b = new.map_or(0xFF, |n| n[(a - off) as usize]);
                 }
-                for &(num, rec) in more[..n].iter().flatten() {
+                for &(num, rec, _) in more[..n].iter().flatten() {
                     let at = ch_addr(num) - sector;
                     if (at..at + CH_LEN as u32).contains(&a) {
                         *b = rec.map_or(0xFF, |r: [u8; CH_LEN]| r[(a - at) as usize]);
@@ -784,8 +831,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             }
         })
         .await?;
-        for &(num, rec) in more[..n].iter().flatten() {
-            self.zmap[num as usize].set(rec.map_or(EMPTY, |r| zkey(ch_zone(&r))));
+        for &(num, rec, old) in more[..n].iter().flatten() {
+            self.note(num, old, rec.map_or(FREE, |r| key(&r)));
         }
         Ok(())
     }
@@ -810,13 +857,14 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             if num < MAX_CHANNELS && ch_addr(num) - ch_addr(num) % SECTOR == sector {
                 // the record as it stands: a merged one before it, or the flash's
                 let cur = out[..n].iter().rev().flatten().find(|m| m.0 == num).map_or_else(|| self.raw_ch(num), |m| Ok(m.1.unwrap_or([0xFF; CH_LEN])))?;
+                let old = key(&cur);
                 let rec = match job {
                     Some(Job::Write(ChanWrite::Put { ch, .. })) => Some(ch_encode(&ch, &cur)),
                     // LINK-53: on the record as it stands after the writes merged before it; no channel: as it is
                     Some(Job::Write(ChanWrite::Pos { pos, .. })) => Some(pos_rec(&cur, pos).unwrap_or(cur)),
                     _ => None,
                 };
-                out[n] = Some((num, rec));
+                out[n] = Some((num, rec, old));
                 n += 1;
             } else {
                 kept[k] = job;
@@ -868,6 +916,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         // What the UI doesn't model comes along from the record it replaces, or the one it moves from.
         let from = from.filter(|&f| f != ch.num && f < MAX_CHANNELS);
+        // CHAN-35: never a 257th channel in a zone (a renumber within it adds none)
+        if !self.room(ch.zone, ch.num) && from.is_none_or(|f| self.key_of(f) != ch.zone) {
+            return Err(NorError);
+        }
         let here = self.raw_ch(ch.num)?;
         let old = match from {
             Some(f) if !ch_valid(&here) => self.raw_ch(f)?,
@@ -906,10 +958,11 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     async fn write_ch(&self, num: u16, rec: &[u8; CH_LEN]) -> Result {
-        if *rec != self.raw_ch(num)? {
+        let was = self.raw_ch(num)?;
+        if *rec != was {
             self.put_rec(ch_addr(num), rec).await?;
         }
-        self.zmap[num as usize].set(zkey(ch_zone(rec)));
+        self.note(num, key(&was), key(rec));
         Ok(())
     }
 
@@ -917,8 +970,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if num >= MAX_CHANNELS {
             return Err(NorError);
         }
+        let was = key(&self.raw_ch(num)?);
         self.clear(ch_addr(num), CH_LEN as u32).await?;
-        self.zmap[num as usize].set(EMPTY);
+        self.note(num, was, FREE);
         Ok(())
     }
 
@@ -938,14 +992,87 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     async fn erase_channels(&self) -> Result {
-        for z in &self.zmap {
-            z.set(EMPTY);
-        }
         for s in CHANNELS.step_by(SECTOR as usize) {
             if !self.f.blank(s, SECTOR)? {
                 self.f.erase_blanked(s).await?;
             }
         }
+        self.channels_gone();
+        // every zone record's count to 0, a sector at a time (not a rewrite per zone)
+        for s in ZONES.step_by(SECTOR as usize) {
+            if !self.f.blank(s, SECTOR)? {
+                self.patch_counts(s, &|_| Some(0)).await?;
+            }
+        }
+        self.dirty.set([0; DIRTY_WORDS]);
+        Ok(())
+    }
+
+    /// No channel is stored any more (an erase, a reset): the totals, the counts in RAM and the lists follow.
+    fn channels_gone(&self) {
+        self.count.set(0);
+        self.loose.set(0);
+        self.zcache.set([(FREE, 0); ZCACHE]);
+        self.at_all.set(At::NONE);
+        self.at_zone.set(At::NONE);
+        for l in self.lists.borrow_mut().iter_mut() {
+            *l = Members { zone: l.zone, ..Members::EMPTY };
+        }
+        self.bump();
+    }
+
+    /// Rewrites the zone sector at `sector` once, giving each zone record in it the count `count_for` names (None:
+    /// left as it is). Records are 32 bytes, so none crosses a rewrite's 256-byte piece.
+    async fn patch_counts(&self, sector: u32, count_for: &dyn Fn(ZoneId) -> Option<u16>) -> Result {
+        let first = ((sector - ZONES.start) / SECTOR * ZONES_PER_SECTOR) as ZoneId;
+        scratch::rewrite(&self.f, sector, &|off, piece| {
+            for r in (0..piece.len()).step_by(ZONE_LEN) {
+                let k = (off + r as u32) / ZONE_LEN as u32;
+                let Ok(rec) = <&mut [u8; ZONE_LEN]>::try_from(&mut piece[r..r + ZONE_LEN]) else { continue };
+                if k >= ZONES_PER_SECTOR || zone_decode(rec).is_none() {
+                    continue;
+                }
+                if let Some(n) = count_for(first + k as ZoneId) {
+                    set_zone_count(rec, n);
+                }
+            }
+        })
+        .await
+    }
+
+    /// CHAN-36: the zones waiting for their count get it written, a sector at a time: up to [`ZCACHE`] of a
+    /// sector's zones counted (those not counted in RAM by a pass), then one rewrite; a zone changed meanwhile
+    /// stays marked for the next time.
+    async fn write_counts(&self) -> Result {
+        while let Some(z) = self.first_dirty() {
+            let sector = zone_addr(z) - zone_addr(z) % SECTOR;
+            let first = ((sector - ZONES.start) / SECTOR * ZONES_PER_SECTOR) as ZoneId;
+            let last = (first + ZONES_PER_SECTOR as ZoneId).min(MAX_ZONES);
+            let mut took = 0;
+            for k in first..last {
+                if self.dirty(k) && took < ZCACHE {
+                    let n = self.zone_len_of(k); // from RAM, its list, or a pass
+                    self.cache_count(k, n);
+                    took += 1;
+                }
+            }
+            let snap = self.zcache.get();
+            let pick = |k: ZoneId| if self.dirty(k) { snap.iter().find(|e| e.0 == k).map(|e| e.1) } else { None };
+            if (first..last).all(|k| pick(k).is_none_or(|n| self.stored_count(k) == Some(n))) {
+                // nothing to change in this sector (a count back where it was)
+            } else {
+                self.patch_counts(sector, &pick).await?;
+            }
+            for k in first..last {
+                if let Some(n) = pick(k) {
+                    // still the count written: done (one changed meanwhile stays marked)
+                    if self.zcache.get().iter().any(|e| e.0 == k && e.1 == n) {
+                        self.set_dirty(k, false);
+                    }
+                }
+            }
+        }
+        self.counts_queued.set(false);
         Ok(())
     }
 
@@ -953,9 +1080,6 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// and never the SSB patch or calibration; then a first boot again, so setup's save seeds presets and the WX
     /// zone as on a new radio.
     async fn wipe(&self) -> Result {
-        for z in &self.zmap {
-            z.set(EMPTY);
-        }
         self.zones.set(0);
         for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS, HEARD] {
             for s in r.step_by(SECTOR as usize) {
@@ -973,6 +1097,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.aprs.set(AprsCfg::DEFAULT);
         self.aprs_changed.set(None);
         self.draft.set(Draft::default());
+        self.channels_gone();
+        self.dirty.set([0; DIRTY_WORDS]);
         self.mounted.set(Mounted::FirstBoot);
         Ok(())
     }
@@ -986,7 +1112,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let cfg = ferrite_app::slot::SlotCfg { mode: 0, narrow: false, step: ferrite_app::slot::BANDS[4].step, ..ferrite_app::slot::DEFAULT_CFG };
         for k in 0..7u16 {
             let num = WX_FIRST + k;
-            if self.zmap[num as usize].get() != EMPTY {
+            if self.key_of(num) != FREE {
                 continue;
             }
             let rec = {
@@ -1004,10 +1130,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// one stays as an empty zone (zone numbers don't move).
     async fn delete_zone(&self, z: ZoneId) -> Result {
         for num in 0..MAX_CHANNELS {
-            if self.zmap[num as usize].get() != z {
-                continue;
-            }
-            let b = self.raw_ch(num)?;
+            let Some(b) = self.member(z, num) else { continue };
             if let Some(mut c) = ch_decode(num, &b) {
                 c.zone = NO_ZONE;
                 self.write_ch(num, &ch_encode(&c, &b)).await?;
@@ -1016,12 +1139,21 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if z + 1 == self.zones.get() {
             self.clear(zone_addr(z), ZONE_LEN as u32).await?;
             self.zones.set(z);
+            self.set_dirty(z, false);
+        } else if let Some((name, cfg)) = self.read_zone(z) {
+            self.write_zone(z, name.as_bytes(), &cfg).await?; // its count, 0 now
         }
         Ok(())
     }
 
+    /// A zone record written with its channel count as it is now (CHAN-36), so it waits for no count write.
     async fn write_zone(&self, z: ZoneId, name: &[u8], cfg: &ZoneCfg) -> Result {
-        self.put_rec(zone_addr(z), &zone_encode(name, cfg)).await
+        let n = if z < self.zones.get() { self.zone_len_of(z) } else { self.tally(z) };
+        self.put_rec(zone_addr(z), &zone_encode(name, cfg, n)).await?;
+        if self.zcache.get().iter().any(|e| e.0 == z && e.1 == n) || !self.dirty(z) {
+            self.set_dirty(z, false);
+        }
+        Ok(())
     }
 
     async fn new_zone(&self, name: &[u8], cfg: &ZoneCfg) -> Result {
@@ -1061,7 +1193,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     fn accepts(&self, op: &Op) -> Option<bool> {
         let exists = |n: u16| n < MAX_CHANNELS && ch_valid(&self.read_ch(n));
         Some(match *op {
-            Op::DeleteChannel(n) | Op::Skip(n, _) | Op::Hide(n, _) | Op::Move(n, _) => exists(n),
+            Op::DeleteChannel(n) | Op::Skip(n, _) | Op::Hide(n, _) => exists(n),
+            Op::Move(n, z) => exists(n) && self.room(z, n), // CHAN-35
             Op::Renumber(n, to) => to < MAX_CHANNELS && !exists(to) && exists(n),
             Op::NewZone => self.zones.get() < MAX_ZONES,
             Op::DeleteZone(z) | Op::Zone(z, _) | Op::RenameZone(z, _) => z < self.zones.get(),
@@ -1089,6 +1222,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::Wipe => self.wipe().await,
             Op::Skip(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_SKIP } else { c.flags & !ferrite_app::chan::FLAG_SKIP }).await,
             Op::Hide(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_HIDDEN } else { c.flags & !ferrite_app::chan::FLAG_HIDDEN }).await,
+            Op::Move(n, z) if !self.room(z, n) => Err(NorError),
             Op::Move(n, z) => edit(n, &|c| c.zone = z).await,
             Op::Renumber(n, to) => {
                 if ch_valid(&self.raw_ch(to)?) {
@@ -1478,9 +1612,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 }
 
-/// The zone map's key for a channel's zone byte (anything past the last zone counts as no zone).
-fn zkey(z: ZoneId) -> ZoneId {
-    if z < MAX_ZONES { z } else { NO_ZONE }
+/// A channel record's zone key ([`crate::members`]): its zone, or [`FREE`] when it holds no channel.
+fn key(b: &[u8; CH_LEN]) -> ZoneId {
+    if ch_valid(b) { zkey(ch_zone(b)) } else { FREE }
 }
 
 /// The range presets a first boot gets after setup, by region (`0 1 4`'s default: 2 m, 70 cm, airband, marine,
@@ -1607,43 +1741,55 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
     }
 
     fn zone_len(&self, zone: ZoneId) -> u16 {
-        self.zmap.iter().filter(|z| z.get() == zone).count() as u16
+        if zone == ALL || zone == FREE {
+            return 0;
+        }
+        self.zone_len_of(zone)
+    }
+
+    fn zone_room(&self, zone: ZoneId, num: u16) -> bool {
+        self.room(zone, num)
+    }
+
+    fn slot_zones(&self, zones: [ZoneId; 3]) {
+        self.set_slot_zones(zones);
     }
 
     fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel> {
-        let num = self.nth_num(i, |z| z == zone)?;
-        ch_decode(num, &self.read_ch(num))
+        if zone == ALL || zone == FREE {
+            return None;
+        }
+        let (num, b) = self.nth(zone, i)?;
+        ch_decode(num, &b)
     }
 
     fn count(&self) -> u16 {
-        self.zmap.iter().filter(|z| z.get() != EMPTY).count() as u16
+        self.count.get()
     }
 
     fn by_num(&self, num: u16) -> Option<(Channel, u16)> {
         let c = ch_decode(num, &self.read_ch(num))?;
-        let key = zkey(c.zone);
-        let pos = (0..num).filter(|&n| self.zmap[n as usize].get() == key).count() as u16;
-        Some((c, pos))
+        Some((c, self.rank(zkey(c.zone), num)))
     }
 
     fn free_num(&self, from: u16) -> Option<u16> {
-        (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.zmap[n as usize].get() == EMPTY)
+        (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.key_of(n) == FREE)
     }
 
     fn zone_of(&self, n: u16) -> Option<ZoneId> {
-        self.zmap.get(n as usize).map(Cell::get).filter(|&z| z != EMPTY)
+        Some(self.key_of(n)).filter(|&z| z != FREE)
     }
 
     fn get(&self, num: u16) -> Option<Channel> {
-        if self.zmap.get(num as usize)?.get() == EMPTY {
+        if num >= MAX_CHANNELS || self.peek_empty(num) {
             return None;
         }
         ch_decode(num, &self.read_ch(num))
     }
 
     fn by_number(&self, i: u16) -> Option<Channel> {
-        let num = self.nth_num(i, |z| z != EMPTY)?;
-        ch_decode(num, &self.read_ch(num))
+        let (num, b) = self.nth(ALL, i)?;
+        ch_decode(num, &b)
     }
 
     fn position(&self, num: u16) -> Option<Pos> {
@@ -1655,7 +1801,7 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
     }
 
     fn located(&self, num: u16) -> Option<(Channel, Pos)> {
-        if self.zmap.get(num as usize)?.get() == EMPTY {
+        if num >= MAX_CHANNELS || self.peek_empty(num) {
             return None;
         }
         let r = self.read_ch(num);

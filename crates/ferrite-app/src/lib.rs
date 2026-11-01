@@ -1231,6 +1231,8 @@ impl App {
     /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
     pub fn tick(&mut self, now: u32, live: &LiveAll, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        // Decision 333: the store keeps the member lists of the slots' zones (CHAN-36)
+        store.slot_zones([self.slots[0].zone, self.slots[1].zone, self.slots[2].zone]);
         local::tick(self, store); // CHAN-34: before anything steps through a slot's zone
         // Channel scans in the Radio task: their set going out, and the frequencies it asks for.
         chanscan::feed(self, store);

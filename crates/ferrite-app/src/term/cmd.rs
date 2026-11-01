@@ -761,33 +761,42 @@ fn refusal(r: Refusal) -> Msg {
     msg!("{}{}", key, r.why())
 }
 
+/// CHAN-35: the refusal for a zone that has its 256 channels already.
+pub(crate) const ZONE_FULL: &str = "zone: full (256 channels at most)";
+
 /// Saves a channel (TERM-9) unless the store already holds it exactly: a load of the same dump writes nothing.
-fn save<S: ChannelStore>(app: &mut App, st: &S, c: Channel) -> Msg {
-    if st.by_num(c.num).map(|x| x.0) != Some(c) {
+fn save<S: ChannelStore>(app: &mut App, st: &S, c: Channel) -> Result<Msg, Msg> {
+    if !st.zone_room(c.zone, c.num) {
+        return Err(msg!("{}", ZONE_FULL));
+    }
+    if st.get(c.num) != Some(c) {
         app.put_channel(c);
     }
     let mut m = msg!("Channel {} saved", c.num as u32 + 1);
     if c.name().is_empty() {
         m.push(b" (no name)");
     }
-    m
+    Ok(m)
 }
 
 /// [`save`] with the channel's position set or cleared (CHAN-2: `pos=`); nothing written when both are as stored.
-fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>) -> Msg {
-    if st.by_num(c.num).map(|x| x.0) != Some(c) || st.position(c.num) != pos {
+fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>) -> Result<Msg, Msg> {
+    if !st.zone_room(c.zone, c.num) {
+        return Err(msg!("{}", ZONE_FULL));
+    }
+    if st.get(c.num) != Some(c) || st.position(c.num) != pos {
         app.put_channel_pos(c, pos);
     }
     let mut m = msg!("Channel {} saved", c.num as u32 + 1);
     if c.name().is_empty() {
         m.push(b" (no name)");
     }
-    m
+    Ok(m)
 }
 
 fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch")? as u16;
-    let old = st.by_num(num).map(|x| x.0);
+    let old = st.get(num);
     let missing = || msg!("ch {}: no such channel", num as u32 + 1);
     if t.clone().next()?.is_some() && super::list::radio_channel(app) == Some(num) {
         return Err(msg!("Channel {} is open in the radio's editor", num as u32 + 1)); // TERM-17
@@ -812,8 +821,8 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
             check(&c)?;
             // A line without pos= keeps the position the channel has (the link sets it too: LINK-53).
             Ok(Done::Said(match pos {
-                Some(p) => save_pos(app, st, c, p),
-                None => save(app, st, c),
+                Some(p) => save_pos(app, st, c, p)?,
+                None => save(app, st, c)?,
             }))
         }
         Some(Tok::Word(w)) if same(w, b"delete") => {
@@ -834,7 +843,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 if t.next()?.is_some() {
                     return Err(msg!("ch: one field at a time"));
                 }
-                return Ok(Done::Said(save_pos(app, st, c, p)));
+                return Ok(Done::Said(save_pos(app, st, c, p)?));
             }
             let was = c;
             field(&mut c, key, v, st)?;
@@ -842,7 +851,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 return Err(msg!("ch: one field at a time"));
             }
             chfield::check_change(&was, &c).map_err(refusal)?; // as the editors change a field
-            Ok(Done::Said(save(app, st, c)))
+            Ok(Done::Said(save(app, st, c)?))
         }
     }
 }
@@ -1398,7 +1407,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
                 return Ok(Done::Said(msg!("No home channel")));
             }
             let n = index(w, MAX_CHANNELS as u32, "home")? as u16;
-            if st.by_num(n).is_none() {
+            if st.get(n).is_none() {
                 return Err(msg!("home: channel {} doesn't exist", n as u32 + 1));
             }
             app.set.home_ch = Some(n);
@@ -2262,7 +2271,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 }
             }
             5 if i == 0 => {
-                if let Some(h) = app.set.home_ch.filter(|&h| st.by_num(h).is_some()) {
+                if let Some(h) = app.set.home_ch.filter(|&h| st.get(h).is_some()) {
                     num(out, b"home ", h as u32 + 1);
                     return true;
                 }
@@ -2319,8 +2328,8 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
             slot_line(app, st, i as u8, out);
             true
         }
-        List::Show(n) => match (i, st.by_num(n)) {
-            (0, Some((c, _))) => {
+        List::Show(n) => match (i, st.get(n)) {
+            (0, Some(c)) => {
                 ch_line(&c, st, out);
                 true
             }
@@ -2461,8 +2470,8 @@ pub fn slot_line<S: ChannelStore>(app: &App, st: &S, s: u8, out: &mut Line) {
     out.push(&[b'A' + s, if g.active { b'*' } else { b' ' }, b' ']);
     match g.channel {
         Some(n) => {
-            match st.by_num(n) {
-                Some((c, _)) => head(b"ch ", n, c.name(), out),
+            match st.get(n) {
+                Some(c) => head(b"ch ", n, c.name(), out),
                 None => num(out, b"ch ", n as u32 + 1),
             }
             out.push(b" ");
