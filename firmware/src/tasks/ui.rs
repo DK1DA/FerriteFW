@@ -41,9 +41,20 @@ impl Sink for Out {
         }
         self.0.room() as usize
     }
+    /// One whole frame (or a terminal's bytes). Into `TERM_OUT` with [`crate::chan::TERM_OUT_LOCK`] held for the copy
+    /// only (decision 331): the DSP task's audio frames go in between, never while the session works out an answer
+    /// or the Live View draws.
     fn put(&mut self, b: &[u8]) {
-        for &c in b {
-            self.0.put(c);
+        let r = self.0;
+        let copy = || {
+            for &c in b {
+                r.put(c);
+            }
+        };
+        if core::ptr::eq(r, &TERM_OUT) {
+            crate::chan::term_out_locked(copy);
+        } else {
+            copy();
         }
     }
 }
@@ -581,9 +592,9 @@ pub async fn task() {
             let cable_free = !bringup::ON.load(Relaxed);
             // LINK-19.5: Bluetooth at its unlocked rate carries a faster Live View
             ports.set_bt_fast(crate::hal::uart::rate(crate::report::UART_BT) >= ferrite_core::link::BT_FAST);
-            // Decision 290: the DSP task, which preempts this one, puts its audio frames into TERM_OUT only while no
-            // frame of the session's is half written.
-            crate::chan::term_out_locked(|| ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true)));
+            // Decisions 290, 331: the DSP task, which preempts this one, puts its audio frames into TERM_OUT only while
+            // no frame of the session's is half written: `Out` holds the flag for each frame's copy, not the poll.
+            ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true));
             if cable_free {
                 crate::hal::uart::tx_ring(crate::report::UART_CPS, &TERM_OUT); // decision 290: the interrupt sends it
             }

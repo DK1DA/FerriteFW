@@ -396,3 +396,36 @@ fn event_log_events() {
     pc.st.log_dtmf();
     assert!(pc.events(500).is_empty());
 }
+
+/// LINK-13.6 (decision 331): while the cable's session listens, its events (here a Live View drawn as the screen
+/// changes every 100 ms) stay within `RATE_CABLE_LISTEN`, so the audio keeps its share of the cable.
+#[test]
+fn listening_slows_the_events() {
+    let bytes = |listen: bool| {
+        let mut pc = Pc::new(true);
+        if listen {
+            assert_eq!(pc.ask(msg::AUDIO, &[1]).0, 0);
+        }
+        pc.ask(msg::SUBSCRIBE, &[ev::SUB_UI, 1, ev::TEXTS]);
+        let mut out = Wire(Vec::new());
+        let start = pc.now;
+        let keys = [Key::Menu, Key::Down, Key::Down, Key::Exit, Key::Up, Key::Exit];
+        for i in 0..60u32 {
+            if i % 20 == 19 {
+                pc.ask(msg::SUBSCRIBE, &[ev::SUB_UI, 1, ev::TEXTS | ev::RENEW]); // the PC keeps it going
+            }
+            let k = keys[i as usize % keys.len()];
+            pc.app.key_down(k, pc.now, &pc.st);
+            pc.app.key_up(k, pc.now + 20, &pc.st);
+            for _ in 0..10 {
+                pc.now += 10;
+                pc.link.events(&mut pc.app, &pc.st, &pc.dev, &pc.live, pc.now, Some(&mut pc.ui), &mut out);
+            }
+        }
+        (out.0.len() as u32, pc.now - start)
+    };
+    let (quiet, ms) = bytes(true);
+    assert!(quiet <= ev::RATE_CABLE_LISTEN * ms / 1000 + ev::BURST + MAX_WIRE as u32, "{quiet} B in {ms} ms while listening");
+    let (busy, _) = bytes(false);
+    assert!(busy > quiet, "without audio the events take more: {busy} against {quiet}");
+}

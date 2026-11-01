@@ -175,7 +175,7 @@ impl Session {
             self.unsubscribe(); // the PC went quiet: events stop (LINK-46)
             return;
         }
-        let rate = if self.by == crate::remote::BY_CABLE { ev::RATE_CABLE } else if self.fast { ev::RATE_BT_FAST } else { ev::RATE_BT } as i32;
+        let rate = ev::rate(self.by == crate::remote::BY_CABLE, self.fast, self.audio != 0) as i32;
         let dt = now.wrapping_sub(self.sub.at).min(10_000) as i32;
         self.sub.budget = (self.sub.budget + dt * rate).min(ev::BURST as i32 * 1000);
         self.sub.at = now;

@@ -244,7 +244,21 @@ pub mod event {
     /// the events take 1 KB/s of it, the rest for the answers. The screen as drawn (LINK-19.5) needs it.
     pub const RATE_BT_FAST: u32 = 1000;
     pub const RATE_CABLE: u32 = 4000;
+    /// The cable while its session listens (LINK-13.6, decision 331): the audio's ~12.6 KB/s comes first, so the
+    /// events (the Live View) take less of the ~23 KB/s 230400 carries, leaving room for the answers.
+    pub const RATE_CABLE_LISTEN: u32 = 3000;
     pub const BURST: u32 = 300;
+
+    /// Events' bytes a second on this port: the cable (`listening`: its session takes receive audio), or Bluetooth
+    /// (`fast`: at its unlocked rate).
+    pub const fn rate(cable: bool, fast: bool, listening: bool) -> u32 {
+        match (cable, listening, fast) {
+            (true, true, _) => RATE_CABLE_LISTEN,
+            (true, false, _) => RATE_CABLE,
+            (false, _, true) => RATE_BT_FAST,
+            (false, _, false) => RATE_BT,
+        }
+    }
     /// Events stop when the session has sent nothing for this long ([`super::msg::SUBSCRIBE`] with
     /// [`RENEW`] keeps them going).
     pub const QUIET_MS: u32 = 10_000;
@@ -659,6 +673,22 @@ pub const RATES: [u32; 4] = [115_200, 230_400, 460_800, 921_600];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LINK-13.6 (decision 331): while the cable's session listens its events slow down, so the audio, the events
+    /// and a margin for the answers fit the ~23 KB/s 230400 carries; Bluetooth's rates are as they were.
+    #[test]
+    fn listening_cable_leaves_the_audio_room() {
+        assert_eq!(event::rate(true, false, false), event::RATE_CABLE);
+        assert_eq!(event::rate(true, true, true), event::RATE_CABLE_LISTEN);
+        assert_eq!(event::rate(false, true, true), event::RATE_BT_FAST);
+        assert_eq!(event::rate(false, false, true), event::RATE_BT);
+        // a 16 ms block's whole frame on the wire, 62.5 a second
+        let mut w = [0u8; MAX_WIRE];
+        let k = crate::rxaudio::frame(0, 0, 0, Some(&[0x55; crate::rxaudio::BLOCK]), &mut w).unwrap();
+        let audio = k as u32 * crate::rxaudio::RATE_HZ / crate::rxaudio::BLOCK as u32;
+        let line = 230_400 / 10;
+        assert!(audio + event::RATE_CABLE_LISTEN + 5_000 <= line, "audio {audio} B/s");
+    }
 
     /// LINK-36: bursts of B bytes, then G ms of quiet from the last byte; a short burst is topped up only after a
     /// full gap; B 0 is unpaced; `bt pace`'s limits; the rate it allows at 9600.

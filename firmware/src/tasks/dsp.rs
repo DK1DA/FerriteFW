@@ -132,14 +132,18 @@ impl AudioOut {
                 self.quiet = 0;
             }
         }
-        self.drain();
+        self.drain(true);
     }
 
-    fn drain(&mut self) {
+    /// As many queued as fit go out. `fresh`: a block was just made (a block still left then counts as waiting);
+    /// else the capture half's retry (decision 331), which keeps the ring topped up between blocks.
+    fn drain(&mut self, fresh: bool) {
         while self.n > 0 {
             let (b, src) = self.q[self.head as usize];
             if !self.put(src, Some(&b)) {
-                AUDIO_WAITS.fetch_add(1, Relaxed);
+                if fresh {
+                    AUDIO_WAITS.fetch_add(1, Relaxed);
+                }
                 return;
             }
             self.head = (self.head + 1) % AUDIO_QUEUE as u8;
@@ -148,10 +152,15 @@ impl AudioOut {
     }
 }
 /// A whole link frame into the cable's send ring (decision 290), or nothing (`false`): not while the bring-up log has
-/// the cable, a thread-mode writer is mid-frame, or the ring lacks room.
+/// the cable, a thread-mode writer is mid-frame, or the ring lacks room. Decision 331: room for the frame and one
+/// more of the session's ([`ferrite_core::link::MAX_WIRE`]) stays free, so a session that found room for its answer
+/// before working it out still finds it after, whatever audio went in meanwhile.
 fn to_cable(w: &[u8]) -> bool {
     use crate::chan::{TERM_OUT, TERM_OUT_LOCK};
-    if crate::bringup::ON.load(Relaxed) || TERM_OUT_LOCK.load(core::sync::atomic::Ordering::SeqCst) || (TERM_OUT.room() as usize) < w.len() {
+    if crate::bringup::ON.load(Relaxed)
+        || TERM_OUT_LOCK.load(core::sync::atomic::Ordering::SeqCst)
+        || (TERM_OUT.room() as usize) < w.len() + ferrite_core::link::MAX_WIRE
+    {
         return false;
     }
     for &b in w {
@@ -395,11 +404,16 @@ pub async fn task() {
                         let mut y = out;
                         agc.chunk(&mut y[..n], open);
                         AUDIO_GAIN.store(agc.gain() as u32, Relaxed);
+                        let mut made = false;
                         for &x in &y[..n] {
                             pack.push(x, |b| {
                                 AUDIO_MADE.fetch_add(1, Relaxed);
                                 sender.block(b);
+                                made = true;
                             });
+                        }
+                        if !made {
+                            sender.drain(false); // decision 331: blocks left waiting go as soon as there's room
                         }
                     }
                     // LINK-13.9: the decoders' samples as they are (no gain)
