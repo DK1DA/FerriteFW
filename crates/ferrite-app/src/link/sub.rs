@@ -167,7 +167,7 @@ impl Session {
     /// session has it.
     #[allow(clippy::too_many_arguments)]
     #[inline(never)] // its buffers in its own frame, not stacked on the session's answer (SBAR-23)
-    pub fn events<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, now: u32, ui: Option<&mut Track>, out: &mut impl Sink) {
+    pub fn events<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, now: u32, ui: Option<&mut Track>, out: &mut dyn Sink) {
         if self.sub.mask == 0 {
             return;
         }
@@ -250,7 +250,7 @@ impl Session {
     }
 
     /// One message event, if one is due: new messages first (the oldest new one), then a state change.
-    fn message_event(&mut self, d: &dyn crate::data::Data, out: &mut impl Sink) {
+    fn message_event(&mut self, d: &dyn crate::data::Data, out: &mut dyn Sink) {
         let (now, n) = watched(d);
         let prev = self.sub.msgs;
         if n < self.sub.msgs_n {
@@ -294,7 +294,7 @@ impl Session {
     /// LINK-57: the oldest event logged since the last one sent (or since the subscription), as `LOG_READ` gives it;
     /// one a call, the rest next time. Events the log has already dropped are skipped; a log cleared on the radio
     /// says nothing.
-    fn log_event(&mut self, d: &dyn crate::data::Data, out: &mut impl Sink) {
+    fn log_event(&mut self, d: &dyn crate::data::Data, out: &mut dyn Sink) {
         let (top, kept) = (log_top(d), d.events() as u32);
         let want = self.sub.log.max(top.saturating_sub(kept));
         if want >= top {
@@ -315,7 +315,7 @@ impl Session {
     }
 
     /// One `EVENT` frame out: false (nothing sent) if `out` lacks room for it and an answer after it.
-    fn emit(&mut self, payload: &[u8], out: &mut impl Sink) -> bool {
+    fn emit(&mut self, payload: &[u8], out: &mut dyn Sink) -> bool {
         let mut w = [0u8; MAX_WIRE];
         let Some(k) = wire::build(msg::EVENT, self.sub.seq, payload, &mut w) else { return false };
         if out.room() < k + MAX_WIRE {

@@ -254,7 +254,7 @@ impl Session {
     /// the radio's DSP task frames its own the same way, decision 290), plain: never
     /// through the compression block (LINK-51), so it goes straight to `out`. Dropped whole when there's no room
     /// (the cable's ring holds several; a lost block costs only itself).
-    pub fn audio_out(&mut self, slot: u8, flags: u8, blk: Option<&ferrite_core::rxaudio::Block>, out: &mut impl Sink) -> bool {
+    pub fn audio_out(&mut self, slot: u8, flags: u8, blk: Option<&ferrite_core::rxaudio::Block>, out: &mut dyn Sink) -> bool {
         let mut w = [0u8; MAX_WIRE];
         if let Some(k) = ferrite_core::rxaudio::frame(self.audio_seq, slot, flags, blk, &mut w) {
             if out.room() >= k {
@@ -294,7 +294,7 @@ impl Session {
     }
 
     /// Handles the owner's answers, ends a quiet session, and answers a waiting frame when there is room.
-    pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut impl Sink) {
+    pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut dyn Sink) {
         self.now = now;
         // BACK on the progress screen (LINK-9) is ours only while a write session runs.
         if self.session && app.take_link_answer() == Some(LinkAnswer::Cancelled) {
@@ -402,13 +402,13 @@ impl Session {
     }
 
     /// The answer out, and the port takes the next frame.
-    fn send(&mut self, ty: u8, seq: u8, ans: &[u8], out: &mut impl Sink) {
+    fn send(&mut self, ty: u8, seq: u8, ans: &[u8], out: &mut dyn Sink) {
         Self::frame_out(ty, seq, ans, out);
         (self.have, self.rn) = (false, 0);
     }
 
     /// A frame out, leaving what the port is receiving alone (a stream's frames, LINK-50).
-    fn frame_out(ty: u8, seq: u8, ans: &[u8], out: &mut impl Sink) {
+    fn frame_out(ty: u8, seq: u8, ans: &[u8], out: &mut dyn Sink) {
         let mut w = [0u8; MAX_WIRE];
         if let Some(k) = wire::build(ty | wire::ANSWER, seq, ans, &mut w) {
             // Only a `KEY` answer can find too little room (the send ring full of them while keyed, TX-43): it is
@@ -420,7 +420,7 @@ impl Session {
     }
 
     /// LINK-50: the stream's next answer, framed `STREAM_MORE` while more follow, `STREAM` for the last.
-    fn stream_frame<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, out: &mut impl Sink) {
+    fn stream_frame<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, out: &mut dyn Sink) {
         let Some(mut s) = self.stream.take() else { return };
         let mut ans = [0u8; MAX_PAYLOAD];
         let mut o = Out { a: &mut ans, n: 1 };
@@ -477,7 +477,7 @@ impl Session {
     }
 
     /// A `WRITE_MANY`'s next record (LINK-41), and its answer once the last is applied or one is refused.
-    fn many_poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, now: u32, out: &mut impl Sink) {
+    fn many_poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, now: u32, out: &mut dyn Sink) {
         self.last = now;
         app.link_transfer(now); // DISP-30: a long `WRITE_MANY` keeps the LED flashing
         let seq = self.many.map_or(0, |m| m.seq);
