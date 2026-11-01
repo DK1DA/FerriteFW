@@ -53,6 +53,7 @@ pub mod rxlevel;
 pub mod rxsleep;
 pub mod same;
 pub mod same_rx;
+pub mod sat;
 pub mod scan;
 pub mod settle;
 pub mod softsq;
