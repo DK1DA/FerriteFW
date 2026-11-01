@@ -86,7 +86,7 @@ def bt_needs_the_pin_with_a_lock(t):
         s, _ = raw.link.ask(fl.BEGIN, struct.pack("<H", 1))
         t.eq(s, 0, "a write session now")
         bad = bytearray(rec)
-        bad[3:7] = struct.pack("<I", 2_000_000_000)  # 20 GHz: no band has it
+        bad[4:8] = struct.pack("<I", 2_000_000_000)  # 20 GHz: no band has it (protocol 3: RX after the 2-byte zone)
         try:
             s, why = raw.link.ask(fl.WRITE_MANY, bytes([fl.CHANNEL]) + struct.pack("<HB", 0, len(bad)) + bytes(bad))
             t.check(s != 0, "a channel outside every band: refused", (s, why))

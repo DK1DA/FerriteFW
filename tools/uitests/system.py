@@ -28,8 +28,8 @@ def info_and_terminal_over_the_link(t):
     terminal line on the link session and gives its output (`get` as the menu shows it)."""
     r = t.r.link.ok(fl.INFO)
     ver, rest = fl.text(r)
-    chans, zones, presets, slen, region = struct.unpack("<HBBHB", rest[:7])
-    call, tail = fl.text(rest[7:])
+    chans, zones, presets, slen, region = struct.unpack("<HHBHB", rest[:8])  # protocol 3: zones are 2 bytes
+    call, tail = fl.text(rest[8:])
     t.eq(fl.build_name(tail), t.r.build, "INFO's build is HELLO's")
     u = t.keys("MENU 0 9 8")
     t.check(u.row("Version")["value"].startswith("v" + ver.lstrip("v")), "INFO's version is About's",

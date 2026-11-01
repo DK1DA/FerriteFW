@@ -112,7 +112,7 @@ def link_records_round_trip(t):
     t.need(not ok and "no such channel" in out, f"channel {n + 1} in use: {out}")
     new = bytearray(rec)
     new[0:2] = struct.pack("<H", n)
-    new[7:23] = b"UITEST LINK".ljust(16, b"\x00")
+    new[8:24] = b"UITEST LINK".ljust(16, b"\x00")  # protocol 3: number (2), zone (2), RX (4), then the name
     try:
         s, a = ask(fl.BEGIN, struct.pack("<H", 1))
         t.check(s == 0, "BEGIN", fl.why(s, a))
@@ -125,7 +125,7 @@ def link_records_round_trip(t):
         ask(fl.END, b"")
         t.has(t.cmd(f"ch {n + 1}"), "UITEST LINK", "channel 990 reads back on the terminal")
         bad = bytearray(new)
-        bad[3:7] = struct.pack("<I", 70000000)  # 700 MHz: no chip receives it
+        bad[4:8] = struct.pack("<I", 70000000)  # 700 MHz: no chip receives it
         ask(fl.BEGIN, struct.pack("<H", 1))
         s, a = write_one(n, bad)
         ask(fl.END, b"")
