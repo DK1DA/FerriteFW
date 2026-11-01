@@ -61,6 +61,10 @@ fn main() {
             }
             None => ferrite_sim::simcore::SimCore::new(1, false),
         };
+        // `--cut-restart`: the next restart after a raw write is a power cut (decision 339; Console's e2e test).
+        if args.iter().any(|a| a == "--cut-restart") {
+            sim.cut_next_restart();
+        }
         // `--no-ssb-patch`: a radio without the SSB patch (HF-20, SELF-6, INST-14; the UI tests' sim_args).
         if args.iter().any(|a| a == "--no-ssb-patch") {
             sim.device_mut().selftest.ssb_patch = false;

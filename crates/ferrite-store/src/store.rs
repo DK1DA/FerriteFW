@@ -2,8 +2,9 @@
 //! fixed places in SPI flash; the settings and slots saved 2 s after the last change ([`FlashStore::autosave`])
 //! and at power off ([`FlashStore::flush`]).
 //!
-//! Mount ([`FlashStore::mount_async`]): finish a rewrite a power cut stopped; check the layout header (missing
-//! or another layout: the chip is formatted, a first boot); count the zones, the channels, and each zone's
+//! Mount ([`FlashStore::mount_async`]): check the layout header (another layout's, or a move's migration mark:
+//! left alone for Console, UPD-16; none, and none of Ferrite's records: formatted, a first boot, INST-6); finish a
+//! rewrite a power cut stopped; count the zones, the channels, and each zone's
 //! channels against the count its record holds ([`crate::members`]: no zone per channel is kept in RAM, decision
 //! 333). No settings stored: a first boot (setup, BOOT-12), and the first save after setup seeds the region's
 //! range presets.
@@ -32,7 +33,7 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, MESSAGES, PRESETS, SETTINGS, TRIMS, V2_HEADER, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, LAYOUT_MOVING, MESSAGES, MIGRATE_MARK, PRESETS, SETTINGS, TRIMS, V2_HEADER, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
@@ -43,8 +44,9 @@ use ferrite_ui::text::Buf;
 pub const HEADER_MAGIC: u32 = 0x5452_5246; // "FRRT"
 /// Where in the layout header the calibration's CRC is (CAL-7).
 const CAL_CRC_AT: usize = 6;
-/// 3: decision 333's map ([`ferrite_core::layout`]). A chip with no Ferrite header is formatted (a first install,
-/// INST-6); one with another layout's header is left alone until Console finishes the update (UPD-16).
+/// 3: decision 333's map ([`ferrite_core::layout`]). A chip with no Ferrite header and none of Ferrite's records is
+/// formatted (a first install, INST-6); one with another layout's header, a migration mark, or records without a
+/// header is left alone until Console finishes the update (UPD-16, decision 339).
 pub use ferrite_core::layout::LAYOUT_VERSION;
 
 /// The largest slots part [`FlashStore::restore`] reads (about 160 bytes now).
@@ -111,6 +113,9 @@ pub enum Job {
     Counts,
     /// LINK-60 (decision 333): a raw write of the data range, Console's.
     Data(DataWrite),
+    /// LINK-62 (decision 339): queued before the first raw write of a power-on: the migration mark, then this
+    /// layout's header, so the chip is never without either until the stamp; `from` the layout found.
+    DataBegin(u16),
 }
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
@@ -175,6 +180,10 @@ pub struct FlashStore<N: Nor, D: Data> {
     changed_at: Cell<u32>,
     /// Writes are queued for the Storage task (the radio) instead of done at once.
     deferred: Cell<bool>,
+    /// LINK-61: a raw write was made this power-on (the begin queued before it, decision 339), and the begin is
+    /// done: raw writes run only after it (one that failed is queued again before the next).
+    raw: Cell<bool>,
+    begun: Cell<bool>,
     jobs: RefCell<[Option<Job>; QUEUE]>,
     head: Cell<u8>,
     queued: Cell<u8>,
@@ -232,6 +241,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             seen: Cell::new(0),
             changed_at: Cell::new(0),
             deferred: Cell::new(false),
+            raw: Cell::new(false),
+            begun: Cell::new(false),
             jobs: RefCell::new([None; QUEUE]),
             head: Cell::new(0),
             queued: Cell::new(0),
@@ -274,8 +285,11 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         // at all done to it.
         match self.header()? {
             Header::Ok => {}
-            // UPD-16: another layout's data: left alone, nothing read or written (Console moves it)
+            // UPD-16: another layout's data, or a move not finished: left alone, nothing read or written (Console
+            // moves it, from its copy)
             Header::Other(v) => return Ok(Mounted::Update(v)),
+            // UPD-16 (decision 339): no header, but Ferrite's records are there: never formatted silently
+            Header::None if self.records_found()? => return Ok(Mounted::Update(LAYOUT_MOVING)),
             Header::None => self.format().await?,
         }
         scratch::recover(&self.f).await?;
@@ -405,7 +419,11 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// UPD-16: what the chip holds: this layout's header; another layout's (a Ferrite header at 0x000000 with
     /// another version, or layout 2's at [`V2_HEADER`]); or none (a blank chip, or stock's data: a first install).
+    /// A migration mark (decision 339) comes first: a move Console began and hasn't stamped.
     fn header(&self) -> Result<Header> {
+        if mark_at(&self.f)?.is_some() {
+            return Ok(Header::Other(LAYOUT_MOVING));
+        }
         Ok(match header_version(&self.f, LAYOUT_HEADER.start)? {
             Some(LAYOUT_VERSION) => Header::Ok,
             Some(v) => Header::Other(v),
@@ -414,6 +432,23 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 None => Header::None,
             },
         })
+    }
+
+    /// UPD-16 (decision 339): a chip with no header holds Ferrite's records all the same: a settings record (its
+    /// magic and CRC-32) at layout 3's or layout 2's place, or a channel record (its version and CRC-16) in layout 3's
+    /// first channel sector. A blank chip or stock's data (a first install, INST-6) has none of them.
+    fn records_found(&self) -> Result<bool> {
+        if settings::latest(&self.f)?.is_some() || settings::latest_of(&self.f, V2_SETTINGS, MAX_PAYLOAD)?.is_some() {
+            return Ok(true);
+        }
+        let mut b = [0u8; CH_LEN];
+        for k in 0..CH_PER_SECTOR {
+            self.f.raw_read(CHANNELS.start + k * CH_LEN as u32, &mut b)?;
+            if ch_valid(&b) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// CAL-7 (TX audit F8): the calibration sector (read only) against the CRC the layout header recorded; none
@@ -447,7 +482,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// skipped; never calibration, the SSB patch or the update area), then the header (a cut before it formats
     /// again next time). Stock's old codeplug, record and voice prompts are in the install's backup (decision 333).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG] {
+        for r in [LAYOUT_HEADER, MIGRATE_MARK, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
@@ -457,17 +492,69 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.f.program(LAYOUT_HEADER.start, &header_bytes()).await
     }
 
-    /// LINK-60, LINK-62: one raw write. A stamp writes this layout's header (its sector erased first) as the format
-    /// does; the radio restarts after it (the link asks for that).
+    /// LINK-60, LINK-62: one raw write. The stamp programs only (decision 339): this layout's header must be in
+    /// place already (the begin wrote it), and the migration mark is cleared, its bytes programmed to zero; each
+    /// read back. A cut in it leaves the mark (a restart waits for Console) or the header and all the data (Ok).
     async fn data_job(&self, w: DataWrite) -> Result {
         match w {
             DataWrite::Erase(a) => self.f.erase(a).await,
             DataWrite::Program { addr, len, bytes } => self.f.program(addr, &bytes[..len as usize]).await,
             DataWrite::Stamp => {
-                self.f.erase(LAYOUT_HEADER.start).await?;
-                self.f.program(LAYOUT_HEADER.start, &header_bytes()).await
+                if header_version(&self.f, LAYOUT_HEADER.start)? != Some(LAYOUT_VERSION) {
+                    return Err(NorError);
+                }
+                while let Some(at) = mark_at(&self.f)? {
+                    self.f.program(at, &[0; MARK_LEN]).await?;
+                    let mut b = [0xFFu8; MARK_LEN];
+                    self.f.raw_read(at, &mut b)?;
+                    if b != [0; MARK_LEN] {
+                        return Err(NorError);
+                    }
+                }
+                Ok(())
             }
         }
+    }
+
+    /// Decision 339: before the first raw write of a power-on, in this order (a cut anywhere leaves the old header,
+    /// or the mark: the chip waits for Console, UPD-16): (1) the migration mark, unless one is there, in the next
+    /// erased place (none left: its sector erased first; the old header is still whole then); (2) this layout's
+    /// header at 0x000000, unless a good one is there (the sector erased first if anything else is); each read back.
+    /// The writes that follow can then take anything, layout 2's header sector included, and the stamp only clears
+    /// the mark.
+    async fn data_begin(&self, from: u16) -> Result {
+        if mark_at(&self.f)?.is_none() {
+            let mut at = None;
+            let mut b = [0u8; MARK_LEN];
+            for a in MIGRATE_MARK.step_by(MARK_LEN) {
+                self.f.raw_read(a, &mut b)?;
+                if b == [0xFF; MARK_LEN] {
+                    at = Some(a);
+                    break;
+                }
+            }
+            let at = match at {
+                Some(a) => a,
+                None => {
+                    self.f.erase(MIGRATE_MARK.start).await?;
+                    MIGRATE_MARK.start
+                }
+            };
+            self.f.program(at, &mark_bytes(from)).await?;
+            if mark_at(&self.f)?.is_none() {
+                return Err(NorError);
+            }
+        }
+        if header_version(&self.f, LAYOUT_HEADER.start)? != Some(LAYOUT_VERSION) {
+            if !self.f.blank(LAYOUT_HEADER.start, SECTOR)? {
+                self.f.erase(LAYOUT_HEADER.start).await?;
+            }
+            self.f.program(LAYOUT_HEADER.start, &header_bytes()).await?;
+            if header_version(&self.f, LAYOUT_HEADER.start)? != Some(LAYOUT_VERSION) {
+                return Err(NorError);
+            }
+        }
+        Ok(())
     }
 
     /// CHAN-36: zone records wait for their channel count (the tests).
@@ -551,12 +638,18 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let j = self.jobs.borrow_mut()[h].take();
         self.head.set(((h + 1) % QUEUE) as u8);
         self.queued.set(self.queued.get() - 1);
+        self.running.set(true); // taken: not idle until `run` has done it (decision 339)
         j
     }
 
     /// Writes are waiting.
     pub fn has_jobs(&self) -> bool {
         self.queued.get() > 0
+    }
+
+    /// LINK-61: a raw write was made this power-on (a restart waits longer for the store then: LINK-62).
+    pub fn raw(&self) -> bool {
+        self.raw.get()
     }
 
     /// Nothing queued and nothing being written (power off waits for this: PWR-17).
@@ -566,9 +659,25 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// Carries out a write (the Storage task; at once in the simulator).
     pub async fn run(&self, job: Job) -> bool {
+        // Decision 339: running (not idle) from the moment the job is taken until it is done, raw writes too, so a
+        // `DATA_READ` and a restart wait for it (LINK-59, LINK-62)
+        self.running.set(true);
+        self.running_write.set(matches!(job, Job::Write(_)));
+        let ok = self.run_job(job).await;
+        self.running.set(false);
+        ok
+    }
+
+    async fn run_job(&self, job: Job) -> bool {
         if let Job::Data(w) = job {
             // LINK-60: raw writes go whatever the layout (that is when Console needs them), not on a failed chip
-            let ok = self.mounted.get() != Mounted::Failed && self.data_job(w).await.is_ok();
+            let ok = self.mounted.get() != Mounted::Failed && self.begun.get() && self.data_job(w).await.is_ok();
+            self.bump();
+            return ok;
+        }
+        if let Job::DataBegin(from) = job {
+            let ok = self.mounted.get() != Mounted::Failed && self.data_begin(from).await.is_ok();
+            self.begun.set(ok);
             self.bump();
             return ok;
         }
@@ -576,8 +685,6 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.saving.set(false);
             return false;
         }
-        self.running.set(true);
-        self.running_write.set(matches!(job, Job::Write(_)));
         let ok = match job {
             Job::Write(w) => self.apply_async(w).await.is_ok(),
             Job::Op(op) => self.perform(op).await.is_ok(),
@@ -628,10 +735,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Job::DeleteContact(c) => self.contacts.delete(&self.f, c.as_bytes()).await.unwrap_or(false),
             Job::AprsSave => self.aprs_save(None).await.is_ok(),
             Job::Counts => self.write_counts().await.is_ok(),
-            Job::Data(_) => false, // above
+            Job::Data(_) | Job::DataBegin(_) => false, // above
         };
         self.bump();
-        self.running.set(false);
         ok
     }
 
@@ -1691,6 +1797,43 @@ fn header_version<N: Nor>(f: &Flash<N>, at: u32) -> Result<Option<u16>> {
     Ok((crate::u32_at(&h, 0) == HEADER_MAGIC && crate::u32_at(&h, 16) == c.get()).then(|| crate::u16_at(&h, 4)))
 }
 
+/// Layout 2's settings copies (UPD-16's check for Ferrite's records on a chip with no header).
+const V2_SETTINGS: [u32; 2] = [0x02_D000, 0x02_E000];
+
+/// The migration mark (decision 339, [`MIGRATE_MARK`]): magic "FRMV", the layout found (u16), this layout (u16),
+/// 4 bytes erased, CRC-32 of the 12 bytes before. Cleared by programming all 16 to zero (the stamp).
+pub const MARK_MAGIC: u32 = 0x564D_5246; // "FRMV"
+pub const MARK_LEN: usize = 16;
+
+/// A migration mark saying a move from layout `from` began.
+pub fn mark_bytes(from: u16) -> [u8; MARK_LEN] {
+    let mut m = [0xFFu8; MARK_LEN];
+    m[..4].copy_from_slice(&MARK_MAGIC.to_le_bytes());
+    m[4..6].copy_from_slice(&from.to_le_bytes());
+    m[6..8].copy_from_slice(&LAYOUT_VERSION.to_le_bytes());
+    let mut c = Crc32::new();
+    c.update(&m[..12]);
+    m[12..16].copy_from_slice(&c.get().to_le_bytes());
+    m
+}
+
+/// Where a valid migration mark is (a move not stamped yet), if any. Read up to the first erased place.
+fn mark_at<N: Nor>(f: &Flash<N>) -> Result<Option<u32>> {
+    let mut m = [0u8; MARK_LEN];
+    for a in MIGRATE_MARK.step_by(MARK_LEN) {
+        f.raw_read(a, &mut m)?;
+        if m == [0xFF; MARK_LEN] {
+            break;
+        }
+        let mut c = Crc32::new();
+        c.update(&m[..12]);
+        if crate::u32_at(&m, 0) == MARK_MAGIC && crate::u32_at(&m, 12) == c.get() {
+            return Ok(Some(a));
+        }
+    }
+    Ok(None)
+}
+
 /// A channel record's zone key ([`crate::members`]): its zone, or [`FREE`] when it holds no channel.
 fn key(b: &[u8; CH_LEN]) -> ZoneId {
     if ch_valid(b) { zkey(ch_zone(b)) } else { FREE }
@@ -2055,13 +2198,27 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
 
     /// LINK-61: the first raw write stops the store's own (it would write over what Console writes): nothing is
-    /// read or written by the store until the radio restarts, the screen saying so as for another layout.
+    /// read or written by the store until the radio restarts, the screen saying so as for another layout. Decision
+    /// 339: the begin (the migration mark, then this layout's header) is queued ahead of it; the stamp only once
+    /// everything before it is written (false: `busy`, Console sends it again).
     fn data_write(&self, w: DataWrite) -> bool {
-        if self.mounted.get() == Mounted::Failed {
+        if self.mounted.get() == Mounted::Failed || w == DataWrite::Stamp && !self.idle() {
             return false;
         }
-        if self.ok() {
-            self.mounted.set(Mounted::Update(LAYOUT_VERSION));
+        if !self.raw.get() || !self.begun.get() && self.idle() {
+            if QUEUE - (self.queued.get() as usize) < 2 {
+                return false;
+            }
+            let from = match self.mounted.get() {
+                Mounted::Update(v) if !self.raw.get() => v,
+                Mounted::Update(_) => LAYOUT_MOVING,
+                _ => LAYOUT_VERSION,
+            };
+            self.raw.set(true);
+            self.mounted.set(Mounted::Update(LAYOUT_MOVING));
+            if !self.submit(Job::DataBegin(from)) {
+                return false; // the mark or the header didn't write: nothing more goes (at once: the simulator)
+            }
         }
         self.submit(Job::Data(w))
     }

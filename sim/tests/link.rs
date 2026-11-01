@@ -139,6 +139,14 @@ fn a_layout_2_chip_waits_for_console() {
     across.extend_from_slice(&0x1_00F0u32.to_le_bytes());
     across.extend_from_slice(&[0; 32]);
     assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 9, &across)[0], 3, "across a page");
+    // Decision 339: the header and the migration mark are the store's own; the radio says the chip is half moved
+    for at in [0u32, 0xE000] {
+        let mut e = vec![ERASE];
+        e.extend_from_slice(&at.to_le_bytes());
+        assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 9, &e)[0], 4, "{at:#x}: refused");
+    }
+    let a = ask(&mut sim, &mut t, msg::HELLO, 9, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[a.len() - 2..], &[3, 255], "LINK-61: half moved until the stamp");
     let mut crc = vec![CRC];
     crc.extend_from_slice(&0x1_0000u32.to_le_bytes());
     crc.extend_from_slice(&64u32.to_le_bytes());
@@ -161,4 +169,62 @@ fn a_layout_2_chip_waits_for_console() {
     assert_eq!(&a[a.len() - 2..], &[3, 3]);
     let r = ask(&mut sim, &mut t, msg::DATA_READ, 15, &rd(0x1_0000, 64));
     assert_eq!(&r[1..], &rec[..], "what Console wrote is there");
+}
+
+/// Decision 339, LINK-62: a power cut right after the stamp's answer (`--cut-restart`: the store's writes queued as
+/// on the radio, the stamp not yet written when the power goes) loses nothing: the radio comes back waiting for
+/// Console (D25, the layouts 3 and 255), never formatted, what was written still there; the stamp sent again
+/// finishes the move.
+#[test]
+fn a_power_cut_right_after_the_stamp_loses_nothing() {
+    use ferrite_core::link::data::{ERASE, PROGRAM, READ, STAMP};
+    use ferrite_sim::simcore::Stored;
+    use ferrite_store::sim::SimFlash;
+    let mut f = SimFlash::new();
+    let mut h = [0xFFu8; 20];
+    h[..4].copy_from_slice(&ferrite_store::store::HEADER_MAGIC.to_le_bytes());
+    h[4..6].copy_from_slice(&2u16.to_le_bytes());
+    let mut c = ferrite_store::Crc32::new();
+    c.update(&h[..16]);
+    h[16..20].copy_from_slice(&c.get().to_le_bytes());
+    f.mem[0x2_C000..0x2_C014].copy_from_slice(&h);
+    let mut sim = SimCore::with_flash(1, false, Stored::Image(f.image()));
+    sim.cut_next_restart();
+    let mut t = 0;
+    while t < 6000 {
+        t += 20;
+        sim.step(t);
+    }
+    let a = ask(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[a.len() - 2..], &[3, 2]);
+    let w = |op: u8, at: u32, rest: &[u8]| {
+        let mut p = vec![op];
+        p.extend_from_slice(&at.to_le_bytes());
+        p.extend_from_slice(rest);
+        p
+    };
+    let rec: Vec<u8> = (0..64u8).collect();
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 2, &w(ERASE, 0x1_0000, &[]))[0], 0);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 3, &w(PROGRAM, 0x1_0000, &rec))[0], 0);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 4, &w(ERASE, 0x2_C000, &[]))[0], 0);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 5, &[STAMP, 3, 0])[0], 0);
+    assert!(sim.booting(), "the restart: a power cut before the Storage task wrote the stamp");
+    while t < 14_000 {
+        t += 20;
+        sim.step(t);
+    }
+    assert_eq!(sim.screen_name(), "Update", "D25: waiting for Console, not a first boot");
+    let a = ask(&mut sim, &mut t, msg::HELLO, 6, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[a.len() - 2..], &[3, 255], "half moved: only Console's copy finishes it");
+    let r = ask(&mut sim, &mut t, msg::DATA_READ, 7, &w(READ, 0x1_0000, &[64]));
+    assert_eq!(&r[1..], &rec[..], "nothing formatted");
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 8, &[STAMP, 3, 0])[0], 0);
+    while t < 22_000 {
+        t += 20;
+        sim.step(t);
+    }
+    let a = ask(&mut sim, &mut t, msg::HELLO, 9, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[a.len() - 2..], &[3, 3], "stamped");
+    let r = ask(&mut sim, &mut t, msg::DATA_READ, 10, &w(READ, 0x1_0000, &[64]));
+    assert_eq!(&r[1..], &rec[..]);
 }

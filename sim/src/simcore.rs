@@ -261,6 +261,9 @@ pub struct SimCore {
     gps: Option<crate::fakegps::FakeGps>,
     /// 0 6 1 turned the sample's fix off (GPS-3: the fixed position or none stands in until it is on again).
     gps_off: bool,
+    /// `--cut-restart` (decision 339): the store's writes queued as on the radio, and the next restart after a raw
+    /// write is a power cut: what the Storage task hadn't done yet is lost (the stamp, when Console sent it last).
+    cut_restart: bool,
 }
 
 /// One render pass as [`SimCore::watch_passes`] records it.
@@ -343,6 +346,14 @@ impl SimCore {
         Self::with_flash(scale, owner_card, Stored::Sample)
     }
 
+    /// Decision 339's check for Ferrite Console (`--cut-restart`): the store's writes queued as on the radio (the
+    /// Storage task's turn at the start of each step), and the next restart after a raw write cuts the power, so a
+    /// stamp queued by the link but not yet written is lost. One restart only; after it, writes are done at once.
+    pub fn cut_next_restart(&mut self) {
+        self.cut_restart = true;
+        self.store.set_deferred(true);
+    }
+
     /// A radio switched on now with the flash holding `stored` (see [`Stored`]).
     pub fn with_flash(scale: usize, owner_card: bool, stored: Stored) -> Self {
         let scale = scale.clamp(1, MAX_SCALE);
@@ -413,6 +424,7 @@ impl SimCore {
             last_theme: 0,
             gps: None,
             gps_off: false,
+            cut_restart: false,
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -690,6 +702,11 @@ impl SimCore {
         if self.ports.take_reboot() {
             self.restart(); // LINK-24: REBOOT's answer has gone out; the radio restarts
         }
+        // The Storage task's turn (`--cut-restart` only: the store's writes are done at once otherwise), after the
+        // restart: what the link queued (in this step or fed before it) is still pending when the power goes.
+        while let Some(j) = self.store.next_job() {
+            ferrite_store::block(self.store.run(j));
+        }
         if self.lcd.pixels > 0 {
             self.last_px = self.lcd.pixels;
         }
@@ -956,8 +973,16 @@ impl SimCore {
     /// what the flash kept (RAM gone, the link sessions start over). The stock bootloader's 200 ms listen has
     /// nothing to stand in for: the boot screen follows at once. What the cable was already sent stays queued.
     fn restart(&mut self) {
-        if !self.booting {
+        // `--cut-restart`, once: a power cut instead, after a raw write (nothing pending is written)
+        let cut = self.cut_restart && self.store.raw();
+        if !self.booting && !cut {
             self.store.flush(&self.app);
+            while let Some(j) = self.store.next_job() {
+                ferrite_store::block(self.store.run(j));
+            }
+        }
+        if cut {
+            self.cut_restart = false;
         }
         let flash = std::mem::replace(&mut self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
         self.store = FlashStore::mount(flash, Sample::new());
@@ -969,7 +994,7 @@ impl SimCore {
         self.term_in.clear();
         self.bt_in.clear();
         self.draw_boot();
-        self.last_key = String::from("restart");
+        self.last_key = String::from(if cut { "power cut" } else { "restart" });
     }
 
     /// One of the simulator's stand-ins for what the radio would report (most are ignored while booting or off).

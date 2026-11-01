@@ -623,13 +623,15 @@ pub async fn task() {
                 super::restore::run(store, &mut lcd, seq, app.settings().leds != 0).await; // DISP-30: LEDs per 0 7 6
             }
             if ports.take_reboot() {
-                // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
-                // reset: the stock bootloader listens for the updater first, as after hwtest's `reboot`.
+                // LINK-24: the radio quiet, everything written (at most 3 s; 15 s after raw writes, whose queue
+                // can hold 8 erases and the stamp: LINK-62, decision 339), the answer out, then a system reset: the
+                // stock bootloader listens for the updater first, as after hwtest's `reboot`.
                 send_shutdown(&mut app, &mut held).await;
                 store.flush(&app);
                 store::wake(store);
                 let t = Instant::now();
-                while !store.idle() && t.elapsed() < Duration::from_secs(3) {
+                let most = Duration::from_secs(if store.raw() { 15 } else { 3 });
+                while !store.idle() && t.elapsed() < most {
                     Timer::after_millis(10).await;
                 }
                 Timer::after_millis(50).await; // the answer's bytes leave the UART

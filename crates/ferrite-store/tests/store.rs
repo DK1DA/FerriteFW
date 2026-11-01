@@ -187,17 +187,31 @@ fn another_layouts_data_is_left_alone() {
     assert!(f.mem == before && f.ops == 0, "layout 2's data untouched");
 }
 
-/// INST-6, BOOT-12: no Ferrite header (a damaged one, a chip of noise or of stock's data): a first install, formatted.
+/// INST-6, BOOT-12: no Ferrite header and none of Ferrite's records (a blank chip, a chip of noise or of stock's
+/// data): a first install, formatted. UPD-16 (decision 339): no header but Ferrite's records there (a damaged
+/// header, a move cut where it shouldn't be): never formatted; the radio waits for Console, nothing written.
 #[test]
-fn a_damaged_header_or_noise_formats() {
+fn no_header_formats_only_without_ferrites_records() {
+    use ferrite_core::layout::LAYOUT_MOVING;
     let mut f = seeded();
     let h = ferrite_core::layout::LAYOUT_HEADER.start as usize;
     f.mem[h + 4] = 1; // its CRC no longer agrees
+    let before = f.mem.clone();
     let s = mount(f);
-    assert_eq!(s.mounted(), Mounted::FirstBoot);
-    assert_eq!(s.count(), 0);
-    assert_eq!(s.presets(), 0);
-    // A chip full of noise: the same.
+    assert_eq!(s.mounted(), Mounted::Update(LAYOUT_MOVING), "the settings record is there: not formatted");
+    let f = unmount(s);
+    assert!(f.mem == before, "nothing written");
+    // Only channels (no settings yet): the same.
+    let mut f = f;
+    f.mem[0x1000..0x3000].fill(0xFF);
+    assert_eq!(mount(f.clone()).mounted(), Mounted::Update(LAYOUT_MOVING));
+    // Layout 2's settings alone (its header gone): the same.
+    let mut g = SimFlash::new();
+    g.mem[0x2D000..0x2F000].copy_from_slice(&before[0x1000..0x3000]);
+    assert_eq!(mount(g).mounted(), Mounted::Update(LAYOUT_MOVING));
+    // A blank chip: formatted.
+    assert_eq!(mount(SimFlash::new()).mounted(), Mounted::FirstBoot);
+    // A chip full of noise (stock's data): formatted.
     let mut f = SimFlash::new();
     let mut r = Rng(7);
     for b in f.mem.iter_mut() {
@@ -655,7 +669,7 @@ fn power_cuts_during_the_first_format() {
         n
     };
     assert!(total > 10);
-    let used = [LAYOUT_HEADER, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG, SCRATCH_RING];
+    let used = [LAYOUT_HEADER, MIGRATE_MARK, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG, SCRATCH_RING];
     let addr = |i: usize| if i < ferrite_store::sim::LOW { i as u32 } else { ferrite_store::sim::HIGH.start + (i - ferrite_store::sim::LOW) as u32 };
     let kept = |i: usize| !used.iter().any(|r| r.contains(&addr(i)));
     assert!(kept(SSB_PATCH.start as usize) && kept(CALIBRATION.start as usize) && kept(MAILBOX.start as usize));
@@ -858,12 +872,12 @@ fn power_cuts_during_a_merged_rewrite() {
 #[test]
 fn a_raw_write_stops_the_stores_own() {
     use ferrite_app::data::DataWrite;
-    use ferrite_core::layout::{CHANNELS, LAYOUT_VERSION};
+    use ferrite_core::layout::{CHANNELS, LAYOUT_MOVING};
     let s = mount(seeded());
     assert_eq!(s.mounted(), Mounted::Ok);
     assert!(s.get(0).is_some());
     assert!(s.data_write(DataWrite::Erase(CHANNELS.start)));
-    assert_eq!((s.layout_found(), s.data().layout_found()), (Some(LAYOUT_VERSION), LAYOUT_VERSION));
+    assert_eq!((s.layout_found(), s.data().layout_found()), (Some(LAYOUT_MOVING), LAYOUT_MOVING));
     assert!(s.get(0).is_none() && !s.save(&app()), "the store reads and writes nothing more");
     let mut rec = [0u8; 64];
     rec[0] = 7;
@@ -875,7 +889,219 @@ fn a_raw_write_stops_the_stores_own() {
         c.update(&[0xFF; 64]);
         c.get()
     }));
+    // Decision 339: a restart before the stamp waits for Console (the migration mark); the stamp, then a restart,
+    // mounts what Console wrote.
     let s = mount(unmount(s));
-    assert_eq!(s.mounted(), Mounted::Ok, "a restart mounts it");
+    assert_eq!(s.mounted(), Mounted::Update(LAYOUT_MOVING), "not stamped: still waiting");
+    assert!(s.data_write(DataWrite::Stamp));
+    let s = mount(unmount(s));
+    assert_eq!(s.mounted(), Mounted::Ok, "stamped: a restart mounts it");
     assert!(s.get(0).is_none() && s.get(1).is_none(), "channels 0-62 erased by Console");
+}
+
+// ---- Decision 339: a move (LINK-62) cut anywhere ----
+
+/// The raw writes of a move as Console makes them from its copy (LINK-62's step 4, Appendix G): every sector of
+/// each region erased, the target chip's bytes programmed 64 at a time (all-0xFF pieces skipped), the channel
+/// sector that holds layout 2's header last; then the stamp.
+fn move_plan(target: &SimFlash) -> Vec<ferrite_app::data::DataWrite> {
+    use ferrite_app::data::DataWrite;
+    use ferrite_core::layout::*;
+    let hs = V2_HEADER.start;
+    let mut regions = vec![SETTINGS, TRIMS, PRESETS, SSB_PATCH, CHANNELS.start..hs, V2_HEADER.end..CHANNELS.end, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG];
+    regions.push(V2_HEADER);
+    let mut out = Vec::new();
+    for r in regions {
+        for s in r.clone().step_by(4096) {
+            out.push(DataWrite::Erase(s));
+        }
+        for a in r.step_by(64) {
+            let i = SimFlash::at(a);
+            let piece = &target.mem[i..i + 64];
+            if piece.iter().any(|&b| b != 0xFF) {
+                let mut bytes = [0xFF; 64];
+                bytes.copy_from_slice(piece);
+                out.push(DataWrite::Program { addr: a, len: 64, bytes });
+            }
+        }
+    }
+    out.push(DataWrite::Stamp);
+    out
+}
+
+/// Runs the queued jobs as the Storage task does (false once the flash has died).
+fn drain(s: &Store) {
+    while let Some(j) = s.next_job() {
+        ferrite_store::block(s.run(j));
+    }
+}
+
+/// The plan sent over the link to a radio (the store deferred, as on the radio): each write queued, `busy` waited
+/// out; stops when the flash has died (a cut). The flash operation count after each write is done.
+fn send(s: &Store, plan: &[ferrite_app::data::DataWrite]) -> Vec<u64> {
+    s.set_deferred(true);
+    let mut done = Vec::new();
+    for &w in plan {
+        let mut tries = 0;
+        while !s.data_write(w) {
+            drain(s);
+            tries += 1;
+            if tries > 3 || s.nor().dead {
+                return done;
+            }
+        }
+        drain(s);
+        done.push(s.nor().ops);
+    }
+    done
+}
+
+/// What a mount after a cut may find: the move waiting for Console (the old layout's header, or the migration mark)
+/// with nothing written by the mount, or (the stamp done) this layout with everything the target holds, or (a
+/// layout 3 chip cut before its mark was in place, nothing written yet) all it held before.
+fn check_after_cut(f: SimFlash, want: &Snap, want_set: &Option<Settings>, old: &(Snap, Option<Settings>), from: Mounted, what: &str) -> SimFlash {
+    use ferrite_core::layout::LAYOUT_MOVING;
+    let before = f.mem.clone();
+    let s = mount(f);
+    let m = s.mounted();
+    assert_ne!(m, Mounted::FirstBoot, "{what}: formatted");
+    if m == Mounted::Ok {
+        let got = (snap(&s), settings_of(&s));
+        assert!(got.0 == *want && got.1 == *want_set || from == Mounted::Ok && got == *old, "{what}: mounted Ok without all the data");
+        return unmount(s);
+    }
+    assert!(m == Mounted::Update(LAYOUT_MOVING) || m == from, "{what}: {m:?}");
+    let f = unmount(s);
+    assert!(f.mem == before, "{what}: the mount wrote");
+    f
+}
+
+/// Moves `source` to `target`'s data with the power cut at every flash operation of it (each erase, each programmed
+/// byte: every write boundary, inside every write, the begin's mark and header, the stamp), the operation cut left
+/// half done the worst way NOR leaves it; after each cut the mount waits for Console or (stamped) holds all the data,
+/// never formats; and Console starting again from its copy finishes the move.
+fn cut_everywhere(source: SimFlash, target: SimFlash, from: Mounted) -> usize {
+    let want = {
+        let s = mount(target.clone());
+        (snap(&s), settings_of(&s))
+    };
+    let old = {
+        let s = mount(source.clone());
+        (snap(&s), settings_of(&s))
+    };
+    let plan = move_plan(&target);
+    // A clean run: where each write ends.
+    let s = mount(source.clone());
+    assert_eq!(s.mounted(), from);
+    let n0 = s.nor().ops;
+    let ends: Vec<u64> = send(&s, &plan).into_iter().map(|e| e - n0).collect();
+    assert_eq!(ends.len(), plan.len());
+    let f = check_after_cut(unmount(s), &want.0, &want.1, &old, from, "a clean move");
+    assert_eq!(mount(f).mounted(), Mounted::Ok, "a clean move mounts");
+    let total = *ends.last().unwrap();
+    let mut r = Rng(0x3390_0001);
+    for c in 1..=total {
+        let s = mount(source.clone());
+        {
+            let mut nor = s.nor();
+            nor.cut_at = Some(nor.ops + c);
+            nor.seed(r.next());
+        }
+        send(&s, &plan);
+        let mut f = unmount(s);
+        f.power_on();
+        let f = check_after_cut(f, &want.0, &want.1, &old, from, &format!("cut at op {c} of {total}"));
+        // Console starts again from its copy (every cut in the begin and the stamp, at each write's first
+        // operation, and every 16th elsewhere).
+        if c <= ends[0] || c > ends[ends.len() - 2] || ends.contains(&(c - 1)) || c % 16 == 0 {
+            let s = mount(f);
+            send(&s, &plan);
+            let s = mount(unmount(s));
+            assert_eq!(s.mounted(), Mounted::Ok, "cut at op {c}: the move started again finishes");
+            assert!(snap(&s) == want.0 && settings_of(&s) == want.1, "cut at op {c}: the move started again holds the data");
+        }
+    }
+    total as usize
+}
+
+/// Decision 339, LINK-62, UPD-16: a layout 2 chip (its header at 0x02C000, its settings, stock's old data at
+/// 0x000000 and where layout 3's channels go) moved to layout 3, cut everywhere: never formatted, always waiting
+/// for Console or done, and finished from Console's copy.
+#[test]
+fn a_move_from_layout_2_cut_anywhere_loses_nothing() {
+    let target = seeded();
+    let mut source = SimFlash::new();
+    let mut r = Rng(0x0002_0333);
+    for a in (0..0x1000).chain(0x1_0000..0x1_8000) {
+        source.mem[a] = r.next() as u8; // stock's data
+    }
+    let mut h = [0xFFu8; 20];
+    h[..4].copy_from_slice(&ferrite_store::store::HEADER_MAGIC.to_le_bytes());
+    h[4..6].copy_from_slice(&2u16.to_le_bytes());
+    let mut c = ferrite_store::Crc32::new();
+    c.update(&h[..16]);
+    h[16..20].copy_from_slice(&c.get().to_le_bytes());
+    source.mem[0x2C000..0x2C014].copy_from_slice(&h);
+    source.mem[0x2D000..0x2F000].copy_from_slice(&target.mem[0x1000..0x3000]); // its settings
+    let n = cut_everywhere(source, target, Mounted::Update(2));
+    assert!(n > 1500, "{n} cuts");
+}
+
+/// Decision 339: Console writing a layout 3 chip raw (a restore from its copy onto a radio already on layout 3),
+/// cut everywhere: the same.
+#[test]
+fn a_raw_rewrite_of_a_layout_3_chip_cut_anywhere_loses_nothing() {
+    let target = seeded();
+    let s = mount(SimFlash::new());
+    assert!(s.add_zone(b"Other", &ZoneCfg::default()));
+    for n in [3u16, 70, 500] {
+        assert!(s.put_with_position(channel(n, 0, 43_000_000 + n as u32 * 1250, "Old", DEFAULT_CFG), None));
+    }
+    assert!(s.save(&app()));
+    let n = cut_everywhere(unmount(s), target, Mounted::Ok);
+    assert!(n > 1500, "{n} cuts");
+}
+
+/// LINK-62, decision 339: the stamp is taken only once the store has nothing queued or running (`busy` before);
+/// a restart right after its answer, before the Storage task has run it, leaves the mark: the radio waits for
+/// Console, and the stamp sent again finishes it.
+#[test]
+fn a_reset_right_after_the_stamps_answer_waits_for_console() {
+    use ferrite_app::data::DataWrite;
+    use ferrite_core::layout::{CHANNELS, LAYOUT_MOVING};
+    let s = mount(seeded());
+    s.set_deferred(true);
+    assert!(s.data_write(DataWrite::Erase(CHANNELS.start + 4096)));
+    assert!(!s.data_write(DataWrite::Stamp), "busy: the begin and the erase are queued");
+    drain(&s);
+    assert!(s.data_write(DataWrite::Stamp), "taken once the store is idle");
+    let s = mount(unmount(s)); // the reset: the queued stamp never ran
+    assert_eq!(s.mounted(), Mounted::Update(LAYOUT_MOVING));
+    assert!(s.data_write(DataWrite::Stamp));
+    let s = mount(unmount(s));
+    assert_eq!(s.mounted(), Mounted::Ok);
+    assert_eq!(s.count(), 11 - 3, "channels 63, 64 and 65 erased by the raw write, the rest kept");
+}
+
+/// LINK-59, decision 339: a raw write the Storage task has taken but not finished still counts as busy, so
+/// `DATA_READ` never reads (or CRCs) a half-done write; once done, the CRC is the written bytes'.
+#[test]
+fn a_raw_write_being_done_keeps_reads_waiting() {
+    use ferrite_app::data::DataWrite;
+    use ferrite_core::layout::CHANNELS;
+    let s = mount(seeded());
+    s.set_deferred(true);
+    let at = CHANNELS.start + 9 * 4096;
+    assert!(s.data_write(DataWrite::Program { addr: at, len: 64, bytes: [0x42; 64] }));
+    assert!(s.data().busy());
+    let begin = s.next_job().unwrap();
+    assert!(s.data().busy(), "the begin taken, the program queued");
+    ferrite_store::block(s.run(begin));
+    let j = s.next_job().unwrap();
+    assert!(s.data().busy(), "taken by the Storage task, not done: still busy");
+    ferrite_store::block(s.run(j));
+    assert!(!s.data().busy() && s.idle());
+    let mut c = ferrite_store::Crc32::new();
+    c.update(&[0x42; 64]);
+    assert_eq!(s.data_crc(at, 64), Some(c.get()));
 }

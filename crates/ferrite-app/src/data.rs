@@ -424,7 +424,8 @@ pub enum DataWrite {
     Erase(u32),
     /// `len` bytes of `bytes` programmed at `addr` (one page, erased bytes).
     Program { addr: u32, len: u8, bytes: [u8; ferrite_core::link::data::PROGRAM_MAX] },
-    /// The layout header written for this firmware's layout; the radio restarts after.
+    /// The move finished (LINK-62, decision 339): this layout's header checked and the migration mark cleared; the
+    /// radio restarts after.
     Stamp,
 }
 

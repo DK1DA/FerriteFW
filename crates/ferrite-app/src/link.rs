@@ -1118,9 +1118,18 @@ fn data_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
     }
 }
 
+/// LINK-60 (decision 339): the layout header and the migration mark are the store's own (the begin and the stamp
+/// write them), never a raw write's.
+fn stores_own(addr: u32, len: u32) -> bool {
+    use ferrite_core::layout::{LAYOUT_HEADER, MIGRATE_MARK};
+    let end = addr as u64 + len as u64;
+    [LAYOUT_HEADER, MIGRATE_MARK].iter().any(|r| (addr as u64) < r.end as u64 && end > r.start as u64)
+}
+
 /// `DATA_WRITE` (LINK-60): a sector erased, bytes programmed or the header stamped, queued for the store's owner
-/// (`busy`: its queue is full, send it again). Never calibration or the update area; a program inside one page.
-/// True as the second value for a stamp: the radio restarts once it is written.
+/// (`busy`: its queue is full, or for the stamp anything is still queued or being written: send it again). Never
+/// calibration or the update area, the header or the migration mark; a program inside one page. True as the second
+/// value for a stamp: the radio restarts once the store has done it (the restart waits for the store, LINK-62).
 fn data_write<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, bool) {
     use crate::data::DataWrite;
     use ferrite_core::link::data::*;
@@ -1130,7 +1139,7 @@ fn data_write<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, bool) 
             if !addr.is_multiple_of(SECTOR) {
                 return (Status::BadArg, false);
             }
-            if !allowed(addr, SECTOR) || !ferrite_core::layout::writable(addr, SECTOR) {
+            if !allowed(addr, SECTOR) || !ferrite_core::layout::writable(addr, SECTOR) || stores_own(addr, SECTOR) {
                 return (Status::Refused, false);
             }
             DataWrite::Erase(addr)
@@ -1141,7 +1150,7 @@ fn data_write<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, bool) 
             if n == 0 || n > PROGRAM_MAX || addr / PAGE != (addr + n as u32 - 1) / PAGE {
                 return (Status::BadArg, false);
             }
-            if !allowed(addr, n as u32) || !ferrite_core::layout::writable(addr, n as u32) {
+            if !allowed(addr, n as u32) || !ferrite_core::layout::writable(addr, n as u32) || stores_own(addr, n as u32) {
                 return (Status::Refused, false);
             }
             let mut b = [0xFFu8; PROGRAM_MAX];

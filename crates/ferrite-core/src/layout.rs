@@ -30,7 +30,11 @@ pub const SATELLITES: Range<u32> = 0x00_6000..0x00_8000;
 /// The SI4732 SSB patch (15,832 B with its 64-byte header): imported from the owner's stock firmware, never shipped.
 pub const SSB_PATCH: Range<u32> = 0x00_8000..0x00_C000;
 /// Free: room for the settings and records above to grow.
-pub const CONFIG_FREE: Range<u32> = 0x00_C000..0x00_F000;
+pub const CONFIG_FREE: Range<u32> = 0x00_C000..0x00_E000;
+/// The migration mark (decision 339, LINK-62): while Console moves the chip's data raw, a mark here says the move
+/// isn't finished, so a restart at any point waits for Console (UPD-16) and never formats; the stamp clears it.
+/// Records of 16 bytes (ferrite-store `store`), a new one in the next erased place each move.
+pub const MIGRATE_MARK: Range<u32> = 0x00_E000..0x00_F000;
 /// Factory calibration: read only, never erased or written; it stays at stock's address (going back to stock needs
 /// it there).
 pub const CALIBRATION: Range<u32> = 0x00_F000..0x01_0000;
@@ -74,6 +78,11 @@ pub const UPDATE_AREA: Range<u32> = 0x30_0000..0x40_0000;
 /// means a radio updated from a layout 2 firmware, whose data waits for Console to move it (UPD-16).
 pub const V2_HEADER: Range<u32> = 0x02_C000..0x02_D000;
 
+/// The layout `HELLO` and `INFO` say the chip's data is in (LINK-62) while it is half moved: a raw write was made
+/// this power-on (LINK-61), or a move was cut before its stamp, or the chip holds Ferrite's records with no header
+/// (UPD-16). Only Console's copy of the old data can finish it; the chip itself is never read as a backup.
+pub const LAYOUT_MOVING: u16 = 255;
+
 /// Everything Ferrite may erase or program: the data range (the layout header to the end of the scratch ring)
 /// less calibration. The update area is past its end. The link's raw data writes (`DATA_WRITE`, LINK-60) are held
 /// to the same ranges.
@@ -84,7 +93,7 @@ pub static WRITABLE: [Range<u32>; 2] = [LAYOUT_HEADER.start..CALIBRATION.start, 
 pub const DATA: Range<u32> = 0..UPDATE_AREA.start;
 
 /// Every region in address order, with its name as the developer page and the build report show it.
-pub const REGIONS: [(&str, Range<u32>); 25] = [
+pub const REGIONS: [(&str, Range<u32>); 26] = [
     ("Layout header", LAYOUT_HEADER),
     ("Settings and slots", SETTINGS),
     ("User trims", TRIMS),
@@ -93,6 +102,7 @@ pub const REGIONS: [(&str, Range<u32>); 25] = [
     ("Satellites (planned)", SATELLITES),
     ("SSB patch", SSB_PATCH),
     ("Free: config growth", CONFIG_FREE),
+    ("Migration mark", MIGRATE_MARK),
     ("Factory calibration", CALIBRATION),
     ("Channels", CHANNELS),
     ("Zones", ZONES),
