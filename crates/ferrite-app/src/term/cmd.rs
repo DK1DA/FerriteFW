@@ -2261,7 +2261,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
             }
             4 if i == 0 => {
                 num(out, b"# Channels (", st.count() as u32);
-                out.push(b" of 1000)");
+                out.push(b" of 4000)");
                 return true;
             }
             4 if i <= st.count() => {

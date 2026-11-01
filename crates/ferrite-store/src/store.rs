@@ -32,19 +32,20 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, PRESETS, SETTINGS, SPARE, TRIMS, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, MESSAGES, PRESETS, SETTINGS, TRIMS, V2_HEADER, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
-/// The layout header: magic, layout version, 10 bytes the installer may fill (0xFF until then), CRC-32 of the
-/// 16 bytes before. Bytes 6-9 hold the calibration sector's CRC-32 (CAL-7), programmed into the erased bytes on
+/// The layout header (UPD-16): magic, layout version, 10 bytes the installer may fill (0xFF until then), CRC-32 of
+/// the 16 bytes before. Bytes 6-9 hold the calibration sector's CRC-32 (CAL-7), programmed into the erased bytes on
 /// the first boot that records it; the header's own CRC takes them as 0xFF, so recording it later keeps the
-/// header valid (and headers written before it still are).
-const HEADER_MAGIC: u32 = 0x5452_5246; // "FRRT"
+/// header valid (and headers written before it still are). Layout 2 kept the same header at [`V2_HEADER`].
+pub const HEADER_MAGIC: u32 = 0x5452_5246; // "FRRT"
 /// Where in the layout header the calibration's CRC is (CAL-7).
 const CAL_CRC_AT: usize = 6;
-/// 2: the fixed map (Oct 4, 2026). A chip with another version is formatted.
-pub const LAYOUT_VERSION: u16 = 2;
+/// 3: decision 333's map ([`ferrite_core::layout`]). A chip with no Ferrite header is formatted (a first install,
+/// INST-6); one with another layout's header is left alone until Console finishes the update (UPD-16).
+pub use ferrite_core::layout::LAYOUT_VERSION;
 
 /// The largest slots part [`FlashStore::restore`] reads (about 160 bytes now).
 const STATE_MAX: usize = 512;
@@ -68,6 +69,10 @@ pub enum Mounted {
     FirstBoot,
     /// The flash failed (or isn't mounted yet): nothing is stored this power-on.
     Failed,
+    /// UPD-16 (decision 333): the chip holds another layout's data (the layout version found: 2 for layout 2's
+    /// header at its old place). Nothing is read or written there until Ferrite Console has moved it to this
+    /// layout over the link (LINK-59 – LINK-62); nothing is stored this power-on.
+    Update(u16),
 }
 
 /// A queued channel write taken into another's rewrite (decision 227): its number, record (None: deleted) and the
@@ -104,6 +109,8 @@ pub enum Job {
     AprsSave,
     /// CHAN-36: the zone records whose channel count changed get it written.
     Counts,
+    /// LINK-60 (decision 333): a raw write of the data range, Console's.
+    Data(DataWrite),
 }
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
@@ -126,14 +133,15 @@ const APRS_AMBIG: usize = APRS_COMMENT + ferrite_app::aprs::COMMENT_LEN;
 const APRS_MIC_E: usize = APRS_AMBIG + 1;
 const APRS_PAYLOAD: usize = APRS_MIC_E + 1;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
+const _: () = assert!(APRS.end - APRS.start >= 2 * SECTOR);
 /// APRS-32: the stored messages [`FlashStore::message_heard`] looks through, newest first.
 pub const HEARD_CHECK: u16 = 16;
 /// The store's clock starts here when nothing is stored and no clock is set: about UTC when Ferrite was written
 /// (Sep 2026), so a GPS fix later moves it by a plausible amount rather than decades.
 const TIME0: u32 = 1_790_000_000;
 
-/// APRS-46.1: words of [`FlashStore::msgs_gone`]: a bit per message slot (the ring holds 6 sectors of 31).
-const MSGS_GONE_WORDS: usize = 6;
+/// APRS-46.1: words of [`FlashStore::msgs_gone`]: a bit per message slot (the ring holds 16 sectors of 31).
+const MSGS_GONE_WORDS: usize = ((MESSAGES.end - MESSAGES.start) / SECTOR * logs::PER).div_ceil(32) as usize;
 
 pub struct FlashStore<N: Nor, D: Data> {
     pub(crate) f: Flash<N>,
@@ -232,7 +240,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             save_buf: RefCell::new([0; MAX_PAYLOAD]),
             saving: Cell::new(false),
             events: Ring::new(EVENT_LOG.start, EVENT_LOG.end, logs::EVENT_END),
-            msgs: Ring::new(APRS.start + 2 * SECTOR, APRS.end, logs::MSG_END),
+            msgs: Ring::new(MESSAGES.start, MESSAGES.end, logs::MSG_END),
             msgs_gone: Cell::new([0; MSGS_GONE_WORDS]),
             heard: Ring::new(HEARD.start, HEARD.end, logs::HEARD_END),
             wps: Waypoints::new(WAYPOINTS.start),
@@ -262,13 +270,18 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     async fn mount_inner(&self) -> Result<Mounted> {
+        // The header first (it is never rewritten through the scratch ring), so another layout's chip has nothing
+        // at all done to it.
+        match self.header()? {
+            Header::Ok => {}
+            // UPD-16: another layout's data: left alone, nothing read or written (Console moves it)
+            Header::Other(v) => return Ok(Mounted::Update(v)),
+            Header::None => self.format().await?,
+        }
         scratch::recover(&self.f).await?;
         // Decision 227: the scratch ring starts where the settings' save count says, a different place each
         // power-on (they are saved at every power-off).
         self.f.scratch_seed(settings::latest(&self.f)?.map_or(0, |c| c.count));
-        if !self.header_ok()? {
-            self.format().await?;
-        }
         {
             // In a block: the buffers aren't kept across the waits below (they would grow the UI task).
             let mut n = 0;
@@ -390,15 +403,17 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         Ok(if settings::latest(&self.f)?.is_none() { Mounted::FirstBoot } else { Mounted::Ok })
     }
 
-    fn header_ok(&self) -> Result<bool> {
-        let mut h = [0u8; 20];
-        self.f.raw_read(LAYOUT_HEADER.start, &mut h)?;
-        let mut c = Crc32::new();
-        let mut body = [0u8; 16];
-        body.copy_from_slice(&h[..16]);
-        body[CAL_CRC_AT..CAL_CRC_AT + 4].fill(0xFF);
-        c.update(&body);
-        Ok(crate::u32_at(&h, 0) == HEADER_MAGIC && crate::u16_at(&h, 4) == LAYOUT_VERSION && crate::u32_at(&h, 16) == c.get())
+    /// UPD-16: what the chip holds: this layout's header; another layout's (a Ferrite header at 0x000000 with
+    /// another version, or layout 2's at [`V2_HEADER`]); or none (a blank chip, or stock's data: a first install).
+    fn header(&self) -> Result<Header> {
+        Ok(match header_version(&self.f, LAYOUT_HEADER.start)? {
+            Some(LAYOUT_VERSION) => Header::Ok,
+            Some(v) => Header::Other(v),
+            None => match header_version(&self.f, V2_HEADER.start)? {
+                Some(v) => Header::Other(v),
+                None => Header::None,
+            },
+        })
     }
 
     /// CAL-7 (TX audit F8): the calibration sector (read only) against the CRC the layout header recorded; none
@@ -428,22 +443,31 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
     }
 
-    /// A blank or foreign chip: every area erased, then the header (a cut before it formats again next time).
+    /// A blank chip, or stock's data (a first install, INST-6): every area this firmware uses erased (blank ones
+    /// skipped; never calibration, the SSB patch or the update area), then the header (a cut before it formats
+    /// again next time). Stock's old codeplug, record and voice prompts are in the install's backup (decision 333).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SPARE, APRS, EVENT_LOG, WAYPOINTS, CONTACTS, HEARD] {
+        for r in [LAYOUT_HEADER, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
                 }
             }
         }
-        let mut h = [0xFFu8; 20];
-        h[..4].copy_from_slice(&HEADER_MAGIC.to_le_bytes());
-        h[4..6].copy_from_slice(&LAYOUT_VERSION.to_le_bytes());
-        let mut c = Crc32::new();
-        c.update(&h[..16]);
-        h[16..20].copy_from_slice(&c.get().to_le_bytes());
-        self.f.program(LAYOUT_HEADER.start, &h).await
+        self.f.program(LAYOUT_HEADER.start, &header_bytes()).await
+    }
+
+    /// LINK-60, LINK-62: one raw write. A stamp writes this layout's header (its sector erased first) as the format
+    /// does; the radio restarts after it (the link asks for that).
+    async fn data_job(&self, w: DataWrite) -> Result {
+        match w {
+            DataWrite::Erase(a) => self.f.erase(a).await,
+            DataWrite::Program { addr, len, bytes } => self.f.program(addr, &bytes[..len as usize]).await,
+            DataWrite::Stamp => {
+                self.f.erase(LAYOUT_HEADER.start).await?;
+                self.f.program(LAYOUT_HEADER.start, &header_bytes()).await
+            }
+        }
     }
 
     /// CHAN-36: zone records wait for their channel count (the tests).
@@ -478,11 +502,23 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// HF-18: stores `patch` (with `p` from its bundle or link header) in SSB_PATCH, unless the same verified copy is
     /// already there (Ok(false)); a format never erases it (SAFE-9). Verified after writing; Err if it doesn't check.
     pub async fn ssb_install(&self, p: ferrite_core::ssb::Patch, patch: &[u8], source: u8) -> Result<bool> {
+        if self.layout_found().is_some() {
+            return Err(NorError); // UPD-16: another layout's data stays as it is (its SSB patch moves with Console)
+        }
         crate::ssb::install(&self.f, p, patch, source).await
     }
 
     pub(crate) fn ok(&self) -> bool {
-        self.mounted.get() != Mounted::Failed
+        matches!(self.mounted.get(), Mounted::Ok | Mounted::FirstBoot)
+    }
+
+    /// UPD-16: the layout version this chip's data is in when it isn't this firmware's (Console must finish the
+    /// update), else None.
+    pub fn layout_found(&self) -> Option<u16> {
+        match self.mounted.get() {
+            Mounted::Update(v) => Some(v),
+            _ => None,
+        }
     }
 
     fn bump(&self) {
@@ -530,6 +566,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// Carries out a write (the Storage task; at once in the simulator).
     pub async fn run(&self, job: Job) -> bool {
+        if let Job::Data(w) = job {
+            // LINK-60: raw writes go whatever the layout (that is when Console needs them), not on a failed chip
+            let ok = self.mounted.get() != Mounted::Failed && self.data_job(w).await.is_ok();
+            self.bump();
+            return ok;
+        }
         if !self.ok() {
             self.saving.set(false);
             return false;
@@ -586,6 +628,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Job::DeleteContact(c) => self.contacts.delete(&self.f, c.as_bytes()).await.unwrap_or(false),
             Job::AprsSave => self.aprs_save(None).await.is_ok(),
             Job::Counts => self.write_counts().await.is_ok(),
+            Job::Data(_) => false, // above
         };
         self.bump();
         self.running.set(false);
@@ -1086,7 +1129,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// zone as on a new radio.
     async fn wipe(&self) -> Result {
         self.zones.set(0);
-        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS, HEARD] {
+        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS, HEARD, MESSAGES] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase_blanked(s).await?;
@@ -1585,7 +1628,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Some(f) if self.wps.len() < logs::WP_MAX => {
                     let mut name = Buf::<16>::from(b"Marked ");
                     let n = self.wps.len() + 1;
-                    for d in [n / 100, n / 10 % 10, n % 10].into_iter().skip_while(|&d| d == 0) {
+                    for d in [n / 1000, n / 100 % 10, n / 10 % 10, n % 10].into_iter().skip_while(|&d| d == 0) {
                         name.push(&[b'0' + d as u8]);
                     }
                     self.submit(Job::Waypoint(Waypoint { name, pos: f.pos, src: WpSrc::Marked }))
@@ -1615,6 +1658,37 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             _ => return None,
         })
     }
+}
+
+/// This layout's header as a format or a stamp writes it: magic, version, the installer's 10 bytes erased (the
+/// calibration CRC among them, recorded later: CAL-7), CRC-32 of the 16 bytes before.
+pub fn header_bytes() -> [u8; 20] {
+    let mut h = [0xFFu8; 20];
+    h[..4].copy_from_slice(&HEADER_MAGIC.to_le_bytes());
+    h[4..6].copy_from_slice(&LAYOUT_VERSION.to_le_bytes());
+    let mut c = Crc32::new();
+    c.update(&h[..16]);
+    h[16..20].copy_from_slice(&c.get().to_le_bytes());
+    h
+}
+
+/// What [`FlashStore::header`] found.
+enum Header {
+    Ok,
+    Other(u16),
+    None,
+}
+
+/// The layout version a Ferrite header at `at` names (magic and CRC good), or None.
+fn header_version<N: Nor>(f: &Flash<N>, at: u32) -> Result<Option<u16>> {
+    let mut h = [0u8; 20];
+    f.raw_read(at, &mut h)?;
+    let mut c = Crc32::new();
+    let mut body = [0u8; 16];
+    body.copy_from_slice(&h[..16]);
+    body[CAL_CRC_AT..CAL_CRC_AT + 4].fill(0xFF);
+    c.update(&body);
+    Ok((crate::u32_at(&h, 0) == HEADER_MAGIC && crate::u32_at(&h, 16) == c.get()).then(|| crate::u16_at(&h, 4)))
 }
 
 /// A channel record's zone key ([`crate::members`]): its zone, or [`FREE`] when it holds no channel.
@@ -1970,6 +2044,30 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
 
     fn busy(&self) -> bool {
         !self.idle()
+    }
+
+    fn data_read(&self, addr: u32, buf: &mut [u8]) -> bool {
+        self.mounted.get() != Mounted::Failed && self.f.read(addr, buf).is_ok()
+    }
+
+    fn data_crc(&self, addr: u32, len: u32) -> Option<u32> {
+        (self.mounted.get() != Mounted::Failed).then(|| self.f.crc(addr, len).ok()).flatten()
+    }
+
+    /// LINK-61: the first raw write stops the store's own (it would write over what Console writes): nothing is
+    /// read or written by the store until the radio restarts, the screen saying so as for another layout.
+    fn data_write(&self, w: DataWrite) -> bool {
+        if self.mounted.get() == Mounted::Failed {
+            return false;
+        }
+        if self.ok() {
+            self.mounted.set(Mounted::Update(LAYOUT_VERSION));
+        }
+        self.submit(Job::Data(w))
+    }
+
+    fn layout_found(&self) -> u16 {
+        self.layout_found().unwrap_or(0)
     }
 
     fn request(&self, op: Op) -> bool {

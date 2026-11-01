@@ -1024,8 +1024,8 @@ fn bluetooth_pb9() {
 
 /// SAFE-1, CAL-1, CAL-2, INST-7, INST-8, SAFE-2, UPD-7: the SPI driver's guard refuses any program or erase that
 /// touches calibration (0x00F000-0x00FFFF) or the update area (0x300000 up), checks the erase unit (a whole 4 KB
-/// sector, aligned) rather than the range asked for, and keeps programs inside one page; everything between the
-/// layout header and the waypoints is writable; the bring-up build writes nowhere.
+/// sector, aligned) rather than the range asked for, and keeps programs inside one page; everything else below the
+/// update area is writable (layout 3, decision 333); the bring-up build writes nowhere.
 #[test]
 fn spi_flash_guard() {
     use crate::flash::{erase_ok, program_ok, PAGE, SECTOR};
@@ -1036,7 +1036,7 @@ fn spi_flash_guard() {
         assert!(!program_ok(ok, a, 16), "program at 0x{a:06X}");
         assert!(!erase_ok(ok, a & !(SECTOR - 1)), "erase at 0x{a:06X}");
     }
-    assert!(!erase_ok(ok, CALIBRATION.start - SECTOR), "the sector below calibration isn't Ferrite's either");
+    assert!(erase_ok(ok, CALIBRATION.start - SECTOR) && erase_ok(ok, CALIBRATION.end), "the sectors either side of calibration are layout 3's");
     assert!(!erase_ok(ok, 0x02_D800), "unaligned: refused, not rounded");
     assert!(!program_ok(ok, 0x02_D0F8, 16), "across a page boundary");
     assert!(!program_ok(ok, 0x02_D000, 0) && !program_ok(ok, 0x02_D000, PAGE + 1));

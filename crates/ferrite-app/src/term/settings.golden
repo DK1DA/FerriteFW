@@ -256,7 +256,7 @@ set 0 9 9 5 Dynamic               # MCU clock
 # 0 9 4 Region: Not set (changes only on the radio)
 # Zones (a channel's zone=N is one of these)
 # Range presets (0 1 4)
-# Channels (21 of 1000)
+# Channels (21 of 4000)
 end
 -- changed
 set 0 7 7 2 Auto                  # Low Power Mode
@@ -2154,8 +2154,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 9 9 3 10_ Cable log: one of Off, On
 :_ :set 0 9 9 3 none_ Cable log: one of Off, On
 :_ :set 0 9 9 4 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 1000                                               Radio now 0 9 9 4 Terminal colour: On
-:_ :set 0 9 9 4 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 1000                                               Radio now 0 9 9 4 Terminal colour: Off
+:_ :set 0 9 9 4 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: On
+:_ :set 0 9 9 4 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: Off
 :_ :set 0 9 9 4 1_ Terminal colour: one of Off, On
 :_ :set 0 9 9 4 2_ Terminal colour: one of Off, On
 :_ :set 0 9 9 4 10_ Terminal colour: one of Off, On
@@ -2426,7 +2426,7 @@ set 0 9 9 5 Dynamic               # MCU clock
 # 0 8 6 Callsign: N0CALL (set on the radio)
 # Zones (a channel's zone=N is one of these)
 # Range presets (0 1 4)
-# Channels (21 of 1000)
+# Channels (21 of 4000)
 end
 -- changed
 set 0 1 1 Off                     # Watch
@@ -4376,8 +4376,8 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 9 9 3 10_ Cable log: one of Off, On
 :_ :set 0 9 9 3 none_ Cable log: one of Off, On
 :_ :set 0 9 9 4 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 on_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 1000                                               Radio now 0 9 9 4 Terminal colour: On
-:_ :set 0 9 9 4 off_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 1000                                               Radio now 0 9 9 4 Terminal colour: Off
+:_ :set 0 9 9 4 on_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: On
+:_ :set 0 9 9 4 off_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: Off
 :_ :set 0 9 9 4 1_ Terminal colour: one of Off, On
 :_ :set 0 9 9 4 2_ Terminal colour: one of Off, On
 :_ :set 0 9 9 4 10_ Terminal colour: one of Off, On
@@ -4648,7 +4648,7 @@ set 0 9 9 5 Dynamic               # MCU clock
 # 0 9 4 Region: Not set (changes only on the radio)
 # Zones (a channel's zone=N is one of these)
 # Range presets (0 1 4)
-# Channels (21 of 1000)
+# Channels (21 of 4000)
 end
 -- changed
 set 0 1 2 10 s                    # Resume
@@ -6580,8 +6580,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 9 9 3 10_ Cable log: one of Off, On
 :_ :set 0 9 9 3 none_ Cable log: one of Off, On
 :_ :set 0 9 9 4 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 1000                                               Radio now 0 9 9 4 Terminal colour: On
-:_ :set 0 9 9 4 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 1000                                               Radio now 0 9 9 4 Terminal colour: Off
+:_ :set 0 9 9 4 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: On
+:_ :set 0 9 9 4 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: Off
 :_ :set 0 9 9 4 1_ Terminal colour: one of Off, On
 :_ :set 0 9 9 4 2_ Terminal colour: one of Off, On
 :_ :set 0 9 9 4 10_ Terminal colour: one of Off, On

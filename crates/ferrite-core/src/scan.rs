@@ -467,8 +467,8 @@ pub fn tick_wake(started: u64, ticked: u64, period: u64, due: Option<u64>) -> u6
     }
 }
 
-/// Channel numbers 0-999 (shown 1-1000).
-pub const MAX_CHANNELS: u16 = 1000;
+/// Channel numbers 0-3999 (shown 1-4000; CHAN-1, decision 333).
+pub const MAX_CHANNELS: u16 = 4000;
 /// Priority channels a channel scan looks at (SCAN-12: the zone's priority 1 and 2, then flagged ones).
 pub const PRIO_MAX: usize = 4;
 /// Frequencies held for the channel scans, shared by the slots.

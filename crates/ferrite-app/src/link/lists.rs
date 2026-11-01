@@ -13,8 +13,8 @@ use crate::words::QUICK;
 use ferrite_core::link::{what, Status, ADD, PRESET_SKIPS_MAX, QUICK_OWN, WAYPOINT_LEN};
 use ferrite_ui::text::Buf;
 
-/// GPS-10's store.
-const WAYPOINTS_MAX: u16 = 256;
+/// GPS-10's store (decision 333: 16 sectors of 127).
+pub const WAYPOINTS_MAX: u16 = 2032;
 /// A waypoint's sources in their record order (GPS-10).
 const SOURCES: [WpSrc; 4] = [WpSrc::Marked, WpSrc::Aprs, WpSrc::Link, WpSrc::Grid];
 
@@ -141,7 +141,7 @@ pub(super) fn apply<S: ChannelStore>(st: &S, w: u8, idx: u16, rec: &[u8], o: &mu
             let Some(&src) = SOURCES.get(src as usize) else { return invalid(o, "source: 0 marked, 1 APRS, 2 link, 3 grid") };
             let wp = Waypoint { name: nm, pos: Pos { lat, lon }, src };
             if idx == ADD && d.waypoints() >= WAYPOINTS_MAX {
-                return invalid(o, "256 waypoints");
+                return invalid(o, "2032 waypoints");
             }
             if d.waypoint(idx) == Some(wp) {
                 return Status::Ok;

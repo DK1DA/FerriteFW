@@ -494,8 +494,8 @@ pub fn heard_decode(b: &[u8; REC as usize], ago_s: u32) -> Station {
 pub const WP_LEN: u32 = 32;
 /// Waypoints in a sector (the last 32 bytes stay free for the scratch footer).
 pub const WP_PER: u32 = 127;
-/// GPS-10.
-pub const WP_MAX: u16 = 256;
+/// GPS-10: 16 sectors of 127 (decision 333).
+pub const WP_MAX: u16 = 2032;
 
 /// Name (16) · latitude (4) · longitude (4) · source (1) · 0xFF (5) · CRC-16 of the 30 bytes before (2).
 pub fn wp_encode(w: &Waypoint) -> [u8; WP_LEN as usize] {
@@ -735,8 +735,9 @@ impl Waypoints {
 
 // ---- contacts ----
 
-/// APRS-37.
-pub const CONTACT_MAX: u16 = 128;
+/// APRS-37: 8 sectors of 127 (decision 333).
+pub const CONTACT_MAX: u16 = 1016;
+const _: () = assert!(CONTACT_MAX == ferrite_app::screens::contacts::CONTACT_MAX && WP_MAX == ferrite_app::link::lists::WAYPOINTS_MAX);
 
 /// Callsign (10) · name (12) · 0xFF (8) · CRC-16 of the 30 bytes before (2).
 pub fn contact_encode(c: &Contact) -> [u8; WP_LEN as usize] {

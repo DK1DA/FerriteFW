@@ -297,7 +297,7 @@ fn main_menu_and_leaving() {
     let mut r = Rig::main();
     assert!(r.vt.has("Ferrite terminal"));
     let n = r.store.count();
-    assert!(r.vt.has(&std::format!("1  Channels      {n} used of 1000")), "{}", r.vt.text());
+    assert!(r.vt.has(&std::format!("1  Channels      {n} used of 4000")), "{}", r.vt.text());
     assert!(r.vt.has("7  About"));
     assert!(r.vt.has("Radio now"));
     assert!(r.vt.has("Battery 7.9 V"));
@@ -566,12 +566,13 @@ fn frequencies() {
 /// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12), a debug
 /// command's one answer (64 bytes of memory at most, TERM-22, or a GGA sentence of 80, TERM-30: about 100 bytes)
 /// and the channel list's tools (TERM-14: marks, a bit per channel, 125 bytes; a sorted page of up to 56 channel
-/// numbers, 112 bytes; Oct 6, 2026) on top. The GGA answer added 16 bytes (Oct 13, 2026).
+/// numbers, 112 bytes; Oct 6, 2026) on top. The GGA answer added 16 bytes (Oct 13, 2026); 4,000 channels' marks
+/// 375 more (decision 333).
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256 + 112 + 304 + 16, "Term is {n} bytes");
+    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----
@@ -872,7 +873,7 @@ fn command_errors() {
         ("ch 12 mode usb", "USB, LSB and CW are for HF channels"),
         ("ch 12 zone 9", "zone 9 doesn't exist"),
         ("ch 12 \"Name", "no closing quote"),
-        ("ch 1001", "ch: a number from 1 to 1000"),
+        ("ch 4001", "ch: a number from 1 to 4000"),
         ("zone 9 \"Far\"", "the radio has 6, so the next is zone 7"),
         ("clear channels 3", "type: clear channels 21"),
     ] {

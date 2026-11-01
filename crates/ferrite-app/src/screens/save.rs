@@ -142,7 +142,7 @@ impl Save {
         if self.kind == Kind::Repeater && self.freq_of(app) < crate::chan::HF_TOP {
             Some("Below 64 MHz: save it from HF mode (hold 9 there).") // CHAN-26
         } else if self.num >= MAX_CHANNELS {
-            Some("No free number: all 1000 channels are used.")
+            Some("No free number: all 4000 channels are used.")
         } else {
             None
         }

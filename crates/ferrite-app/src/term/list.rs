@@ -441,12 +441,12 @@ impl Term {
                 let from = if s.is_empty() { Some(0) } else { number(s) };
                 match from {
                     Some(f) => self.begin(app, Op::Copy(f), st),
-                    None => self.tell("Copy to: a channel number from 1 to 1000".as_bytes(), true),
+                    None => self.tell("Copy to: a channel number from 1 to 4000".as_bytes(), true),
                 }
             }
             Ask::Renumber => match number(s) {
                 Some(f) => self.begin(app, Op::Renumber(f), st),
-                None => self.tell("Renumber from: a channel number from 1 to 1000".as_bytes(), true),
+                None => self.tell("Renumber from: a channel number from 1 to 4000".as_bytes(), true),
             },
             Ask::Delete | Ask::None => {}
         }
@@ -559,7 +559,7 @@ impl Term {
     fn renumber_check<S: ChannelStore>(&self, from: u16, total: u16, single: Option<u16>, st: &S) -> Result<(), Msg> {
         if from + total > MAX_CHANNELS {
             let mut m = Msg::new();
-            put!(m, "{} channels from {} would pass 1000", total, from as u32 + 1);
+            put!(m, "{} channels from {} would pass 4000", total, from as u32 + 1);
             return Err(m);
         }
         let mut n = single.or_else(|| self.next_mark(0));

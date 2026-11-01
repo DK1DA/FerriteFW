@@ -112,13 +112,13 @@ fn prompts_and_bad_answers() {
     r.send(b"c");
     assert!(r.vt.has("Copy 2 marked channels to free numbers from (Enter: first free): "), "{}", r.vt.text());
     r.send(b"x\r");
-    assert!(r.bottom().contains("Copy to: a channel number from 1 to 1000"), "{}", r.bottom());
+    assert!(r.bottom().contains("Copy to: a channel number from 1 to 4000"), "{}", r.bottom());
     r.send(b"r");
     assert!(r.vt.has("Renumber 2 marked channels from number: "), "{}", r.vt.text());
     r.send(b"0\r");
-    assert!(r.bottom().contains("Renumber from: a channel number from 1 to 1000"), "{}", r.bottom());
-    r.send(b"r1000\r");
-    assert!(r.bottom().contains("2 channels from 1000 would pass 1000"), "{}", r.bottom());
+    assert!(r.bottom().contains("Renumber from: a channel number from 1 to 4000"), "{}", r.bottom());
+    r.send(b"r4000\r");
+    assert!(r.bottom().contains("2 channels from 4000 would pass 4000"), "{}", r.bottom());
     r.send(b"m2\r");
     r.settle();
     assert!(r.bottom().contains("2 channels moved") || r.store.get(r.nums()[0]).unwrap().zone == 1, "{}", r.bottom());

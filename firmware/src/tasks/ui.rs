@@ -405,6 +405,8 @@ pub async fn task() {
         (false, ferrite_store::store::Mounted::Ok) => b"store: mounted",
         (false, ferrite_store::store::Mounted::FirstBoot) => b"store: first boot (Ferrite's areas formatted)",
         (false, ferrite_store::store::Mounted::Failed) => b"store: FAILED (nothing is saved this power-on)",
+        // UPD-16: another layout's data, left alone for Console (the App shows D25 from its first tick)
+        (false, ferrite_store::store::Mounted::Update(_)) => b"store: another layout's data: finish the update in Ferrite Console",
     });
     // TERM-28: after the boot report the normal build logs only with Cable log on (0 9 9 3); the bring-up build
     // always. Either way the first byte from the PC ends it.

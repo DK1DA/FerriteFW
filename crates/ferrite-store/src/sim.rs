@@ -1,18 +1,25 @@
-//! A simulated NOR flash (the first 512 KB of the radio's 4 MB) for the simulator and the tests: erased bytes
-//! are 0xFF, a program only clears bits, an erase sets a 4 KB sector. Programs and erases finish as they start,
-//! so the store never waits on it. It can cut the power at any point: after a set number of operations (each
-//! programmed byte and each erase counts one) the operation in progress is left half done, the worst way NOR
-//! leaves it, and every call fails until [`SimFlash::power_on`]. Writing outside
-//! [`ferrite_core::layout::WRITABLE`] panics: calibration and the update area must never be touched.
+//! A simulated NOR flash for the simulator and the tests: erased bytes are 0xFF, a program only clears bits, an
+//! erase sets a 4 KB sector. Programs and erases finish as they start, so the store never waits on it. It can cut
+//! the power at any point: after a set number of operations (each programmed byte and each erase counts one) the
+//! operation in progress is left half done, the worst way NOR leaves it, and every call fails until
+//! [`SimFlash::power_on`]. Writing outside [`ferrite_core::layout::WRITABLE`] panics: calibration and the update
+//! area must never be touched.
+//!
+//! It holds the parts of layout 3 Ferrite uses (decision 333): the low part, from the layout header to the end of
+//! the packet mailbox, and the high part, the event log and the scratch ring. The rest of the 4 MB reads erased
+//! and refuses writes (a link's raw write there fails in the simulator).
 
 use crate::{Nor, NorError, Result, SECTOR};
-use ferrite_core::layout::{HEARD, SCRATCH_RING, WRITABLE};
+use ferrite_core::layout::{EVENT_LOG, MAILBOX, SCRATCH_RING, WRITABLE};
 
-/// The chip up to the end of the heard list (564 KB of the 4 MB), where everything Ferrite stores is, then the
-/// scratch ring (decision 227) in a window of its own: `mem` holds the two back to back ([`SimFlash::at`]);
-/// anything else is out of range here.
-pub const LOW: usize = HEARD.end as usize;
-pub const SIZE: usize = LOW + (SCRATCH_RING.end - SCRATCH_RING.start) as usize;
+/// The low part: the chip from 0 to the end of the packet mailbox.
+pub const LOW: usize = MAILBOX.end as usize;
+/// The high part, after it in `mem`: the event log, then the scratch ring.
+pub const HIGH: core::ops::Range<u32> = EVENT_LOG.start..SCRATCH_RING.end;
+pub const SIZE: usize = LOW + (HIGH.end - HIGH.start) as usize;
+/// What the simulator keeps between runs ([`SimFlash::image`]): the low part and the event log (not the scratch
+/// ring, empty whenever nothing is being written).
+pub const IMAGE_LEN: usize = LOW + (EVENT_LOG.end - EVENT_LOG.start) as usize;
 /// The whole chip, for the erase counts.
 const CHIP: usize = 4 << 20;
 
@@ -36,13 +43,18 @@ pub struct SimFlash {
 }
 
 impl SimFlash {
-    /// Where chip address `addr` is in `mem`.
-    pub fn at(addr: u32) -> usize {
+    /// Where chip address `addr` is in `mem`, if the simulated chip holds it.
+    pub fn place(addr: u32) -> Option<usize> {
         match addr {
-            a if (a as usize) < LOW => a as usize,
-            a if SCRATCH_RING.contains(&a) => LOW + (a - SCRATCH_RING.start) as usize,
-            a => panic!("{a:#x}: outside the simulated flash"),
+            a if (a as usize) < LOW => Some(a as usize),
+            a if HIGH.contains(&a) => Some(LOW + (a - HIGH.start) as usize),
+            _ => None,
         }
+    }
+
+    /// [`SimFlash::place`] for an address the simulated chip holds (the tests).
+    pub fn at(addr: u32) -> usize {
+        Self::place(addr).unwrap_or_else(|| panic!("{addr:#x}: outside the simulated flash"))
     }
 
     /// A blank chip, as after installing (only calibration, which this never touches, would be left).
@@ -50,13 +62,30 @@ impl SimFlash {
         SimFlash { mem: vec![0xFF; SIZE], ops: 0, cut_at: None, dead: false, dirty: false, erases: vec![0; CHIP / SECTOR as usize], reads: 0, read_bytes: 0, rng: 0x9E37_79B9_7F4A_7C15 }
     }
 
-    /// A chip holding `image` at `at` (a saved region), blank elsewhere.
-    pub fn with_image(at: u32, image: &[u8]) -> Self {
+    /// A chip holding `bytes` at chip address `at` (what the simulated chip holds of it), blank elsewhere.
+    pub fn with_image(at: u32, bytes: &[u8]) -> Self {
         let mut f = Self::new();
-        let a = at as usize;
-        let n = image.len().min(LOW - a);
-        f.mem[a..a + n].copy_from_slice(&image[..n]);
+        for (i, &b) in bytes.iter().enumerate() {
+            if let Some(a) = Self::place(at + i as u32) {
+                f.mem[a] = b;
+            }
+        }
         f
+    }
+
+    /// A chip from a kept image ([`SimFlash::image`]); one of another length (an image from another layout) gives a
+    /// blank chip.
+    pub fn from_image(img: &[u8]) -> Self {
+        let mut f = Self::new();
+        if img.len() == IMAGE_LEN {
+            f.mem[..IMAGE_LEN].copy_from_slice(img);
+        }
+        f
+    }
+
+    /// What the simulator keeps between runs: [`IMAGE_LEN`] bytes.
+    pub fn image(&self) -> Vec<u8> {
+        self.mem[..IMAGE_LEN].to_vec()
     }
 
     /// Seeds the half-done bits of a cut (tests vary it).
@@ -106,8 +135,10 @@ impl Nor for SimFlash {
         if self.dead {
             return Err(NorError);
         }
-        let a = Self::at(addr);
-        buf.copy_from_slice(&self.mem[a..a + buf.len()]);
+        match Self::place(addr) {
+            Some(a) => buf.copy_from_slice(&self.mem[a..a + buf.len()]),
+            None => buf.fill(0xFF),
+        }
         self.reads += 1;
         self.read_bytes += buf.len() as u64;
         Ok(())
@@ -119,6 +150,9 @@ impl Nor for SimFlash {
         }
         assert!(addr / crate::PAGE == (addr + data.len() as u32 - 1) / crate::PAGE, "program at {addr:#x} crosses a page");
         Self::writable(addr, data.len() as u32);
+        if Self::place(addr).is_none() {
+            return Err(NorError);
+        }
         self.dirty = true;
         for (i, &d) in data.iter().enumerate() {
             let a = Self::at(addr) + i;
@@ -141,6 +175,9 @@ impl Nor for SimFlash {
         }
         assert_eq!(addr % SECTOR, 0, "erase at {addr:#x}: not a sector");
         Self::writable(addr, SECTOR);
+        if Self::place(addr).is_none() {
+            return Err(NorError);
+        }
         self.dirty = true;
         self.erases[(addr / SECTOR) as usize] += 1;
         let a = Self::at(addr);
@@ -168,15 +205,25 @@ mod tests {
     use super::*;
     use ferrite_core::layout::{CALIBRATION, CHANNELS, UPDATE_AREA};
 
-    /// A saved image lands where it was taken, cut at the end of the simulated chip; the rest is erased.
+    /// Bytes land where they were taken, those past the parts it holds dropped; the rest is erased. A kept image
+    /// comes back whole; one of another length (another layout's) gives a blank chip; the parts not held read
+    /// erased and refuse writes.
     #[test]
     fn an_image_is_placed_and_clipped() {
         let f = SimFlash::with_image(CHANNELS.start, &[0x42; 8]);
         let a = CHANNELS.start as usize;
         assert_eq!(&f.mem[a - 1..a + 9], &[0xFF, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0xFF]);
         let f = SimFlash::with_image(LOW as u32 - 4, &[0; 16]);
-        assert_eq!(&f.mem[LOW - 4..LOW + 1], &[0, 0, 0, 0, 0xFF], "past the low part: dropped, the scratch ring untouched");
+        assert_eq!(&f.mem[LOW - 4..LOW + 1], &[0, 0, 0, 0, 0xFF], "past the low part: dropped, the high part untouched");
         assert!(SimFlash::default().mem.iter().all(|&b| b == 0xFF));
+        let mut img = vec![0xFFu8; IMAGE_LEN];
+        img[IMAGE_LEN - 1] = 7;
+        let mut f = SimFlash::from_image(&img);
+        assert_eq!((f.image(), f.mem[SimFlash::at(EVENT_LOG.end - 1)]), (img, 7));
+        assert!(SimFlash::from_image(&[0; 300]).mem.iter().all(|&b| b == 0xFF), "an image from another layout");
+        let mut b = [0u8; 2];
+        assert!(f.read(0x10_0000, &mut b).is_ok() && b == [0xFF; 2]);
+        assert!(f.start_erase(0x10_0000).is_err() && f.start_program(0x10_0000, &[0]).is_err());
     }
 
     /// The power off: every call fails, nothing changes, until it is back on.

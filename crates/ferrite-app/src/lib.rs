@@ -376,6 +376,8 @@ pub struct App {
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
     scan_mask: u8,
+    /// UPD-16: the finish-the-update page has been shown this power-on (BACK leaves it for good).
+    update_told: bool,
     /// SCAN-6: each slot's scan's last hit (0 none), for Return to "Last hit".
     pub(crate) last_hit: [Freq10; SLOTS],
     relay_mask: u8,
@@ -500,6 +502,7 @@ impl App {
             clock_set: None,
             rx_mask: 0,
             scan_mask: 0,
+            update_told: false,
             last_hit: [0; SLOTS],
             relay_mask: 0,
             scan_hit: [0; SLOTS],
@@ -1233,6 +1236,11 @@ impl App {
         self.tick_keys(now, store);
         // Decision 333: the store keeps the member lists of the slots' zones (CHAN-36)
         store.slot_zones([self.slots[0].zone, self.slots[1].zone, self.slots[2].zone]);
+        // UPD-16, LINK-61: the chip's data waits for Console: said once, over whatever is up
+        if store.data().layout_found() != 0 && !self.update_told {
+            self.update_told = true;
+            self.open(Dest::FinishUpdate);
+        }
         local::tick(self, store); // CHAN-34: before anything steps through a slot's zone
         // Channel scans in the Radio task: their set going out, and the frequencies it asks for.
         chanscan::feed(self, store);

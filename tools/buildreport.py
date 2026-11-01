@@ -158,8 +158,10 @@ def elf_sizes():
 
 # ---- SPI flash ------------------------------------------------------------------------------------------------------
 
-OWNER = {"CALIBRATION": "factory", "STOCK_RECORD": "stock", "PROMPTS": "stock", "UPDATE_AREA": "bootloader",
-         "SSB_PATCH": "owner's stock firmware", "SPARE": "free", "MAILBOX": "free"}
+OWNER = {"CALIBRATION": "factory", "UPDATE_AREA": "bootloader", "SSB_PATCH": "owner's stock firmware", "FREE": "free",
+         "CONFIG_FREE": "free"}
+# Ranges in layout.rs that aren't regions of the map (decision 333: layout 2's header place, the raw data range).
+NOT_REGIONS = {"V2_HEADER", "DATA"}
 
 
 def spi_map():
@@ -171,36 +173,30 @@ def spi_map():
             doc.append(s[3:].strip())
             continue
         m = re.match(r"pub const (\w+): Range<u32> = 0x([\w_]+)\.\.0x([\w_]+);", s)
-        if m:
+        if m and m.group(1) not in NOT_REGIONS:
             a, b = (int(x.replace("_", ""), 16) for x in m.group(2, 3))
             regions.append(dict(name=m.group(1), start=a, end=b, size=b - a, note=" ".join(doc)))
         doc = [] if not s.startswith("///") else doc
+    at = {r["name"]: r for r in regions}
+
+    def addr(e):  # REGION.start or REGION.end
+        n, edge = e.strip().split(".")
+        return at[n][edge]
     w = re.search(r"pub static WRITABLE: \[Range<u32>; \d+\] = \[(.*?)\];", src, re.S).group(1)
-    writable = []
-    for part in w.split(","):
-        part = part.strip()
-        if ".." in part:
-            a, b = part.split("..")
-            writable.append((a.split(".")[0], b.split(".")[0]))  # LAYOUT_HEADER.start..CONTACTS.end
-        elif part:
-            writable.append((part, part))
-    names = [r["name"] for r in regions]
-    may = set()
-    for a, b in writable:
-        may.update(names[names.index(a):names.index(b) + 1])
+    writable = [tuple(addr(x) for x in part.split("..")) for part in w.split(",") if ".." in part]
     for r in regions:
-        r["writable"] = r["name"] in may
+        r["writable"] = any(a <= r["start"] and r["end"] <= b for a, b in writable)
         r["owner"] = OWNER.get(r["name"], "Ferrite")
-    # the gaps: never written by Ferrite (stock's or empty)
-    out, at = [], 0
+    # the gaps: never written by Ferrite (stock's or empty); layout 3 leaves none
+    out, at_ = [], 0
     for r in sorted(regions, key=lambda r: r["start"]):
-        if r["start"] > at:
-            out.append(dict(name="(unmapped)", start=at, end=r["start"], size=r["start"] - at, note="not used by Ferrite",
+        if r["start"] > at_:
+            out.append(dict(name="(unmapped)", start=at_, end=r["start"], size=r["start"] - at_, note="not used by Ferrite",
                             writable=False, owner="untouched"))
         out.append(r)
-        at = r["end"]
-    if at < SPI_SIZE:
-        out.append(dict(name="(unmapped)", start=at, end=SPI_SIZE, size=SPI_SIZE - at, note="", writable=False,
+        at_ = r["end"]
+    if at_ < SPI_SIZE:
+        out.append(dict(name="(unmapped)", start=at_, end=SPI_SIZE, size=SPI_SIZE - at_, note="", writable=False,
                         owner="untouched"))
     ferrite = sum(r["size"] for r in out if r["writable"] and r["owner"] == "Ferrite")
     return dict(regions=out, size=SPI_SIZE, ferrite_bytes=ferrite,

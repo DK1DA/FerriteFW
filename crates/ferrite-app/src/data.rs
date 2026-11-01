@@ -417,6 +417,17 @@ pub fn ax25_call_ok(call: &[u8]) -> bool {
     (1..=crate::screens::transmit::AX25_CALL).contains(&call.split(|&c| c == b'-').next().map_or(0, <[u8]>::len))
 }
 
+/// LINK-60 (decision 333): a raw write of the SPI flash's data range, as `DATA_WRITE` asks it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataWrite {
+    /// The 4 KB sector at this address erased.
+    Erase(u32),
+    /// `len` bytes of `bytes` programmed at `addr` (one page, erased bytes).
+    Program { addr: u32, len: u8, bytes: [u8; ferrite_core::link::data::PROGRAM_MAX] },
+    /// The layout header written for this firmware's layout; the radio restarts after.
+    Stamp,
+}
+
 pub trait Data {
     /// Changes whenever anything here changes: lists redraw only when it or their own position moved.
     fn version(&self) -> u32 {
@@ -562,6 +573,29 @@ pub trait Data {
     /// The terminal's `load` waits for this before each line (TERM-13).
     fn busy(&self) -> bool {
         false
+    }
+
+    /// LINK-59 (decision 333): `buf.len()` bytes of the SPI flash at `addr`, raw (false: no flash here, the RAM
+    /// stores, or it failed). The link has checked the range.
+    fn data_read(&self, _addr: u32, _buf: &mut [u8]) -> bool {
+        false
+    }
+
+    /// LINK-59: the CRC-32 of `len` bytes at `addr`.
+    fn data_crc(&self, _addr: u32, _len: u32) -> Option<u32> {
+        None
+    }
+
+    /// LINK-60: a raw write queued for the store's owner (false: no room, or no flash here). The link has checked
+    /// the range and the shape.
+    fn data_write(&self, _w: DataWrite) -> bool {
+        false
+    }
+
+    /// UPD-16 (decision 333): the layout the chip's data is in when it isn't this firmware's, or the radio is
+    /// being written raw (LINK-61): then nothing is read or written by the store until a restart; 0 otherwise.
+    fn layout_found(&self) -> u16 {
+        0
     }
 
     /// How many more writes the store's queue takes now (LINK-41.1: a `WRITE_MANY` frame goes to it whole).

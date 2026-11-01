@@ -174,7 +174,7 @@ fn a_console_position_import() {
     assert!(s.get(6).is_none() && s.position(6).is_none(), "no channel at 6: nothing made");
 }
 
-/// LINK-54 – LINK-56 (decision 327): Console writing the lists. 256 waypoints added and 16 DTMF memories with names
+/// LINK-54 – LINK-56 (decision 327): Console writing the lists. 256 waypoints (of the 2,032 the store holds) added and 16 DTMF memories with names
 /// set on a blank store are programmed only (no erase); one waypoint replaced, one deleted, one DTMF memory renamed
 /// each rewrite one sector once (through the scratch ring); a quick message saves the APRS record (one erase of one
 /// of its two copies), as the radio's own editors do. The link writes nothing for a record as stored.
@@ -187,7 +187,6 @@ fn console_writes_the_lists() {
     for n in 0..256 {
         assert!(s.request(Op::PutWaypoint(ferrite_core::link::ADD, wp(n))));
     }
-    assert!(!s.request(Op::PutWaypoint(ferrite_core::link::ADD, wp(999))), "256 at most");
     for i in 0..16u8 {
         assert!(s.request(Op::Dtmf(i, Dtmf::parse(b"*79#"))));
         assert!(s.request(Op::DtmfName(i, Buf::from(b"Link on"))));

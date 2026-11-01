@@ -327,7 +327,7 @@ impl Entry {
         self.freq_mode() && t.iter().position(|&c| c == b'.').is_some_and(|p| p + 1 < t.len())
     }
 
-    /// The typed channel number (0-999, typed as 1-1000).
+    /// The typed channel number (0-3999, typed as 1-4000).
     pub fn number(&self) -> Option<u16> {
         let v = self.typed().iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
         (v >= 1 && v <= MAX_CHANNELS as u32).then(|| v as u16 - 1)
@@ -657,7 +657,7 @@ match self.to {
                     None => (rows[1].1, rows[1].2) = (Buf::from(b"empty"), AMBER),
                 }
             } else if self.n > 0 {
-                note = b"Channels are 1 to 1000";
+                note = b"Channels are 1 to 4000";
             }
         Info { rows, note }
     }

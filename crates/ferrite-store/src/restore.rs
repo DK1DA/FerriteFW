@@ -153,11 +153,11 @@ mod tests {
     }
 
     /// BACKUP-7, LINK-4: calibration and the update area are refused before the chip is asked (the simulated chip
-    /// would panic on them), and so is stock's data outside Ferrite's ranges.
+    /// would panic on them); everything else below the update area is layout 3's (decision 333).
     #[test]
     fn restore_refuses_protected_ranges() {
         let mut f = SimFlash::new();
-        for a in [CALIBRATION.start, 0, UPDATE_AREA.start, UPDATE_AREA.end - 4096] {
+        for a in [CALIBRATION.start, UPDATE_AREA.start, UPDATE_AREA.end - 4096] {
             assert_eq!(ask(&mut f, &req(r::ERASE, a, &[])).0, Status::Refused as u8, "{a:#x}");
             assert_eq!(ask(&mut f, &req(r::PROGRAM, a, &[0; 16])).0, Status::Refused as u8, "{a:#x}");
         }

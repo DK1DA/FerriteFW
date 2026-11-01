@@ -158,8 +158,8 @@ fn hello_and_info() {
     assert_eq!(s, 0);
     let v = a[0] as usize;
     assert_eq!(u16::from_le_bytes([a[1 + v], a[2 + v]]), pc.st.count());
-    // LINK-35.1: the last 12 bytes are the unique ID as the MCU stores it
-    assert_eq!(a[a.len() - 12..], ferrite_core::uid::bytes(pc.dev.selftest.uid));
+    // LINK-35.1: the 12 bytes before the layouts (LINK-62) are the unique ID as the MCU stores it
+    assert_eq!(a[a.len() - 14..a.len() - 2], ferrite_core::uid::bytes(pc.dev.selftest.uid));
     assert_eq!(pc.link.hellos(), 1);
     assert!(pc.link.active(pc.now));
     assert!(!pc.link.active(pc.now + ACTIVE_MS));
@@ -188,12 +188,13 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59), then the layouts (LINK-62)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 8;
         let c = v + 1 + a[v] as usize;
         assert_eq!(a[c], b, "INFO");
-        assert_eq!(a[c + 1..], [0; 12], "LINK-35.1: the unique ID follows, zeros until read");
+        assert_eq!(a[c + 1..c + 13], [0; 12], "LINK-35.1: the unique ID follows, zeros until read");
+        assert_eq!(a[c + 13..], [3, 3], "LINK-62: the layouts, this firmware's and the chip's");
     }
     assert_eq!(build::name(2), "tx-dry");
     assert_eq!(build::name(0x82), "tx-dry");
@@ -1510,24 +1511,38 @@ pub(crate) fn chan_rec(n: u16, rx: u32, name: &[u8]) -> Vec<u8> {
     out
 }
 
-/// LINK-39: `USED` gives a bit for every channel number, set where a channel is; zones and presets all set.
+/// LINK-39: `USED` gives a bit for every channel number, set where a channel is, in parts of 1,880 from a first index
+/// (4,000 channels: three asks); zones and presets all set.
 #[test]
 fn used_maps_channels() {
     let mut pc = Pc::new(true);
-    let (s, a) = pc.ask(msg::USED, &[what::CHANNEL]);
-    assert_eq!(s, 0);
-    assert_eq!(u16::from_le_bytes([a[0], a[1]]), MAX_CHANNELS);
-    assert_eq!(a.len(), 2 + MAX_CHANNELS.div_ceil(8) as usize);
+    let mut bits = std::vec::Vec::new();
+    let mut first = 0u16;
+    let mut asks = 0;
+    while first < MAX_CHANNELS {
+        let mut p = std::vec![what::CHANNEL];
+        p.extend_from_slice(&first.to_le_bytes());
+        let (s, a) = pc.ask(msg::USED, &p);
+        assert_eq!(s, 0);
+        assert_eq!((u16::from_le_bytes([a[0], a[1]]), u16::from_le_bytes([a[2], a[3]])), (MAX_CHANNELS, first));
+        let k = (MAX_CHANNELS - first).min(crate::link::USED_MAX);
+        assert_eq!(a.len(), 4 + k.div_ceil(8) as usize);
+        bits.extend((0..k).map(|i| a[4 + i as usize / 8] >> (i % 8) & 1 != 0));
+        first += k;
+        asks += 1;
+    }
+    assert_eq!(asks, 3);
     let mut n = 0;
     for i in 0..MAX_CHANNELS {
-        let bit = a[2 + i as usize / 8] >> (i % 8) & 1 != 0;
-        assert_eq!(bit, pc.st.get(i).is_some(), "channel {i}");
-        n += bit as u16;
+        assert_eq!(bits[i as usize], pc.st.get(i).is_some(), "channel {i}");
+        n += bits[i as usize] as u16;
     }
     assert_eq!(n, pc.st.count());
+    assert_eq!(pc.ask(msg::USED, &[what::CHANNEL]).1[2..4], [0, 0], "no first index: 0");
     let (s, a) = pc.ask(msg::USED, &[what::ZONE]);
     assert_eq!((s, u16::from_le_bytes([a[0], a[1]])), (0, pc.st.zones()));
-    assert!((0..pc.st.zones()).all(|i| a[2 + i as usize / 8] >> (i % 8) & 1 != 0));
+    assert!((0..pc.st.zones()).all(|i| a[4 + i as usize / 8] >> (i % 8) & 1 != 0));
+    assert_eq!(pc.ask(msg::USED, &[what::CHANNEL, 0xA1, 0x0F]).0, Status::BadArg as u8, "past the last");
     assert_eq!(pc.ask(msg::USED, &[what::SETTINGS]).0, Status::BadArg as u8);
     assert_eq!(pc.ask(msg::USED, &[]).0, Status::BadArg as u8);
 }
@@ -1545,9 +1560,9 @@ fn read_many_matches_read() {
             assert!(asks <= want.len().div_ceil(5), "{asks} requests for {} channels", want.len());
         }
     }
-    // A range: only what's in it; the end past 999 is cut.
+    // A range: only what's in it; the end past the last channel is cut.
     let mut p = std::vec![what::CHANNEL];
-    p.extend_from_slice(&990u16.to_le_bytes());
+    p.extend_from_slice(&(MAX_CHANNELS - 10).to_le_bytes());
     p.extend_from_slice(&100u16.to_le_bytes());
     let (s, a) = pc.ask(msg::READ_MANY, &p);
     assert_eq!((s, u16::from_le_bytes([a[0], a[1]])), (0, MAX_CHANNELS));
@@ -1732,6 +1747,26 @@ fn stock_restore_start_on_the_cable_only() {
     let mut bt = Pc::new(false);
     assert_eq!(bt.ask(msg::STOCK_RESTORE, &[START]).0, Status::Refused as u8, "never over Bluetooth");
     assert_eq!(bt.link.take_restore(), None);
+}
+
+/// LINK-59, LINK-60: raw data: the shapes and ranges are checked before the store is asked; writes from the cable
+/// only; a store without a flash (the RAM sample) has nothing to read or write.
+#[test]
+fn raw_data_shapes_ranges_and_ports() {
+    use ferrite_core::link::data::{ERASE, PROGRAM, READ, STAMP};
+    let mut pc = Pc::new(true);
+    assert_eq!(pc.ask(msg::DATA_READ, &[READ, 0, 0, 0, 0, 16]).0, Status::NotFound as u8, "no flash here");
+    assert_eq!(pc.ask(msg::DATA_READ, &[READ, 0, 0xF0, 0, 0, 16]).0, Status::Refused as u8, "calibration");
+    assert_eq!(pc.ask(msg::DATA_READ, &[READ, 0, 0, 0, 0, 0]).0, Status::BadArg as u8, "nothing to read");
+    assert_eq!(pc.ask(msg::DATA_READ, &[9]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::DATA_WRITE, &[ERASE, 0x10, 0, 0, 0]).0, Status::BadArg as u8, "not a sector");
+    assert_eq!(pc.ask(msg::DATA_WRITE, &[ERASE, 0, 0, 0x30, 0]).0, Status::Refused as u8, "the update area");
+    assert_eq!(pc.ask(msg::DATA_WRITE, &[PROGRAM, 0, 0, 1, 0]).0, Status::BadArg as u8, "no bytes");
+    assert_eq!(pc.ask(msg::DATA_WRITE, &[ERASE, 0, 0, 1, 0]).0, Status::Busy as u8, "no store to queue it");
+    assert_eq!(pc.ask(msg::DATA_WRITE, &[STAMP, 4, 0]).0, Status::Invalid as u8);
+    let mut bt = Pc::new(false);
+    assert_eq!(bt.ask(msg::DATA_WRITE, &[ERASE, 0, 0, 1, 0]).0, Status::Refused as u8, "never over Bluetooth");
+    assert_eq!(bt.ask(msg::DATA_READ, &[READ, 0, 0, 0, 0, 16]).0, Status::NotFound as u8, "reads go on over Bluetooth");
 }
 
 /// CHAN-12.1: a zone deleted over the link leaves no slot in it, as the radio's own delete does, so a later edit

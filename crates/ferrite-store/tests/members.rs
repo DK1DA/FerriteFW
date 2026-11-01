@@ -203,12 +203,11 @@ fn a_zone_takes_256_channels() {
 #[test]
 fn building_a_list_costs() {
     let s = Store::mount(SimFlash::new(), NoData);
-    zones(&s, 8);
-    // every number used: a full zone of 256 among them, the rest spread over the others and no zone
+    zones(&s, 18);
+    // every number used: a full zone of 256 among them, the rest spread over 17 others (under 256 each) and no zone
     for n in 0..MAX_CHANNELS {
-        let z = if n % 4 == 0 && n / 4 < ZONE_CAP { 0 } else { [1, 2, 3, 4, 5, 6, 7, NO_ZONE][n as usize % 8] };
-        let z = if z == 0 && !(n % 4 == 0 && n / 4 < ZONE_CAP) { 1 } else { z };
-        assert!(s.apply(ChanWrite::Put { ch: ch(n, z), from: None }));
+        let z = if n % 4 == 0 && n / 4 < ZONE_CAP { 0 } else { [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, NO_ZONE][n as usize % 18] };
+        assert!(s.apply(ChanWrite::Put { ch: ch(n, z), from: None }), "channel {n}");
     }
     assert_eq!(s.zone_len(0), ZONE_CAP.min(MAX_CHANNELS.div_ceil(4)));
     let r0 = s.nor().reads;

@@ -1343,7 +1343,7 @@ impl Term {
                 match i {
                     0 => {
                         v.push(digits(cx.store.count() as u32, &mut [0; 10]));
-                        v.push(b" used of 1000");
+                        v.push(b" used of 4000");
                     }
                     1 => {
                         v.push(digits(cx.store.zones() as u32, &mut [0; 10]));
@@ -1830,7 +1830,7 @@ fn about<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
             w.at(2);
             w.s(b"Channels      ");
             w.n(cx.store.count() as u32);
-            w.s(b" of 1000, ");
+            w.s(b" of 4000, ");
             w.n(cx.store.zones() as u32);
             w.s(b" zones");
         }

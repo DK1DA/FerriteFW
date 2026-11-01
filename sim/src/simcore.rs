@@ -17,7 +17,7 @@ use ferrite_app::data::{Data, MsgState, Src};
 use ferrite_app::ports::{Port, Ports, To};
 use ferrite_app::sample::Sample;
 use ferrite_app::settings::Settings;
-use ferrite_core::layout::{CONTACTS, LAYOUT_HEADER};
+use ferrite_core::layout::{LAYOUT_HEADER, MAILBOX};
 use ferrite_store::sim::SimFlash;
 use ferrite_store::FlashStore;
 use ferrite_app::screens::nav::{self, Dest};
@@ -182,9 +182,11 @@ const CHECKS: [Check; 6] = [
     Check { label: "Calibration", value: "", state: State::Ok },
 ];
 
-/// The simulated flash's saved part: from the layout header to the end of the waypoints (the event log, APRS
-/// messages and waypoints included).
-pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..CONTACTS.end;
+/// The simulated flash's saved part ([`SimFlash::image`]): the chip from the layout header to the end of the packet
+/// mailbox (settings, channels, zones, the APRS records, waypoints) at the image's start, then the event log
+/// (decision 333's layout 3: [`ferrite_store::sim::IMAGE_LEN`] bytes in all). An image of another length (layout
+/// 2's) isn't used: the sample data instead.
+pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..MAILBOX.end;
 
 /// What the flash holds at power on.
 pub enum Stored {
@@ -345,9 +347,12 @@ impl SimCore {
     pub fn with_flash(scale: usize, owner_card: bool, stored: Stored) -> Self {
         let scale = scale.clamp(1, MAX_SCALE);
         let nor = match &stored {
-            Stored::Image(img) if !img.is_empty() => SimFlash::with_image(FLASH_IMAGE.start, img),
+            Stored::Image(img) if img.len() == ferrite_store::sim::IMAGE_LEN => SimFlash::from_image(img),
             _ => SimFlash::new(),
         };
+        // a kept image from another layout (its length): the sample, as if none was kept
+        let sample = matches!(&stored, Stored::Sample) || matches!(&stored, Stored::Image(img) if !img.is_empty() && img.len() != ferrite_store::sim::IMAGE_LEN);
+        let stored = if sample { Stored::Sample } else { stored };
         let store = FlashStore::mount(nor, Sample::new());
         if matches!(stored, Stored::Sample) && store.first_boot() {
             seed(&store);
@@ -419,8 +424,7 @@ impl SimCore {
 
     /// The saved part of the flash ([`FLASH_IMAGE`]), for the caller to keep.
     pub fn flash_image(&self) -> Vec<u8> {
-        let r = FLASH_IMAGE.start as usize..FLASH_IMAGE.end as usize;
-        self.store.nor().mem[r].to_vec()
+        self.store.nor().image()
     }
 
     /// The flash changed since the last call (time to save the image).

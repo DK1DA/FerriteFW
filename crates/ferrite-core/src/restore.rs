@@ -1,8 +1,8 @@
 //! `STOCK_RESTORE` (BACKUP-7, LINK-4, LINK-8, decision 261): the way back to stock writes the owner's backup over
 //! the cable into what Ferrite may have changed, then the PC flashes the stock `.BTF` (BACKUP-8).
 //!
-//! - Only Ferrite's own writable ranges ([`crate::layout::WRITABLE`]) are restored: Ferrite never writes anywhere
-//!   else (its flash driver refuses it), so everything outside them still holds what stock left.
+//! - Only Ferrite's own writable ranges ([`crate::layout::WRITABLE`]) are restored: since layout 3 (decision 333)
+//!   that is the whole chip below the update area but calibration, which nothing ever writes.
 //! - Calibration ([`CALIBRATION`]) and the update area ([`UPDATE_AREA`]) are refused by [`allowed`] whatever the
 //!   ranges say, on top of the driver's own guard (SAFE-1, SAFE-2).
 //! - The PC's requests, each a `STOCK_RESTORE` frame whose payload starts with an op: [`START`] (the radio stops
@@ -125,7 +125,8 @@ mod tests {
             assert!(allowed(&WRITABLE, r.start, SECTOR) && allowed(&WRITABLE, r.end - SECTOR, SECTOR));
             assert!(!allowed(&WRITABLE, r.end - 8, 16), "not past its end");
         }
-        assert!(!allowed(&WRITABLE, 0, SECTOR), "stock's own data below the layout header: not Ferrite's");
+        assert!(allowed(&WRITABLE, 0, SECTOR), "layout 3: from the layout header at 0x000000");
+        assert!(!allowed(&WRITABLE, CALIBRATION.start, SECTOR) && !allowed(&WRITABLE, UPDATE_AREA.start, SECTOR));
     }
 
     /// BACKUP-7: requests parse by shape, then go only where they may.

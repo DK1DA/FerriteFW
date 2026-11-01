@@ -7,7 +7,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT info
     python3 tools/ferrite_link.py PORT read-settings settings.bin
     python3 tools/ferrite_link.py PORT write-settings settings.bin
-    python3 tools/ferrite_link.py PORT read-channel 12            # channel 12 as shown on the radio (1-1000)
+    python3 tools/ferrite_link.py PORT read-channel 12            # channel 12 as shown on the radio (1-4000)
     python3 tools/ferrite_link.py PORT write-channel 12 --name "Club rpt" [--rx 146.94]
     python3 tools/ferrite_link.py PORT delete-channel 12
     python3 tools/ferrite_link.py PORT used [channel|zone|preset]  # which numbers hold a record (LINK-39)
@@ -98,6 +98,8 @@ SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
 CONTACT = 6  # APRS-42
 POSITION = 7  # LINK-53: a channel's position by number, <ii lat, lon in 1e-7 degree; b"" clears it
 CAP_POSITION = 64  # LINK-53: HELLO's caps say POSITION
+DATA_READ, DATA_WRITE = 0x61, 0x62  # LINK-59, LINK-60 (decision 333): the SPI data range raw (writes: the cable only)
+CAP2_DATA = 2  # LINK-59: HELLO's second caps byte says the raw data messages and the layout bytes (LINK-62)
 QUICK, WAYPOINT, DTMF = 8, 9, 10  # LINK-54 - LINK-56: flags + text; name(16) <ii lat, lon, source; len + symbols + name
 WP_ADD = 0xFFFF  # LINK-55: WRITE_MANY's index for a new waypoint
 CAP_LISTS = 128  # LINK-54 - LINK-57: HELLO's caps say QUICK, WAYPOINT, DTMF and SUBSCRIBE's log
@@ -511,17 +513,43 @@ class Link:
         for off in range(0, max(len(rec), 1), part):
             self.ok(WRITE, struct.pack("<BHHH", what, idx, off, len(rec)) + rec[off:off + part])
 
+    def data_read(self, addr, n):
+        """LINK-59: `n` bytes (1-232) of the SPI flash at `addr` (never calibration or the update area)."""
+        return self.ok(DATA_READ, struct.pack("<BIB", 0, addr, n))
+
+    def data_crc(self, addr, n):
+        """LINK-59: the CRC-32 of `n` bytes at `addr`."""
+        return struct.unpack("<I", self.ok(DATA_READ, struct.pack("<BII", 1, addr, n)))[0]
+
+    def data_erase(self, addr):
+        """LINK-60: the 4 KB sector at `addr` erased (the cable only)."""
+        self.ok(DATA_WRITE, struct.pack("<BI", 0, addr))
+
+    def data_program(self, addr, b):
+        """LINK-60: 1-64 bytes programmed at `addr`, inside one 256-byte page, into erased bytes."""
+        self.ok(DATA_WRITE, struct.pack("<BI", 1, addr) + bytes(b))
+
+    def data_stamp(self, layout=3):
+        """LINK-62: the layout header written last; the radio restarts on it."""
+        self.ok(DATA_WRITE, struct.pack("<BH", 2, layout))
+
     def used(self, what):
-        """LINK-39: the indexes of `what` that hold a record."""
-        a = self.ok(USED, bytes([what]))
-        n = struct.unpack("<H", a[:2])[0]
-        return [i for i in range(n) if a[2 + i // 8] >> (i % 8) & 1]
+        """LINK-39: the indexes of `what` that hold a record (protocol 3: in parts from a first index)."""
+        out, first, n = [], 0, 1
+        while first < n:
+            a = self.ok(USED, struct.pack("<BH", what, first))
+            n, at = struct.unpack("<HH", a[:4])
+            bits = a[4:]
+            k = min(n - at, len(bits) * 8)
+            out += [at + i for i in range(k) if bits[i // 8] >> (i % 8) & 1]
+            first = at + max(k, 1)
+        return out
 
     def read_many(self, what, first=0, count=None):
-        """LINK-40: every record held from `first`, `count` indexes on (default: to the end; channels are 0-999):
+        """LINK-40: every record held from `first`, `count` indexes on (default: to the end; channels are 0-3999):
         [(index, record)], and the requests it took."""
         if count is None:
-            count = (1000 if what in (CHANNEL, POSITION) else 256) - first
+            count = (4000 if what in (CHANNEL, POSITION) else 4096) - first
         if self.caps & CAP_STREAM:
             out, end, asks = [], first + count, 0
             while first < end:
@@ -1460,7 +1488,7 @@ def run(link, a):
         for i, rec in recs:
             if what == CHANNEL:
                 num, zone, rx, name = channel_fields(rec)
-                print(f"channel {i + 1}: {name!r} {rx / 100000:.5f} MHz zone {zone if zone != 255 else 'none'}")
+                print(f"channel {i + 1}: {name!r} {rx / 100000:.5f} MHz zone {zone if zone != 0xFFFF else 'none'}")
             else:
                 print(f"{i}: {rec.hex()}")
         print(f"{len(recs)} records in {asks} requests")

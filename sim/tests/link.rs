@@ -81,3 +81,84 @@ fn reboot_restarts_the_simulator() {
     let a = ask(&mut sim, &mut t, msg::HELLO, 3, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(&a[..2], &[0, PROTOCOL]);
 }
+
+/// UPD-16, LINK-59 – LINK-62 (decision 333): a chip with layout 2's data (its header at 0x02C000) is left alone and
+/// says so (D25, and `HELLO` ending with the layouts 3 and 2); Console reads it raw, never calibration or the update
+/// area; erases and programs the new layout over the cable (not over Bluetooth); stamps the header last, and the
+/// radio restarts on layout 3 with what was written.
+#[test]
+fn a_layout_2_chip_waits_for_console() {
+    use ferrite_core::link::data::{CRC, ERASE, PROGRAM, READ, STAMP};
+    use ferrite_sim::simcore::Stored;
+    use ferrite_store::sim::SimFlash;
+    let mut f = SimFlash::new();
+    let mut h = [0xFFu8; 20];
+    h[..4].copy_from_slice(&ferrite_store::store::HEADER_MAGIC.to_le_bytes());
+    h[4..6].copy_from_slice(&2u16.to_le_bytes());
+    let mut c = ferrite_store::Crc32::new();
+    c.update(&h[..16]);
+    h[16..20].copy_from_slice(&c.get().to_le_bytes());
+    f.mem[0x2_C000..0x2_C014].copy_from_slice(&h);
+    f.mem[0x2_F000..0x2_F040].fill(0x42); // a layout 2 channel record's place
+    let before = f.image();
+    let mut sim = SimCore::with_flash(1, false, Stored::Image(before.clone()));
+    let mut t = 0;
+    while t < 6000 {
+        t += 20;
+        sim.step(t);
+    }
+    assert_eq!(sim.screen_name(), "Update", "D25");
+    let a = ask(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[a.len() - 2..], &[3, 2], "this firmware's layout, the chip's");
+    assert!(a[a.len() - 3] & ferrite_core::link::caps2::DATA != 0);
+    let rd = |addr: u32, n: u8| {
+        let mut p = vec![READ];
+        p.extend_from_slice(&addr.to_le_bytes());
+        p.push(n);
+        p
+    };
+    let r = ask(&mut sim, &mut t, msg::DATA_READ, 2, &rd(0x2_C000, 20));
+    assert_eq!((r[0], &r[1..]), (0, &h[..]), "layout 2's header, read raw");
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_READ, 3, &rd(0xF000, 16))[0], 4, "calibration: refused");
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_READ, 4, &rd(0x2F_FFF0, 32))[0], 4, "into the update area: refused");
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_READ, 5, &rd(0, 233))[0], 3, "more than an answer holds");
+    assert_eq!(sim.store().nor().image(), before, "nothing written by the radio itself");
+    // the new layout's first channel sector: erased, then a record programmed, read back by its CRC
+    let mut e = vec![ERASE];
+    e.extend_from_slice(&0x1_0000u32.to_le_bytes());
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 6, &e)[0], 0);
+    let mut cal = vec![ERASE];
+    cal.extend_from_slice(&0xF000u32.to_le_bytes());
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 7, &cal)[0], 4, "calibration is never erased");
+    let rec: Vec<u8> = (0..64u8).collect();
+    let mut p = vec![PROGRAM];
+    p.extend_from_slice(&0x1_0000u32.to_le_bytes());
+    p.extend_from_slice(&rec);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 8, &p)[0], 0);
+    let mut across = vec![PROGRAM];
+    across.extend_from_slice(&0x1_00F0u32.to_le_bytes());
+    across.extend_from_slice(&[0; 32]);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 9, &across)[0], 3, "across a page");
+    let mut crc = vec![CRC];
+    crc.extend_from_slice(&0x1_0000u32.to_le_bytes());
+    crc.extend_from_slice(&64u32.to_le_bytes());
+    let mut want = ferrite_store::Crc32::new();
+    want.update(&rec);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_READ, 10, &crc), [&[0u8][..], &want.get().to_le_bytes()].concat());
+    // layout 2's header sector goes last before the stamp (an interrupted update keeps the radio waiting)
+    let mut e = vec![ERASE];
+    e.extend_from_slice(&0x2_C000u32.to_le_bytes());
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 11, &e)[0], 0);
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 12, &[STAMP, 2, 0])[0], 9, "only this firmware's layout");
+    assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 13, &[STAMP, 3, 0])[0], 0);
+    assert!(sim.booting(), "the radio restarts on the stamped layout");
+    while t < 12_000 {
+        t += 20;
+        sim.step(t);
+    }
+    assert_eq!(sim.store().layout_found(), None);
+    let a = ask(&mut sim, &mut t, msg::HELLO, 14, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[a.len() - 2..], &[3, 3]);
+    let r = ask(&mut sim, &mut t, msg::DATA_READ, 15, &rd(0x1_0000, 64));
+    assert_eq!(&r[1..], &rec[..], "what Console wrote is there");
+}

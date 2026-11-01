@@ -146,12 +146,53 @@ fn round_trip_and_first_boot() {
     assert!(!s.flush(&b));
 }
 
+/// A layout header with the given version (and a good CRC) at `at`.
+fn put_header(f: &mut SimFlash, at: u32, version: u16) {
+    let mut h = [0xFFu8; 20];
+    h[..4].copy_from_slice(&ferrite_store::store::HEADER_MAGIC.to_le_bytes());
+    h[4..6].copy_from_slice(&version.to_le_bytes());
+    let mut c = ferrite_store::Crc32::new();
+    c.update(&h[..16]);
+    h[16..20].copy_from_slice(&c.get().to_le_bytes());
+    let a = at as usize;
+    f.mem[a..a + 4096].fill(0xFF);
+    f.mem[a..a + 20].copy_from_slice(&h);
+}
+
+/// UPD-16 (decision 333): a chip holding another layout's data is left alone: another version in the header at
+/// 0x000000, or layout 2's header at its old place 0x02C000 with no layout 3 header. Nothing is read or written
+/// (not even the scratch ring's recovery), nothing is stored this power-on, and the version found is told.
 #[test]
-fn a_foreign_header_or_noise_formats() {
-    // Another layout (the earlier journal layout was version 1): formatted, first boot, empty.
+fn another_layouts_data_is_left_alone() {
+    use ferrite_core::layout::{LAYOUT_HEADER, V2_HEADER};
+    let mut f = seeded();
+    put_header(&mut f, LAYOUT_HEADER.start, 4);
+    f.ops = 0;
+    let before = f.mem.clone();
+    let s = mount(f);
+    assert_eq!((s.mounted(), s.layout_found()), (Mounted::Update(4), Some(4)));
+    assert!(!s.first_boot() && s.count() == 0 && s.presets() == 0 && s.zones() == 0 && s.by_num(0).is_none());
+    assert!(!s.apply(ChanWrite::Put { ch: channel(5, NO_ZONE, 14_600_000, "X", DEFAULT_CFG), from: None }), "writes refused");
+    assert!(!s.save(&app()));
+    let f = unmount(s);
+    assert!(f.mem == before && f.ops == 0, "nothing written");
+    // layout 2: its header at 0x02C000, nothing at 0x000000 (an update from a layout 2 firmware)
+    let mut f = SimFlash::new();
+    put_header(&mut f, V2_HEADER.start, 2);
+    f.mem[0x2D000..0x2D100].fill(0x5A); // its settings
+    let before = f.mem.clone();
+    let s = mount(f);
+    assert_eq!(s.mounted(), Mounted::Update(2));
+    let f = unmount(s);
+    assert!(f.mem == before && f.ops == 0, "layout 2's data untouched");
+}
+
+/// INST-6, BOOT-12: no Ferrite header (a damaged one, a chip of noise or of stock's data): a first install, formatted.
+#[test]
+fn a_damaged_header_or_noise_formats() {
     let mut f = seeded();
     let h = ferrite_core::layout::LAYOUT_HEADER.start as usize;
-    f.mem[h + 4] = 1;
+    f.mem[h + 4] = 1; // its CRC no longer agrees
     let s = mount(f);
     assert_eq!(s.mounted(), Mounted::FirstBoot);
     assert_eq!(s.count(), 0);
@@ -430,7 +471,7 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
 }
 
 /// Writes past the last channel number fail; a zone deleted through the channel queue (CHAN-12) leaves its
-/// channels in no zone; an existing zone written again is renamed in place; 254 zones and 16 presets at most. The
+/// channels in no zone; an existing zone written again is renamed in place; 512 zones and 16 presets at most. The
 /// Storage task checks again what the screens checked: a renumber onto a channel stored meanwhile, or an edit of
 /// one deleted meanwhile, is refused and changes nothing.
 #[test]
@@ -449,7 +490,7 @@ fn out_of_range_full_and_stale_requests() {
     assert_eq!((s.zones(), s.zone_of(1)), (2, Some(NO_ZONE)), "an earlier zone stays, empty; its channel in no zone");
     assert!(s.request(Op::PutZone(1, Buf::from(b"Renamed"), ZoneCfg::default())));
     assert_eq!((s.zones(), s.zone_name(1).unwrap().as_bytes()), (2, &b"Renamed"[..]));
-    while s.zones() < 254 {
+    while s.zones() < ferrite_app::chan::MAX_ZONES {
         assert!(s.add_zone(b"Z", &ZoneCfg::default()));
     }
     assert!(!s.add_zone(b"Z", &ZoneCfg::default()) && !s.request(Op::NewZone));
@@ -465,16 +506,16 @@ fn out_of_range_full_and_stale_requests() {
 }
 
 /// CHAN-25: Recent lists the channels used, newest first, in RAM. The lookups the screens use: the next free
-/// number from a given one (wrapping past 999), a number's zone, a channel with its position.
+/// number from a given one (wrapping past the last), a number's zone, a channel with its position.
 #[test]
 fn channel_lookups() {
     let s = mount(SimFlash::new());
-    for n in [5u16, 6, 998, 999] {
+    for n in [5u16, 6, MAX_CHANNELS - 2, MAX_CHANNELS - 1] {
         assert!(s.queue_write(ChanWrite::Put { ch: channel(n, NO_ZONE, 14_652_000, "Ch", DEFAULT_CFG), from: None }));
     }
     assert!(s.add_zone(b"Local", &ZoneCfg::default()));
     assert!(s.request(Op::Move(6, 0)));
-    assert_eq!((s.free_num(5), s.free_num(998), s.free_num(0)), (Some(7), Some(0), Some(0)));
+    assert_eq!((s.free_num(5), s.free_num(MAX_CHANNELS - 2), s.free_num(0)), (Some(7), Some(0), Some(0)));
     assert_eq!((s.zone_of(5), s.zone_of(6), s.zone_of(7), s.zone_of(MAX_CHANNELS)), (Some(NO_ZONE), Some(0), None, None));
     assert!(s.located(5).is_none() && s.located(7).is_none() && s.get(MAX_CHANNELS).is_none(), "no position, no channel");
     assert!(s.apply(ChanWrite::PutPos { ch: s.get(5).unwrap(), pos: Some(ferrite_app::data::Pos { lat: 45, lon: -75 }) }));
@@ -594,13 +635,12 @@ fn reads_during_a_queued_write_see_old_or_new() {
     assert!(polls > 1000);
 }
 
-/// BOOT-12, SAFE-1: a first boot on a chip full of stock's (or any) data outside Ferrite's areas, with the power
-/// cut at points through the format: the next boot formats again and comes up as a first boot, and nothing
-/// outside the formatted areas changes — not calibration, not the SSB patch and trims (kept by a format), not
-/// stock's data below 0x02C000 or above the waypoints.
+/// BOOT-12, SAFE-1, INST-6: a first boot on a chip full of stock's (or any) data, with the power cut at points through
+/// the format: the next boot formats again and comes up as a first boot, and nothing outside the areas this
+/// firmware uses changes: not calibration, not the SSB patch (kept by a format), not the planned regions.
 #[test]
 fn power_cuts_during_the_first_format() {
-    use ferrite_core::layout::{CALIBRATION, HEARD, SSB_PATCH, TRIMS, WRITABLE};
+    use ferrite_core::layout::*;
     let mut f = SimFlash::new();
     let mut r = Rng(11);
     for b in f.mem.iter_mut() {
@@ -615,7 +655,10 @@ fn power_cuts_during_the_first_format() {
         n
     };
     assert!(total > 10);
-    let kept = |a: usize| !(WRITABLE[0].contains(&(a as u32)) || HEARD.contains(&(a as u32))) || SSB_PATCH.contains(&(a as u32)) || TRIMS.contains(&(a as u32));
+    let used = [LAYOUT_HEADER, SETTINGS, TRIMS, PRESETS, CHANNELS, ZONES, APRS, CONTACTS, HEARD, MESSAGES, WAYPOINTS, EVENT_LOG, SCRATCH_RING];
+    let addr = |i: usize| if i < ferrite_store::sim::LOW { i as u32 } else { ferrite_store::sim::HIGH.start + (i - ferrite_store::sim::LOW) as u32 };
+    let kept = |i: usize| !used.iter().any(|r| r.contains(&addr(i)));
+    assert!(kept(SSB_PATCH.start as usize) && kept(CALIBRATION.start as usize) && kept(MAILBOX.start as usize));
     for cut in [1, 2, total / 3, total / 2, total - 2, total - 1] {
         let mut g = f.clone();
         g.cut_at = Some(cut);
@@ -769,7 +812,7 @@ fn queued_channel_writes_share_a_rewrite() {
 /// scratch sector isn't used any more.
 #[test]
 fn rewrites_spread_over_the_scratch_ring() {
-    use ferrite_core::layout::{SCRATCH_RING, SPARE};
+    use ferrite_core::layout::SCRATCH_RING;
     let s = mount(SimFlash::new());
     assert!(s.apply(ChanWrite::Put { ch: channel(1, NO_ZONE, 14_600_000, "A", DEFAULT_CFG), from: None }));
     let before = s.nor().erases.clone();
@@ -779,7 +822,6 @@ fn rewrites_spread_over_the_scratch_ring() {
     let e = s.nor().erases.clone();
     let ring: Vec<u32> = (SCRATCH_RING.start / 4096..SCRATCH_RING.end / 4096).map(|k| e[k as usize] - before[k as usize]).collect();
     assert!(ring.iter().all(|&n| n == 2), "{ring:?}");
-    assert_eq!(e[(SPARE.start / 4096) as usize], before[(SPARE.start / 4096) as usize]);
 }
 
 
@@ -809,4 +851,31 @@ fn power_cuts_during_a_merged_rewrite() {
         index_agrees(&s);
         f = unmount(s);
     }
+}
+
+/// LINK-61 (decision 333): the first raw write (Console's) stops the store's own: nothing more is read or written by
+/// the store until a restart, which mounts what Console wrote; the radio says so as for another layout (UPD-16).
+#[test]
+fn a_raw_write_stops_the_stores_own() {
+    use ferrite_app::data::DataWrite;
+    use ferrite_core::layout::{CHANNELS, LAYOUT_VERSION};
+    let s = mount(seeded());
+    assert_eq!(s.mounted(), Mounted::Ok);
+    assert!(s.get(0).is_some());
+    assert!(s.data_write(DataWrite::Erase(CHANNELS.start)));
+    assert_eq!((s.layout_found(), s.data().layout_found()), (Some(LAYOUT_VERSION), LAYOUT_VERSION));
+    assert!(s.get(0).is_none() && !s.save(&app()), "the store reads and writes nothing more");
+    let mut rec = [0u8; 64];
+    rec[0] = 7;
+    assert!(s.data_write(DataWrite::Program { addr: CHANNELS.start + 10 * 4096, len: 64, bytes: rec }));
+    let mut b = [0u8; 64];
+    assert!(s.data_read(CHANNELS.start + 10 * 4096, &mut b) && b == rec);
+    assert_eq!(s.data_crc(CHANNELS.start, 64), Some({
+        let mut c = ferrite_store::Crc32::new();
+        c.update(&[0xFF; 64]);
+        c.get()
+    }));
+    let s = mount(unmount(s));
+    assert_eq!(s.mounted(), Mounted::Ok, "a restart mounts it");
+    assert!(s.get(0).is_none() && s.get(1).is_none(), "channels 0-62 erased by Console");
 }

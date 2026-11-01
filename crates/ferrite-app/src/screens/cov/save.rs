@@ -84,7 +84,7 @@ fn no_free_number() {
     t.app.screen = Screen::Save(s);
     t.draw();
     t.shows("none free");
-    t.shows("No free number: all 1000 channels are used.");
+    t.shows("No free number: all 4000 channels are used.");
     t.tap(Key::Menu);
     assert_eq!(t.toast(), "Not saved: / No free number");
 }

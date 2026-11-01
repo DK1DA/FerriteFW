@@ -179,6 +179,46 @@ pub mod msg {
     /// The way back to stock (BACKUP-7, LINK-4, LINK-8; [`crate::restore`]): the cable only. `START` stops the radio
     /// and hands the cable to the restore until it resets; erase, program and CRC requests follow, then `FINISH`.
     pub const STOCK_RESTORE: u8 = 0x60;
+    /// LINK-59 (decision 333): the SPI flash's data range read raw, bytes or a CRC ([`super::data`]): Console's
+    /// backup before an update moves data to another layout.
+    pub const DATA_READ: u8 = 0x61;
+    /// LINK-60: the data range written raw, a sector erased or bytes programmed, and the layout header stamped last
+    /// ([`super::data`]): the cable only.
+    pub const DATA_WRITE: u8 = 0x62;
+}
+
+/// `DATA_READ` and `DATA_WRITE` (LINK-59 – LINK-62, decision 333): their ops and limits. Both refuse calibration
+/// (0x00F000-0x00FFFF) and the update area (0x300000 up) by construction ([`allowed`]); a write also stays inside
+/// [`crate::layout::WRITABLE`], which is the same range.
+pub mod data {
+    use crate::layout::{CALIBRATION, DATA};
+
+    /// `DATA_READ`: address (u32), length (u8, 1 to [`READ_MAX`]); the answer is the bytes.
+    pub const READ: u8 = 0;
+    /// `DATA_READ`: address (u32), length (u32, up to the data range's end); the answer is the CRC-32 (u32) of the
+    /// bytes, as the layout header's (CRC-32/ISO-HDLC: reflected, poly 0xEDB88320, init and final XOR 0xFFFFFFFF).
+    pub const CRC: u8 = 1;
+    /// `DATA_WRITE`: the 4 KB sector at an address (u32, a multiple of 4096) erased.
+    pub const ERASE: u8 = 0;
+    /// `DATA_WRITE`: address (u32), then 1 to [`PROGRAM_MAX`] bytes programmed, all inside one 256-byte page, into
+    /// erased bytes (NOR: a program only clears bits).
+    pub const PROGRAM: u8 = 1;
+    /// `DATA_WRITE`: layout version (u16, this firmware's): the layout header written (its sector erased first;
+    /// magic, version, CRC), then the radio restarts and mounts it. The last write of an update (LINK-62).
+    pub const STAMP: u8 = 2;
+    /// The most bytes a `DATA_READ` answers.
+    pub const READ_MAX: usize = 232;
+    /// The most bytes one `PROGRAM` carries (a quarter page: an aligned chunk never crosses a page).
+    pub const PROGRAM_MAX: usize = 64;
+    pub const PAGE: u32 = 256;
+    pub const SECTOR: u32 = 4096;
+
+    /// Whether `len` bytes at `addr` may be read or written raw: inside the data range (below the update area),
+    /// none of them calibration's.
+    pub fn allowed(addr: u32, len: u32) -> bool {
+        let end = addr as u64 + len as u64;
+        len > 0 && end <= DATA.end as u64 && (end <= CALIBRATION.start as u64 || addr >= CALIBRATION.end)
+    }
 }
 
 /// What a radio can do beyond protocol 2, the byte after `HELLO`'s build byte (LINK-35.2); absent: none.
@@ -210,6 +250,10 @@ pub mod caps2 {
     /// A range preset's skipped frequencies by `READ_MANY` and `WRITE_MANY` of [`super::what::PRESET_SKIPS`]
     /// (LINK-58, decision 329).
     pub const PRESET_SKIPS: u8 = 1;
+    /// Protocol 3 (decision 333): 2-byte zone numbers, the zone record's channel count, `USED` in parts, and the raw
+    /// data messages `DATA_READ` and `DATA_WRITE` (LINK-59 – LINK-62); `HELLO` and `INFO` end with the layout
+    /// versions (the firmware's, the chip's).
+    pub const DATA: u8 = 2;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -675,6 +719,17 @@ pub const RATES: [u32; 4] = [115_200, 230_400, 460_800, 921_600];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LINK-59, LINK-60 (decision 333): raw data reads and writes reach the whole data range but calibration, and
+    /// never the update area; no range wraps.
+    #[test]
+    fn raw_data_ranges() {
+        use super::data::allowed;
+        assert!(allowed(0, 4096) && allowed(0xE000, 0x1000) && allowed(0x1_0000, 232) && allowed(0x2F_F000, 4096));
+        assert!(!allowed(0xF000, 1) && !allowed(0xEFFF, 2) && !allowed(0xFFFF, 1) && !allowed(0xE000, 0x2000));
+        assert!(!allowed(0x30_0000, 1) && !allowed(0x2F_FFFF, 2) && !allowed(u32::MAX, 2) && !allowed(0, 0));
+        assert!(allowed(0, 0xF000) && allowed(0x1_0000, 0x2F_0000), "a CRC over each side of calibration");
+    }
 
     /// LINK-13.6 (decision 331): while the cable's session listens its events slow down, so the audio, the events
     /// and a margin for the answers fit the ~23 KB/s 230400 carries; Bluetooth's rates are as they were.

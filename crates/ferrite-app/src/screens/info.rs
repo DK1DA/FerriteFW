@@ -40,6 +40,8 @@ pub enum Page {
     PowerOff,
     EmptyBattery,
     Mailbox,
+    /// D25, UPD-16: the chip's data is another layout's, or Console is writing it raw (LINK-61).
+    FinishUpdate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -353,6 +355,7 @@ pub(crate) fn def(p: Page) -> PageDef {
             hints: &[("OK", "Use it"), ("BACK", "Not now")],
         },
         Page::PowerOff | Page::EmptyBattery => PageDef { title: "Power", rows: &NONE, note: "", hints: &[] },
+        Page::FinishUpdate => PageDef { title: "Update", rows: &NONE, note: "", hints: &[("BACK", "Use it")] },
         Page::Mailbox => PageDef {
             title: "Mailbox",
             rows: &MAILBOX,
@@ -371,6 +374,12 @@ pub(crate) fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'stati
             AMBER,
         ),
         Page::PowerOff => ("Saving...", "Finishing writes, then off.", TEXT),
+        // UPD-16: nothing is lost; the radio works, but saves nothing until Console has moved the data
+        Page::FinishUpdate => (
+            "Finish the update",
+            "Your channels and settings are waiting in the old layout. Connect the cable and open Ferrite Console to finish the update. Until then nothing is saved.",
+            AMBER,
+        ),
         Page::EmptyBattery => {
             volts(b, dev.battery_mv);
             ("Battery empty", "Switching off safely.", RED)

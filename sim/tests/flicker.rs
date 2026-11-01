@@ -285,6 +285,7 @@ const BUDGET: &[(&str, u64)] = &[
     ("D22 Power off", 123000),
     ("D23 Empty battery", 67000),
     ("D24 Mailbox", 10000),
+    ("D25 Finish the update", 10000),
     ("D3 Settings group #2", 88000),
     ("D3 Settings list #2", 67000),
     ("A5 Value editor #2", 70000),

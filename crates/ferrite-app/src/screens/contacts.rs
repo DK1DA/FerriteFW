@@ -246,7 +246,7 @@ impl View for Contacts {
 }
 
 /// APRS-37: the book's size (the store's `logs::CONTACT_MAX`).
-pub const CONTACT_MAX: u16 = 128;
+pub const CONTACT_MAX: u16 = 1016;
 
 // ---- options rows on the thing under them (APRS-40, APRS-41, GPS-36) ----
 
@@ -318,6 +318,6 @@ pub(crate) fn typed(app: &mut App, to: TextFor, t: &[u8], store: &impl ChannelSt
     if store.data().request(Op::SaveContact(c)) {
         app.show_toast(b"Contact saved", c.call.as_bytes(), false);
     } else {
-        app.show_toast(b"128 contacts", b"delete one first", false);
+        app.show_toast(b"1016 contacts", b"delete one first", false);
     }
 }

@@ -369,18 +369,44 @@ mod tests {
     use ferrite_app::chan::channel;
     use ferrite_app::slot::DCS_FLAG;
 
-    /// CHAN-1: 1,000 channels of 64 B from SPI 0x02F000, all inside the region; an erased record (RX
-    /// frequency 0xFFFFFFFF) is empty. CHAN-6: 254 zones of 32 B from 0x03F000, 127 per sector, inside theirs.
+    /// CHAN-1: 4,000 channels of 64 B from SPI 0x010000, 63 a sector, all inside the region; an erased record (RX
+    /// frequency 0xFFFFFFFF) is empty. CHAN-6: 512 zones of 32 B from 0x050000, 127 a sector, inside theirs.
     #[test]
     fn channel_and_zone_regions() {
         assert_eq!(CH_LEN, 64);
-        assert_eq!(CHANNELS.start, 0x02_F000);
-        assert!(ch_addr(999) + CH_LEN as u32 <= CHANNELS.end);
+        assert_eq!(CHANNELS.start, 0x01_0000);
+        assert_eq!(ch_addr(63), 0x01_0000 + SECTOR);
+        assert!(ch_addr(3999) + CH_LEN as u32 <= CHANNELS.end);
         assert!(!ch_valid(&[0xFF; CH_LEN]) && ch_decode(5, &[0xFF; CH_LEN]).is_none());
-        assert_eq!((ZONE_LEN, ZONES_PER_SECTOR, MAX_ZONES), (32, 127, 254));
-        assert_eq!(zone_addr(0), 0x03_F000);
-        assert_eq!(zone_addr(127), 0x03_F000 + SECTOR);
+        assert_eq!((ZONE_LEN, ZONES_PER_SECTOR, MAX_ZONES), (32, 127, 512));
+        assert_eq!(zone_addr(0), 0x05_0000);
+        assert_eq!(zone_addr(127), 0x05_0000 + SECTOR);
         assert!(zone_addr(MAX_ZONES - 1) + ZONE_LEN as u32 <= ZONES.end);
+    }
+
+    /// CHAN-2, decision 333: the record's version is 2, its zone 2 bytes (low at 18, high at 61; 0xFFFF none); a
+    /// version 1 record, or a zone that can't be (past the last, not none), reads as no channel.
+    #[test]
+    fn a_channel_record_holds_a_two_byte_zone() {
+        let mut c = channel(7, 300, 14_600_000, "Club", ferrite_app::slot::DEFAULT_CFG);
+        let b = ch_encode(&c, &[0xFF; CH_LEN]);
+        assert_eq!((b[60], b[CH_ZONE_LO], b[CH_ZONE_HI], ch_zone(&b)), (2, 44, 1, 300));
+        assert_eq!(ch_decode(7, &b).map(|c| c.zone), Some(300));
+        c.zone = NO_ZONE;
+        let b = ch_encode(&c, &[0xFF; CH_LEN]);
+        assert_eq!((b[CH_ZONE_LO], b[CH_ZONE_HI]), (0xFF, 0xFF));
+        assert_eq!(ch_decode(7, &b).map(|c| c.zone), Some(NO_ZONE));
+        let fix = |mut b: [u8; CH_LEN]| {
+            let k = crc16(&b[..62]);
+            b[62..64].copy_from_slice(&k.to_le_bytes());
+            b
+        };
+        let mut v1 = b;
+        v1[60] = 1;
+        assert!(ch_decode(7, &fix(v1)).is_none(), "version 1: Console translates it");
+        let mut far = b;
+        (far[CH_ZONE_LO], far[CH_ZONE_HI]) = (0x00, 0x02); // zone 512
+        assert!(!ch_valid(&fix(far)));
     }
 
     /// CHAN-3: the tone word is CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted, 0 none; each survives a round

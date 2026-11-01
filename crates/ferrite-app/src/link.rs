@@ -500,7 +500,7 @@ impl Session {
                 // cut (no keepalive wait, no 400 ms hold), and the keys it holds are let go.
                 app.remote_session_closed(self.by, now, st);
                 self.unsubscribe(); // LINK-46
-                self.hello(app, dev, p, &mut o)
+                self.hello(app, st, dev, p, &mut o)
             }
             msg::AUTH => self.auth(app, p),
             // LINK-30: on Bluetooth with the PIN lock on, nothing else until AUTH.
@@ -537,6 +537,15 @@ impl Session {
                 }
                 None => Status::BadArg,
             },
+            msg::DATA_READ => data_read(st, p, &mut o),
+            // LINK-60: raw writes from the cable only, not while the other port writes
+            msg::DATA_WRITE if self.by != crate::remote::BY_CABLE => Status::Refused,
+            msg::DATA_WRITE if self.other_writing => Status::Busy,
+            msg::DATA_WRITE => {
+                let (s, stamp) = data_write(st, p, &mut o);
+                self.reboot |= stamp; // LINK-62: the radio restarts on the stamped layout
+                s
+            }
             msg::REBOOT if app.radio.keyed.is_some() || live.tx.keyed => Status::Busy, // LINK-24.3: a data key-up too
             msg::REBOOT => {
                 self.reboot = true;
@@ -694,7 +703,7 @@ impl Session {
     }
 
     /// `HELLO`: the protocol, the largest payload, and whether this session may go on (0: `AUTH` first).
-    fn hello(&mut self, app: &App, dev: &Device, p: &[u8], o: &mut Out) -> Status {
+    fn hello<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, p: &[u8], o: &mut Out) -> Status {
         self.hellos = self.hellos.wrapping_add(1);
         // LINK-51: the first reserved byte's bit 0 asks for compression; granted while the shared block is free
         self.lz = p.get(1).is_some_and(|b| b & 1 != 0) && self.lz_free;
@@ -704,7 +713,8 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS]); // LINK-35.2: two bytes
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA]); // LINK-35.2: two bytes
+        layouts(st, o); // LINK-62
         Status::Ok
     }
 
@@ -1045,7 +1055,112 @@ fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status
     o.text(app.set.callsign.as_bytes());
     o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
     o.put(&ferrite_core::uid::bytes(dev.selftest.uid)); // LINK-35.1: the unique ID, zeros until read
+    layouts(st, o); // LINK-62
     Status::Ok
+}
+
+/// LINK-62, UPD-16 (decision 333): the layout this firmware stores, then the one the chip's data is in (the same
+/// when all is well; another: Console finishes the update), a byte each.
+fn layouts<S: ChannelStore>(st: &S, o: &mut Out) {
+    let own = ferrite_core::layout::LAYOUT_VERSION;
+    let found = match st.data().layout_found() {
+        0 => own,
+        v => v,
+    };
+    o.put(&[own as u8, found.min(255) as u8]);
+}
+
+fn le32(b: &[u8]) -> u32 {
+    u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+}
+
+/// `DATA_READ` (LINK-59): bytes or a CRC of the data range, never calibration or the update area; `busy` while the
+/// store still has writes to make (a read-back then shows them all).
+fn data_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    use ferrite_core::link::data::*;
+    let d = st.data();
+    match *p {
+        [READ, a0, a1, a2, a3, n] => {
+            let (addr, n) = (le32(&[a0, a1, a2, a3]), n as usize);
+            if n == 0 || n > READ_MAX {
+                return Status::BadArg;
+            }
+            if !allowed(addr, n as u32) {
+                return Status::Refused;
+            }
+            if d.busy() {
+                return Status::Busy;
+            }
+            let mut b = [0u8; READ_MAX];
+            if !d.data_read(addr, &mut b[..n]) {
+                return Status::NotFound;
+            }
+            o.put(&b[..n]);
+            Status::Ok
+        }
+        [CRC, a0, a1, a2, a3, l0, l1, l2, l3] => {
+            let (addr, len) = (le32(&[a0, a1, a2, a3]), le32(&[l0, l1, l2, l3]));
+            if !allowed(addr, len) {
+                return Status::Refused;
+            }
+            if d.busy() {
+                return Status::Busy;
+            }
+            match d.data_crc(addr, len) {
+                Some(c) => {
+                    o.put(&c.to_le_bytes());
+                    Status::Ok
+                }
+                None => Status::NotFound,
+            }
+        }
+        _ => Status::BadArg,
+    }
+}
+
+/// `DATA_WRITE` (LINK-60): a sector erased, bytes programmed or the header stamped, queued for the store's owner
+/// (`busy`: its queue is full, send it again). Never calibration or the update area; a program inside one page.
+/// True as the second value for a stamp: the radio restarts once it is written.
+fn data_write<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, bool) {
+    use crate::data::DataWrite;
+    use ferrite_core::link::data::*;
+    let w = match p {
+        [ERASE, a0, a1, a2, a3] => {
+            let addr = le32(&[*a0, *a1, *a2, *a3]);
+            if !addr.is_multiple_of(SECTOR) {
+                return (Status::BadArg, false);
+            }
+            if !allowed(addr, SECTOR) || !ferrite_core::layout::writable(addr, SECTOR) {
+                return (Status::Refused, false);
+            }
+            DataWrite::Erase(addr)
+        }
+        [PROGRAM, a0, a1, a2, a3, bytes @ ..] => {
+            let addr = le32(&[*a0, *a1, *a2, *a3]);
+            let n = bytes.len();
+            if n == 0 || n > PROGRAM_MAX || addr / PAGE != (addr + n as u32 - 1) / PAGE {
+                return (Status::BadArg, false);
+            }
+            if !allowed(addr, n as u32) || !ferrite_core::layout::writable(addr, n as u32) {
+                return (Status::Refused, false);
+            }
+            let mut b = [0xFFu8; PROGRAM_MAX];
+            b[..n].copy_from_slice(bytes);
+            DataWrite::Program { addr, len: n as u8, bytes: b }
+        }
+        [STAMP, v0, v1] => {
+            if u16::from_le_bytes([*v0, *v1]) != ferrite_core::layout::LAYOUT_VERSION {
+                o.put(b"layout: this firmware stores layout 3");
+                return (Status::Invalid, false);
+            }
+            DataWrite::Stamp
+        }
+        _ => return (Status::BadArg, false),
+    };
+    if !st.data().data_write(w) {
+        return (Status::Busy, false);
+    }
+    (Status::Ok, w == DataWrite::Stamp)
 }
 
 // ---- Records (Appendix "Link protocol v1": the same byte layouts as the radio's own storage) ----
@@ -1165,7 +1280,7 @@ fn name_of<const N: usize>(b: &[u8]) -> Option<Buf<N>> {
 /// commands, events or audio.
 fn transfer(ty: u8, p: &[u8]) -> bool {
     match ty {
-        msg::READ | msg::WRITE | msg::DELETE | msg::BEGIN | msg::USED | msg::READ_MANY | msg::WRITE_MANY | msg::LOG_READ | msg::HEARD | msg::MSGS | msg::STOCK_RESTORE => true,
+        msg::READ | msg::WRITE | msg::DELETE | msg::BEGIN | msg::USED | msg::READ_MANY | msg::WRITE_MANY | msg::LOG_READ | msg::HEARD | msg::MSGS | msg::STOCK_RESTORE | msg::DATA_READ | msg::DATA_WRITE => true,
         msg::STREAM => p.first().is_some_and(|&t| t != msg::UI),
         _ => false,
     }
@@ -1257,23 +1372,34 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
     }
 }
 
-/// `USED` (LINK-39): the index count, then the bitmap of the ones holding a record.
+/// `USED` (LINK-39): the index count, the first index answered (the request's, 0 without one), then the bitmap of
+/// the ones holding a record from there, as many as fit (1,880: 4,000 channels take three asks).
 fn used<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
     let Some(w) = p.first().copied().filter(|&w| w < what::POSITION) else { return Status::BadArg }; // LINK-53 – LINK-56: READ_MANY
     let Some(n) = indexes(st, w) else { return Status::BadArg };
+    let first = if p.len() >= 3 { le16(&p[1..]) } else { 0 };
+    if first > n {
+        return Status::BadArg;
+    }
+    let end = (first as u32 + USED_MAX as u32).min(n as u32) as u16;
     o.put(&n.to_le_bytes());
+    o.put(&first.to_le_bytes());
     let mut byte = 0u8;
-    for i in 0..n {
+    for i in first..end {
+        let k = i - first;
         if held(st, w, i) {
-            byte |= 1 << (i % 8);
+            byte |= 1 << (k % 8);
         }
-        if i % 8 == 7 || i + 1 == n {
+        if k % 8 == 7 || i + 1 == end {
             o.put(&[byte]);
             byte = 0;
         }
     }
     Status::Ok
 }
+
+/// LINK-39: the most indexes one `USED` answer maps (its bytes after the status and the two counts).
+pub const USED_MAX: u16 = ((MAX_PAYLOAD - 5) * 8) as u16;
 
 /// `READ_MANY` (LINK-40): from `first`, `count` indexes on, each record held as a whole, as many as fit; the
 /// index to go on from first.
@@ -1543,7 +1669,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
                 return Status::Ok;
             }
             if st.data().contacts() >= crate::screens::contacts::CONTACT_MAX && st.data().contact_of(call.as_bytes()).is_none() {
-                return invalid(o, "128 contacts".as_bytes());
+                return invalid(o, "1016 contacts".as_bytes());
             }
             request(st, Op::SaveContact(c))
         }
@@ -1552,7 +1678,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
     }
 }
 
-mod lists;
+pub mod lists;
 mod sub;
 pub mod z;
 /// LINK-43: the APRS record's length, for Ferrite Console (which reads its layout from this crate).

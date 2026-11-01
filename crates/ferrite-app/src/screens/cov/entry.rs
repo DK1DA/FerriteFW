@@ -51,7 +51,7 @@ fn channel_numbers() {
     t.reads("title=\"Channel\"");
     t.shows("Type the channel number, then OK.");
     t.tap(Key::Digit(0));
-    t.shows("Channels are 1 to 1000");
+    t.shows("Channels are 1 to 4000");
     t.tap(Key::Exit);
     digits(&mut t, &[9, 9, 9]);
     t.shows("empty");

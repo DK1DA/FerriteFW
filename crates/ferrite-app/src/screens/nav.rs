@@ -180,6 +180,8 @@ pub enum Dest {
     EmptyBattery,
     /// D24: mailbox.
     Mailbox,
+    /// D25: finish the update in Ferrite Console (UPD-16: the chip holds another layout's data).
+    FinishUpdate,
 }
 
 impl Dest {
@@ -256,6 +258,7 @@ impl Dest {
             PowerOff => ("Power off", "33", "D22"),
             EmptyBattery => ("Empty battery", "33", "D23"),
             Mailbox => ("Mailbox", "38", "D24"),
+            FinishUpdate => ("Finish the update", "30", "D25"),
         }
     }
 
@@ -296,7 +299,7 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 67] = {
+pub const ALL: [Dest; 68] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
@@ -306,7 +309,7 @@ pub const ALL: [Dest; 67] = {
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
         LinkStatus, WriteProgress, PowerOff, EmptyBattery, Mailbox,
-        Group(1), Sub(4, 2), Value(Item::Power),
+        Group(1), Sub(4, 2), Value(Item::Power), FinishUpdate,
     ]
 };
 
@@ -447,6 +450,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::PowerOff => Screen::Info(Info { page: Page::PowerOff }),
         Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
         Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
+        Dest::FinishUpdate => Screen::Info(Info { page: Page::FinishUpdate }),
         Dest::KeyTest => Screen::KeyTest(super::keytest::KeyTest::new()),
         Dest::PositionEntry => Screen::PosEntry(super::posentry::PosEntry::new()),
         Dest::LocationCodes => Screen::SameCodes(super::samecodes::SameCodes::new()),

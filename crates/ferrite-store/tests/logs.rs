@@ -234,42 +234,43 @@ fn waypoints_list_newest_first_and_move_down_on_delete() {
     let w = |i| s.waypoint(i).unwrap();
     assert!(w(0).src == WpSrc::Grid && w(1).src == WpSrc::Aprs && w(1).name.as_bytes() == b"VE3OCB-7" && w(2).src == WpSrc::Marked);
     assert_eq!(w(2).name.as_bytes(), b"Marked 199");
-    // 256 at most.
-    while s.waypoints() < 256 {
+    // 2,032 at most (decision 333).
+    while s.waypoints() < ferrite_store::logs::WP_MAX {
         assert!(s.add_waypoint(&wp(1000)));
     }
     assert!(!s.add_waypoint(&wp(1001)) && !s.request(Op::MarkHere));
 }
 
 /// APRS-37: the contacts stay in callsign order across the sector boundary (127 to a sector), a saved callsign
-/// is renamed rather than added twice, deleting moves the later ones down, and the book holds 128.
+/// is renamed rather than added twice, deleting moves the later ones down, and the book holds 1,016 (decision 333).
 #[test]
 fn contacts_kept_in_callsign_order() {
     let s = mount(SimFlash::new());
     let c = |n: u32, name: &[u8]| {
         let mut call = Buf::<10>::from(b"VE3");
-        for d in [n / 100, n / 10 % 10, n % 10] {
+        for d in [n / 1000, n / 100 % 10, n / 10 % 10, n % 10] {
             call.push(&[b'A' + d as u8]);
         }
         Contact { call, name: Buf::from(name) }
     };
+    let max = ferrite_store::logs::CONTACT_MAX as u32;
     // Backwards, so every save goes in at the front and moves the rest up.
-    for n in (0..128).rev() {
+    for n in (0..max).rev() {
         assert!(s.request(Op::SaveContact(c(n, b"x"))), "contact {n}");
     }
-    assert!(!s.request(Op::SaveContact(c(999, b"full"))), "128 at most");
+    assert!(!s.request(Op::SaveContact(c(9999, b"full"))), "1,016 at most");
     assert!(s.request(Op::SaveContact(c(5, b"Renamed"))), "a saved one is renamed when full");
     let s = cycle(s);
-    assert_eq!(s.contacts(), 128);
-    for n in 0..128u32 {
+    assert_eq!(s.contacts() as u32, max);
+    for n in 0..max {
         assert!(s.contact(n as u16).unwrap().call == c(n, b"").call, "slot {n}");
     }
     assert!(s.contact_of(c(5, b"").call.as_bytes()).unwrap().name.as_bytes() == b"Renamed");
     assert!(s.request(Op::DeleteContact(c(0, b"").call)));
     assert!(!s.request(Op::DeleteContact(c(0, b"").call)), "not there any more");
     let s = cycle(s);
-    assert_eq!(s.contacts(), 127);
-    assert!(s.contact(0).unwrap().call == c(1, b"").call && s.contact(126).unwrap().call == c(127, b"").call);
+    assert_eq!(s.contacts() as u32, max - 1);
+    assert!(s.contact(0).unwrap().call == c(1, b"").call && s.contact(max as u16 - 2).unwrap().call == c(max - 1, b"").call);
     assert!(s.contact_of(b"VE3ZZZ").is_none());
 }
 
@@ -346,12 +347,12 @@ fn old_data_in_the_areas_is_cleared_at_mount() {
     let s = mount(f);
     assert_eq!((s.events(), s.waypoints()), (0, 0));
     for n in 0..300 {
-        assert!(s.add_waypoint(&wp(n % 256)) || n >= 256);
+        assert!(s.add_waypoint(&wp(n)));
         s.log(&ev(Src::Dtmf, n));
     }
     let s = cycle(s);
-    assert_eq!((s.events(), s.waypoints()), (300, 256));
-    assert!(s.waypoint(0).unwrap() == wp(255) && s.event(0).unwrap().id == 299);
+    assert_eq!((s.events(), s.waypoints()), (300, 300));
+    assert!(s.waypoint(0).unwrap() == wp(299) && s.event(0).unwrap().id == 299);
 }
 
 struct Rng(u64);
@@ -798,15 +799,15 @@ fn delete_one_message() {
     assert!(s.message_in(true, b"VE3ABC", b"fourth", 0));
     assert_eq!(text(&s), [Buf::from(&b"fourth"[..]), Buf::from(&b"third"[..])], "a new one in front");
     // Wrap the ring: every slot written again, so nothing deleted is left and every record shows.
-    for k in 0..200u32 {
+    for k in 0..520u32 {
         assert!(s.message_in(true, b"VE3ABC", format!("n{k}").as_bytes(), 0));
     }
     let n = s.messages();
-    assert!(n >= 155, "the ring full of new ones (a sector is erased ahead as it wraps): {n}");
+    assert!(n >= 465, "the ring of 496 full of new ones (a sector is erased ahead as it wraps): {n}");
     for i in 0..n {
-        assert_eq!(s.message(i).unwrap().text.as_bytes(), format!("n{}", 199 - i).as_bytes(), "none hidden: {i}");
+        assert_eq!(s.message(i).unwrap().text.as_bytes(), format!("n{}", 519 - i).as_bytes(), "none hidden: {i}");
     }
     assert!(s.request(Op::DeleteMessage(0)));
     assert_eq!(s.messages(), n - 1);
-    assert_eq!(s.message(0).unwrap().text.as_bytes(), b"n198");
+    assert_eq!(s.message(0).unwrap().text.as_bytes(), b"n518");
 }

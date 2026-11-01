@@ -370,7 +370,8 @@ fn a_format_with_the_chip_gone() {
     use ferrite_core::layout::{CHANNELS, EVENT_LOG, LAYOUT_HEADER};
     let mut f = SimFlash::new();
     for a in [CHANNELS.start, EVENT_LOG.start + 4096, LAYOUT_HEADER.start] {
-        f.mem[a as usize..a as usize + 64].fill(0);
+        let a = SimFlash::at(a);
+        f.mem[a..a + 64].fill(0);
     }
     let s = mount(f.clone());
     assert_eq!(s.mounted(), Mounted::FirstBoot);

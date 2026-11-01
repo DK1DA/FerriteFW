@@ -74,7 +74,7 @@ fn new_zones_until_full() {
             break;
         }
     }
-    assert_eq!(t.toast(), "No room / 254 zones at most");
+    assert_eq!(t.toast(), "No room / 512 zones at most");
 }
 
 /// CHAN-10: with no zones (and Local off, CHAN-34) the list says how to make one.

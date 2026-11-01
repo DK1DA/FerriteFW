@@ -26,7 +26,7 @@ pub type ZoneId = u16;
 /// This zone number means "no zone" (CHAN-6).
 pub const NO_ZONE: ZoneId = 0xFFFF;
 /// How many zones the store holds (CHAN-6): numbers 0 to this - 1.
-pub const MAX_ZONES: ZoneId = 254;
+pub const MAX_ZONES: ZoneId = 512;
 /// CHAN-35 (decision 333): the most channels a zone holds. "No zone" has no limit.
 pub const ZONE_CAP: u16 = 256;
 
@@ -65,6 +65,7 @@ pub const FLAG_PRIORITY: u8 = 0x80;
 
 /// Channel numbers 0-999 (shown 1-1000).
 pub const MAX_CHANNELS: u16 = ferrite_core::scan::MAX_CHANNELS;
+const _: () = assert!(MAX_CHANNELS == 4000, "the screens' and the terminal's texts say 4000 (decision 333)");
 
 /// A change to the stored channels, for whoever owns them (the Storage task; the simulator's RAM store),
 /// from [`crate::App::pop_write`].
