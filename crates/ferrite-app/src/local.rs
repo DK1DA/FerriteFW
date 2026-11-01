@@ -136,10 +136,8 @@ fn find<S: ChannelStore>(store: &S, here: Pos, km: u16, ver: u32, old: &Local) -
     let mut l = Local { state: State::Ready, km, at: here, ver, ..Local::OFF };
     let mut dist = [0u32; LOCAL_MAX];
     for num in 0..MAX_CHANNELS {
-        if store.zone_of(num).is_none() {
-            continue;
-        }
-        let Some(p) = store.position(num) else { continue };
+        // one look at an empty number, one record read for a channel (decision 333: no zone map to skip by)
+        let Some((_, p)) = store.located(num) else { continue };
         let m = crate::screens::lists::dist_bearing(here, p).0;
         if m > out || m > range && !kept(num) {
             continue;

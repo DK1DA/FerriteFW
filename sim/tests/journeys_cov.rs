@@ -182,12 +182,11 @@ fn terminal_redraws_radio_edits() {
     assert!(out.contains("446.20000"), "the terminal redrew the new frequency:\n{out}");
 }
 
-/// A channel flagged Skip is left out of a scan: the stops the UI streams to the radio for a zone scan don't
-/// include it, and the others in the zone are there (SCAN-9).
+/// A channel flagged Skip is left out of a scan: the UI answers the Radio task's asks for its position in the
+/// scan's list with no frequency (no stop), and gives the others in the zone theirs (SCAN-9, SCAN-25).
 #[test]
 fn skipped_channels_are_never_stops() {
     use ferrite_core::msg::RadioCmd;
-    use ferrite_core::scan::ChanSet;
     let mut r = Radio::new();
     let out = term(&mut r, ":ch 3 skip");
     assert!(out.contains("Channel 3 saved"), "{out}");
@@ -195,18 +194,18 @@ fn skipped_channels_are_never_stops() {
     r.press(Key::VfoMem).wait(300); // slot A to channel mode
     r.run("type 1; press OK; wait 300ms");
     r.take_cmds();
-    r.press(Key::Side(2)).wait(1500);
-    let mut set = ChanSet::new();
-    let mut chunks = 0;
-    for c in r.take_cmds() {
-        if let RadioCmd::ScanSet { slot: 0, chunk, bits } = c {
-            set.put_chunk(chunk, bits);
-            chunks += 1;
+    r.press(Key::Side(2)).wait(3000);
+    let cmds = r.take_cmds();
+    assert!(cmds.iter().any(|c| matches!(c, RadioCmd::ScanSet { slot: 0, .. })), "a channel scan sent its list");
+    let mut answers = std::collections::BTreeMap::new();
+    for c in cmds {
+        if let RadioCmd::ScanEntry { slot: 0, pos, rx } = c {
+            let num = ferrite_app::chanscan::at(r.sim.app(), 0, pos, r.sim.store()).map(|c| c.num);
+            answers.insert(num, rx);
         }
     }
-    assert!(chunks > 0, "a channel scan streamed its stops");
-    assert!(set.has(0) && set.has(1), "the zone's other channels are stops");
-    assert!(!set.has(2), "channel 3 has Skip: never a stop");
+    assert!(answers.get(&Some(0)).is_some_and(|&f| f != 0) && answers.get(&Some(1)).is_some_and(|&f| f != 0), "the zone's other channels are stops: {answers:?}");
+    assert_eq!(answers.get(&Some(2)), Some(&0), "channel 3 has Skip: never a stop");
 }
 
 /// The reset clears settings, channels and the rest, but never the SSB patch (HF-21, as SAFE-9.1).

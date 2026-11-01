@@ -87,22 +87,24 @@ pub enum RadioCmd {
     TxPlan { tx: Freq10, region: u8, extend: bool, confirmed: bool },
     /// Scanning: skip the current hit for the rest of this scan (SCAN-11).
     ScanSkip { slot: u8 },
-    /// A channel scan's stops: bytes `chunk * 5..` of the slot's bitmap, a bit per channel number
-    /// ([`crate::scan::ChanSet`]). Sent before [`RadioCmd::ScanChans`], and again when the set changes mid-scan.
-    ScanSet { slot: u8, chunk: u8, bits: [u8; crate::scan::SET_CHUNK] },
-    /// A channel scan's priority channel `k` (SCAN-12; 0xFFFF none).
-    ScanPrio { slot: u8, k: u8, num: u16 },
-    /// Start a channel scan on the slot at channel `from`, with the set just sent; `prio_s`: the priority look's
-    /// interval in seconds (0 1 3; 0 off).
+    /// A channel scan's list: `len` positions (the slot's zone's channels, then the zones added with digits:
+    /// [`crate::scan::ChanSpan`], SCAN-25). Sent before [`RadioCmd::ScanChans`]; it forgets the slot's priority
+    /// channels and frequencies.
+    ScanSet { slot: u8, len: u16 },
+    /// A channel scan's priority channel `k` at position `pos` (SCAN-12; 0xFFFF none).
+    ScanPrio { slot: u8, k: u8, pos: u16 },
+    /// Start a channel scan on the slot at position `from` of its list; `prio_s`: the priority look's interval in
+    /// seconds (0 1 3; 0 off).
     ScanChans { slot: u8, from: u16, prio_s: u8 },
     /// The resume rule for the slot's next scan (SCAN-5, SCAN-24), as [`crate::scan::Resume::from_code`]:
     /// already the zone's or the preset's own, or the radio's (0 1 2).
     ScanResume { slot: u8, code: u8 },
-    /// The answer to [`LiveAll::want`]: channel `num`'s receive frequency (0: there is no such channel now).
-    ScanEntry { num: u16, rx: Freq10 },
-    /// Channel `num`'s transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`]
-    /// (SCAN-22, only while 0 1 6 3 is on).
-    ScanEntryTx { num: u16, tx: Freq10 },
+    /// The answer to [`LiveAll::want`]: the receive frequency of the channel at the slot's position `pos` (0: not a
+    /// stop: a Skip-flagged or HF channel, or none there now).
+    ScanEntry { slot: u8, pos: u16, rx: Freq10 },
+    /// Its transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`] (SCAN-22, only while
+    /// 0 1 6 3 is on).
+    ScanEntryTx { slot: u8, pos: u16, tx: Freq10 },
     /// While keyed: the tone burst (PTT + SIDE2) at 1750 Hz for as long as SIDE2 is held (TONE-13, TONE-13.1).
     ToneBurst { on: bool },
     /// While keyed: a DTMF digit ('0'-'9', '*', '#', 'A'-'D') sent live for as long as its key is held (DTMF-7,
@@ -363,8 +365,8 @@ pub struct SlotLive {
     /// Scan hits so far, and the last one.
     pub hits: u8,
     pub last_hit: Freq10,
-    /// A channel scan's step and its last hit as channel numbers plus 1 (0: none, or a band scan), so the UI
-    /// can show their names (HOME-4.1).
+    /// A channel scan's step and its last hit as positions in its list plus 1 (0: none, or a band scan), so the
+    /// UI can show their names (HOME-4.1; the UI knows which channel is at a position, SCAN-25).
     pub chan: u16,
     pub hit_chan: u16,
     /// Not watched: it needs the other band relay state (WATCH-11).
@@ -397,8 +399,9 @@ pub struct LiveAll {
     /// BCR-24: the broadcast plays on the speaker now (no amateur slot heard). Apart from [`ModeLive::Fm`], which
     /// home's strip replaces with its bars while it sweeps beside a broadcast (MODE-5).
     pub bcast_heard: bool,
-    /// A channel scan needs a channel's frequencies ([`crate::scan::want`]): its number plus 1, 0 for none (so
-    /// the default is none); the UI answers with [`RadioCmd::ScanEntry`]. Read it with [`LiveAll::wanted`].
+    /// A channel scan needs what is at a position of a slot's list ([`crate::scan::want`]): 1 + slot × 4096 +
+    /// position, 0 for none (so the default is none); the UI answers with [`RadioCmd::ScanEntry`]. Read it with
+    /// [`LiveAll::wanted`].
     pub want: u16,
 }
 
@@ -873,13 +876,13 @@ impl Default for XbLive {
 }
 
 impl LiveAll {
-    /// The channel a channel scan asks for, if any ([`LiveAll::want`]).
-    pub fn wanted(&self) -> Option<u16> {
-        self.want.checked_sub(1)
+    /// The (slot, position) a channel scan asks for, if any ([`LiveAll::want`]).
+    pub fn wanted(&self) -> Option<(u8, u16)> {
+        self.want.checked_sub(1).map(|w| ((w >> 12) as u8, w & crate::scan::POS_MAX))
     }
 
-    pub fn set_want(&mut self, n: Option<u16>) {
-        self.want = n.map_or(0, |n| n + 1);
+    pub fn set_want(&mut self, w: Option<(u8, u16)>) {
+        self.want = w.map_or(0, |(slot, pos)| 1 + ((slot as u16 % 3) << 12 | pos & crate::scan::POS_MAX));
     }
 
     /// One slot as the single-receiver [`Live`].
@@ -1129,15 +1132,17 @@ mod tests {
         assert_eq!((x.state, x.rssi, x.stopped, x.strip), (0, -127, 0, [0; XB_COLS]));
     }
 
-    /// The channel a scan wants travels as its number plus 1, so the default (0) is none.
+    /// SCAN-25: the (slot, position) a scan wants travels as 1 + slot × 4096 + position, so the default (0) is none.
     #[test]
-    fn wanted_channel_round_trips() {
+    fn wanted_position_round_trips() {
         let mut l = LiveAll::default();
         assert_eq!(l.wanted(), None);
-        l.set_want(Some(0));
-        assert_eq!((l.want, l.wanted()), (1, Some(0)));
-        l.set_want(Some(41));
-        assert_eq!(l.wanted(), Some(41));
+        l.set_want(Some((0, 0)));
+        assert_eq!((l.want, l.wanted()), (1, Some((0, 0))));
+        l.set_want(Some((2, 4095)));
+        assert_eq!(l.wanted(), Some((2, 4095)));
+        l.set_want(Some((1, 41)));
+        assert_eq!((l.want, l.wanted()), (1 + 4096 + 41, Some((1, 41))));
         l.set_want(None);
         assert_eq!((l.want, l.wanted()), (0, None));
     }

@@ -9,9 +9,9 @@
 //! which of the two its `open` answers. [`WithTx`] adds a channel's transmit frequency after its receive one
 //! (SCAN-22).
 //!
-//! Channel scans (zones, a zone set, all) run in the Radio task from [`ChanSet`] and [`FreqCache`] (see
-//! there): the UI sends which channel numbers are in the scan as a bitmap and the Radio task asks it for the
-//! frequencies a few steps ahead, so it never holds a copy of the channels.
+//! Channel scans (the slot's zone and the zones added with digits) run in the Radio task from [`ChanSpan`] and
+//! [`FreqCache`] (see there): the UI sends how many positions the scan's list has and the Radio task asks it for
+//! what is at a position, a few steps ahead, so it never holds a copy of the channels, nor a bit per channel.
 //!
 //! Timings without a rule of their own are written into the manual as "to confirm on the bench" (SCAN-20).
 
@@ -320,6 +320,16 @@ impl Scan {
         }
     }
 
+    /// On from a position that turned out not to be a stop (a channel scan's answer, SCAN-25): the next one now,
+    /// as a step that ended.
+    pub fn pass(&mut self, l: &impl List, now: u32) -> Out {
+        let mut out = Out::default();
+        if self.running() {
+            self.leave(l, now, &mut out);
+        }
+        out
+    }
+
     /// ▲▼ (SCAN-16): the direction from here; on a hit they leave it now, without counting a skip.
     pub fn dir(&mut self, up: bool, l: &impl List, now: u32) -> Out {
         self.up = up;
@@ -457,171 +467,177 @@ pub fn tick_wake(started: u64, ticked: u64, period: u64, due: Option<u64>) -> u6
     }
 }
 
-/// Channel numbers 0-999 (shown 1-1000): what a channel scan's positions are.
+/// Channel numbers 0-999 (shown 1-1000).
 pub const MAX_CHANNELS: u16 = 1000;
-/// The bitmap's size: a bit per channel number.
-pub const SET_BYTES: usize = MAX_CHANNELS as usize / 8;
-/// A [`RadioCmd::ScanSet`](crate::msg::RadioCmd::ScanSet) carries this many bitmap bytes.
-pub const SET_CHUNK: usize = 5;
 /// Priority channels a channel scan looks at (SCAN-12: the zone's priority 1 and 2, then flagged ones).
 pub const PRIO_MAX: usize = 4;
-/// Frequencies held for the channel scans, shared by the slots (a channel's frequency is the same whichever
-/// slot scans it).
+/// Frequencies held for the channel scans, shared by the slots.
 pub const CACHE: usize = 16;
 /// How many stops ahead the Radio task asks for (a step is [`STEP_MS`], an answer a few ms).
 pub const AHEAD: u16 = 4;
-/// What [`ChanList::at`] answers for a channel in the scan whose frequency hasn't arrived: don't tune yet.
+/// What [`ChanList::at`] answers for a stop whose frequency hasn't arrived: don't tune yet.
 pub const PENDING: Freq10 = 0;
-/// No channel wanted ([`crate::msg::LiveAll::want`]).
+/// No position wanted, no priority channel.
 pub const NO_WANT: u16 = u16::MAX;
+/// A channel scan's positions fit 12 bits (SCAN-25: the slot's zone and the zones added with digits, 256 channels
+/// each at most, CHAN-35, then the zone's two priority channels outside it).
+pub const POS_MAX: u16 = 0x0FFF;
 
-/// One slot's channel scan: which channel numbers it stops on (in the set, not Skip-flagged, not empty, not an
-/// HF channel: the UI decides) and its priority channels. 133 bytes; the frequencies are in [`FreqCache`].
+/// One slot's channel scan as the Radio task holds it (SCAN-25, decision 333): how many positions its list has
+/// (the UI's list: the slot's zone's channels in number order, then those of the zones added with digits; Local's
+/// nearest first) and the positions of its priority channels (a zone priority channel outside the list has a
+/// position after it). 10 bytes: which channel is at a position, and its frequency, the UI answers when asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChanSet {
-    bits: [u8; SET_BYTES],
+pub struct ChanSpan {
+    len: u16,
     prio: [u16; PRIO_MAX],
 }
 
-impl Default for ChanSet {
+impl Default for ChanSpan {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ChanSet {
+impl ChanSpan {
     pub const fn new() -> Self {
-        ChanSet { bits: [0; SET_BYTES], prio: [NO_WANT; PRIO_MAX] }
+        ChanSpan { len: 0, prio: [NO_WANT; PRIO_MAX] }
     }
 
-    /// Bytes `chunk * SET_CHUNK..` of the bitmap (from a `ScanSet`); a chunk past the end is ignored.
-    pub fn put_chunk(&mut self, chunk: u8, bits: [u8; SET_CHUNK]) {
-        let at = chunk as usize * SET_CHUNK;
-        if at < SET_BYTES {
-            let n = SET_CHUNK.min(SET_BYTES - at);
-            self.bits[at..at + n].copy_from_slice(&bits[..n]);
+    /// Positions in the list (the priority channels after them not counted).
+    pub fn len(&self) -> u16 {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// A position the UI can be asked about: the list's, or a priority channel's after it.
+    pub fn valid(&self, p: u16) -> bool {
+        p < self.len || self.prio.contains(&p) && p != NO_WANT
+    }
+
+    /// Priority `k` (SCAN-12) at position `p`, [`NO_WANT`] for none.
+    pub fn set_prio(&mut self, k: u8, p: u16) {
+        if let Some(x) = self.prio.get_mut(k as usize) {
+            *x = if p <= POS_MAX { p } else { NO_WANT };
         }
     }
 
-    /// The bitmap's chunk `k`, for sending.
-    pub fn chunk(&self, k: u8) -> [u8; SET_CHUNK] {
-        let mut out = [0; SET_CHUNK];
-        let at = k as usize * SET_CHUNK;
-        if at < SET_BYTES {
-            let n = SET_CHUNK.min(SET_BYTES - at);
-            out[..n].copy_from_slice(&self.bits[at..at + n]);
-        }
-        out
-    }
-
-    pub fn has(&self, n: u16) -> bool {
-        n < MAX_CHANNELS && self.bits[n as usize / 8] & 1 << (n % 8) != 0
-    }
-
-    pub fn set(&mut self, n: u16, on: bool) {
-        if n < MAX_CHANNELS {
-            let b = &mut self.bits[n as usize / 8];
-            *b = if on { *b | 1 << (n % 8) } else { *b & !(1 << (n % 8)) };
-        }
-    }
-
-    /// Stops in the scan.
-    pub fn count(&self) -> u16 {
-        self.bits.iter().map(|b| b.count_ones() as u16).sum()
-    }
-
-    /// Priority `k` (SCAN-12), [`NO_WANT`] for none.
-    pub fn set_prio(&mut self, k: u8, n: u16) {
-        if let Some(p) = self.prio.get_mut(k as usize) {
-            *p = if n < MAX_CHANNELS { n } else { NO_WANT };
-        }
-    }
-
-    /// The `k`th priority channel, in order, skipping empty places.
+    /// The `k`th priority channel's position, in order, skipping empty places.
     pub fn prio(&self, k: u8) -> Option<u16> {
         self.prio.iter().copied().filter(|&p| p != NO_WANT).nth(k as usize)
     }
-
-    /// The next stop after `from` going `up` (wrapping), not `from` itself.
-    pub fn next_from(&self, from: u16, up: bool) -> Option<u16> {
-        let n = MAX_CHANNELS as u32;
-        (1..n).map(|k| if up { (from as u32 + k) % n } else { (from as u32 + n - k) % n } as u16).find(|&i| self.has(i))
-    }
 }
 
-/// Channel frequencies for the channel scans: receive and transmit (0 = same as receive), by channel number.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// One answer kept: under slot `slot`, position `pos` receives on `rx` (0: not a stop: a Skip-flagged, HF or empty
+/// channel) and transmits on `tx` (0: the same).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub slot: u8,
+    pub pos: u16,
+    pub rx: Freq10,
+    pub tx: Freq10,
+}
+
+impl Entry {
+    const NONE: Entry = Entry { slot: 0xFF, pos: NO_WANT, rx: 0, tx: 0 };
+}
+
+/// The channel scans' frequencies by (slot, position), shared by the slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FreqCache {
-    e: [(u16, Freq10, Freq10); CACHE],
+    e: [Entry; CACHE],
     /// The next place to replace.
     next: u8,
 }
 
+impl Default for FreqCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FreqCache {
     pub const fn new() -> Self {
-        FreqCache { e: [(NO_WANT, 0, 0); CACHE], next: 0 }
+        FreqCache { e: [Entry::NONE; CACHE], next: 0 }
     }
 
-    pub fn get(&self, n: u16) -> Option<(Freq10, Freq10)> {
-        self.e.iter().find(|e| e.0 == n).map(|e| (e.1, e.2))
+    pub fn get(&self, slot: u8, pos: u16) -> Option<Entry> {
+        self.e.iter().find(|e| e.slot == slot && e.pos == pos).copied()
     }
 
-    /// A channel's frequencies arrived (`rx` 0: it has gone, e.g. deleted while scanning). `keep` are numbers
-    /// not to be replaced (the stops being listened on and the priority channels).
-    pub fn put_rx(&mut self, n: u16, rx: Freq10, keep: &[u16]) {
-        if let Some(e) = self.e.iter_mut().find(|e| e.0 == n) {
-            e.1 = rx;
+    /// A position's receive frequency arrived (0: not a stop). `keep` are (slot, position) pairs not to be
+    /// replaced (the stops being listened on and the priority channels).
+    pub fn put_rx(&mut self, slot: u8, pos: u16, rx: Freq10, keep: &[(u8, u16)]) {
+        if let Some(e) = self.e.iter_mut().find(|e| e.slot == slot && e.pos == pos) {
+            (e.rx, e.tx) = (rx, 0);
             return;
         }
         for _ in 0..CACHE {
             let i = self.next as usize % CACHE;
             self.next = ((i + 1) % CACHE) as u8;
-            if self.e[i].0 == NO_WANT || !keep.contains(&self.e[i].0) {
-                self.e[i] = (n, rx, 0);
+            let x = self.e[i];
+            if x.pos == NO_WANT || !keep.contains(&(x.slot, x.pos)) {
+                self.e[i] = Entry { slot, pos, rx, tx: 0 };
                 return;
             }
         }
     }
 
-    /// The channel's transmit frequency (SCAN-22), after its receive one.
-    pub fn put_tx(&mut self, n: u16, tx: Freq10) {
-        if let Some(e) = self.e.iter_mut().find(|e| e.0 == n) {
-            e.2 = tx;
+    /// The position's transmit frequency (SCAN-22), after its receive one.
+    pub fn put_tx(&mut self, slot: u8, pos: u16, tx: Freq10) {
+        if let Some(e) = self.e.iter_mut().find(|e| e.slot == slot && e.pos == pos) {
+            e.tx = tx;
         }
     }
 
-    /// Forget everything (a channel was written or deleted: the UI says so by starting the scan again).
+    /// Forget one slot's (its scan starts again: the list may have changed).
+    pub fn clear_slot(&mut self, slot: u8) {
+        self.e.iter_mut().filter(|e| e.slot == slot).for_each(|e| *e = Entry::NONE);
+    }
+
+    /// Forget everything.
     pub fn clear(&mut self) {
         *self = FreqCache::new();
     }
 }
 
-/// A channel scan's [`List`]: positions are channel numbers; a stop not yet in the cache is [`PENDING`].
+/// A channel scan's [`List`]: positions in the slot's list; a stop not yet in the cache is [`PENDING`], a position
+/// the UI answered as not a stop is passed.
 #[derive(Clone, Copy, Debug)]
 pub struct ChanList<'a> {
-    pub set: &'a ChanSet,
+    pub slot: u8,
+    pub span: &'a ChanSpan,
     pub cache: &'a FreqCache,
 }
 
 impl List for ChanList<'_> {
     fn len(&self) -> u16 {
-        MAX_CHANNELS
+        self.span.len
     }
 
     fn at(&self, i: u16) -> Option<Freq10> {
-        self.set.has(i).then(|| self.cache.get(i).map_or(PENDING, |e| e.0))
+        if !self.span.valid(i) {
+            return None;
+        }
+        match self.cache.get(self.slot, i) {
+            Some(e) => (e.rx != 0).then_some(e.rx),
+            None => Some(PENDING),
+        }
     }
 
     fn priority(&self, k: u8) -> Option<u16> {
-        self.set.prio(k)
+        self.span.prio(k)
     }
 
     fn tx_at(&self, i: u16) -> Option<Freq10> {
-        self.cache.get(i).map(|e| e.1).filter(|&t| t != 0)
+        self.cache.get(self.slot, i).map(|e| e.tx).filter(|&t| t != 0)
     }
 }
 
-/// The channel number a channel scan is on: its position, halved when it walks [`WithTx`] (`tx`).
+/// The position a channel scan is on in its list: the engine's, halved when it walks [`WithTx`] (`tx`).
 pub fn chan_at(scan: &Scan, tx: bool) -> u16 {
     if tx {
         scan.pos() / 2
@@ -630,40 +646,41 @@ pub fn chan_at(scan: &Scan, tx: bool) -> u16 {
     }
 }
 
-/// The channel the Radio task asks for next for one slot's channel scan (`tx`: walking [`WithTx`]), if any:
-/// the stop it is on, then its priority channels, then the next [`AHEAD`] stops in the scan's direction; the
-/// first not yet cached.
-pub fn want(scan: &Scan, set: &ChanSet, cache: &FreqCache, tx: bool) -> Option<u16> {
-    if !scan.running() {
+/// The position the Radio task asks for next for slot `slot`'s channel scan (`tx`: walking [`WithTx`]), if any:
+/// the stop it is on, then its priority channels, then the next [`AHEAD`] positions in the scan's direction; the
+/// first not yet answered.
+pub fn want(scan: &Scan, slot: u8, span: &ChanSpan, cache: &FreqCache, tx: bool) -> Option<u16> {
+    if !scan.running() || span.is_empty() {
         return None;
     }
-    let missing = |n: u16| set.has(n) && cache.get(n).is_none();
+    let missing = |p: u16| span.valid(p) && cache.get(slot, p).is_none();
     let here = chan_at(scan, tx);
     if missing(here) {
         return Some(here);
     }
-    if let Some(p) = (0..PRIO_MAX as u8).filter_map(|k| set.prio(k)).find(|&p| missing(p)) {
+    if let Some(p) = (0..PRIO_MAX as u8).filter_map(|k| span.prio(k)).find(|&p| missing(p)) {
         return Some(p);
     }
-    let mut at = here;
+    let n = span.len as u32;
+    let mut at = here as u32 % n;
     for _ in 0..AHEAD {
-        at = set.next_from(at, scan.up())?;
-        if at == here {
+        at = if scan.up() { (at + 1) % n } else { (at + n - 1) % n };
+        if at == here as u32 {
             return None;
         }
-        if missing(at) {
-            return Some(at);
+        if missing(at as u16) {
+            return Some(at as u16);
         }
     }
     None
 }
 
-/// The numbers a slot's channel scan wants kept in the cache: where it is and its priority channels.
-pub fn keep(scan: &Scan, set: &ChanSet, tx: bool) -> [u16; 1 + PRIO_MAX] {
-    let mut k = [NO_WANT; 1 + PRIO_MAX];
-    k[0] = chan_at(scan, tx);
-    for (i, p) in (0..PRIO_MAX as u8).filter_map(|j| set.prio(j)).enumerate() {
-        k[1 + i] = p;
+/// The (slot, position) pairs a slot's channel scan wants kept in the cache: where it is and its priority channels.
+pub fn keep(scan: &Scan, slot: u8, span: &ChanSpan, tx: bool) -> [(u8, u16); 1 + PRIO_MAX] {
+    let mut k = [(0xFF, NO_WANT); 1 + PRIO_MAX];
+    k[0] = (slot, chan_at(scan, tx));
+    for (i, p) in (0..PRIO_MAX as u8).filter_map(|j| span.prio(j)).enumerate() {
+        k[1 + i] = (slot, p);
     }
     k
 }
@@ -697,11 +714,11 @@ impl List for ChanWalk<'_> {
 }
 
 /// The Radio task's channel scans, for the three slots (the firmware's and the simulators' fake radio's): the
-/// sets and the shared frequency cache, the commands that fill them, and the engine run on them. About 600
-/// bytes.
+/// slots' lists as lengths and the shared frequency cache, the commands that fill them, and the engine run on them.
+/// About 300 bytes (decision 333: no bitmap of channel numbers).
 #[derive(Clone, Debug)]
 pub struct ChanScans {
-    sets: [ChanSet; 3],
+    spans: [ChanSpan; 3],
     cache: FreqCache,
     /// The slot's scan is a channel scan (not a band or range scan).
     on: [bool; 3],
@@ -719,7 +736,7 @@ impl Default for ChanScans {
 
 impl ChanScans {
     pub const fn new() -> Self {
-        ChanScans { sets: [ChanSet::new(); 3], cache: FreqCache::new(), on: [false; 3], pending: [false; 3], tx: false }
+        ChanScans { spans: [ChanSpan::new(); 3], cache: FreqCache::new(), on: [false; 3], pending: [false; 3], tx: false }
     }
 
     /// The slot runs a channel scan.
@@ -733,7 +750,7 @@ impl ChanScans {
     }
 
     fn walk(&self, slot: usize) -> ChanWalk<'_> {
-        let l = ChanList { set: &self.sets[slot % 3], cache: &self.cache };
+        let l = ChanList { slot: (slot % 3) as u8, span: &self.spans[slot % 3], cache: &self.cache };
         if self.tx {
             ChanWalk::Tx(WithTx(l))
         } else {
@@ -741,24 +758,22 @@ impl ChanScans {
         }
     }
 
-    /// The channel `slot`'s scan is on (its number, whatever [`WithTx`] position it is at).
+    /// The position `slot`'s scan is on in its list (whatever [`WithTx`] position it is at).
     pub fn chan(&self, scan: &Scan) -> u16 {
         chan_at(scan, self.tx)
     }
 
-    /// A command for the channel scans: the set, priorities, resume rule, start, and the frequencies the UI
-    /// sends. A frequency the stopped scan waited for comes back as `(slot, frequency)` to tune.
+    /// A command for the channel scans: the list's length, priorities, resume rule, start, and the frequencies the
+    /// UI sends. A frequency the stopped scan waited for comes back as `(slot, frequency)` to tune.
     pub fn cmd(&mut self, c: &crate::msg::RadioCmd, scans: &mut [Scan; 3], now: u32) -> Option<(usize, Freq10)> {
         use crate::msg::RadioCmd as C;
         match *c {
-            C::ScanSet { slot, chunk, bits } => {
-                let s = &mut self.sets[slot as usize % 3];
-                if chunk == 0 {
-                    *s = ChanSet::new();
-                }
-                s.put_chunk(chunk, bits);
+            C::ScanSet { slot, len } => {
+                let i = slot as usize % 3;
+                self.spans[i] = ChanSpan { len: len.min(POS_MAX), ..ChanSpan::new() };
+                self.cache.clear_slot(i as u8);
             }
-            C::ScanPrio { slot, k, num } => self.sets[slot as usize % 3].set_prio(k, num),
+            C::ScanPrio { slot, k, pos } => self.spans[slot as usize % 3].set_prio(k, pos),
             C::ScanResume { slot, code } => scans[slot as usize % 3].resume = Resume::from_code(code),
             C::ScanTx(on) => self.tx = on,
             C::ScanChans { slot, from, prio_s } => {
@@ -767,24 +782,26 @@ impl ChanScans {
                 (sc.fast, sc.prio_ms) = (false, prio_s as u32 * 1000);
                 sc.start(if self.tx { from.saturating_mul(2) } else { from }, now);
                 (self.on[i], self.pending[i]) = (true, false);
-                self.cache.clear(); // channels may have changed since the last scan
+                self.cache.clear_slot(i as u8); // the list may have changed since the last scan
             }
-            C::ScanEntry { num, rx } | C::ScanEntryTx { num, tx: rx } => {
+            C::ScanEntryTx { slot, pos, tx } => self.cache.put_tx(slot % 3, pos, tx),
+            C::ScanEntry { slot, pos, rx } => {
+                let i = slot as usize % 3;
                 let keep = self.keeps(scans);
-                if matches!(c, C::ScanEntry { .. }) {
-                    self.cache.put_rx(num, rx, &keep);
-                } else {
-                    self.cache.put_tx(num, rx);
-                }
-                for i in 0..3 {
-                    let sc = &mut scans[i];
-                    if self.on[i] && self.pending[i] && chan_at(sc, self.tx) == num {
-                        self.pending[i] = false;
-                        sc.restep(now);
-                        let f = self.walk(i).at(sc.pos()).filter(|&f| f != PENDING);
-                        if let Some(f) = f {
-                            return Some((i, f));
-                        }
+                self.cache.put_rx(i as u8, pos, rx, &keep);
+                let sc = &mut scans[i];
+                if self.on[i] && self.pending[i] && chan_at(sc, self.tx) == pos {
+                    self.pending[i] = false;
+                    if rx == 0 {
+                        // not a stop after all (Skip, HF, gone): on to the next, as a step that ended
+                        let o = sc.pass(&self.walk(i), now);
+                        let o = self.tune(i, o);
+                        return o.tune.map(|f| (i, f));
+                    }
+                    sc.restep(now);
+                    let f = self.walk(i).at(sc.pos()).filter(|&f| f != PENDING);
+                    if let Some(f) = f {
+                        return Some((i, f));
                     }
                 }
             }
@@ -793,10 +810,10 @@ impl ChanScans {
         None
     }
 
-    fn keeps(&self, scans: &[Scan; 3]) -> [u16; 3 * (1 + PRIO_MAX)] {
-        let mut k = [NO_WANT; 3 * (1 + PRIO_MAX)];
+    fn keeps(&self, scans: &[Scan; 3]) -> [(u8, u16); 3 * (1 + PRIO_MAX)] {
+        let mut k = [(0xFF, NO_WANT); 3 * (1 + PRIO_MAX)];
         for i in (0..3).filter(|&i| self.on[i]) {
-            k[i * (1 + PRIO_MAX)..(i + 1) * (1 + PRIO_MAX)].copy_from_slice(&keep(&scans[i], &self.sets[i], self.tx));
+            k[i * (1 + PRIO_MAX)..(i + 1) * (1 + PRIO_MAX)].copy_from_slice(&keep(&scans[i], i as u8, &self.spans[i], self.tx));
         }
         k
     }
@@ -832,9 +849,9 @@ impl ChanScans {
         self.tune(slot % 3, o)
     }
 
-    /// The channel to ask the UI for next ([`crate::msg::LiveAll::want`]), over the slots' channel scans.
-    pub fn want(&self, scans: &[Scan; 3]) -> Option<u16> {
-        (0..3).filter(|&i| self.on[i]).find_map(|i| want(&scans[i], &self.sets[i], &self.cache, self.tx))
+    /// The (slot, position) to ask the UI for next ([`crate::msg::LiveAll::want`]), over the slots' channel scans.
+    pub fn want(&self, scans: &[Scan; 3]) -> Option<(u8, u16)> {
+        (0..3).filter(|&i| self.on[i]).find_map(|i| want(&scans[i], i as u8, &self.spans[i], &self.cache, self.tx).map(|p| (i as u8, p)))
     }
 }
 
@@ -1181,59 +1198,57 @@ mod tests {
         assert_eq!(range_pos(&r, mhz(400)), r.len() - 1, "clamped to the range");
     }
 
-    /// The bitmap goes over in chunks and comes back the same; next_from wraps both ways.
+    /// SCAN-25: a slot's list as the Radio task holds it: a length and the priority positions (empty places
+    /// skipped; one past [`POS_MAX`] is none); a position is one to ask about when it is the list's or a priority's.
     #[test]
-    fn chan_set_chunks_and_order() {
-        let mut a = ChanSet::new();
-        for n in [0, 7, 8, 500, 999] {
-            a.set(n, true);
-        }
-        let mut b = ChanSet::new();
-        for k in 0..SET_BYTES.div_ceil(SET_CHUNK) as u8 {
-            b.put_chunk(k, a.chunk(k));
-        }
-        assert_eq!(a, b);
-        assert_eq!(b.count(), 5);
-        assert_eq!(b.next_from(8, true), Some(500));
-        assert_eq!(b.next_from(999, true), Some(0), "wraps up");
-        assert_eq!(b.next_from(0, false), Some(999), "wraps down");
-        b.set(500, false);
-        assert_eq!(b.next_from(8, true), Some(999));
-        b.set_prio(1, 7);
-        b.set_prio(0, NO_WANT);
-        assert_eq!((b.prio(0), b.prio(1)), (Some(7), None), "empty places are skipped");
+    fn chan_span_positions_and_priorities() {
+        let mut a = ChanSpan::default();
+        assert!(a.is_empty() && a == ChanSpan::new());
+        a.len = 5;
+        a.set_prio(1, 7);
+        a.set_prio(0, NO_WANT);
+        a.set_prio(2, POS_MAX + 1);
+        a.set_prio(PRIO_MAX as u8, 3);
+        assert_eq!((a.prio(0), a.prio(1), a.len()), (Some(7), None, 5), "empty places are skipped");
+        assert!(a.valid(0) && a.valid(4) && !a.valid(5) && a.valid(7) && !a.valid(NO_WANT));
     }
 
-    /// The Radio task's channel scan: frequencies arrive only when asked for (one per tick here, as the UI
-    /// answers); every stop is listened on for its full step once tuned, in order, and nothing outside the set.
+    /// Fills a slot's cache with answers to its wants until none is left: position p answers `f(p)`.
+    fn answer_all(cs: &mut ChanScans, scans: &mut [Scan; 3], f: &dyn Fn(u16) -> Freq10, t: u32, tuned: &mut std::vec::Vec<(usize, Freq10)>) {
+        while let Some((slot, p)) = cs.want(scans) {
+            if let Some(x) = cs.cmd(&crate::msg::RadioCmd::ScanEntry { slot, pos: p, rx: f(p) }, scans, t) {
+                tuned.push(x);
+            }
+        }
+    }
+
+    /// SCAN-25: the Radio task's channel scan asks what is at each position as it needs it (one answer per tick
+    /// here, as the UI answers); every stop is listened on for its full step once tuned, in order, wrapping; a
+    /// position the UI says is no stop (rx 0: a Skip-flagged or HF channel) is passed.
     #[test]
     fn chan_scan_fetches_ahead() {
-        let mut set = ChanSet::new();
-        let stops = [3u16, 10, 11, 40, 900];
-        for n in stops {
-            set.set(n, true);
-        }
+        let span = ChanSpan { len: 6, ..ChanSpan::new() };
         let mut cache = FreqCache::new();
-        let f = |n: u16| mhz(146) + n as u32 * 500;
+        let f = |p: u16| if p == 2 { 0 } else { mhz(146) + p as u32 * 500 };
         let mut s = Scan::new();
-        s.start(3, 0);
+        s.start(0, 0);
         let mut tuned = std::vec::Vec::new();
         let mut pending = false;
         let mut asked = 0;
         let mut t = 0;
         while t < 3_000 {
             // the UI's answer to last tick's want
-            if let Some(n) = want(&s, &set, &cache, false) {
-                cache.put_rx(n, f(n), &keep(&s, &set, false));
+            if let Some(p) = want(&s, 0, &span, &cache, false) {
+                cache.put_rx(0, p, f(p), &keep(&s, 0, &span, false));
                 asked += 1;
-                if pending && n == s.pos() {
+                if pending && p == s.pos() {
                     pending = false;
                     s.restep(t);
-                    tuned.push((t, n));
+                    tuned.push((t, p));
                 }
             }
             if !pending {
-                let o = s.tick(&ChanList { set: &set, cache: &cache }, t, false);
+                let o = s.tick(&ChanList { slot: 0, span: &span, cache: &cache }, t, false);
                 match o.tune {
                     Some(PENDING) => pending = true,
                     Some(fr) => tuned.push((t, ((fr - mhz(146)) / 500) as u16)),
@@ -1243,56 +1258,53 @@ mod tests {
             t += 10;
         }
         let order: std::vec::Vec<u16> = tuned.iter().map(|x| x.1).take(6).collect();
-        assert_eq!(order, [10, 11, 40, 900, 3, 10], "in number order, wrapping, only the set");
+        assert_eq!(order, [1, 3, 4, 5, 0, 1], "in list order, wrapping, position 2 passed");
         for w in tuned.windows(2) {
             assert!(w[1].0 - w[0].0 >= STEP_MS, "each stop listened a full step: {:?}", w);
         }
-        assert!(asked >= stops.len(), "fetched as needed");
+        assert!(asked >= 6, "fetched as needed");
     }
 
-    /// The cache keeps what is being listened on and the priority channels when it fills.
+    /// The cache keeps what is being listened on and the priority channels when it fills; it is by slot.
     #[test]
     fn cache_keeps_what_is_in_use() {
         let mut c = FreqCache::new();
-        for n in 0..CACHE as u16 {
-            c.put_rx(n, 1_000 + n as u32, &[]);
+        for p in 0..CACHE as u16 {
+            c.put_rx(1, p, 1_000 + p as u32, &[]);
         }
-        c.put_tx(2, 77);
-        for n in 100..100 + CACHE as u16 {
-            c.put_rx(n, 2_000, &[2, 5]);
+        c.put_tx(1, 2, 77);
+        for p in 100..100 + CACHE as u16 {
+            c.put_rx(1, p, 2_000, &[(1, 2), (1, 5)]);
         }
-        assert_eq!(c.get(2), Some((1_002, 77)));
-        assert_eq!(c.get(5), Some((1_005, 0)));
-        assert_eq!(c.get(0), None);
+        assert_eq!(c.get(1, 2).map(|e| (e.rx, e.tx)), Some((1_002, 77)));
+        assert_eq!(c.get(1, 5).map(|e| (e.rx, e.tx)), Some((1_005, 0)));
+        assert_eq!(c.get(1, 0), None);
+        assert_eq!(c.get(0, 2), None, "another slot's position 2 is another channel");
+        c.clear_slot(1);
+        assert_eq!(c.get(1, 2), None);
         assert_eq!(Resume::from_code(11), Resume::Drop);
         assert_eq!(Resume::from_code(Resume::code_over(0, 3)), Resume::Time(3));
         assert_eq!(Resume::from_code(Resume::code_over(12, 3)), Resume::Never);
     }
 
-    /// The Radio task's side end to end, as the UI and the firmware drive it: set, priorities, start, then
-    /// answering wants; a tune comes as soon as the awaited frequency arrives.
+    /// The Radio task's side end to end, as the UI and the firmware drive it: the list's length, priorities, start,
+    /// then answering wants; a tune comes as soon as the awaited frequency arrives.
     #[test]
     fn chan_scans_driven_by_commands() {
         use crate::msg::RadioCmd as C;
         let mut cs = ChanScans::new();
         let mut scans = [Scan::new(); 3];
-        let mut set = ChanSet::new();
-        for n in [5u16, 6, 20] {
-            set.set(n, true);
-        }
-        for k in 0..SET_BYTES.div_ceil(SET_CHUNK) as u8 {
-            cs.cmd(&C::ScanSet { slot: 1, chunk: k, bits: set.chunk(k) }, &mut scans, 0);
-        }
+        cs.cmd(&C::ScanSet { slot: 1, len: 3 }, &mut scans, 0);
         cs.cmd(&C::ScanResume { slot: 1, code: 11 }, &mut scans, 0);
-        cs.cmd(&C::ScanChans { slot: 1, from: 5, prio_s: 0 }, &mut scans, 0);
+        cs.cmd(&C::ScanChans { slot: 1, from: 0, prio_s: 0 }, &mut scans, 0);
         assert!(cs.is_on(1) && scans[1].running() && scans[1].resume == Resume::Drop);
-        let f = |n: u16| mhz(446) + n as u32 * 1_250;
+        let f = |p: u16| mhz(446) + p as u32 * 1_250;
         let mut tuned = std::vec::Vec::new();
         let mut t = 0;
         while t < 1_000 {
-            if let Some(n) = cs.want(&scans) {
-                if let Some((slot, fr)) = cs.cmd(&C::ScanEntry { num: n, rx: f(n) }, &mut scans, t) {
-                    tuned.push((slot, fr));
+            if let Some((slot, p)) = cs.want(&scans) {
+                if let Some(x) = cs.cmd(&C::ScanEntry { slot, pos: p, rx: f(p) }, &mut scans, t) {
+                    tuned.push(x);
                 }
             }
             if let Some(fr) = cs.tick(1, &mut scans[1], t, false).tune {
@@ -1300,8 +1312,9 @@ mod tests {
             }
             t += 10;
         }
-        assert_eq!(&tuned[..3], &[(1, f(6)), (1, f(20)), (1, f(5))]);
+        assert_eq!(&tuned[..3], &[(1, f(1)), (1, f(2)), (1, f(0))]);
         assert!(tuned.iter().all(|&(_, fr)| fr != PENDING));
+        assert_eq!(cs.chan(&scans[1]), scans[1].pos());
     }
 
     /// Nothing to stop on.
@@ -1426,87 +1439,78 @@ mod tests {
         assert!(!s.listening());
     }
 
-    /// The bitmap's edges: chunks and channel numbers past the end are ignored, a priority number past the end
-    /// is none.
+    /// The list's edges: a length past [`POS_MAX`] is held to it; a list of none ends the scan at its first step.
     #[test]
-    fn chan_set_edges() {
-        let mut a = ChanSet::default();
-        assert_eq!(a, ChanSet::new());
-        a.put_chunk(200, [0xFF; SET_CHUNK]);
-        a.set(MAX_CHANNELS, true);
-        assert_eq!(a.count(), 0);
-        assert!(!a.has(MAX_CHANNELS));
-        assert_eq!(a.chunk(200), [0; SET_CHUNK]);
-        assert_eq!(a.next_from(0, true), None, "an empty set");
-        a.put_chunk(24, [0xFF; SET_CHUNK]);
-        assert_eq!(a.count(), 40);
-        assert!(a.has(960) && a.has(999) && !a.has(959));
-        a.set_prio(0, 3);
-        a.set_prio(1, MAX_CHANNELS);
-        a.set_prio(PRIO_MAX as u8, 4);
-        assert_eq!((a.prio(0), a.prio(1), a.prio(2)), (Some(3), None, None));
+    fn chan_span_edges() {
+        use crate::msg::RadioCmd as C;
+        let mut cs = ChanScans::new();
+        let mut scans = [Scan::new(); 3];
+        cs.cmd(&C::ScanSet { slot: 0, len: u16::MAX }, &mut scans, 0);
+        assert_eq!(cs.spans[0].len(), POS_MAX);
+        cs.cmd(&C::ScanSet { slot: 0, len: 0 }, &mut scans, 0);
+        cs.cmd(&C::ScanChans { slot: 0, from: 0, prio_s: 0 }, &mut scans, 0);
+        assert_eq!(cs.want(&scans), None, "nothing to ask");
+        assert!(cs.tick(0, &mut scans[0], STEP_MS, false).ended);
     }
 
-    /// A channel already cached is updated in place; a cache full of kept channels takes no new one.
+    /// A position already cached is updated in place (its transmit side forgotten until it comes again); a cache
+    /// full of kept positions takes no new one.
     #[test]
     fn cache_updates_and_full_of_kept() {
         let mut c = FreqCache::new();
-        c.put_rx(4, 100, &[]);
-        c.put_rx(4, 200, &[]);
-        assert_eq!(c.get(4), Some((200, 0)));
-        c.put_tx(9, 5);
-        assert_eq!(c.get(9), None, "a transmit side for a channel not cached is dropped");
-        let keep: std::vec::Vec<u16> = (0..CACHE as u16).collect();
+        c.put_rx(0, 4, 100, &[]);
+        c.put_tx(0, 4, 7);
+        c.put_rx(0, 4, 200, &[]);
+        assert_eq!(c.get(0, 4).map(|e| (e.rx, e.tx)), Some((200, 0)));
+        c.put_tx(0, 9, 5);
+        assert_eq!(c.get(0, 9), None, "a transmit side for a position not cached is dropped");
+        let keep: std::vec::Vec<(u8, u16)> = (0..CACHE as u16).map(|p| (2, p)).collect();
         let mut c = FreqCache::new();
-        for &n in &keep {
-            c.put_rx(n, 1_000 + n as u32, &keep);
+        for &(sl, p) in &keep {
+            c.put_rx(sl, p, 1_000 + p as u32, &keep);
         }
-        c.put_rx(50, 2, &keep);
-        assert_eq!(c.get(50), None);
-        assert!(keep.iter().all(|&n| c.get(n) == Some((1_000 + n as u32, 0))));
+        c.put_rx(2, 50, 2, &keep);
+        assert_eq!(c.get(2, 50), None);
+        assert!(keep.iter().all(|&(sl, p)| c.get(sl, p).map(|e| e.rx) == Some(1_000 + p as u32)));
         c.clear();
         assert_eq!(c, FreqCache::new());
     }
 
-    /// What a channel scan asks for: nothing when stopped; the stop it is on, then a priority channel, then the
-    /// next stops; nothing when all it would look at is cached.
+    /// What a channel scan asks for: nothing when stopped; the stop it is on, then a priority channel (here one
+    /// outside the list, after it), then the next stops; nothing when all it would look at is cached.
     #[test]
     fn want_order_and_none() {
-        let mut set = ChanSet::new();
-        for n in [5u16, 6, 900] {
-            set.set(n, true);
-        }
-        set.set_prio(0, 900);
+        let mut span = ChanSpan { len: 3, ..ChanSpan::new() };
+        span.set_prio(0, 3);
         let mut cache = FreqCache::new();
         let mut s = Scan::new();
-        assert_eq!(want(&s, &set, &cache, false), None, "not running");
-        s.start(5, 0);
-        assert_eq!(want(&s, &set, &cache, false), Some(5));
-        cache.put_rx(5, 1, &[]);
-        assert_eq!(want(&s, &set, &cache, false), Some(900), "the priority channel before the next stop");
-        cache.put_rx(900, 1, &[]);
-        assert_eq!(want(&s, &set, &cache, false), Some(6));
-        cache.put_rx(6, 1, &[]);
-        assert_eq!(want(&s, &set, &cache, false), None, "round to where it is");
-        assert_eq!(keep(&s, &set, false), [5, 900, NO_WANT, NO_WANT, NO_WANT]);
-        // Walking WithTx: position 10 is channel 5.
-        s.start(10, 0);
-        assert_eq!((chan_at(&s, true), keep(&s, &set, true)[0]), (5, 5));
+        assert_eq!(want(&s, 0, &span, &cache, false), None, "not running");
+        s.start(1, 0);
+        assert_eq!(want(&s, 0, &span, &cache, false), Some(1));
+        cache.put_rx(0, 1, 1, &[]);
+        assert_eq!(want(&s, 0, &span, &cache, false), Some(3), "the priority channel before the next stop");
+        cache.put_rx(0, 3, 1, &[]);
+        assert_eq!(want(&s, 0, &span, &cache, false), Some(2));
+        cache.put_rx(0, 2, 1, &[]);
+        assert_eq!(want(&s, 0, &span, &cache, false), Some(0));
+        cache.put_rx(0, 0, 1, &[]);
+        assert_eq!(want(&s, 0, &span, &cache, false), None, "round to where it is");
+        assert_eq!(keep(&s, 0, &span, false), [(0, 1), (0, 3), (0xFF, NO_WANT), (0xFF, NO_WANT), (0xFF, NO_WANT)]);
+        // Walking WithTx: engine position 2 is list position 1.
+        s.start(2, 0);
+        assert_eq!((chan_at(&s, true), keep(&s, 0, &span, true)[0]), (1, (0, 1)));
         // A single stop: nothing ahead of it.
-        let mut one = ChanSet::new();
-        one.set(5, true);
-        s.start(5, 0);
-        assert_eq!(want(&s, &one, &cache, false), None);
-        // More stops than AHEAD, all cached: no further look.
-        let mut many = ChanSet::new();
-        let mut cache = FreqCache::new();
-        for n in 0..10u16 {
-            many.set(n, true);
-            cache.put_rx(n, 1, &[]);
-        }
-        many.set(500, true);
+        let one = ChanSpan { len: 1, ..ChanSpan::new() };
         s.start(0, 0);
-        assert_eq!(want(&s, &many, &cache, false), None, "only AHEAD stops ahead are fetched");
+        assert_eq!(want(&s, 0, &one, &cache, false), None);
+        // More stops than AHEAD, all those ahead cached: no further look.
+        let many = ChanSpan { len: 11, ..ChanSpan::new() };
+        let mut cache = FreqCache::new();
+        for p in 0..10u16 {
+            cache.put_rx(0, p, 1, &[]);
+        }
+        s.start(0, 0);
+        assert_eq!(want(&s, 0, &many, &cache, false), None, "only AHEAD stops ahead are fetched");
     }
 
     /// SCAN-22 through the Radio task's walk: a shifted channel's input right after it, a priority as its
@@ -1516,24 +1520,21 @@ mod tests {
         use crate::msg::RadioCmd as C;
         let mut cs = ChanScans::default();
         let mut scans = [Scan::new(); 3];
-        let mut set = ChanSet::new();
-        set.set(5, true);
-        set.set(6, true);
         cs.cmd(&C::ScanTx(true), &mut scans, 0);
-        cs.cmd(&C::ScanSet { slot: 0, chunk: 0, bits: set.chunk(0) }, &mut scans, 0);
-        cs.cmd(&C::ScanPrio { slot: 0, k: 0, num: 6 }, &mut scans, 0);
-        cs.cmd(&C::ScanChans { slot: 0, from: 5, prio_s: 0 }, &mut scans, 0);
+        cs.cmd(&C::ScanSet { slot: 0, len: 2 }, &mut scans, 0);
+        cs.cmd(&C::ScanPrio { slot: 0, k: 0, pos: 1 }, &mut scans, 0);
+        cs.cmd(&C::ScanChans { slot: 0, from: 0, prio_s: 0 }, &mut scans, 0);
         assert!(cs.tx && cs.is_on(0) && !cs.is_on(1));
-        assert_eq!((scans[0].pos(), cs.chan(&scans[0])), (10, 5));
-        let f = |n: u16| mhz(446) + n as u32 * 1_250;
-        assert_eq!(cs.want(&scans), Some(5));
-        assert_eq!(cs.cmd(&C::ScanEntry { num: 5, rx: f(5) }, &mut scans, 0), None, "not waited for");
-        assert_eq!(cs.want(&scans), Some(6));
-        cs.cmd(&C::ScanEntry { num: 6, rx: f(6) }, &mut scans, 0);
-        cs.cmd(&C::ScanEntryTx { num: 6, tx: f(6) + 60_000 }, &mut scans, 0);
+        assert_eq!((scans[0].pos(), cs.chan(&scans[0])), (0, 0));
+        let f = |p: u16| mhz(446) + p as u32 * 1_250;
+        assert_eq!(cs.want(&scans), Some((0, 0)));
+        assert_eq!(cs.cmd(&C::ScanEntry { slot: 0, pos: 0, rx: f(0) }, &mut scans, 0), None, "not waited for");
+        assert_eq!(cs.want(&scans), Some((0, 1)));
+        cs.cmd(&C::ScanEntry { slot: 0, pos: 1, rx: f(1) }, &mut scans, 0);
+        cs.cmd(&C::ScanEntryTx { slot: 0, pos: 1, tx: f(1) + 60_000 }, &mut scans, 0);
         assert_eq!(cs.want(&scans), None);
-        assert_eq!(cs.walk(0).len(), 2 * MAX_CHANNELS);
-        assert_eq!(cs.walk(0).priority(0), Some(12));
+        assert_eq!(cs.walk(0).len(), 4);
+        assert_eq!(cs.walk(0).priority(0), Some(2));
         let mut tuned = std::vec::Vec::new();
         let mut t = 0;
         while tuned.len() < 3 {
@@ -1542,36 +1543,32 @@ mod tests {
             }
             t += 10;
         }
-        assert_eq!(tuned, [f(6), f(6) + 60_000, f(5)], "5 is simplex: no input of its own");
+        assert_eq!(tuned, [f(1), f(1) + 60_000, f(0)], "0 is simplex: no input of its own");
         cs.tx = false;
-        assert_eq!(cs.walk(0).priority(0), Some(6));
-        assert_eq!(cs.cmd(&C::Tune(f(5)), &mut scans, t), None, "not a scan command");
+        assert_eq!(cs.walk(0).priority(0), Some(1));
+        assert_eq!(cs.cmd(&C::Tune(f(0)), &mut scans, t), None, "not a scan command");
         cs.off(0);
         assert!(!cs.is_on(0));
         assert_eq!(cs.want(&scans), None);
     }
 
-    /// A step onto a channel whose frequency hasn't arrived waits (not ticked) and tunes when it comes; * and
-    /// ▲▼ onto one wait the same way (SCAN-11, SCAN-16).
+    /// A step onto a position whose frequency hasn't arrived waits (not ticked) and tunes when it comes; * and ▲▼
+    /// onto one wait the same way (SCAN-11, SCAN-16); an answer that it is no stop moves on at once (SCAN-25).
     #[test]
     fn chan_scan_waits_for_a_pending_stop() {
         use crate::msg::RadioCmd as C;
         let mut cs = ChanScans::new();
         let mut scans = [Scan::new(); 3];
-        let mut set = ChanSet::new();
-        for n in [5u16, 6, 20] {
-            set.set(n, true);
-        }
-        cs.cmd(&C::ScanSet { slot: 2, chunk: 0, bits: set.chunk(0) }, &mut scans, 0);
+        cs.cmd(&C::ScanSet { slot: 2, len: 4 }, &mut scans, 0);
         cs.cmd(&C::ScanResume { slot: 2, code: 11 }, &mut scans, 0);
-        cs.cmd(&C::ScanChans { slot: 2, from: 5, prio_s: 0 }, &mut scans, 0);
-        let f = |n: u16| mhz(446) + n as u32 * 1_250;
+        cs.cmd(&C::ScanChans { slot: 2, from: 0, prio_s: 0 }, &mut scans, 0);
+        let f = |p: u16| mhz(446) + p as u32 * 1_250;
         assert_eq!(cs.tick(2, &mut scans[2], 0, false), Out::default());
         assert_eq!(cs.tick(2, &mut scans[2], STEP_MS, false), Out::default(), "PENDING never reaches the chip");
-        assert_eq!(scans[2].pos(), 6);
+        assert_eq!(scans[2].pos(), 1);
         assert_eq!(cs.tick(2, &mut scans[2], STEP_MS + 50, true), Out::default(), "not ticked while waiting");
         assert!(!scans[2].on_hit());
-        assert_eq!(cs.cmd(&C::ScanEntry { num: 6, rx: f(6) }, &mut scans, 90), Some((2, f(6))));
+        assert_eq!(cs.cmd(&C::ScanEntry { slot: 2, pos: 1, rx: f(1) }, &mut scans, 90), Some((2, f(1))));
         let mut t = 100;
         while !scans[2].on_hit() {
             cs.tick(2, &mut scans[2], t, true);
@@ -1579,14 +1576,19 @@ mod tests {
         }
         assert!(t - 90 >= STEP_MS / 2, "a full listen from when it was tuned");
         assert_eq!(cs.skip_once(2, &mut scans[2], t), Out::default());
-        assert_eq!((scans[2].pos(), scans[2].skips), (20, 1));
-        assert_eq!(cs.cmd(&C::ScanEntry { num: 20, rx: f(20) }, &mut scans, t), Some((2, f(20))));
+        assert_eq!((scans[2].pos(), scans[2].skips), (2, 1));
+        // position 2 is no stop (a Skip-flagged channel): on to 3 at once, which waits in turn
+        assert_eq!(cs.cmd(&C::ScanEntry { slot: 2, pos: 2, rx: 0 }, &mut scans, t), None);
+        assert_eq!(scans[2].pos(), 3);
+        assert_eq!(cs.cmd(&C::ScanEntry { slot: 2, pos: 3, rx: f(3) }, &mut scans, t), Some((2, f(3))));
         while !scans[2].on_hit() {
             t += 10;
             cs.tick(2, &mut scans[2], t, true);
         }
         assert_eq!(cs.dir(2, &mut scans[2], false, t), Out::default());
-        assert_eq!(scans[2].pos(), 5, "down past 6, skipped for this scan");
-        assert_eq!(cs.cmd(&C::ScanEntry { num: 5, rx: f(5) }, &mut scans, t), Some((2, f(5))));
+        assert_eq!(scans[2].pos(), 0, "down past 2 (no stop) and 1 (skipped for this scan)");
+        assert_eq!(cs.cmd(&C::ScanEntry { slot: 2, pos: 0, rx: f(0) }, &mut scans, t), Some((2, f(0))));
+        let mut tuned = std::vec::Vec::new();
+        answer_all(&mut cs, &mut scans, &|_| f(0), t, &mut tuned);
     }
 }

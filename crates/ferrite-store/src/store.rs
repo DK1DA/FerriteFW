@@ -154,6 +154,9 @@ pub struct FlashStore<N: Nor, D: Data> {
     counts_queued: Cell<bool>,
     pub(crate) at_all: Cell<At>,
     pub(crate) at_zone: Cell<At>,
+    /// Moves on with every channel record written ([`ChannelStore::chan_version`]: Local and a running channel
+    /// scan look again), not with the logs' records.
+    pub(crate) cver: Cell<u32>,
     /// Recent (CHAN-25): 10 channel numbers in RAM, not saved.
     recent: ferrite_app::chan::RecentList,
     ver: Cell<u32>,
@@ -213,6 +216,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             counts_queued: Cell::new(false),
             at_all: Cell::new(At::NONE),
             at_zone: Cell::new(At::NONE),
+            cver: Cell::new(0),
             recent: ferrite_app::chan::RecentList::new(),
             ver: Cell::new(0),
             mounted: Cell::new(Mounted::Failed),
@@ -1019,6 +1023,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             *l = Members { zone: l.zone, ..Members::EMPTY };
         }
         self.bump();
+        self.cver.set(self.cver.get().wrapping_add(1));
     }
 
     /// Rewrites the zone sector at `sector` once, giving each zone record in it the count `count_for` names (None:
@@ -1797,7 +1802,7 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
     }
 
     fn chan_version(&self) -> u32 {
-        self.ver.get()
+        self.cver.get()
     }
 
     fn located(&self, num: u16) -> Option<(Channel, Pos)> {

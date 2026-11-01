@@ -326,11 +326,12 @@ impl App {
     /// frequency as a VFO is shown.
     pub(crate) fn card_name(&self, s: u8, live: &LiveAll, store: &impl ChannelStore) -> Buf<16> {
         let lv = &live.slots[s as usize];
-        let name = if lv.scanning { num_name(lv.chan, store) } else { self.chan_name(s, live) };
+        let scanned = if lv.scanning { self.scanned(s, lv.chan, store) } else { None };
+        let name = if lv.scanning { scanned.map_or_else(Buf::new, |c| Buf::from(c.name())) } else { self.chan_name(s, live) };
         let sl = &self.slots[s as usize];
         match self.set.ch_display {
             1 if !name.is_empty() || sl.on_channel() && !lv.scanning && !self.aprs_slot(s) => {
-                let num = if lv.scanning { lv.chan.saturating_sub(1) } else { sl.ch.map_or(0, |c| c.num) };
+                let num = if lv.scanning { scanned.map_or(0, |c| c.num) } else { sl.ch.map_or(0, |c| c.num) };
                 let mut l = Buf::<32>::new();
                 crate::slot::chan_label(num, &mut l);
                 Buf::from(l.as_bytes())
@@ -342,7 +343,14 @@ impl App {
 
     /// A channel scan's last hit by name (HOME-4.1); empty for a band scan or a channel without a name.
     pub(crate) fn hit_name(&self, s: u8, live: &LiveAll, store: &impl ChannelStore) -> Buf<16> {
-        num_name(live.slots[s as usize].hit_chan, store)
+        self.scanned(s, live.slots[s as usize].hit_chan, store).map_or_else(Buf::new, |c| Buf::from(c.name()))
+    }
+
+    /// The channel at a channel scan's position plus 1 as the Radio task reports it (0: none): the scan list is the
+    /// UI's (SCAN-25), so it knows which channel that is.
+    fn scanned(&self, s: u8, at: u16, store: &impl ChannelStore) -> Option<crate::chan::Channel> {
+        let p = at.checked_sub(1)?;
+        self.slot(s).on_channel().then(|| crate::chanscan::at(self, s, p, store)).flatten()
     }
 
     /// The slot's frequency, or the scan's current step while it scans.
@@ -450,12 +458,3 @@ pub(crate) fn heard_text(t: u16, own: u16, b: &mut Buf<24>) {
 
 /// The state field's width for a tone hint (TSRCH-13): 11 characters.
 pub(crate) const HEARD_W: i32 = 80;
-
-/// The name of channel `n` - 1 (the snapshot's numbering: 0 is none).
-fn num_name(n: u16, store: &impl ChannelStore) -> Buf<16> {
-    let mut b = Buf::new();
-    if let Some(c) = n.checked_sub(1).and_then(|n| store.get(n)) {
-        b.set(c.name());
-    }
-    b
-}

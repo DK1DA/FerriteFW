@@ -124,9 +124,7 @@ pub(crate) fn nearest(store: &impl ChannelStore, here: Pos, hidden: bool, out: &
     out.iter_mut().for_each(|o| *o = None);
     let mut n = 0u16;
     for num in 0..MAX_CHANNELS {
-        if store.zone_of(num).is_none() {
-            continue;
-        }
+        // one look at an empty number, one record read for a channel (decision 333: no zone map to skip by)
         let Some((c, p)) = store.located(num) else { continue };
         if !listed(&c, hidden) {
             continue;
@@ -393,11 +391,9 @@ pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: ZoneId) -> P
     let cfg = store.data().zone_cfg(z);
     let mut p = Preview { head: caps(store.zone_name(z).unwrap_or_default().as_bytes()), ..Preview::default() };
     let (mut bits, mut listed_n, mut filled) = (0u16, 0u16, 0usize);
-    for num in 0..MAX_CHANNELS {
-        if store.zone_of(num) != Some(z) {
-            continue;
-        }
-        let Some(c) = store.get(num) else { continue };
+    // the zone's own channels in order (decision 333: a slot's list, or paged through flash)
+    for i in 0..store.zone_len(z) {
+        let Some(c) = store.zone_at(z, i) else { continue };
         bits |= band_bit(c.rx);
         if !listed(&c, hidden) {
             continue;

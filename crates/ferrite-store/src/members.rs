@@ -295,6 +295,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     pub(crate) fn note(&self, num: u16, old: ZoneId, new: ZoneId) {
         self.at_all.set(At::NONE);
         self.at_zone.set(At::NONE);
+        self.cver.set(self.cver.get().wrapping_add(1));
         if old == new {
             return;
         }

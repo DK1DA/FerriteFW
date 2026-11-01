@@ -1,125 +1,165 @@
-//! Channel scans in the Radio task (SCAN-3, SCAN-12, SCAN-22, SCAN-24): the UI says which channels a slot's
-//! scan stops on and answers for their frequencies; the Radio task's engine walks them
+//! Channel scans in the Radio task (SCAN-3, SCAN-12, SCAN-22, SCAN-24, SCAN-25): the UI says how long a slot's
+//! scan list is and answers for what is at each position; the Radio task's engine walks the positions
 //! ([`ferrite_core::scan::ChanList`]).
 //!
-//! The Radio task never holds the channels: it keeps a bit per channel number for each scanning slot
-//! ([`ChanSet`], 133 bytes) and a few frequencies shared by all ([`ferrite_core::scan::FreqCache`]), asking for
-//! the next ones a few stops ahead through [`LiveAll::want`]. Starting a scan streams the bitmap here, a chunk
-//! of 40 channel numbers per [`RadioCmd::ScanSet`], a few per tick so the outbox never overflows, with the
-//! priority channels as they are found; then the resume rule and [`RadioCmd::ScanChans`]. The first chunk
-//! clears the Radio task's set and priority list.
+//! The list (decision 333) is the slot's zone's channels in number order (Local's nearest first, CHAN-34), then
+//! those of the zones added with digits, each in turn: the store's member list of the slot's zone answers a
+//! position at once, another zone is paged through flash from where the last position was found, so walking the
+//! list costs a record read a stop. The Radio task holds no channel numbers at all, only the list's length and
+//! the priority positions (the zone's priority 1 and 2: their place in the list, or after it when they are
+//! outside it; then flagged ones). Starting a scan sends the length, the priority positions, the resume rule and
+//! [`RadioCmd::ScanChans`]; when the channels change under a running scan, the length and priorities go again
+//! (the scan goes on where it is, its frequencies asked again).
 
-use crate::chan::{ChannelStore, FLAG_PRIORITY, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, ZoneId, FLAG_PRIORITY, NO_ZONE};
 use crate::App;
 use ferrite_core::msg::{LiveAll, RadioCmd};
-use ferrite_core::scan::{Resume, MAX_CHANNELS, PRIO_MAX, SET_BYTES, SET_CHUNK};
+use ferrite_core::scan::{Resume, POS_MAX, PRIO_MAX};
 
-/// Bitmap chunks to send in all.
-const CHUNKS: u8 = SET_BYTES.div_ceil(SET_CHUNK) as u8;
-/// Commands pushed per tick at most, leaving room in the outbox for the rest.
-const PER_TICK: usize = 6;
-
-/// A channel scan's set being sent (one at a time; starting another replaces it). Everything else it needs is
-/// read again as it goes: the slot's zone and channel, the zones added with digits, the zone's settings.
+/// A channel scan being started (`full`: the resume rule and the start follow) or its list sent again after a
+/// change (one at a time; starting another replaces it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Feed {
     slot: u8,
-    /// The next bitmap chunk to send.
-    chunk: u8,
-    /// Priority channels sent so far (SCAN-12: the zone's priority 1 and 2, then flagged ones in number order).
-    prio: u8,
+    full: bool,
 }
 
-/// Starts (or restarts, after the zone set changed) a channel scan on `slot` from its channel. The set goes out
-/// over the next ticks ([`feed`]).
+/// Starts (or restarts, after the zone set changed) a channel scan on `slot` from its channel. Its list goes out
+/// at the next tick with room in the outbox ([`feed`]).
 pub fn start(app: &mut App, slot: u8) {
-    app.radio.feed = Some(Feed { slot, chunk: 0, prio: 0 });
+    app.radio.feed = Some(Feed { slot, full: true });
 }
 
-/// The zone set: the slot's zone, and zones 0-15 added with digits (SCAN-3).
-fn in_set(app: &App, slot: u8, z: crate::chan::ZoneId) -> bool {
-    z == app.slot(slot).zone || z < 16 && app.radio.zones & 1 << z != 0
+/// The zones a slot's channel scan walks, in order: its own, then those added with digits (SCAN-3, 0-9 here).
+fn zones(app: &App, slot: u8) -> impl Iterator<Item = ZoneId> + '_ {
+    let own = app.slot(slot).zone;
+    core::iter::once(own).chain((0..10 as ZoneId).filter(move |&z| z != own && app.radio.zones & 1 << z != 0))
+}
+
+/// How many positions the slot's scan list has.
+pub fn len(app: &App, slot: u8, store: &impl ChannelStore) -> u16 {
+    zones(app, slot).map(|z| app.zlen(store, z) as u32).sum::<u32>().min(POS_MAX as u32) as u16
+}
+
+/// The channel at position `pos` of the slot's scan list: a list position, or a zone priority channel's after it
+/// (the zone's priority `pos - len`, SCAN-12).
+pub fn at(app: &App, slot: u8, pos: u16, store: &impl ChannelStore) -> Option<Channel> {
+    let mut p = pos;
+    for z in zones(app, slot) {
+        let n = app.zlen(store, z);
+        if p < n {
+            return app.zat(store, z, p);
+        }
+        p -= n;
+    }
+    let k = p as usize;
+    zone_cfg(app, slot, store).pri.get(k).copied().flatten().and_then(|n| store.get(n))
 }
 
 fn zone_cfg(app: &App, slot: u8, store: &impl ChannelStore) -> crate::data::ZoneCfg {
     match app.slot(slot).zone {
-        NO_ZONE => Default::default(),
+        NO_ZONE | crate::local::LOCAL => Default::default(),
         z => store.data().zone_cfg(z),
     }
 }
 
-/// Whether channel `n` is a stop of the scan: in the set, not Skip-flagged, not an HF channel (CHAN-26: a scan
-/// never moves the relay, SAFE-20); and whether it is a flagged priority channel.
-fn stop(app: &App, slot: u8, store: &impl ChannelStore, n: u16) -> Option<bool> {
-    // CHAN-34: a slot on Local scans its members (the zones added with digits as well)
-    let local = app.slot(slot).zone == crate::local::LOCAL && app.local.has(n);
-    if !(local || store.zone_of(n).is_some_and(|z| in_set(app, slot, z))) {
-        return None;
-    }
-    store.get(n).filter(|c| !c.skip() && !c.is_hf() && crate::chan::rx_ok(c.rx)).map(|c| c.flags & FLAG_PRIORITY != 0)
+/// Whether a channel is a stop: not Skip-flagged, not an HF channel (CHAN-26: a scan never moves the relay,
+/// SAFE-20), and a frequency a channel holds.
+fn stop(c: &Channel) -> bool {
+    !c.skip() && !c.is_hf() && crate::chan::rx_ok(c.rx)
 }
 
-/// Sends the next part of a channel scan being started: bitmap chunks (the first resets the Radio task's set),
-/// the priority channels as they are found, then the resume rule and the start.
-#[inline(never)] // SBAR-23: its chunk buffers in its own frame
+/// The priority positions (SCAN-12): the zone's priority 1 and 2 (their place in the list, or `len` + 0 or 1 when
+/// outside it), then flagged channels of the list in its order, [`PRIO_MAX`] in all.
+#[inline(never)]
+fn priorities(app: &App, slot: u8, len: u16, store: &impl ChannelStore) -> [u16; PRIO_MAX] {
+    let mut out = [u16::MAX; PRIO_MAX];
+    let mut k = 0;
+    let pri = zone_cfg(app, slot, store).pri;
+    let mut zone_pos = [None; 2];
+    let mut p = 0u16;
+    let mut flagged = [u16::MAX; PRIO_MAX];
+    let mut f = 0;
+    for z in zones(app, slot) {
+        for i in 0..app.zlen(store, z) {
+            if let Some(c) = app.zat(store, z, i) {
+                if let Some(j) = pri.iter().position(|&x| x == Some(c.num)) {
+                    zone_pos[j] = Some(p);
+                } else if c.flags & FLAG_PRIORITY != 0 && stop(&c) && f < PRIO_MAX {
+                    flagged[f] = p;
+                    f += 1;
+                }
+            }
+            p += 1;
+        }
+    }
+    for (j, n) in pri.iter().enumerate() {
+        if n.is_some() && k < PRIO_MAX {
+            out[k] = zone_pos[j].unwrap_or(len + j as u16);
+            k += 1;
+        }
+    }
+    for &q in flagged.iter().take_while(|&&q| q != u16::MAX) {
+        if k < PRIO_MAX {
+            out[k] = q;
+            k += 1;
+        }
+    }
+    out
+}
+
+/// Sends a channel scan's list when there is room in the outbox: its length and priority positions, then (for a
+/// start) the resume rule and the start at the slot's place in its zone. A running channel scan whose channels
+/// changed gets its list again (the store's [`ChannelStore::chan_version`]).
+#[inline(never)] // SBAR-23: its buffers in its own frame
 pub fn feed(app: &mut App, store: &impl ChannelStore) {
-    let Some(mut f) = app.radio.feed else { return };
-    let zone_pri = zone_cfg(app, f.slot, store).pri;
-    for _ in 0..PER_TICK {
-        if app.out.q.len() + 2 + PRIO_MAX > app.out.q.capacity() {
-            break;
+    let ver = store.chan_version();
+    if ver != app.radio.scan_ver {
+        app.radio.scan_ver = ver;
+        app.radio.refresh = (0..3u8).filter(|&s| app.scan_mask & 1 << s != 0 && app.slot(s).on_channel()).fold(0, |m, s| m | 1 << s);
+    }
+    if app.radio.feed.is_none() && app.radio.refresh != 0 {
+        let s = app.radio.refresh.trailing_zeros() as u8;
+        app.radio.refresh &= !(1 << s);
+        if app.scan_mask & 1 << s != 0 && app.slot(s).on_channel() {
+            app.radio.feed = Some(Feed { slot: s, full: false });
         }
-        if f.chunk < CHUNKS {
-            let mut bits = [0u8; SET_CHUNK];
-            let mut flagged = [u16::MAX; PRIO_MAX];
-            let first = f.chunk as u16 * SET_CHUNK as u16 * 8;
-            for k in 0..(SET_CHUNK * 8) as u16 {
-                let n = first + k;
-                if let Some(pri) = stop(app, f.slot, store, n).filter(|_| n < MAX_CHANNELS) {
-                    bits[k as usize / 8] |= 1 << (k % 8);
-                    if pri && !zone_pri.contains(&Some(n)) {
-                        if let Some(p) = flagged.iter_mut().find(|p| **p == u16::MAX) {
-                            *p = n;
-                        }
-                    }
-                }
-            }
-            app.out.push(RadioCmd::ScanSet { slot: f.slot, chunk: f.chunk, bits });
-            let zone_first = if f.chunk == 0 { zone_pri } else { [None; 2] };
-            for num in zone_first.into_iter().flatten().chain(flagged.into_iter().filter(|&p| p != u16::MAX)) {
-                if (f.prio as usize) < PRIO_MAX {
-                    app.out.push(RadioCmd::ScanPrio { slot: f.slot, k: f.prio, num });
-                    f.prio += 1;
-                }
-            }
-            f.chunk += 1;
-            continue;
-        }
+    }
+    let Some(f) = app.radio.feed else { return };
+    if app.out.q.len() + 4 + PRIO_MAX > app.out.q.capacity() {
+        return; // next tick
+    }
+    let n = len(app, f.slot, store);
+    app.out.push(RadioCmd::ScanSet { slot: f.slot, len: n });
+    for (k, pos) in priorities(app, f.slot, n, store).into_iter().enumerate().filter(|x| x.1 != u16::MAX) {
+        app.out.push(RadioCmd::ScanPrio { slot: f.slot, k: k as u8, pos });
+    }
+    if f.full {
         let sl = app.slot(f.slot);
-        let from = sl.ch.map_or(0, |c| c.num);
+        let from = if sl.ch.is_some() { sl.pos.min(n.saturating_sub(1)) } else { 0 };
         let resume = Resume::code_over(zone_cfg(app, f.slot, store).resume, app.set.scan_resume);
         app.out.push(RadioCmd::ScanResume { slot: f.slot, code: resume });
         app.out.push(RadioCmd::ScanChans { slot: f.slot, from, prio_s: app.set.scan_prio });
-        app.radio.feed = None;
-        return;
     }
-    app.radio.feed = Some(f);
+    app.radio.feed = None;
 }
 
-/// The Radio task asks for a channel's frequencies ([`LiveAll::want`]): answered once per new ask.
+/// The Radio task asks what is at a position of a slot's list ([`LiveAll::want`]): answered once per new ask with
+/// the channel's receive frequency, or 0 when it is no stop; its transmit frequency too while scan inputs are on
+/// (SCAN-22). A zone priority channel is answered whatever its Skip flag (SCAN-12).
 pub fn answer(app: &mut App, live: &LiveAll, store: &impl ChannelStore) {
     if live.want == app.radio.want_seen {
         return;
     }
     app.radio.want_seen = live.want;
-    let Some(num) = live.wanted() else { return };
-    let c = store.get(num);
-    let rx = c.map_or(0, |c| c.rx);
-    app.out.push(RadioCmd::ScanEntry { num, rx });
+    let Some((slot, pos)) = live.wanted() else { return };
+    let n = len(app, slot, store);
+    let c = at(app, slot, pos, store).filter(|c| if pos < n { stop(c) } else { !c.is_hf() && crate::chan::rx_ok(c.rx) });
+    app.out.push(RadioCmd::ScanEntry { slot, pos, rx: c.map_or(0, |c| c.rx) });
     if let Some(c) = c.filter(|_| app.set.scan_tx) {
         let tx = c.cfg.tx_of(c.rx);
         if tx != c.rx {
-            app.out.push(RadioCmd::ScanEntryTx { num, tx });
+            app.out.push(RadioCmd::ScanEntryTx { slot, pos, tx });
         }
     }
 }
@@ -133,95 +173,116 @@ pub fn preset_resume(app: &App, preset_resume: u8) -> u8 {
 mod tests {
     use super::*;
     use crate::sample::Sample;
-    use ferrite_core::scan::{ChanSet, NO_WANT};
 
-    /// Drains the app's commands into a ChanSet as the Radio task would.
-    fn drain(app: &mut App, store: &Sample, set: &mut ChanSet) -> std::vec::Vec<RadioCmd> {
-        let mut all = std::vec::Vec::new();
-        for _ in 0..40 {
-            feed(app, store);
-            while let Some(c) = app.pop_cmd() {
-                if let RadioCmd::ScanSet { chunk, bits, .. } = c {
-                    set.put_chunk(chunk, bits);
-                }
-                if let RadioCmd::ScanPrio { k, num, .. } = c {
-                    set.set_prio(k, num);
-                }
-                all.push(c);
-            }
-        }
-        all
+    fn app() -> App {
+        let set: &'static mut crate::settings::Settings = std::boxed::Box::leak(std::boxed::Box::new(crate::settings::Settings::DEFAULT));
+        let alert = std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
+        App::new(set, alert)
     }
 
-    /// SCAN-25: a channel scan needs no copy of the channels in the Radio task: the UI streams which channel
-    /// numbers are stops, a few chunks per tick, without overflowing the outbox.
+    /// The commands a feed sends.
+    fn drain(app: &mut App, store: &Sample) -> std::vec::Vec<RadioCmd> {
+        feed(app, store);
+        core::iter::from_fn(|| app.pop_cmd()).collect()
+    }
+
+    /// The list a slot's scan walks, as the UI answers it position by position.
+    fn walk(app: &App, slot: u8, store: &Sample) -> std::vec::Vec<u16> {
+        (0..len(app, slot, store)).filter_map(|p| at(app, slot, p, store)).map(|c| c.num).collect()
+    }
+
+    /// SCAN-25 (decision 333): a channel scan needs no copy of the channels in the Radio task, nor a bit per
+    /// channel: the UI sends the list's length, the priority positions, the resume rule and the start; the list is
+    /// the slot's zone's channels in number order, and the zone's priority channel is at its place in it.
     #[test]
-    fn the_set_streams_without_overflow() {
+    fn a_start_sends_the_length() {
         let store = Sample::new();
-        let leak = || -> &'static mut crate::settings::Settings { std::boxed::Box::leak(std::boxed::Box::new(crate::settings::Settings::DEFAULT)) };
-        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
-        let mut app = App::new(leak(), alert());
+        let mut app = app();
         app.set_channel(0, 1, 0, &store);
         while app.pop_cmd().is_some() {}
         start(&mut app, 0);
-        let mut set = ChanSet::new();
-        let cmds = drain(&mut app, &store, &mut set);
-        let sets = cmds.iter().filter(|c| matches!(c, RadioCmd::ScanSet { .. })).count();
-        assert_eq!(sets, CHUNKS as usize, "every chunk sent, none dropped");
-        assert!(matches!(cmds.last(), Some(RadioCmd::ScanChans { slot: 0, .. })), "the start comes last");
-        // exactly the zone's channels that a scan stops on
+        let cmds = drain(&mut app, &store);
         let zone = app.slot(0).zone;
-        let want: std::vec::Vec<u16> = (0..store.zone_len(zone)).filter_map(|i| store.zone_at(zone, i)).filter(|c| !c.skip() && !c.is_hf()).map(|c| c.num).collect();
-        let got: std::vec::Vec<u16> = (0..MAX_CHANNELS).filter(|&n| set.has(n)).collect();
-        assert_eq!(got, want);
+        let want: std::vec::Vec<u16> = (0..store.zone_len(zone)).filter_map(|i| store.zone_at(zone, i)).map(|c| c.num).collect();
         assert!(!want.is_empty());
-        // the zone's priority channel (sample zone 1: channel 11)
-        let pri = store.data().zone_cfg(zone).pri[0];
-        assert_eq!(set.prio(0), pri);
-        let _ = NO_WANT;
+        assert_eq!(walk(&app, 0, &store), want, "the zone's channels in number order");
+        assert_eq!(cmds[0], RadioCmd::ScanSet { slot: 0, len: want.len() as u16 });
+        assert!(matches!(cmds.last(), Some(RadioCmd::ScanChans { slot: 0, .. })), "the start comes last");
+        // the zone's priority channel (sample zone 1: channel 11) at its place in the list
+        let pri = store.data().zone_cfg(zone).pri[0].unwrap();
+        let p = want.iter().position(|&n| n == pri).unwrap() as u16;
+        assert!(cmds.contains(&RadioCmd::ScanPrio { slot: 0, k: 0, pos: p }), "{cmds:?}");
+        assert_eq!(app.radio.feed, None, "all sent in one go");
     }
 
-    /// CHAN-34.2: a slot on Local scans Local's members (nearest first is only the list's order; the Radio task walks
-    /// them by number as any zone's), Skip-flagged and HF ones passed as in any zone.
+    /// SCAN-3 through the list: zones added with digits follow the slot's own, each in number order.
+    #[test]
+    fn added_zones_follow_the_slots_own() {
+        let store = Sample::new();
+        let mut app = app();
+        app.set_channel(0, 1, 0, &store);
+        let other = (0..10).find(|&z| z != 1 && store.zone_len(z) > 0).unwrap();
+        app.radio.zones = 1 << other | 1 << 1; // 1 is the slot's own: not twice
+        let own: std::vec::Vec<u16> = (0..store.zone_len(1)).filter_map(|i| store.zone_at(1, i)).map(|c| c.num).collect();
+        let more: std::vec::Vec<u16> = (0..store.zone_len(other)).filter_map(|i| store.zone_at(other, i)).map(|c| c.num).collect();
+        assert_eq!(walk(&app, 0, &store), [own, more].concat());
+    }
+
+    /// CHAN-34.2: a slot on Local scans Local's members, nearest first as the list is.
     #[test]
     fn local_scans_its_members() {
         let store = Sample::new();
-        let leak = || -> &'static mut crate::settings::Settings { std::boxed::Box::leak(std::boxed::Box::new(crate::settings::Settings::DEFAULT)) };
-        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
-        let mut app = App::new(leak(), alert());
+        let mut app = app();
         crate::local::tick(&mut app, &store);
         app.set_channel(0, crate::local::LOCAL, 0, &store);
-        while app.pop_cmd().is_some() {}
-        start(&mut app, 0);
-        let mut set = ChanSet::new();
-        drain(&mut app, &store, &mut set);
-        let mut want: std::vec::Vec<u16> = (0..app.local().len()).filter_map(|i| app.local().num(i)).filter(|&n| store.get(n).is_some_and(|c| !c.skip() && !c.is_hf())).collect();
-        want.sort();
-        let got: std::vec::Vec<u16> = (0..MAX_CHANNELS).filter(|&n| set.has(n)).collect();
+        let want: std::vec::Vec<u16> = (0..app.local().len()).filter_map(|i| app.local().num(i)).collect();
         assert!(!want.is_empty());
-        assert_eq!(got, want);
+        assert_eq!(walk(&app, 0, &store), want);
     }
 
+    /// SCAN-25: each ask is answered once, with the receive frequency at that position, or 0 for a position that
+    /// is no stop (a Skip-flagged channel, an HF one, none there).
     #[test]
     fn wants_are_answered_once() {
         let store = Sample::new();
-        let leak = || -> &'static mut crate::settings::Settings { std::boxed::Box::leak(std::boxed::Box::new(crate::settings::Settings::DEFAULT)) };
-        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
-        let mut app = App::new(leak(), alert());
+        let mut app = app();
+        app.set_channel(1, 1, 0, &store);
         while app.pop_cmd().is_some() {}
-        let c = store.by_number(0).unwrap();
+        let c = at(&app, 1, 0, &store).unwrap();
         let mut live = LiveAll::default();
-        live.set_want(Some(c.num));
+        live.set_want(Some((1, 0)));
         answer(&mut app, &live, &store);
         answer(&mut app, &live, &store);
-        let mut n = 0;
-        while let Some(cmd) = app.pop_cmd() {
-            assert_eq!(cmd, RadioCmd::ScanEntry { num: c.num, rx: c.rx });
-            n += 1;
+        let rx = if stop(&c) { c.rx } else { 0 };
+        assert_eq!(core::iter::from_fn(|| app.pop_cmd()).collect::<std::vec::Vec<_>>(), [RadioCmd::ScanEntry { slot: 1, pos: 0, rx }], "once per ask");
+        live.set_want(Some((1, 999)));
+        answer(&mut app, &live, &store);
+        assert_eq!(app.pop_cmd(), Some(RadioCmd::ScanEntry { slot: 1, pos: 999, rx: 0 }), "nothing there: 0");
+        // a Skip-flagged channel is no stop
+        let n = len(&app, 1, &store);
+        if let Some(p) = (0..n).find(|&p| at(&app, 1, p, &store).is_some_and(|c| c.skip())) {
+            live.set_want(Some((1, p)));
+            answer(&mut app, &live, &store);
+            assert_eq!(app.pop_cmd(), Some(RadioCmd::ScanEntry { slot: 1, pos: p, rx: 0 }));
         }
-        assert_eq!(n, 1, "once per ask");
-        live.set_want(Some(999));
-        answer(&mut app, &live, &store);
-        assert_eq!(app.pop_cmd(), Some(RadioCmd::ScanEntry { num: 999, rx: 0 }), "no such channel: 0");
+    }
+
+    /// SCAN-25: when the channels change under a running channel scan, its list goes again (no restart: no
+    /// resume rule, no start).
+    #[test]
+    fn a_change_sends_the_list_again() {
+        let store = Sample::new();
+        let mut app = app();
+        app.set_channel(0, 1, 0, &store);
+        while app.pop_cmd().is_some() {}
+        app.scan_mask = 1;
+        feed(&mut app, &store);
+        while app.pop_cmd().is_some() {}
+        app.radio.scan_ver = app.radio.scan_ver.wrapping_add(1); // as if the store's version moved
+        let cmds = drain(&mut app, &store);
+        assert!(matches!(cmds.first(), Some(RadioCmd::ScanSet { slot: 0, .. })), "{cmds:?}");
+        assert!(!cmds.iter().any(|c| matches!(c, RadioCmd::ScanChans { .. } | RadioCmd::ScanResume { .. })));
+        let again = drain(&mut app, &store);
+        assert!(again.is_empty(), "once: {again:?}");
     }
 }
