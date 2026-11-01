@@ -406,7 +406,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let mut r = [0u8; ZONE_LEN];
         for z in 0..self.zones.get() {
             self.f.raw_read(zone_addr(z), &mut r)?;
-            if zone_count(&r) != Some(per[z as usize]) {
+            // A deleted zone's empty record holds no count, and the rewrite skips it: marking it would rewrite
+            // the sector at every mount.
+            if zone_decode(&r).is_some() && zone_count(&r) != Some(per[z as usize]) {
                 self.set_dirty(z, true);
                 self.cache_count(z, per[z as usize]);
             }

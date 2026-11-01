@@ -220,3 +220,24 @@ fn building_a_list_costs() {
     eprintln!("list of {} from {} records: {reads} reads, {bytes} bytes, about {ms:.0} ms on the radio's bus", s.zone_len(0), MAX_CHANNELS);
     assert!(ms < 150.0, "{ms} ms");
 }
+
+/// CHAN-36: an empty record below the zone count (a zone deleted over the link, or one the layout 3 update carried
+/// over blank) holds no count; the mount doesn't mark it, since its rewrite skips empty records and a mark would rewrite
+/// the zone sector at every power-on.
+#[test]
+fn an_empty_middle_zone_record_needs_no_count() {
+    let s = Store::mount(SimFlash::new(), NoData);
+    zones(&s, 3);
+    for n in 0..6 {
+        assert!(s.apply(ChanWrite::Put { ch: ch(n, if n % 2 == 0 { 0 } else { 2 }), from: None }));
+    }
+    let a = app();
+    s.autosave(5000, &a);
+    assert!(!s.counts_pending());
+    // zone 1's record erased behind the store's back (the zone count stays 3)
+    let mut f = s.into_parts().0;
+    let at = ferrite_store::records::zone_addr(1) as usize;
+    f.mem[at..at + 32].fill(0xFF);
+    let s = Store::mount(f, NoData);
+    assert!(!s.counts_pending(), "no count marked for the empty record");
+}
