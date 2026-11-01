@@ -3,10 +3,11 @@
 //! What Ferrite Console loads through the stock bootloader to back a radio up before anything else (BACKUP-9.1,
 //! BACKUP-9.3; decision 264, replacing fw/apps/hwtest). It reads, never writes (BACKUP-9.5): the SPI flash only
 //! through [`flash::ReadOnly`] over w25q built without its `write` feature, so program, erase and status writes
-//! aren't in the image at all; nothing here touches the MCU's own flash controller.
+//! aren't in the image at all; nothing here touches the MCU's own flash controller (`mdump` reads the MCU's flash through plain loads).
 //!
 //! The cable (UART4, 115200) speaks hwtest's console and its `fdump` (ferrite_core::reader has the protocol and
-//! its tests): `sys` (the MCU's unique ID), `flash`, `fdump`, `flashcrc`, `reader`, `reboot`, `off`. The screen
+//! its tests): `sys` (the MCU's unique ID), `flash`, `fdump`, `flashcrc`, `mdump` (stock's marker sector for the backup,
+//! BACKUP-12), `reader`, `reboot`, `off`. The screen
 //! says "Backing up your radio" with the progress (BACKUP-9.4, ferrite_ui::reader).
 //!
 //! One thread, no executor: a loop polls the cable, the power switch and a running `flashcrc`. The only interrupt
@@ -293,6 +294,7 @@ impl Reader {
             Command::FlashCrc => self.crc_start(),
             Command::Fdump { addr, len, baud } => self.fdump(addr, len, baud, false),
             Command::FdumpZ { addr, len, baud } => self.fdump(addr, len, baud, true),
+            Command::Mdump { addr, len } => mdump(addr, len),
             Command::Tune { bytes, us, stop2 } => {
                 PACE_BYTES.store(bytes, Relaxed);
                 PACE_US.store(us, Relaxed);
@@ -440,6 +442,26 @@ impl Reader {
         }
         Cable.put(b"\r\n");
     }
+}
+
+/// `mdump` (BACKUP-12, decision 338): the MCU's main flash, read only, as hwtest's. The backup reads stock's marker
+/// sector with it (`mdump 0x080F0000 16`); nothing outside the main flash the chip reports is read.
+fn mdump(addr: u32, len: u32) {
+    if proto::mdump_refusal(&mut Cable, addr, len, sys::flash_kb()) {
+        return;
+    }
+    let mut b = [0u8; proto::MDUMP_LINE];
+    let (mut at, end) = (addr, addr + len);
+    while at < end {
+        let n = (end - at).min(b.len() as u32) as usize;
+        for (i, x) in b[..n].iter_mut().enumerate() {
+            // SAFETY: inside the MCU's main flash (checked above), always mapped and readable; never written.
+            *x = unsafe { core::ptr::read_volatile((at as usize + i) as *const u8) };
+        }
+        proto::mdump_line(&mut Cable, at, &b[..n]);
+        at += n as u32;
+    }
+    proto::mdump_end(&mut Cable);
 }
 
 #[entry]

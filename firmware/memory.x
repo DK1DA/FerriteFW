@@ -1,8 +1,10 @@
-/* Same map as fw/board/at32f403a_app.ld: the stock bootloader owns 0x08000000-0x08002FFF and jumps here;
- * 0x080F0000 up (stock marker sector) is left alone. */
+/* The stock bootloader owns 0x08000000-0x08002FFF and jumps here. The app runs to the end of the chip's 1024 KB
+ * (0x080FFFFF), the bootloader's own limit (image offsets below 0xFD000): 1,012 KB. The top 64 KB (0x080F0000) was
+ * stock's marker sector, one word (UV85/BJ90) only stock firmware writes; the backup records it and the way back
+ * to stock puts it back or leaves it erased (decision 338, BACKUP-12). */
 MEMORY
 {
-  FLASH : ORIGIN = 0x08003000, LENGTH = 948K
+  FLASH : ORIGIN = 0x08003000, LENGTH = 1012K
   RAM   : ORIGIN = 0x20000000, LENGTH = 96K
 }
 

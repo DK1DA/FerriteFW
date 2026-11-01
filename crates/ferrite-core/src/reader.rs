@@ -7,6 +7,10 @@
 //! - `flash`: `flash id EF4016 (Winbond, 4096 KB) status 00 uid ...  cal sector sum ...`.
 //! - `flashcrc`: the radio's own CRC-32 of the whole chip, `flash crc32 1A2B3C4D over 4096 KB, ...`.
 //! - `fdump <addr> <len> [baud]`: the binary dump below, at `baud` (500000 when left out).
+//! - `mdump <addr> <len>`: the MCU's own flash, read only, as hwtest's: a line per 32 bytes, `80F0000:` (the
+//!   address, 6 hex digits at least), the bytes in hex, `*` and their byte sum, then `dump: end`. The backup reads
+//!   stock's marker sector with it, `mdump 0x080F0000 16` (BACKUP-12, decision 338); only the main flash
+//!   (0x08000000 up, as big as the chip says) is read.
 //! - `reader`: the backup screen ("reader screen on"); `reboot`: back through the bootloader; `off`.
 //!
 //! `fdump`:
@@ -84,7 +88,16 @@ pub const FDUMPZ_BAUD: u32 = 230_400;
 pub const HELP: &[u8] = b"sys | flash | flashcrc   (SPI flash, read only)\r\n\
 fdump <addr> <len> [baud]   (SPI flash, read only, binary: fw/tools/flashdump.py --fast)\r\n\
 fdumpz <addr> <len> [baud]  (as fdump, 8 KB chunks coded: erased, run-length or raw)\r\n\
+mdump <addr> <len>          (MCU flash, read only)\r\n\
 reader | reboot | off\r\n";
+
+/// The MCU's main flash, where `mdump` reads.
+pub const MCU_FLASH: u32 = 0x0800_0000;
+/// Stock's marker sector (BACKUP-12, decision 338): the backup records its first [`MARKER_LEN`] bytes.
+pub const MARKER_ADDR: u32 = 0x080F_0000;
+pub const MARKER_LEN: u32 = 16;
+/// Bytes per `mdump` line.
+pub const MDUMP_LINE: usize = 32;
 
 // ---- CRC-32 ----
 
@@ -602,6 +615,8 @@ pub enum Command {
     Fdump { addr: u32, len: u32, baud: u32 },
     /// `fdumpz`: as `fdump`, coded (BACKUP-9.6).
     FdumpZ { addr: u32, len: u32, baud: u32 },
+    /// `mdump <addr> <len>`: the MCU's flash, read only (hwtest's command).
+    Mdump { addr: u32, len: u32 },
     Reader,
     /// `tune <pace bytes> <pace us> <stop bits>`: the dump's pacing and stop bits, for link tests.
     Tune { bytes: u32, us: u32, stop2: bool },
@@ -627,6 +642,10 @@ pub fn parse(line: &[u8]) -> Command {
         },
         b"reboot" => Command::Reboot,
         b"off" => Command::Off,
+        b"mdump" => match (a[0].and_then(uint), a[1].and_then(uint)) {
+            (Some(addr), Some(len)) => Command::Mdump { addr, len },
+            _ => Command::Unknown,
+        },
         b"fdump" | b"fdumpz" => {
             let (Some(addr), Some(len)) = (a[0].and_then(uint), a[1].and_then(uint)) else { return Command::Unknown };
             let baud = match a[2] {
@@ -759,6 +778,39 @@ pub fn fdump_refusal(o: &mut impl Out, addr: u32, len: u32, chip: u32) -> bool {
     false
 }
 
+/// Why an `mdump` won't run: outside the MCU's main flash (`flash_kb`: the chip's size register, 1024 at most), the
+/// only memory it reads. hwtest's line, word for word.
+pub fn mdump_refusal(o: &mut impl Out, addr: u32, len: u32, flash_kb: u32) -> bool {
+    let end = MCU_FLASH + flash_kb.min(1024) * 1024;
+    if flash_kb == 0 || addr < MCU_FLASH || addr >= end || len > end - addr {
+        o.put(b"mdump: 0x08000000-0x");
+        hex(o, end.wrapping_sub(1), 8);
+        o.put(b" only");
+        o.put(NL);
+        return true;
+    }
+    false
+}
+
+/// One `mdump` line: `80F0000:` + the bytes in hex + `*` + their byte sum.
+pub fn mdump_line(o: &mut impl Out, addr: u32, bytes: &[u8]) {
+    hex(o, addr, 6);
+    o.put(b":");
+    let mut sum = 0u8;
+    for &b in bytes {
+        hex(o, b as u32, 2);
+        sum = sum.wrapping_add(b);
+    }
+    o.put(b"*");
+    hex(o, sum as u32, 2);
+    o.put(NL);
+}
+
+pub fn mdump_end(o: &mut impl Out) {
+    o.put(b"dump: end");
+    o.put(NL);
+}
+
 pub fn fdump_bad_rate(o: &mut impl Out, baud: u32, pclk: u32) {
     o.put(b"fdump: ");
     dec(o, baud);
@@ -823,6 +875,32 @@ mod tests {
         let mut v = Vec::new();
         f(&mut v);
         String::from_utf8(v).unwrap()
+    }
+
+    /// BACKUP-12: `mdump` as hwtest's (fw/apps/hwtest/svc.c `dump`): the marker sector's line, the refusal outside
+    /// the main flash, and the command parsed as hwtest's.
+    #[test]
+    fn mdump_reads_the_marker_as_hwtest() {
+        assert_eq!(parse(b"mdump 0x080F0000 16"), Command::Mdump { addr: MARKER_ADDR, len: MARKER_LEN });
+        assert_eq!(parse(b"mdump 0x080F0000"), Command::Unknown);
+        let mut m = [0xFFu8; 16];
+        m[..4].copy_from_slice(b"UV85");
+        assert_eq!(
+            text(|o| mdump_line(o, MARKER_ADDR, &m)),
+            "80F0000:55563835FFFFFFFFFFFFFFFFFFFFFFFF*0C\r\n"
+        );
+        assert_eq!(text(|o| mdump_line(o, 0x0800_0000, &[0x12])), "8000000:12*12\r\n");
+        assert_eq!(text(mdump_end), "dump: end\r\n");
+        assert!(!mdump_refusal(&mut Vec::new(), MARKER_ADDR, MARKER_LEN, 1024));
+        assert!(!mdump_refusal(&mut Vec::new(), 0x080F_FFF0, 16, 1024));
+        for (addr, len, kb) in [(0x080F_FFF0, 17, 1024), (0x0810_0000, 1, 1024), (0x07FF_FFFF, 1, 1024), (0x2000_0000, 4, 1024), (0x1FFF_F800, 48, 1024), (MARKER_ADDR, 16, 512), (MARKER_ADDR, 16, 0), (0x0800_0000, u32::MAX, 1024)] {
+            let mut o = Vec::new();
+            assert!(mdump_refusal(&mut o, addr, len, kb), "{addr:#x}+{len} on {kb} KB");
+            if kb == 1024 {
+                assert_eq!(String::from_utf8(o).unwrap(), "mdump: 0x08000000-0x080FFFFF only\r\n");
+            }
+        }
+        assert!(String::from_utf8(HELP.to_vec()).unwrap().contains("mdump <addr> <len>"));
     }
 
     /// BACKUP-9.5: the reader's CRC is zlib's, continued across pieces, as hwtest's `crc32_update` and Console's.

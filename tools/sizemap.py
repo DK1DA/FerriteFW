@@ -20,7 +20,7 @@ import argparse, collections, json, os, re, struct, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ELF = os.path.join(ROOT, "target/thumbv7em-none-eabihf/release/ferrite")
-APP_BASE, APP_SIZE = 0x08003000, 948 * 1024
+APP_BASE, APP_SIZE = 0x08003000, 1012 * 1024  # firmware/memory.x (decision 338)
 FAST_END = 0x08040000  # zero-wait flash ends at 256 KB (firmware/memory.x)
 BUILDS = {"rx": ("", "ferrite.bin"), "tx": ("tx", "ferrite-tx.bin"), "tx-bench": ("tx-bench", "ferrite-txbench.bin")}
 REGION = {".vector_table": "vectors & tags", ".model_tag": "vectors & tags", ".model_tag_boot": "vectors & tags",

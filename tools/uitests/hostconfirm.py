@@ -38,6 +38,32 @@ def mem(t, addr, n):
     return bytes(data[:n])
 
 
+MARKER, MARKER_OFF = 0x080F0000, 0x080F0000 - 0x08003000
+# Stock's marker words (decision 338, BACKUP-12), as the bytes would read in either order.
+MARKER_WORDS = (b"UV85", b"58VU", b"BJ90", b"09JB", b"\xff\xff\xff\xff")
+
+
+def installed_image(t):
+    """The image the radio runs (About's commit), unpacked from target/'s .BTF and its 0xFF padding cut, or None
+    when target/ has no .BTF of that commit."""
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import btf
+    u = t.keys("MENU 0 9 8")
+    version = (u.row("Version") or {}).get("value", "")
+    m = re.search(r"([0-9a-f]{7,})", version)
+    if not m:
+        return None
+    commit = m.group(1)[:7]
+    for name in ("ferrite-txbench.btf", "ferrite-txdry.btf", "ferrite-tx.btf", "ferrite.btf"):
+        p = os.path.join(TARGET, name)
+        if os.path.exists(p):
+            cand = btf.unpack(open(p, "rb").read())[0]
+            if commit.encode() in cand:
+                return cand.rstrip(b"\xff")
+    return None
+
+
 def boot_flash(t):
     """The MCU's option bytes (user system data, 48 B), the stock bootloader (0x08000000, 12 KB) as a SHA-256 and the
     marker sector's first 16 bytes (0x080F0000)."""
@@ -66,45 +92,31 @@ def option_bytes_and_boot_flash_unchanged(t):
     t.eq(after[0].hex(), before[0].hex(), "the option bytes unchanged after the REBOOT")
     t.eq(after[1], before[1], "the bootloader unchanged")
     t.eq(after[2].hex(), before[2].hex(), "the marker sector unchanged")
-    t.check(after[2][:4] in (b"UV85", b"BJ90", b"\xff\xff\xff\xff"), "the marker sector is stock's or erased",
-            after[2][:4])
+    img = installed_image(t)
+    if img is not None and len(img) > MARKER_OFF:
+        t.note("the installed image reaches 0x080F0000 (BACKUP-12): the marker sector holds Ferrite's code")
+    else:
+        t.check(after[2][:4] in MARKER_WORDS, "the marker sector is stock's or erased", after[2][:4])
 
 
 @test("UPD-1", "UPD-3", needs=("bench",), where="radio", pages=("Info",))
 def installed_image_matches_its_btf(t):
     """The installed image is the .BTF's, unpacked (first 1 KB plain, the rest decrypted with the zero key, the last
     block plain: UPD-3): its first, a middle and its last 1 KB read back from 0x08003000 the same, it is at most
-    948 KB and ends below the 0x080F0000 marker sector (UPD-1). Skipped when target/ has no .BTF of the commit
-    the radio runs (About's version)."""
+    1,012 KB and ends within the chip's 1024 KB, at 0x08100000 at most (UPD-1, decision 338). Skipped when target/
+    has no .BTF of the commit the radio runs (About's version)."""
     t.bench()
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import btf
-    u = t.keys("MENU 0 9 8")
-    version = (u.row("Version") or {}).get("value", "")
-    m = re.search(r"([0-9a-f]{7,})", version)
-    t.need(m, f"About's version names no commit ({version!r})")
-    commit = m.group(1)[:7]
-    img = None
-    for name in ("ferrite-txdry.btf", "ferrite-tx.btf", "ferrite.btf"):
-        p = os.path.join(TARGET, name)
-        if os.path.exists(p):
-            cand = btf.unpack(open(p, "rb").read())
-            cand = cand[0] if isinstance(cand, tuple) else cand
-            if commit.encode() in cand:
-                img = cand
-                break
-    t.need(img is not None, f"no .BTF of {commit} in {TARGET}")
-    img = img.rstrip(b"\xff")
-    t.check(len(img) <= 948 * 1024, "the image is at most 948 KB", len(img))
-    t.check(0x08003000 + len(img) <= 0x080F0000, "it ends below the marker sector", hex(0x08003000 + len(img)))
+    img = installed_image(t)
+    t.need(img is not None, f"no .BTF of the commit About names in {TARGET}")
+    t.check(len(img) <= 1012 * 1024, "the image is at most 1,012 KB", len(img))
+    t.check(0x08003000 + len(img) <= 0x08100000, "it ends within MCU flash", hex(0x08003000 + len(img)))
     last = (len(img) - 1) // 1024 * 1024
     for off, what in ((0, "the first 1 KB (plain in the .BTF)"), (last // 2 // 1024 * 1024, "a middle 1 KB"),
                       (last, "the last 1 KB")):
         want = img[off:off + 1024]
         n = (len(want) + 15) // 16 * 16  # whole lines: a short last line's characters could read as hex
         t.eq(mem(t, 0x08003000 + off, n)[:len(want)].hex(), want.hex(), f"{what} as installed")
-    t.note(f"{commit}: {len(img)} bytes")
+    t.note(f"installed image: {len(img)} bytes")
 
 
 BUILT = {fl.HELLO, fl.INFO, fl.AUTH, fl.READ, fl.WRITE, fl.DELETE, fl.BEGIN, fl.END, fl.SLOT, fl.BAUD, fl.REBOOT,

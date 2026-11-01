@@ -17,8 +17,8 @@ What it shows:
   - tests: host tests (workspace, and the drivers with their features), the sim UI tests from --ui (with the
     commit they ran on), and tools/slowcheck.py;
   - static RAM: .data and .bss against the 96 KB the MCU has, and what is left for the stack;
-  - MCU flash: the fast part (zero-wait, up to 256 KB from the chip's start) and the slow part, against the 948 KB
-    the bootloader leaves us;
+  - MCU flash: the fast part (zero-wait, up to 256 KB from the chip's start) and the slow part, against the 1,012 KB
+    the bootloader leaves us (decision 338);
   - SPI flash: the map, read from crates/ferrite-core/src/layout.rs (each region, its size, who owns it, whether
     Ferrite may write it).
 Output: target/build-report-<build>.html and .json. Needs arm-none-eabi-nm (as slowcheck.py) and, for coverage,
@@ -30,7 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ELF = os.path.join(ROOT, "target/thumbv7em-none-eabihf/release/ferrite")
 LAYOUT = os.path.join(ROOT, "crates/ferrite-core/src/layout.rs")
 BUILDS = {"rx": ("", "ferrite"), "tx": ("tx", "ferrite-tx"), "tx-bench": ("tx-bench", "ferrite-txbench")}
-APP_BASE, APP_SIZE = 0x0800_3000, 948 * 1024  # firmware/memory.x
+APP_BASE, APP_SIZE = 0x0800_3000, 1012 * 1024  # firmware/memory.x (decision 338)
 FAST_END = 0x0804_0000  # zero-wait flash ends 256 KB into the chip (memory.x)
 RAM_BASE, RAM_SIZE = 0x2000_0000, 96 * 1024
 SPI_SIZE = 4 << 20

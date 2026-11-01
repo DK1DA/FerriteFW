@@ -30,8 +30,17 @@ import struct
 import sys
 
 APP_BASE = 0x08003000
-APP_MAX = 948 * 1024            # our limit: stop below the stock marker sector at 0x080F0000
-BOOT_MAX = 0xFD000              # the bootloader's own limit, for reading stock files
+BOOT_MAX = 0xFD000              # the bootloader's own limit: image offsets below 0xFD000 (to 0x080FFFFF)
+APP_MAX = 1012 * 1024           # ours: the same, to the chip's end (decision 338; was 948 KB, below 0x080F0000)
+# Stock's marker sector (decision 338, BACKUP-12): at 0x080F0000 stock firmware alone writes one word, UV85 or BJ90
+# (0x55563835 or 0x424A3930), when a power-on key combo is held on a blank sector; it picks the model name on stock's
+# info page. An image past 948 KB overwrites it; the backup records its first 16 bytes and the way back to stock
+# sends the stock image padded to cover its first 2 KB page (the bootloader erases only the pages it writes).
+MARKER_ADDR = 0x080F0000
+MARKER_OFF = MARKER_ADDR - APP_BASE   # 0xED000, the image offset
+MARKER_LEN = 16
+MARKER_PAGE = 0x800
+_MARKER_WORDS = (0x55563835, 0x424A3930)
 MODEL_OFF = 0x3E0
 MODEL_TAG = b"RT-950      "     # 12 bytes; the bootloader compares exactly these
 # The bootloader also compares the tag at image offset 0x7E0 (0x080037E0) at every power-on and shows
@@ -79,8 +88,46 @@ def check_image(img, limit=APP_MAX):
         errs.append(f"no model tag {MODEL_TAG!r} at {MODEL_OFF_BOOT:#x} (the bootloader checks it at power-on: "
                     "\"Firmware Error!\")")
     if len(img) > limit:
-        errs.append(f"image is {len(img)} bytes; over {limit} would reach the stock marker sector at 0x080F0000")
+        errs.append(f"image is {len(img)} bytes; over {limit} would run past the end of MCU flash (0x08100000)"
+                    if limit >= APP_MAX else f"image is {len(img)} bytes; over {limit}")
     return errs
+
+
+def marker_word(m):
+    """The stock marker word the saved bytes hold (the 4 bytes as text, as read: "UV85" or "BJ90", either byte
+    order), or None: erased, short, or anything else (stock reads that as no marker)."""
+    if not m or len(m) < 4 or any(b != 0xFF for b in m[4:MARKER_LEN]):
+        return None
+    w = m[:4]
+    if struct.unpack("<I", w)[0] in _MARKER_WORDS or struct.unpack(">I", w)[0] in _MARKER_WORDS:
+        return w.decode("ascii")
+    return None
+
+
+def marker_describe(m):
+    """One line about saved marker bytes (None: not read)."""
+    if m is None:
+        return "not recorded: assumed blank, left erased (stock then shows its default model name)"
+    w = marker_word(m)
+    if w:
+        return f"stock marker {w!r} ({m.hex().upper()})"
+    if len(m) >= 4 and all(b == 0xFF for b in m):
+        return "blank (erased)"
+    return f"not a stock marker ({m.hex().upper()}): left erased on the way back"
+
+
+def stock_restore_image(img, marker=None):
+    """The stock image for the way back (BACKUP-12): padded with 0xFF through the first 2 KB page of 0x080F0000 so
+    the bootloader erases it (no Ferrite code is left in the word stock reads), with the saved marker's 16 bytes put
+    back at its start when they are a stock marker. Anything else saved is left erased. An image already that long is
+    sent as it is."""
+    end = MARKER_OFF + MARKER_PAGE
+    if len(img) >= end:
+        return bytes(img)
+    out = bytearray(img) + b"\xFF" * (end - len(img))
+    if len(img) <= MARKER_OFF and marker_word(marker):
+        out[MARKER_OFF:MARKER_OFF + MARKER_LEN] = marker[:MARKER_LEN]
+    return bytes(out)
 
 
 def pack(img, key=None, keyblock=None, pad=True):
@@ -137,6 +184,21 @@ def selftest(stock_dir=None):
         print("FAIL crypt is not its own inverse"); fails += 1
     if not check_image(img[:0x100]) or not check_image(b"\x00" * 0x400):
         print("FAIL bad images not rejected"); fails += 1
+    # BACKUP-12: the way back covers 0x080F0000's first page; a stock marker goes back, anything else stays erased.
+    uv = b"UV85" + b"\xFF" * 12
+    for m, want in ((None, b"\xFF" * 16), (b"\xFF" * 16, b"\xFF" * 16), (uv, uv), (b"58VU" + b"\xFF" * 12, b"58VU" + b"\xFF" * 12),
+                    (b"BJ90" + b"\xFF" * 12, b"BJ90" + b"\xFF" * 12), (b"UV85" + b"\x00" * 12, b"\xFF" * 16),
+                    (b"ABCD" + b"\xFF" * 12, b"\xFF" * 16)):
+        r = stock_restore_image(img, m)
+        back = unpack(pack(r))[0]
+        if (len(r) != MARKER_OFF + MARKER_PAGE or r[:len(img)] != img or back[:len(r)] != r
+                or r[MARKER_OFF:MARKER_OFF + 16] != want or r[MARKER_OFF + 16:].count(0xFF) != MARKER_PAGE - 16
+                or r[len(img):MARKER_OFF].count(0xFF) != MARKER_OFF - len(img) or check_image(r, BOOT_MAX)):
+            print(f"FAIL stock restore image, marker {m!r}"); fails += 1
+    if stock_restore_image(b"\x01" * (MARKER_OFF + MARKER_PAGE), uv) != b"\x01" * (MARKER_OFF + MARKER_PAGE):
+        print("FAIL a stock image that already covers the page goes as it is"); fails += 1
+    if check_image(img + b"\xFF" * (APP_MAX - len(img))) or not check_image(img + b"\xFF" * (APP_MAX + 1 - len(img))):
+        print("FAIL the 1,012 KB limit"); fails += 1
     for root, _, files in os.walk(stock_dir) if stock_dir else []:
         for f in sorted(files):
             if not f.upper().endswith(".BTF"):

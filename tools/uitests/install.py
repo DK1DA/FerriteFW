@@ -83,17 +83,48 @@ def flasher_needs_a_good_backup(t):
 
 @test("INST-3", pages=())
 def flasher_refuses_oversize_images(t):
-    """An image over 948 KB (it would reach the stock marker sector at 0x080F0000) is refused by btf.py's check and
-    by flash.py; 948 KB exactly is taken."""
+    """An image over 1,012 KB (it would run past the chip's end at 0x08100000, the bootloader's own limit; decision
+    338) is refused by btf.py's check and by flash.py; 1,012 KB exactly is taken."""
     import btf
-    ok = btf.check_image(ferrite_image(948 * 1024))
-    t.check(ok == [], "948 KB: fine", ok)
-    errs = btf.check_image(ferrite_image(948 * 1024 + 1024))
-    t.check(errs, "949 KB: refused by the check", errs)
+    ok = btf.check_image(ferrite_image(1012 * 1024))
+    t.check(ok == [], "1,012 KB: fine", ok)
+    errs = btf.check_image(ferrite_image(1012 * 1024 + 1024))
+    t.check(errs, "1,013 KB: refused by the check", errs)
     with tempfile.TemporaryDirectory() as d:
-        img = tmpfile(d, "big.bin", ferrite_image(949 * 1024))
+        img = tmpfile(d, "big.bin", ferrite_image(1013 * 1024))
         rc, out = flash("--dry-run", "-", img)
         t.check(rc != 0 and "refusing" in out, "flash.py refuses it", out)
+
+
+@test("BACKUP-12.2", "BACKUP-12", pages=())
+def stock_restore_covers_the_marker_page(t):
+    """Back to stock (flash.py with a stock image): the image goes padded with 0xFF through 0x080F07FF, so the
+    bootloader erases the marker sector's first page and no Ferrite code is left in the word stock reads; the 16 bytes
+    in marker.bin beside the backup go back at 0x080F0000 when they hold a stock marker, else the page stays erased.
+    `--as-is` sends the file unchanged."""
+    import btf
+    stock = bytearray(ferrite_image(300 * 1024 + 123))
+    stock[0x900:0x910] = b"stock firmware.."  # no Ferrite mark
+    page_end = btf.MARKER_OFF + btf.MARKER_PAGE
+    with tempfile.TemporaryDirectory() as d:
+        img = tmpfile(d, "stock.bin", bytes(stock))
+        rc, out = flash("--dry-run", "-", img)
+        t.check(rc == 0 and "padded through 0x080F07FF" in out and "assumed blank" in out, "no record: padded, erased",
+                out)
+        t.check(f"{(page_end + 1024) // 1024} blocks" in out, "the file reaches 0x080F07FF", out)
+        os.makedirs(os.path.join(d, "radio"))
+        bk = tmpfile(os.path.join(d, "radio"), "flash.bin", backup())
+        tmpfile(os.path.join(d, "radio"), "marker.bin", b"UV85" + b"\xff" * 12)
+        rc, out = flash("--dry-run", "-", img, "--backup", bk)
+        t.check(rc == 0 and "stock marker 'UV85'" in out, "marker.bin beside the backup: the word goes back", out)
+        rc, out = flash("--dry-run", "-", img, "--as-is")
+        t.check(rc == 0 and "padded" not in out and f"{-(-(len(stock) + 1024) // 1024)} blocks" in out,
+                "--as-is: unchanged", out)
+    for m, want in ((None, b"\xff" * 16), (b"BJ90" + b"\xff" * 12, b"BJ90" + b"\xff" * 12),
+                    (bytes(range(16)), b"\xff" * 16)):
+        r = btf.stock_restore_image(bytes(stock), m)
+        t.eq((len(r), r[:len(stock)] == bytes(stock), r[btf.MARKER_OFF:btf.MARKER_OFF + 16]),
+             (page_end, True, want), f"marker {m!r}")
 
 
 @test("INST-5", pages=())
@@ -184,7 +215,7 @@ def save(t, key, value):
 def update_keeps_the_spi_flash(t):
     """An update leaves the SPI flash alone: the dump (settings, zones, presets, channels, the home channel) and the
     slots as before, and the SSB patch still installed (flashed with or without --ssb-from); on a bench build the
-    stock marker sector's first bytes (0x080F0000) as before (the image stops below it: INST-3)."""
+    stock marker sector's first bytes (0x080F0000) as before while the image stops below it (BACKUP-12)."""
     p, before = phase(t)
     now = readings(t)
     if t.r.bench:
@@ -201,7 +232,12 @@ def update_keeps_the_spi_flash(t):
     if b["about"].get("SSB patch") == "Installed":
         t.eq(now["about"].get("SSB patch"), "Installed", "the SSB patch still installed")
     if "marker" in b and "marker" in now:
-        t.eq(now["marker"], b["marker"], "0x080F0000 as before the flash")
+        from .hostconfirm import MARKER_OFF, installed_image
+        img = installed_image(t)
+        if img is not None and len(img) > MARKER_OFF:
+            t.note("the new image reaches 0x080F0000: the marker sector holds its code (BACKUP-12)")
+        else:
+            t.eq(now["marker"], b["marker"], "0x080F0000 as before the flash")
 
 
 @test("INST-12", "UPD-13", "HF-18", needs=("flash",), pages=("Group", "Hf", "Info"))

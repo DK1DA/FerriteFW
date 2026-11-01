@@ -6,12 +6,20 @@
     python3 tools/flash.py /dev/tty.usbserial-XXXX build/target/hwtest.bin     # packed on the fly
     python3 tools/flash.py --dry-run - stock.BTF                               # checks only, no radio
     python3 tools/flash.py PORT target/ferrite.btf --backup flash.bin         # Ferrite: needs the backup
+    python3 tools/flash.py PORT stock.BTF --backup flash.bin                  # back to stock, marker put back
 
 Ferrite images (they contain "Ferrite terminal") are refused without --backup: the whole SPI flash read with
 the hwtest image (tools/flashdump.py, in ../fw). The backup must look like this radio's chip (2, 4 or 8 MB,
 calibration present at 0xF000), and it must not hold a pending phone/Bluetooth update (magic 0xA55A at
 0x300000): the bootloader would flash that over Ferrite at the next power-on (roadmap 1b). Ferrite never
 writes the update area, not even to clear it, so restore stock and update it the normal way first.
+
+The MCU's top 64 KB (0x080F0000, stock's marker sector: decision 338, BACKUP-12) holds one word only stock firmware
+writes (UV85 or BJ90, the model name on stock's info page); a Ferrite image past 948 KB overwrites it. Its first 16
+bytes are recorded at backup time in `marker.bin` beside the backup (fw/tools/backup.py, read with the reader's or
+hwtest's `mdump 0x080F0000 16`; or `--marker FILE`). A stock image (neither Ferrite nor the reader) goes padded with
+0xFF through 0x080F07FF, the bootloader erasing that page, and the recorded word put back when it is a stock marker;
+without a record the page is left erased (stock then shows its default model name). `--as-is` sends a file unchanged.
 
 Getting into the bootloader needs nothing from the running firmware: at every power-on the
 bootloader listens about 200 ms for a probe packet before starting the app. This script floods
@@ -161,6 +169,26 @@ def check_backup(path):
     return errs, desc
 
 
+READER_MARK = b"fdump <addr> <len>"
+
+
+def load_marker(path):
+    """The marker sector's 16 bytes recorded at backup time, or None when there is no record."""
+    if not path or not os.path.isfile(path):
+        return None
+    m = open(path, "rb").read()
+    if len(m) != btf.MARKER_LEN:
+        sys.exit(f"{path} is {len(m)} bytes: a marker record is the {btf.MARKER_LEN} bytes at 0x080F0000")
+    return m
+
+
+def marker_path(a):
+    """--marker, else marker.bin beside the backup."""
+    if a.marker:
+        return a.marker
+    return os.path.join(os.path.dirname(os.path.abspath(a.backup)), "marker.bin") if a.backup else None
+
+
 def check_sha256(path, data):
     """UPD-15: a release file's SHA-256 beside it (FILE.sha256, `sha256sum` format) must match the file; no
     checksum file, nothing to check. (The minisign signature isn't checked yet: releases carry none.)"""
@@ -188,6 +216,10 @@ def main():
                     help="the whole-SPI-flash backup taken with the hwtest image (required for Ferrite images)")
     ap.add_argument("--ssb-from", metavar="STOCK.BTF",
                     help="bundle the SI4732 SSB patch from your own stock firmware file (Ferrite images only)")
+    ap.add_argument("--marker", metavar="MARKER.BIN",
+                    help="the 16 bytes at 0x080F0000 recorded at backup time (default: marker.bin beside --backup)")
+    ap.add_argument("--as-is", action="store_true",
+                    help="send a stock file unchanged (no padding over the marker sector's first page)")
     a = ap.parse_args()
 
     data = open(a.file, "rb").read()
@@ -208,6 +240,14 @@ def main():
             print("note: flashing this Ferrite image will need --backup FLASH.BIN")
     if errs:
         sys.exit("refusing to flash:\n  " + "\n  ".join(errs))
+    mpath = marker_path(a)
+    marker = load_marker(mpath)
+    stock = FERRITE_MARK not in img and READER_MARK not in img
+    if stock and not a.as_is:                  # BACKUP-12: the way back covers 0x080F0000's first page
+        img = btf.stock_restore_image(img, marker)
+        is_btf = False                         # repacked with the zero key below
+        print(f"stock image padded through 0x{btf.MARKER_ADDR + btf.MARKER_PAGE - 1:08X}; marker sector: "
+              f"{btf.marker_describe(marker)}{f' ({mpath})' if marker is not None else ''}")
     if a.ssb_from:
         import hashlib
         import ssbpatch
@@ -217,10 +257,14 @@ def main():
         known = hashlib.sha256(patch).hexdigest() == ssbpatch.KNOWN_SHA256
         img, at = ssbpatch.bundle(img, patch)
         if len(img) > btf.APP_MAX:
-            sys.exit("image plus SSB patch does not fit below the stock marker sector")
+            sys.exit("image plus SSB patch does not fit in MCU flash")
         print(f"SSB patch from {a.ssb_from}: {len(patch)} bytes, {'known' if known else 'UNKNOWN (Ferrite will ask)'}, "
               f"bundled at 0x{btf.APP_BASE + at:08X}")
         is_btf = False                         # repack below
+    if FERRITE_MARK in img and len(img) > btf.MARKER_OFF:
+        # BACKUP-12: this image overwrites the marker sector; its bytes must be in the backup's record first.
+        print(f"this image reaches 0x{btf.MARKER_ADDR:08X} (stock's marker sector): "
+              f"{btf.marker_describe(marker)}{f', recorded in {mpath}' if marker is not None else ''}")
     if not is_btf:
         data = btf.pack(img)
     blocks = [data[i:i + 1024].ljust(1024, b"\x00") for i in range(0, len(data), 1024)]   # 00 pad, as Radtel

@@ -1,6 +1,6 @@
 /* The reader image (decision 264): the firmware's map (firmware/memory.x), so it loads through the stock
- * bootloader as Ferrite does. The bootloader owns 0x08000000-0x08002FFF and jumps here; 0x080F0000 up (stock
- * marker sector) is left alone. */
+ * bootloader as Ferrite does. The bootloader owns 0x08000000-0x08002FFF and jumps here; it stays below
+ * 0x080F0000 (stock's marker sector), which it reads for the backup (`mdump`, BACKUP-12). */
 MEMORY
 {
   FLASH : ORIGIN = 0x08003000, LENGTH = 948K
