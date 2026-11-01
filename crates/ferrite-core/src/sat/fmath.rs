@@ -131,6 +131,7 @@ pub fn deg(rad: f32) -> f32 {
 mod tests {
     use super::*;
 
+    /// SAT-4: the f32 sine, cosine and arctangent against std's f64 over SGP4's angles.
     #[test]
     fn trig_against_std() {
         let mut worst = 0f64;

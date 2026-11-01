@@ -92,6 +92,7 @@ fn apart(a: (f64, f64), b: (f64, f64)) -> f64 {
 
 const OBSERVERS: [(f64, f64, f64); 2] = [(45.3, -75.7, 70.0), (49.25, -123.1, 30.0)];
 
+/// SAT-4, SAT-7: pointing and Doppler against the oracle over 14 days.
 #[test]
 fn pointing_and_doppler_over_14_days() {
     let mut worst_deg = 0f64;
@@ -122,6 +123,7 @@ fn pointing_and_doppler_over_14_days() {
     assert!(worst_hz < 100.0, "Doppler {worst_hz} Hz");
 }
 
+/// SAT-4, SAT-6: every rise within 10 s of the oracle's, no pass over 2° missed.
 #[test]
 fn rises_within_10_s_over_14_days() {
     let fx = fixture();

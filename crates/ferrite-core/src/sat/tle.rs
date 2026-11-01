@@ -104,6 +104,7 @@ mod tests {
     const L1: &[u8] = b"1 25544U 98067A   26304.75703384  .00006360  00000+0  12291-3 0  9994";
     const L2: &[u8] = b"2 25544  51.6332 344.2755 0007028 332.5119  27.5497 15.49131714592920";
 
+    /// SAT-3: a pasted TLE read to the record's integers.
     #[test]
     fn the_iss() {
         let e = parse(L1, L2).unwrap();

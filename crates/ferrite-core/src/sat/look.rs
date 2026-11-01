@@ -195,6 +195,7 @@ pub fn point8(deg: f32) -> &'static str {
 mod tests {
     use super::*;
 
+    /// SAT-4: sidereal time from whole seconds in fixed point, against the f64 IAU expression.
     #[test]
     fn sidereal_time_matches_the_iau_formula() {
         // f64 reference, the sgp4 crate's expression
@@ -210,6 +211,7 @@ mod tests {
         }
     }
 
+    /// SAT-19: the sun's place within 0.1° of a fuller formula (the rule asks for 1°).
     #[test]
     fn sun_against_a_fuller_formula() {
         // Meeus chapter 25 (the equation of centre to three terms, the true obliquity left at its mean) in f64
@@ -241,6 +243,7 @@ mod tests {
         assert!(worst < 0.1, "sun worst {worst}°");
     }
 
+    /// SAT-17, SAT-18, SAT-19: the compass point, the magnetic bearing from a declination, the angle from the sun.
     #[test]
     fn compass_and_sun_aids() {
         assert_eq!(magnetic(212.0, 160), 196); // the mock-up: 212° true, 16° E
@@ -253,6 +256,7 @@ mod tests {
         assert_eq!(point8(225.0), "SW");
     }
 
+    /// SAT-8: Doppler's signs on each side.
     #[test]
     fn doppler_signs() {
         let l = Look { rate: -6.85, ..Default::default() }; // coming closer at 6.85 km/s

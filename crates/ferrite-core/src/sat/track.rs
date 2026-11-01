@@ -253,7 +253,7 @@ mod tests {
         b"2 27607  64.5527  66.1378 0068979 237.1936 122.2515 14.83296838284727",
     );
 
-    /// Tracks every 15 s, interpolated, against the propagator every second of every pass: within SAT-4's
+    /// SAT-4, SAT-15: tracks every 15 s, interpolated, against the propagator every second of every pass: within SAT-4's
     /// limits (pointing 0.5°, Doppler 100 Hz at 437.8 MHz).
     #[test]
     fn interpolated_tracks_match_the_propagator() {

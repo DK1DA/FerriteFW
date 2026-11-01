@@ -280,6 +280,8 @@ mod tests {
     const L1: &[u8] = b"1 25544U 98067A   26304.75703384  .00006360  00000+0  12291-3 0  9994";
     const L2: &[u8] = b"2 25544  51.6332 344.2755 0007028 332.5119  27.5497 15.49131714592920";
 
+    /// SAT-5, SAT-6, SAT-12: no clock or position, no passes; predicted in slices when the screen opens, again
+    /// after a move, dropped on close; closed, only the alarm's pass is found again (and gone after it).
     #[test]
     fn predicts_while_open_and_keeps_only_the_alarm() {
         let sats = [Sat { id: 25_544, el: tle::parse(L1, L2).unwrap(), ..Default::default() }];

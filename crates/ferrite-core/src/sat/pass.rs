@@ -282,6 +282,7 @@ fn top(tr: &Tracker, t: u32, aos: u32, los: u32) -> (u32, f32, u32) {
 mod tests {
     use super::*;
 
+    /// SAT-6: up to 64 passes in rise order, the latest dropped when full.
     #[test]
     fn insert_keeps_order_and_drops_the_latest() {
         let mut p = Plan::new();

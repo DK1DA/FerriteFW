@@ -214,15 +214,15 @@ impl App {
     /// the next key-up and, keyed, every [`TX_RETUNE_S`]). `force`: now, whatever changed (a key).
     #[inline(never)]
     pub(crate) fn sat_retune(&mut self, now: u32, force: bool) {
-        if !force && now == self.sat.sent_s {
+        let Some((p, _, t, pr)) = self.sat_cur() else { return };
+        let keyed = self.radio.keyed == Some(SAT_SLOT);
+        // SAT-10: the arming tone for its first seconds on the first key-up of a pass (its end retunes at once)
+        let tone = if keyed && self.now.wrapping_sub(self.sat.arm_until) > u32::MAX / 2 { t.arm } else { t.tone };
+        if !force && now == self.sat.sent_s && tone == self.sat.sent.2 {
             return;
         }
-        let Some((p, _, t, pr)) = self.sat_cur() else { return };
         let l = self.sat_data().look(p.sat, now).unwrap_or_default();
         let (down, up) = corrected(&t, &l, &pr);
-        let keyed = self.radio.keyed == Some(SAT_SLOT);
-        // SAT-10: the arming tone for its first seconds on the first key-up of a pass
-        let tone = if keyed && self.now.wrapping_sub(self.sat.arm_until) > u32::MAX / 2 { t.arm } else { t.tone };
         let was = self.sat.sent;
         self.sat.sent_s = now;
         if down != was.0 || force {
@@ -380,6 +380,7 @@ impl ferrite_core::sat::SatSource for SimSats {
 mod tests {
     use super::*;
 
+    /// SAT-8: both sides corrected, or the 70 cm side only; the trim on the downlink.
     #[test]
     fn doppler_rules() {
         let so50 = Transponder { up: 14_585_000, down: 43_679_500, tone: 670, arm: 744, kind: ferrite_core::sat::Kind::Voice };
