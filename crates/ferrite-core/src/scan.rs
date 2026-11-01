@@ -595,7 +595,11 @@ impl FreqCache {
 
     /// Forget one slot's (its scan starts again: the list may have changed).
     pub fn clear_slot(&mut self, slot: u8) {
-        self.e.iter_mut().filter(|e| e.slot == slot).for_each(|e| *e = Entry::NONE);
+        // field by field: a whole `Entry::NONE` would be copied from a constant in slow flash, read here from the
+        // Radio task's interrupt context (tools/slowcheck.py)
+        for e in self.e.iter_mut().filter(|e| e.slot == slot) {
+            (e.slot, e.pos, e.rx, e.tx) = (0xFF, NO_WANT, 0, 0);
+        }
     }
 
     /// Forget everything.
