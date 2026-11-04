@@ -1256,20 +1256,25 @@ fn radio_record(app: &App, fix: Option<crate::data::Fix>, w: &mut Window) {
         _ => (0, (app.set.fixed_on).then_some(app.set.fixed), 0xFFFF),
     };
     let pos = pos.unwrap_or(crate::data::Pos { lat: 0, lon: 0 });
-    w.put(&[app.watch, app.bsave, kind, 0]);
+    w.put(&[app.watch, app.bsave, kind, app.aprs_cfg().sound]);
     w.put(&pos.lat.to_le_bytes());
     w.put(&pos.lon.to_le_bytes());
     w.put(&age.to_le_bytes());
 }
 
-/// A radio record written (LINK-66): Watch and Battery Save, each changed as the menu changes it.
+/// A radio record written (LINK-66): Watch and Battery Save, each changed as the menu changes it, and the message
+/// sound when the record reaches it.
 fn radio_apply(app: &mut App, rec: &[u8]) -> Status {
     let [watch, bsave, ..] = *rec else { return Status::BadArg };
-    if watch > 2 || bsave > 3 {
+    let sound = rec.get(3).copied();
+    if watch > 2 || bsave > 3 || sound.is_some_and(|s| s as usize >= ferrite_core::tonegen::CHIMES.len()) {
         return Status::Invalid;
     }
     app.change(crate::Item::Watch, watch as i32 - app.watch as i32);
     app.change(crate::Item::BatterySave, bsave as i32 - app.bsave as i32);
+    if let Some(sound) = sound.filter(|&s| s != app.aprs_cfg().sound) {
+        app.set_aprs(crate::aprs::AprsCfg { sound, ..app.aprs_cfg() });
+    }
     Status::Ok
 }
 

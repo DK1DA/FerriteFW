@@ -1976,8 +1976,10 @@ fn radio_record_reads_and_writes() {
     assert_ne!(&r[12..14], &[0xFF, 0xFF], "its age");
     assert_eq!(write(&mut pc, &[2, 3]), 0);
     assert_eq!((pc.app.watch, pc.app.bsave), (2, 3));
-    assert_eq!(write(&mut pc, &[0, 0, 9, 9, 9]), 0, "the read-only part is ignored");
-    assert_eq!((pc.app.watch, pc.app.bsave), (0, 0));
+    assert_eq!(write(&mut pc, &[0, 0, 9, 4, 9]), 0, "the fix and position are ignored");
+    assert_eq!((pc.app.watch, pc.app.bsave, pc.app.aprs_cfg().sound), (0, 0, 4), "the message sound written");
+    assert_eq!(read(&mut pc)[3], 4);
+    assert_eq!(write(&mut pc, &[0, 0, 0, 6]), Status::Invalid as u8, "no seventh chime");
     assert_eq!(write(&mut pc, &[3, 0]), Status::Invalid as u8);
     assert_eq!(write(&mut pc, &[0, 4]), Status::Invalid as u8);
     assert_eq!(write(&mut pc, &[1]), Status::BadArg as u8);

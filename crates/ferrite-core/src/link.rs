@@ -485,10 +485,12 @@ pub mod what {
     /// 0: [`super::SAT_INFO_LEN`] bytes.
     pub const SAT_INFO: u8 = 13;
     /// The radio's own state the settings record doesn't hold, index 0 (LINK-66, decision 347): Watch (0 1 1: 0-2),
-    /// Battery Save (0 7 7 1: 0-3), the GPS fix (0 none, 2 2D, 3 3D; read only), 0, latitude and longitude (i32
-    /// each, 1e-7 degree, north and east positive; the fixed position when there is no fix and it is on, GPS-3),
-    /// the fix's age in seconds (u16, 0xFFFF none): [`super::RADIO_LEN`] bytes. A write takes the first two bytes,
-    /// each as the menu changes it; the rest is ignored. Only from radios that say [`super::caps2::RADIO`].
+    /// Battery Save (0 7 7 1: 0-3), the GPS fix (0 none, 2 2D, 3 3D; read only), the message sound (0 7 5 5: an
+    /// index into `tonegen::CHIMES`), latitude and longitude (i32 each, 1e-7 degree, north and east positive; the
+    /// fixed position when there is no fix and it is on, GPS-3), the fix's age in seconds (u16, 0xFFFF none):
+    /// [`super::RADIO_LEN`] bytes. A write takes Watch and Battery Save, and the message sound when it is 4 bytes
+    /// or more, each as the menu changes it; the fix and position are ignored. Only from radios that say
+    /// [`super::caps2::RADIO`].
     pub const RADIO: u8 = 14;
 }
 
