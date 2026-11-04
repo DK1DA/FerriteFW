@@ -4,6 +4,9 @@ use super::*;
 
 /// HF-31: the SI4732's AM seek band in HF mode (kHz): HF mode's bottom (150 kHz) to chip 1's start (18 MHz).
 const HF_SEEK_KHZ: (u16, u16) = (150, 18_000);
+/// HF-15.1: the board's front end (an LNA before the SI4732's AM input) gain, estimated at 20 dB: the chip reads
+/// 13-33 dBuV of indoor noise on the whip, which a receiver measured at the antenna shows as about S2-S5.
+const SI_FRONT_DB: i16 = 20;
 
 impl Radio {
     /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz, chip 1 through the
@@ -57,7 +60,7 @@ impl Radio {
         let Some(h) = self.hf else { return };
         let (rssi, snr) = if h.si {
             match self.si.rsq(&mut BusyDelay) {
-                Ok(q) => (q.rssi as i16 - 107, q.snr), // dBuV to dBm at 50 ohms
+                Ok(q) => (q.rssi as i16 - 107 - SI_FRONT_DB, q.snr), // HF-15.1: dBuV at the chip to dBm at the antenna
                 Err(_) => (-127, 0),
             }
         } else {
