@@ -942,6 +942,7 @@ struct Out<'a> {
 }
 
 impl Out<'_> {
+    #[inline(never)] // one copy, not one at each of its many callers (size review #9)
     fn put(&mut self, b: &[u8]) {
         let k = b.len().min(MAX_PAYLOAD - self.n);
         self.a[self.n..self.n + k].copy_from_slice(&b[..k]);

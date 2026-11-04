@@ -35,13 +35,15 @@
 /// DISP-25: `$body` (drawing on `$lcd`) straight onto the panel; or, when `$clear` (a box whose layout changed), off
 /// the screen in bands over the box, so its old content goes to the new without a blank between.
 macro_rules! redraw_box {
-    ($clear:expr, $lcd:ident, ($x:expr, $y:expr, $w:expr, $h:expr, $bg:expr), $body:block) => {
+    // The body is compiled once, as one closure on a `Band`: straight to the panel when not clearing (size review #9).
+    ($clear:expr, $lcd:ident, ($x:expr, $y:expr, $w:expr, $h:expr, $bg:expr), $body:block) => {{
+        let mut draw = |$lcd: &mut ferrite_ui::canvas::Band| $body;
         if $clear {
-            ferrite_ui::canvas::banded($lcd, $x, $y, $w, $h, $bg, |$lcd| $body);
+            ferrite_ui::canvas::banded($lcd, $x, $y, $w, $h, $bg, &mut draw);
         } else {
-            $body
+            draw(&mut ferrite_ui::canvas::direct($lcd));
         }
-    };
+    }};
 }
 
 pub mod activity;

@@ -243,6 +243,7 @@ impl App {
     }
 
     /// True (and remembered) when region r's content differs from what is on screen.
+    #[inline(never)] // one copy for every region check (size review #9)
     pub(crate) fn dirty(&mut self, r: usize, h: u32) -> bool {
         let d = self.drawn.hash[r] != h;
         self.drawn.hash[r] = h;
