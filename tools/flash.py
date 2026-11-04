@@ -341,7 +341,7 @@ def write_spi(a, parts):
     end = time.monotonic() + 45
     while True:
         try:
-            r = ferrite_link.Remote(a.port, a.pin, name=b"flash.py")
+            r = ferrite_link.Radio(a.port, a.pin, name=b"flash.py")
             break
         except ferrite_link.RadioError as e:
             sys.exit(f"the radio refused the link ({e}): with a PIN lock, pass --pin")
