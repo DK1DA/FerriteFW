@@ -267,7 +267,7 @@ fn satellite_records_checked() {
     assert_eq!(s, Status::Invalid as u8, "doesn't decode");
     assert!(!why.is_empty(), "says why");
     let good = wire::encode(&crate::sat::sample().into_iter().next().unwrap());
-    assert_eq!(pc.write_many(what::SAT, &[(SATS_MAX as u16, good.to_vec())]).0, Status::NotFound as u8, "past the last place");
+    assert_eq!(pc.write_many(what::SAT, &[(SATS_MAX, good.to_vec())]).0, Status::NotFound as u8, "past the last place");
     assert_eq!(pc.write_many(what::SAT, &[(0, good.to_vec())]).0, Status::Busy as u8, "to the store (none here)");
     assert_eq!(pc.write_many(what::SAT_INFO, &[(0, Vec::new())]).0, 0, "cleared: nothing there");
     assert_eq!(pc.write_many(what::SAT_INFO, &[(0, std::vec![0; 3])]).0, Status::BadArg as u8);
