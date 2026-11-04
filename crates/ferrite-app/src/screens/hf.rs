@@ -156,7 +156,8 @@ fn strip_x(f: Freq10, lo: Freq10, hi: Freq10) -> i32 {
 /// whole; its edges under it.
 #[inline(never)]
 fn band_strip(lcd: &mut impl Panel, band: Option<usize>, marker: i32) {
-    ferrite_ui::canvas::banded(lcd, 0, 118, 240, 34, BG, |lcd| {
+    // down to the meter (y 158), so nothing of the mode row (HF-12) is left between them
+    ferrite_ui::canvas::banded(lcd, 0, 118, 240, 40, BG, |lcd| {
         let Some(b) = band else {
             lcd.text4(12, 136, b"Between bands", &UI_12, DIM, BG);
             return;
@@ -189,10 +190,11 @@ fn band_strip(lcd: &mut impl Panel, band: Option<usize>, marker: i32) {
 /// HF-12: SIDE2's row of the modes this frequency allows, the one picked lit.
 #[inline(never)]
 fn mode_row(lcd: &mut impl Panel, h: &HfMem, patch: bool) {
-    ferrite_ui::canvas::banded(lcd, 0, 118, 240, 64, BG, |lcd| {
-        lcd.fill_r(8, 118, 224, 62, 4, BLUE);
-        lcd.fill_r(9, 119, 222, 60, 4, SURFACE);
-        lcd.text4(16, 134, b"MODE   SIDE2 next", &UI_12, SUB, SURFACE);
+    // below the step and signal line (its field ends at y 120), so a new reading never cuts the box's top
+    ferrite_ui::canvas::banded(lcd, 0, 120, 240, 62, BG, |lcd| {
+        lcd.fill_r(8, 121, 224, 59, 4, BLUE);
+        lcd.fill_r(9, 122, 222, 57, 4, SURFACE);
+        lcd.text4(16, 136, b"MODE   SIDE2 next", &UI_12, SUB, SURFACE);
         let modes = MODE_ORDER.iter().copied().filter(|&m| h.allowed(m, patch));
         let n = modes.clone().count().max(1) as i32;
         let bw = (208 - 4 * (n - 1)) / n;
@@ -200,13 +202,13 @@ fn mode_row(lcd: &mut impl Panel, h: &HfMem, patch: bool) {
             let x = 16 + i as i32 * (bw + 4);
             let on = m == h.mode;
             let c = if on { mode_colour(m) } else { LINE };
-            lcd.fill_r(x, 142, bw, 30, 3, c);
+            lcd.fill_r(x, 144, bw, 30, 3, c);
             if !on {
-                lcd.fill_r(x + 1, 143, bw - 2, 28, 3, SURFACE);
+                lcd.fill_r(x + 1, 145, bw - 2, 28, 3, SURFACE);
             }
             let t = mode_name(m).as_bytes();
             let tw = text4_width(t, &UI_15B);
-            lcd.text4(x + (bw - tw) / 2, 163, t, &UI_15B, if on { BG } else { SUB }, if on { c } else { SURFACE });
+            lcd.text4(x + (bw - tw) / 2, 165, t, &UI_15B, if on { BG } else { SUB }, if on { c } else { SURFACE });
         }
     });
 }
@@ -939,6 +941,9 @@ impl View for Hf {
                 mode_row(lcd, &h, app.radio.ssb_patch);
             } else {
                 band_strip(lcd, band_i, marker);
+                // the meter's row beside its segments, where the mode row was
+                lcd.fill(0, 158, 12, 8, BG);
+                lcd.fill(12 + w::METER_SEGS as i32 * 10, 158, 228 - w::METER_SEGS as i32 * 10, 8, BG);
             }
         }
         let lit = w::meter_level(rssi);
@@ -946,7 +951,7 @@ impl View for Hf {
             w::meter(lcd, 12, 158, None, lit, GREEN, BG);
         }
         if !picking && app.dirty(R_SCROLL, 1) {
-            ferrite_ui::canvas::banded(lcd, 0, 167, 240, 14, BG, |lcd| {
+            ferrite_ui::canvas::banded(lcd, 0, 166, 240, 16, BG, |lcd| {
                 // S1, S3, S5, S7, S9 and +20 under their segments (meter_level's scale)
                 for (seg, t) in [(1, "1"), (5, "3"), (9, "5"), (13, "7"), (17, "9"), (18, "+20")] {
                     lcd.text4(12 + seg * 10, 178, t.as_bytes(), &UI_12, DIM, BG);
