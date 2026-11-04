@@ -13,9 +13,12 @@ use ferrite_ui::fb::FrameBuffer;
 fn no_parts_every_fallback() {
     assert_eq!(ferrite_sim::parts::none(), 0);
     assert!(!ferrite_ui::logo::present() && !ferrite_app::text::present());
+    // Without its part predictive text offers no words; the short forms and quick messages stay (decision 345).
+    assert!(!ferrite_app::words::present() && ferrite_app::words::count(b"43") == 0);
+    assert!(!ferrite_app::words::quick(0).is_empty() && ferrite_app::words::short(b"thanks").is_some());
     let mut r = Radio::new();
     r.menu("0 1").expect_text("Watch").expect_no_text("Which slots are heard besides the active one.");
-    r.menu("0 9").type_("8").press(ferrite_core::keys::Key::Left).expect_text("0 of 3").expect_text("Text pack missing");
+    r.menu("0 9").type_("8").press(ferrite_core::keys::Key::Left).expect_text("0 of 4").expect_text("Text pack missing");
     r.menu("0 9").type_("8").expect_text("PolyForm Noncommercial"); // About's licence: the MCU's flash (SELF-10)
     // The terminal: the plain command line, `help` saying the pack is missing, a refusal's fallback.
     r.sim.term_feed(b"\r");

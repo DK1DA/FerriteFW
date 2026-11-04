@@ -15,6 +15,7 @@ pub fn bodies() -> Vec<(Kind, Vec<u8>)> {
                 b"FTXT" => ferrite_app::text::BODY.to_vec(),
                 b"FLGO" => ferrite_ui::logo::body(),
                 b"FVTP" => ferrite_app::term::template_pack().to_vec(),
+                b"FDIC" => ferrite_app::words::BODY.to_vec(),
                 m => panic!("no body for part {m:?}"),
             };
             (k.clone(), body)

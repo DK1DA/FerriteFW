@@ -58,8 +58,10 @@ pub const WAYPOINTS: Range<u32> = 0x08_0000..0x09_0000;
 pub const TEXT_PACK: Range<u32> = 0x09_0000..0x0A_0000;
 /// Held for the packet mailbox (chapter 38).
 pub const MAILBOX: Range<u32> = 0x0A_0000..0x0B_0000;
+/// Predictive text's words (decision 345): an SPI part, with room for a bigger dictionary.
+pub const DICTIONARY: Range<u32> = 0x0B_0000..0x0C_0000;
 /// Free, in one run (what goes here is for a later decision).
-pub const FREE: Range<u32> = 0x0B_0000..0x1C_0000;
+pub const FREE: Range<u32> = 0x0C_0000..0x1C_0000;
 /// Language packs: English plus one other at a time (planned).
 pub const LANGUAGES: Range<u32> = 0x1C_0000..0x24_0000;
 /// The boot animation and custom screens (planned).
@@ -94,7 +96,7 @@ pub static WRITABLE: [Range<u32>; 2] = [LAYOUT_HEADER.start..CALIBRATION.start, 
 pub const DATA: Range<u32> = 0..UPDATE_AREA.start;
 
 /// Every region in address order, with its name as the developer page and the build report show it.
-pub const REGIONS: [(&str, Range<u32>); 26] = [
+pub const REGIONS: [(&str, Range<u32>); 27] = [
     ("Layout header", LAYOUT_HEADER),
     ("Settings and slots", SETTINGS),
     ("User trims", TRIMS),
@@ -114,6 +116,7 @@ pub const REGIONS: [(&str, Range<u32>); 26] = [
     ("GPS waypoints", WAYPOINTS),
     ("Text pack", TEXT_PACK),
     ("Packet mailbox (held)", MAILBOX),
+    ("Dictionary", DICTIONARY),
     ("Free", FREE),
     ("Language packs", LANGUAGES),
     ("Boot animation and screens", SCREENS),
@@ -162,7 +165,7 @@ mod tests {
         for (n, r) in &REGIONS {
             assert!(r.start % 4096 == 0 && r.end % 4096 == 0, "{n}: sector aligned");
         }
-        for r in [CHANNELS, HEARD, MESSAGES, WAYPOINTS, TEXT_PACK, MAILBOX, FREE, LANGUAGES, SCREENS, FONTS, EVENT_LOG, SCRATCH_RING, UPDATE_AREA] {
+        for r in [CHANNELS, HEARD, MESSAGES, WAYPOINTS, TEXT_PACK, MAILBOX, DICTIONARY, FREE, LANGUAGES, SCREENS, FONTS, EVENT_LOG, SCRATCH_RING, UPDATE_AREA] {
             assert_eq!(r.start % 0x1_0000, 0, "{r:x?}: on a 64 KB boundary");
         }
         assert_eq!(CALIBRATION, 0xF000..0x1_0000, "calibration stays at stock's address");
@@ -173,7 +176,7 @@ mod tests {
         assert_eq!((sectors(&CONTACTS) * 127, sectors(&WAYPOINTS) * 127), (1016, 2032));
         assert_eq!((sectors(&HEARD) * 31, sectors(&MESSAGES) * 31, sectors(&EVENT_LOG) * 31), (496, 496, 992));
         assert_eq!(sectors(&SCRATCH_RING), 32);
-        assert_eq!((SSB_PATCH.len(), LANGUAGES.len(), FREE.len()), (16 << 10, 512 << 10, 1088 << 10));
+        assert_eq!((SSB_PATCH.len(), LANGUAGES.len(), FREE.len()), (16 << 10, 512 << 10, 1024 << 10));
         assert!(!overlaps(&V2_HEADER, &LAYOUT_HEADER) && CHANNELS.contains(&V2_HEADER.start), "layout 2's header sits where channels go now");
         assert_eq!(DATA.end, UPDATE_AREA.start);
     }

@@ -56,12 +56,14 @@ fn parts_from_files_are_used_and_checked() {
     assert_eq!(part::check(&part::TEXT, ferrite_core::BUILD, &mut read_from(&chip)), None, "a damaged text pack");
 
     // The simulator with the files: every part good.
-    assert_eq!(ferrite_sim::parts::load(&dir), 0b111);
+    assert_eq!(ferrite_sim::parts::load(&dir), 0b1111);
     assert!(ferrite_ui::logo::present());
+    // Predictive text's words from their part (decision 345).
+    assert!(ferrite_app::words::present() && ferrite_app::words::count(b"43") > 0);
     let mut r = Radio::new();
     r.menu("0").expect_text("Watch, resume, priority, ranges, skips.");
     r.menu("0 1").expect_text("Which slots are heard besides the active one.");
-    r.menu("0 9").type_("8").press(ferrite_core::keys::Key::Left).expect_text("3 of 3");
+    r.menu("0 9").type_("8").press(ferrite_core::keys::Key::Left).expect_text("4 of 4");
     // The terminal: its pages (the template part), and `help` from the text pack.
     r.sim.term_size(80, 24);
     r.sim.term_feed(b"\r");

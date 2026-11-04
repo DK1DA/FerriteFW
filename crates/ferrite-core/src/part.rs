@@ -1,5 +1,5 @@
 //! SPI parts (decision 335, UPD-20 – UPD-23): data the firmware keeps on the SPI flash instead of its own, installed
-//! from the `.ffw` update file with every update (the text pack, the terminal's page templates, the boot logo).
+//! from the `.ffw` update file with every update (the text pack, the terminal's page templates, the boot logo, predictive text's words).
 //!
 //! Each part starts with a 32-byte header (little-endian):
 //!
@@ -40,8 +40,11 @@ pub const LOGO: Kind = Kind { magic: *b"FLGO", file: "logo.bin", slot: crate::la
 /// The terminal's page templates (TERM-47): the next 32 KB of the boot screens region.
 pub const TERM: Kind = Kind { magic: *b"FVTP", file: "term-vt.bin", slot: crate::layout::SCREENS.start + 0x8000..crate::layout::SCREENS.start + 0x1_0000 };
 
+/// Predictive text's words (decision 345): layout 3's dictionary region (64 KB at 0x0B0000).
+pub const DICT: Kind = Kind { magic: *b"FDIC", file: "words-en.bin", slot: crate::layout::DICTIONARY };
+
 /// Every kind, in the order [`mount`]'s bits and the `.ffw`'s parts list them.
-pub const KINDS: [Kind; 3] = [TEXT, LOGO, TERM];
+pub const KINDS: [Kind; 4] = [TEXT, LOGO, TERM, DICT];
 
 /// A part's header for `body`, as the packer writes it (`build`: the firmware's build ID, at most 16 bytes).
 pub fn header(kind: &Kind, build: &str, body: &[u8]) -> [u8; HEADER] {
