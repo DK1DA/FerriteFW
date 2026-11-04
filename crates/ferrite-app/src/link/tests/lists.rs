@@ -250,3 +250,29 @@ fn preset_skips_leave_blank_entries_out() {
     assert!(pc.st.request(Op::PresetSkips { preset: 0, at: 0, count: 3, f }));
     assert!(all(&mut pc, what::PRESET_SKIPS).iter().all(|g| g.0 != 0), "nothing to send for it");
 }
+
+/// LINK-63, LINK-64: satellite records over `WRITE_MANY`, checked before the store: all deleted with an empty record
+/// at ADD (nothing stored: done at once), one deleted with an empty record (likewise), the wrong length, a record
+/// that doesn't decode (its reason), past the last place; a good record goes to the store (the RAM sample has no
+/// satellite store: busy). The declination record: cleared when empty, its length and its range checked.
+#[test]
+fn satellite_records_checked() {
+    use ferrite_core::link::{SATS_MAX, SAT_INFO_LEN, SAT_LEN};
+    use ferrite_core::sat::wire;
+    let mut pc = Pc::new(true);
+    assert_eq!(pc.write_many(what::SAT, &[(ADD, Vec::new())]).0, 0, "all deleted: none there");
+    assert_eq!(pc.write_many(what::SAT, &[(0, Vec::new())]).0, 0, "one deleted: none there");
+    assert_eq!(pc.write_many(what::SAT, &[(0, std::vec![0; 7])]).0, Status::BadArg as u8, "the wrong length");
+    let (s, why) = pc.write_many(what::SAT, &[(0, std::vec![0xFF; SAT_LEN])]);
+    assert_eq!(s, Status::Invalid as u8, "doesn't decode");
+    assert!(!why.is_empty(), "says why");
+    let good = wire::encode(&crate::sat::sample().into_iter().next().unwrap());
+    assert_eq!(pc.write_many(what::SAT, &[(SATS_MAX as u16, good.to_vec())]).0, Status::NotFound as u8, "past the last place");
+    assert_eq!(pc.write_many(what::SAT, &[(0, good.to_vec())]).0, Status::Busy as u8, "to the store (none here)");
+    assert_eq!(pc.write_many(what::SAT_INFO, &[(0, Vec::new())]).0, 0, "cleared: nothing there");
+    assert_eq!(pc.write_many(what::SAT_INFO, &[(0, std::vec![0; 3])]).0, Status::BadArg as u8);
+    let mut bad = wire::Info { decl: Some(0), stamp: 1, written: 2 }.encode();
+    bad[..2].copy_from_slice(&5_000i16.to_le_bytes());
+    assert_eq!(pc.write_many(what::SAT_INFO, &[(0, bad.to_vec())]).0, Status::Invalid as u8, "declination past 180°");
+    assert_eq!(bad.len(), SAT_INFO_LEN);
+}

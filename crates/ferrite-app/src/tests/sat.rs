@@ -393,3 +393,68 @@ fn arrows_filter_to_the_selected_satellite() {
     t.tap(Key::Left);
     assert!(matches!(t.app.screen(), Screen::Sat(s) if s.filter != sat), "◀ steps to another satellite (or all)");
 }
+
+/// SAT-1 to SAT-22 (DISP-25): every satellite page draws a whole screen in each of its states: the list while it
+/// predicts and after, filtered to one satellite, the pass page before the rise (its timeline), the pointing page
+/// (the sky plot) before and during the pass, the pass page overhead, keyed (the transmit page), the alarm picker,
+/// each option row; and BACK from each lands where it should.
+#[test]
+fn every_satellite_page_draws() {
+    let p = a_pass(1);
+    let mut t = sat_app(p.aos - 600);
+    let mut fb = FrameBuffer::new();
+    let mut drew = |t: &mut T, what: &str| {
+        t.render(&mut fb);
+        let n = count_px(&fb, 20, 300, |c| c != ferrite_ui::gfx::BG);
+        assert!(n > 500, "{what}: drew little ({n} px): {:?}", t.app.screen());
+    };
+    t.open(crate::screens::nav::Dest::Satellites);
+    drew(&mut t, "the list predicting");
+    t.wait(3000);
+    drew(&mut t, "the list");
+    t.tap(Key::Right);
+    drew(&mut t, "the list, one satellite");
+    t.tap(Key::Left);
+    t.tap(Key::Hash);
+    drew(&mut t, "the alarm picker");
+    for _ in 0..3 {
+        t.tap(Key::Down);
+        drew(&mut t, "the picker, another row");
+    }
+    t.tap(Key::Exit);
+    t.app.sat.cur = Some(p);
+    t.app.screen = Screen::Sat(SatScr::pass_of(&p));
+    t.wait(1100);
+    drew(&mut t, "the pass page before the rise");
+    t.tap(Key::Digit(0));
+    t.wait(1100);
+    drew(&mut t, "the pointing page before the rise");
+    t.app.sat_clock(Some(p.aos + (p.los() - p.aos) / 2), true, Some(HERE));
+    t.wait(1100);
+    drew(&mut t, "the pointing page overhead");
+    t.tap(Key::Digit(0));
+    t.wait(1100);
+    drew(&mut t, "the pass page overhead");
+    t.hold(Key::Menu);
+    for _ in 0..8 {
+        drew(&mut t, "an option row");
+        t.tap(Key::Down);
+    }
+    t.tap(Key::Exit);
+    let s = store();
+    t.app.radio.tx_built = true; // the harness's device report clears it on the way
+    t.app.key_down(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
+    t.wait(1100);
+    assert!(matches!(t.app.screen(), Screen::Sat(x) if x.page & 0x80 != 0), "keyed: {:?} {:?}", t.app.screen(), t.app.radio.keyed);
+    drew(&mut t, "keyed: the transmit page");
+    t.tap(Key::Right);
+    t.wait(300);
+    drew(&mut t, "keyed, the trim moved");
+    t.app.key_up(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
+    t.wait(300);
+    t.app.sat_clock(Some(p.los() + 60), true, Some(HERE));
+    t.wait(1100);
+    drew(&mut t, "the pass page after the set");
+    t.hold(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+}
