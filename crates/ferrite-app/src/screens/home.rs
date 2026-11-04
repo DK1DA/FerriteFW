@@ -572,7 +572,7 @@ fn quick_mute(app: &mut App) {
             (b" unmuted", b"")
         }
     };
-    app.out.push(RadioCmd::Mute(app.mute));
+    app.send_mute();
     app.out.push(RadioCmd::SlotOff(app.off));
     app.out.push(RadioCmd::Watch(app.watch_mask())); // WATCH-2.1: an off slot's turns go to the others
     if a == crate::aprs::APRS_SLOT && app.set.aprs_mode {

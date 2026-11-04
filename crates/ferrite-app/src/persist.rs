@@ -256,7 +256,7 @@ impl App {
         self.out.push(RadioCmd::Watch(self.watch_mask()));
         self.send_aprs_slot();
         if self.mute != 0 {
-            self.out.push(RadioCmd::Mute(self.mute)); // APRS-15.2: C muted in APRS mode
+            self.send_mute(); // APRS-15.2: C muted in APRS mode
         }
         self.c_settled();
         self.send_radio_settings();

@@ -133,6 +133,8 @@ pub struct RadioUi {
     pub bcast_in: u8,
     /// BCR-5: when the broadcast slot took the broadcast, for the sleep timer.
     pub bcast_since: u32,
+    /// BCR-4: the mute mask the Radio task was last sent ([`App::send_mute`]).
+    pub mute_sent: u8,
     /// The broadcast plays on the SI4732: in [`Mode::Fm`] (the FM screen, or a broadcast slot), or beside home's
     /// strip while another slot than the active one plays broadcast (MODE-5, decision 115). Started and stopped
     /// by [`App::reconcile_mode`] apart from the exclusive mode, so the strip coming and going never restarts it.
@@ -176,6 +178,7 @@ impl RadioUi {
             want_seen: 0,
             bcast: None,
             bcast_since: 0,
+            mute_sent: 0,
             bcast_in: 0,
             fm_on: false,
             fm_sent: 0,

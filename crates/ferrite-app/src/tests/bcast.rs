@@ -353,3 +353,26 @@ fn sleep_timer_mutes_the_broadcast_slot() {
     assert!(t.cmds().contains(&RadioCmd::Mute(1)));
     assert_eq!(t.app.bcast_slot(), Some(0), "the slot is still the broadcast slot")
 }
+
+/// BCR-4: radio monitor off (0 3 1 3) mutes every slot but the broadcast one while it plays, so none takes the
+/// speaker from it; on again, or the broadcast over, they are heard again. The quick mutes (HOME-15) stay as set.
+#[test]
+fn radio_monitor_off_keeps_the_slots_quiet() {
+    let mut t = ready();
+    t.app.set.fm_monitor = false;
+    let mut c = tune(&mut t, 0, FM1005);
+    t.wait(200);
+    c.extend(t.cmds());
+    assert!(c.contains(&RadioCmd::Mute(0b110)), "B and C quiet while A plays: {c:?}");
+    assert_eq!(t.app.mute, 0, "not quick mutes: the cards don't say Muted");
+    t.app.set.fm_monitor = true;
+    t.wait(100);
+    assert!(t.cmds().contains(&RadioCmd::Mute(0)), "monitor on: heard again");
+    t.app.set.fm_monitor = false;
+    t.wait(100);
+    t.cmds();
+    let mut c = tune(&mut t, 0, TWO_M);
+    t.wait(200);
+    c.extend(t.cmds());
+    assert!(c.contains(&RadioCmd::Mute(0)), "the broadcast over: heard again: {c:?}");
+}

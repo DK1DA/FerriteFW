@@ -592,7 +592,7 @@ impl App {
         let m = if on { self.mute | 1 << APRS_SLOT } else { self.mute & !(1 << APRS_SLOT) };
         if m != self.mute {
             self.mute = m;
-            self.out.push(RadioCmd::Mute(m));
+            self.send_mute();
         }
     }
 

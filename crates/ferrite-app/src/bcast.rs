@@ -61,10 +61,33 @@ impl App {
         let min = crate::settings::SLEEP_TIMES[self.set.fm_sleep as usize % crate::settings::SLEEP_TIMES.len()] as u32;
         if let Some(s) = next.filter(|&s| min != 0 && self.mute & 1 << s == 0 && self.now.wrapping_sub(self.radio.bcast_since) >= min * 60_000) {
             self.mute |= 1 << s;
-            self.out.push(RadioCmd::Mute(self.mute));
+            self.send_mute();
             self.radio.bcast_since = self.now;
             self.show_toast(b"Sleep timer", b"broadcast muted", false);
         }
+        // BCR-4: radio monitor off keeps the other slots quiet while the broadcast plays (it starts, stops, or the
+        // setting changes: the mask goes again)
+        if self.radio_mute() != self.radio.mute_sent {
+            self.send_mute();
+        }
+    }
+
+    /// The Radio task's mute mask: the quick mutes (HOME-15), and with radio monitor off (0 3 1 3, BCR-4) every
+    /// slot but the broadcast one while it plays, so none of them takes the speaker from it (they still receive,
+    /// light the LED and decode).
+    pub(crate) fn radio_mute(&self) -> u8 {
+        let monitor_off = match self.radio.bcast {
+            Some(b) if self.radio.fm_on && !self.set.fm_monitor => ((1u8 << SLOTS) - 1) & !(1 << b),
+            _ => 0,
+        };
+        self.mute | monitor_off
+    }
+
+    /// [`App::radio_mute`] to the Radio task.
+    pub(crate) fn send_mute(&mut self) {
+        let m = self.radio_mute();
+        self.radio.mute_sent = m;
+        self.out.push(RadioCmd::Mute(m));
     }
 
     /// The station the SI4732 plays (10 kHz): the broadcast slot's frequency, else the FM screen's last one.
