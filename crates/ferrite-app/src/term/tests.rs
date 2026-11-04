@@ -2686,3 +2686,114 @@ fn quick_messages_in_the_terminal() {
     assert_eq!(r.store.quick(2), None);
     assert!(!crate::term::cmd::writes(b"quick 3") && crate::term::cmd::writes(b"quick 3 factory"));
 }
+
+/// TERM-12: every command's answer, byte for byte, kept in `term/golden/` (typical and refused arguments, typed
+/// and in a load), so a rework of the command parser shows any change in what a line says. `UPDATE_GOLDEN=1`
+/// writes the file again (look at the diff).
+#[test]
+fn command_answers_golden() {
+    const LINES: &[&str] = &[
+        "", "# a note", "\"quoted\"", "frob", "help", "?", "HELP", "Get 0 7 1",
+        "get", "get 0 7 1", "get 0 5 1", "get 0 4 2 3", "get 0 5 4", "get 0 6 9", "get 9 9 9", "get x", "get 0", "get 0 7 1 1 1",
+        "set 0 7 1 Daylight", "set 0 7 1 night", "set 0 7 1 purple", "set 0 7 1", "set 7 1 Dark", "set 0 9 4 EU",
+        "set 0 9 3 1 Off", "set 0 8 8 5 off", "set 0 8 8 5 on", "set 0 4 2 3 1234", "set 0 4 2 3 99999999",
+        "set 0 4 2 3 none", "set 0 5 5 3 Hello there", "set 0 5 5 3 none", "set 0 5 4 144.390", "set 0 5 4 abc",
+        "set 0 4 2 2 439.9875", "set 0 5 9 2 wide1-1,wide2-1", "set 0 5 9 2 bad,,bad,,", "set 0 5 9 2 none",
+        "set 0 6 9 FN25", "set 0 6 9 45.5 -75.6", "set 0 6 9 north", "set 0 6 9 none", "set 0 7 7 1", "set 0 7 7 x",
+        "set 0 7 2 10", "set 0 1 1 Off", "set", "set x",
+        "ch", "ch 12", "ch 999", "ch 4001", "ch x", "ch 12 power high", "ch 12 power ultra", "ch 12 tone 100.0",
+        "ch 12 tone 300.0", "ch 12 tone D023I", "ch 12 tone D028N", "ch 12 tone=D023N", "ch 12 rx 700", "ch 12 rx 30",
+        "ch 12 mode usb", "ch 12 mode am", "ch 12 zone 9", "ch 12 zone 1", "ch 12 \"Name", "ch 12 name \"New one\"",
+        "ch 12 name \"Club \\\"north\\\"\"", "ch 12 offset +0.6", "ch 12 offset x", "ch 12 offset off", "ch 12 tx 147.0",
+        "ch 12 step 12.5", "ch 12 step 7", "ch 12 squelch 6", "ch 12 squelch 99", "ch 12 squelch global",
+        "ch 12 busy on", "ch 12 reverse on", "ch 12 skip on", "ch 12 aprs on", "ch 12 rxonly on", "ch 12 hidden on",
+        "ch 12 priority on", "ch 12 bw narrow", "ch 12 bw x", "ch 12 rxtone 88.5", "ch 12 txtone off",
+        "ch 12 rxtone dcs-n 023", "ch 12 frob 1", "ch 12 busy maybe", "ch 12", "ch 12 end beep", "ch 12 tail on",
+        "ch 300 \"Test\" 146.6 offset=-0.6 tone=100.0 power=mid zone=1 skip squelch=6", "ch 300",
+        "ch 301 \"Two20\" 223.5 power=high", "ch 301 power mid", "ch 302 \"Bad\" 146.6 frob=1", "ch 303 \"Bad\"",
+        "ch 300 delete", "ch 300 delete", "ch 12 split 146.0", "ch 12 rx 146.52 tx 146.0",
+        "zone", "zone 1", "zone 9 \"Far\"", "zone 7 \"Next\"", "zone 7", "zone 1 scan=on", "zone 1 frob=1", "zone x",
+        "zone 1 resume=5 dwell=3", "zone 1 pri1=12", "zone 1 distance=10",
+        "preset", "preset 1", "preset 1 \"2 m\" 144 148", "preset 1 step=5", "preset 99", "preset 1 \"x\" 148 144",
+        "home", "home 12", "home none", "home 999", "home x",
+        "quick", "quick 3", "quick 3 \"On my way\"", "quick 3", "quick 3 factory", "quick 99", "quick 3 \"",
+        "slot", "slot A", "slot B", "slot C", "slot D", "slot A 146.52 nfm high tone 100.0", "slot A vfo",
+        "slot B active", "slot A offset -0.6", "slot A offset off", "slot A split 446.0", "slot A 9999", "slot A frob",
+        "slot A rxtone ctcss 88.5", "slot A txtone dcs-i 023", "slot A am", "slot A low", "slot",
+        "ui", "ui keys", "ui status", "ui frob",
+        "key", "key MENU", "key EXIT long", "key FROB", "key MENU sideways", "key EXIT", "key EXIT up",
+        "knob", "knob +3", "knob -2", "knob 30", "knob x", "knob +0",
+        "xb", "xb start", "xb stop", "xb stop", "xb frob",
+        "dump", "load", "gps", "gps query", "gps nmea off", "gps frob",
+        "sat", "sat add", "sat del 1", "sat del x", "sat frob",
+        "clear", "clear frob", "clear channels 3", "clear channels",
+        "mem 20000000 4", "mem32 40010808 1", "gpio", "bk 0 30", "bk settle", "bk save", "si 10 00", "bt AT",
+        "rx both", "mic", "af", "txtest sweep", "lcd", "fsk", "meter", "synthfsk", "pin",
+    ];
+    const LOADING: &[&str] = &["set 0 7 1 Dark", "ch 12 power low", "zone 1", "preset 1", "home 12", "quick 3", "get", "slot", "dump", "sat", "frob"];
+    let mut r = Rig::new();
+    let mut out = String::new();
+    let run = |r: &mut Rig, l: &str, loading: bool, out: &mut String| {
+        use core::fmt::Write;
+        let _ = writeln!(out, "{} {l}", if loading { "<" } else { ">" });
+        if !loading {
+            let _ = writeln!(out, "  writes {}", cmd::writes(l.as_bytes()));
+        }
+        let live = LiveAll::default();
+        let res = cmd::run(&mut r.app, &r.store, &r.dev, l.as_bytes(), loading);
+        while let Some(w) = r.app.pop_write() {
+            r.store.apply(w);
+        }
+        while r.app.pop_cmd().is_some() {}
+        match res {
+            Err(m) => {
+                let _ = writeln!(out, "  ! {}", String::from_utf8_lossy(m.as_bytes()));
+            }
+            Ok(cmd::Done::Nothing) => out.push_str("  nothing\n"),
+            Ok(cmd::Done::Said(m)) => {
+                let _ = writeln!(out, "  = {}", String::from_utf8_lossy(m.as_bytes()));
+            }
+            Ok(cmd::Done::List(k)) => {
+                let _ = writeln!(out, "  list {k:?}");
+                let mut i = 0;
+                let mut b = cmd::Line::new();
+                while cmd::list_line(&r.app, &r.store, &r.dev, &live, k, i, &mut b) {
+                    let _ = writeln!(out, "  | {}", String::from_utf8_lossy(b.as_bytes()));
+                    b = cmd::Line::new();
+                    i += 1;
+                }
+            }
+            Ok(cmd::Done::Dump) => {
+                out.push_str("  dump\n");
+                for d in dump(&r.app, &r.store, &r.dev) {
+                    let _ = writeln!(out, "  | {d}");
+                }
+            }
+            Ok(cmd::Done::Load) => out.push_str("  load\n"),
+            Ok(cmd::Done::SatPaste) => out.push_str("  sat paste\n"),
+            Ok(cmd::Done::Debug(_)) => out.push_str("  debug job\n"),
+        }
+    };
+    for l in LINES {
+        r.now += 100;
+        r.app.now = r.now;
+        run(&mut r, l, false, &mut out);
+    }
+    for l in LOADING {
+        run(&mut r, l, true, &mut out);
+    }
+    let n = r.store.count();
+    run(&mut r, &std::format!("clear channels {n}"), false, &mut out);
+    run(&mut r, "dump", false, &mut out);
+    let name = if cfg!(feature = "bench") { "cmds-bench.txt" } else { "cmds.txt" };
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/term/golden").join(name);
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &out).unwrap();
+    }
+    let want = std::fs::read_to_string(&path).expect("the golden file (UPDATE_GOLDEN=1 writes it)");
+    if want != out {
+        let at = want.lines().zip(out.lines()).position(|(a, b)| a != b).unwrap_or(0);
+        panic!("line {}: want {:?}, got {:?}", at + 1, want.lines().nth(at), out.lines().nth(at));
+    }
+}

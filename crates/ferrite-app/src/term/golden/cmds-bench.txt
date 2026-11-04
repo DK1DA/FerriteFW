@@ -1,0 +1,1105 @@
+> 
+  writes false
+  nothing
+> # a note
+  writes true
+  nothing
+> "quoted"
+  writes true
+  ! a command first; help lists them
+> frob
+  writes true
+  ! frob: no such command; help lists them
+> help
+  writes false
+  list Help
+  | Commands: type : then one of these, and Enter. A dump is made of the same lines.
+  | 
+  |   set 0 7 1 Dark         a setting, by its number in the radio's menu
+  |   get 0 7 1   get        one setting; every setting not at its default
+  |   ch 12                  channel 12, as its ch line
+  |   slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,
+  |                          slot B active, slot A offset off|-0.6, slot A split 446.0:
+  |                          as the keys would (a channel slot: add vfo)
+  |   ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone
+  |                          power zone step squelch busy reverse skip aprs rxonly hidden priority
+  |   ch 12 "Name" 146.52 offset=+0.6 tone=100.0 ...   a whole channel
+  |   ch 12 delete           delete channel 12
+  |   zone 2 "Repeaters"     a zone (made in order); fields scan shown resume ...
+  |   preset 1 "2 m" 144 148 a range preset; fields step mode bw
+  |   home 12   home none    the home channel
+  |   quick 3 "On my way"   quick message 3; quick 3 shows it, quick 3 factory resets it
+  |   dump                   everything, as these lines; save it with your terminal's log
+  |   load                   read a dump back: send the file, it ends at the line end
+  |   sat                    the satellites; sat add pastes a TLE or OMM CSV, sat del N
+  |   clear channels N       delete every channel (N: how many there are)
+  |   gps                    the GPS module's last GGA sentence, its age and heights
+  |   xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it
+  | 
+  | Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):
+  |   mem 20000000 64        bytes of MCU memory (flash, RAM)
+  |   mem32 40010808 4       32-bit words: use this for peripheral registers
+  |   gpio                   ports A to E: input and output bits, 15 to 0
+  |   bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)
+  |   bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)
+  |   si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property
+  |   bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)
+  |   bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)
+  |   bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)
+  |   rx both   rx one       bench test: VHF and UHF receive selects both on, or one
+  |   bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)
+  |   gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)
+  |   gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set
+  |   gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)
+  |   gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s
+  |   mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up
+  |   txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal
+  |                          at that % on the next PTT key-up until release (tx builds)
+  |   txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator
+  |   txtest fsk 2400 [rc]   PRBS9 NRZ at 300-9600 Bd, +-3 kHz; gmsk 4800: BT 0.5, h 0.5
+  |   txtest g3ruh           9600 Bd packet's scrambled NRZ (txdata.py counts the errors)
+  |   txtest sweep data bypass eq   REG_47 bypass, limiter off; eq flat to 5 kHz, eq8 8 kHz
+  |   txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)
+  |   bk rxaf 700   bk rxaf off   bench test: REG_2B 10:8 after every FM tune (RX filters)
+  |   bk rxif 5A20  bk rxif off   bench test: REG_43 after every FM tune (RX IF width)
+  |   bk hold 73 4692   bk hold off   bench test: up to 4 registers after every FM tune
+  |   meter on       meter        bench test: RX audio levels 50 Hz-12.5 kHz at 48 kHz
+  |   synthfsk 3000 4 2400 1290 10 40 70 100   bench test while keyed: 4FSK from tone 1's gain
+  |   fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off
+  |   fsk tx 2400 20         20 test frames at the next PTT key-up (Dry TX only; ffsk1800 ...)
+  |   The radio's own logic may rewrite a register you set (a tune, Battery Save).
+> ?
+  writes false
+  list Help
+  | Commands: type : then one of these, and Enter. A dump is made of the same lines.
+  | 
+  |   set 0 7 1 Dark         a setting, by its number in the radio's menu
+  |   get 0 7 1   get        one setting; every setting not at its default
+  |   ch 12                  channel 12, as its ch line
+  |   slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,
+  |                          slot B active, slot A offset off|-0.6, slot A split 446.0:
+  |                          as the keys would (a channel slot: add vfo)
+  |   ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone
+  |                          power zone step squelch busy reverse skip aprs rxonly hidden priority
+  |   ch 12 "Name" 146.52 offset=+0.6 tone=100.0 ...   a whole channel
+  |   ch 12 delete           delete channel 12
+  |   zone 2 "Repeaters"     a zone (made in order); fields scan shown resume ...
+  |   preset 1 "2 m" 144 148 a range preset; fields step mode bw
+  |   home 12   home none    the home channel
+  |   quick 3 "On my way"   quick message 3; quick 3 shows it, quick 3 factory resets it
+  |   dump                   everything, as these lines; save it with your terminal's log
+  |   load                   read a dump back: send the file, it ends at the line end
+  |   sat                    the satellites; sat add pastes a TLE or OMM CSV, sat del N
+  |   clear channels N       delete every channel (N: how many there are)
+  |   gps                    the GPS module's last GGA sentence, its age and heights
+  |   xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it
+  | 
+  | Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):
+  |   mem 20000000 64        bytes of MCU memory (flash, RAM)
+  |   mem32 40010808 4       32-bit words: use this for peripheral registers
+  |   gpio                   ports A to E: input and output bits, 15 to 0
+  |   bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)
+  |   bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)
+  |   si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property
+  |   bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)
+  |   bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)
+  |   bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)
+  |   rx both   rx one       bench test: VHF and UHF receive selects both on, or one
+  |   bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)
+  |   gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)
+  |   gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set
+  |   gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)
+  |   gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s
+  |   mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up
+  |   txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal
+  |                          at that % on the next PTT key-up until release (tx builds)
+  |   txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator
+  |   txtest fsk 2400 [rc]   PRBS9 NRZ at 300-9600 Bd, +-3 kHz; gmsk 4800: BT 0.5, h 0.5
+  |   txtest g3ruh           9600 Bd packet's scrambled NRZ (txdata.py counts the errors)
+  |   txtest sweep data bypass eq   REG_47 bypass, limiter off; eq flat to 5 kHz, eq8 8 kHz
+  |   txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)
+  |   bk rxaf 700   bk rxaf off   bench test: REG_2B 10:8 after every FM tune (RX filters)
+  |   bk rxif 5A20  bk rxif off   bench test: REG_43 after every FM tune (RX IF width)
+  |   bk hold 73 4692   bk hold off   bench test: up to 4 registers after every FM tune
+  |   meter on       meter        bench test: RX audio levels 50 Hz-12.5 kHz at 48 kHz
+  |   synthfsk 3000 4 2400 1290 10 40 70 100   bench test while keyed: 4FSK from tone 1's gain
+  |   fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off
+  |   fsk tx 2400 20         20 test frames at the next PTT key-up (Dry TX only; ffsk1800 ...)
+  |   The radio's own logic may rewrite a register you set (a tune, Battery Save).
+> HELP
+  writes false
+  list Help
+  | Commands: type : then one of these, and Enter. A dump is made of the same lines.
+  | 
+  |   set 0 7 1 Dark         a setting, by its number in the radio's menu
+  |   get 0 7 1   get        one setting; every setting not at its default
+  |   ch 12                  channel 12, as its ch line
+  |   slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,
+  |                          slot B active, slot A offset off|-0.6, slot A split 446.0:
+  |                          as the keys would (a channel slot: add vfo)
+  |   ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone
+  |                          power zone step squelch busy reverse skip aprs rxonly hidden priority
+  |   ch 12 "Name" 146.52 offset=+0.6 tone=100.0 ...   a whole channel
+  |   ch 12 delete           delete channel 12
+  |   zone 2 "Repeaters"     a zone (made in order); fields scan shown resume ...
+  |   preset 1 "2 m" 144 148 a range preset; fields step mode bw
+  |   home 12   home none    the home channel
+  |   quick 3 "On my way"   quick message 3; quick 3 shows it, quick 3 factory resets it
+  |   dump                   everything, as these lines; save it with your terminal's log
+  |   load                   read a dump back: send the file, it ends at the line end
+  |   sat                    the satellites; sat add pastes a TLE or OMM CSV, sat del N
+  |   clear channels N       delete every channel (N: how many there are)
+  |   gps                    the GPS module's last GGA sentence, its age and heights
+  |   xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it
+  | 
+  | Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):
+  |   mem 20000000 64        bytes of MCU memory (flash, RAM)
+  |   mem32 40010808 4       32-bit words: use this for peripheral registers
+  |   gpio                   ports A to E: input and output bits, 15 to 0
+  |   bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)
+  |   bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)
+  |   si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property
+  |   bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)
+  |   bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)
+  |   bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)
+  |   rx both   rx one       bench test: VHF and UHF receive selects both on, or one
+  |   bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)
+  |   gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)
+  |   gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set
+  |   gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)
+  |   gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s
+  |   mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up
+  |   txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal
+  |                          at that % on the next PTT key-up until release (tx builds)
+  |   txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator
+  |   txtest fsk 2400 [rc]   PRBS9 NRZ at 300-9600 Bd, +-3 kHz; gmsk 4800: BT 0.5, h 0.5
+  |   txtest g3ruh           9600 Bd packet's scrambled NRZ (txdata.py counts the errors)
+  |   txtest sweep data bypass eq   REG_47 bypass, limiter off; eq flat to 5 kHz, eq8 8 kHz
+  |   txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)
+  |   bk rxaf 700   bk rxaf off   bench test: REG_2B 10:8 after every FM tune (RX filters)
+  |   bk rxif 5A20  bk rxif off   bench test: REG_43 after every FM tune (RX IF width)
+  |   bk hold 73 4692   bk hold off   bench test: up to 4 registers after every FM tune
+  |   meter on       meter        bench test: RX audio levels 50 Hz-12.5 kHz at 48 kHz
+  |   synthfsk 3000 4 2400 1290 10 40 70 100   bench test while keyed: 4FSK from tone 1's gain
+  |   fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off
+  |   fsk tx 2400 20         20 test frames at the next PTT key-up (Dry TX only; ffsk1800 ...)
+  |   The radio's own logic may rewrite a register you set (a tune, Battery Save).
+> Get 0 7 1
+  writes false
+  = 0 7 1 Theme: Dark
+> get
+  writes false
+  list Changed
+  | set 0 7 7 2 Auto                  # Low Power Mode
+> get 0 7 1
+  writes false
+  = 0 7 1 Theme: Dark
+> get 0 5 1
+  writes false
+  = 0 5 1 Heard: a page on the radio, not a setting
+> get 0 4 2 3
+  writes false
+  = 0 4 2 3 Capcode filter: None
+> get 0 5 4
+  writes false
+  = 0 5 4 Frequency: 144.390
+> get 0 6 9
+  writes false
+  = 0 6 9 Fixed position: None
+> get 9 9 9
+  writes false
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> get x
+  writes false
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> get 0
+  writes false
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> get 0 7 1 1 1
+  writes false
+  = 0 7 1 Theme: Dark
+> set 0 7 1 Daylight
+  writes true
+  = 0 7 1 Theme: Daylight
+> set 0 7 1 night
+  writes true
+  = 0 7 1 Theme: Night red
+> set 0 7 1 purple
+  writes true
+  ! Theme: one of Night red, Cyberpunk, Dark, Daylight
+> set 0 7 1
+  writes true
+  ! set needs a value, e.g. set 0 7 1 Dark
+> set 7 1 Dark
+  writes true
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> set 0 9 4 EU
+  writes true
+  ! Region changes only on the radio
+> set 0 9 3 1 Off
+  writes true
+  ! PIN lock changes only on the radio
+> set 0 8 8 5 off
+  writes true
+  ! Dry TX changes only on the radio
+> set 0 8 8 5 on
+  writes true
+  ! Dry TX changes only on the radio
+> set 0 4 2 3 1234
+  writes true
+  = 0 4 2 3 Capcode filter: 1234
+> set 0 4 2 3 99999999
+  writes true
+  ! Capcode filter: a capcode up to 2097151, or None
+> set 0 4 2 3 none
+  writes true
+  = 0 4 2 3 Capcode filter: None
+> set 0 5 5 3 Hello there
+  writes true
+  = 0 5 5 3 Comment: Hello there
+> set 0 5 5 3 none
+  writes true
+  = 0 5 5 3 Comment: Empty
+> set 0 5 4 144.390
+  writes true
+  = 0 5 4 Frequency: 144.390
+> set 0 5 4 abc
+  writes true
+  ! Frequency: a frequency in MHz, e.g. 145.495
+> set 0 4 2 2 439.9875
+  writes true
+  = 0 4 2 2 Frequency: 439.987
+> set 0 5 9 2 wide1-1,wide2-1
+  writes true
+  = 0 5 9 2 Custom path: WIDE1-1,WIDE2-1
+> set 0 5 9 2 bad,,bad,,
+  writes true
+  ! Custom path: one or two entries like WIDE1-1,WIDE2-1 (16 characters at most), or None
+> set 0 5 9 2 none
+  writes true
+  = 0 5 9 2 Custom path: None
+> set 0 6 9 FN25
+  writes true
+  = 0 6 9 Fixed position: 45.5,-75
+> set 0 6 9 45.5 -75.6
+  writes true
+  ! Fixed position: lat,lon in degrees (45.42,-75.69), a grid square, or none
+> set 0 6 9 north
+  writes true
+  ! Fixed position: lat,lon in degrees (45.42,-75.69), a grid square, or none
+> set 0 6 9 none
+  writes true
+  = 0 6 9 Fixed position: None
+> set 0 7 7 1
+  writes true
+  ! set needs a value, e.g. set 0 7 1 Dark
+> set 0 7 7 x
+  writes true
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> set 0 7 2 10
+  writes true
+  ! Home layout: one of Watch, Single + scope, Watch + activity
+> set 0 1 1 Off
+  writes true
+  = 0 1 1 Watch: Off
+> set
+  writes true
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> set x
+  writes true
+  ! a menu number from MENU, e.g. 0 7 1 (Theme)
+> ch
+  writes false
+  ! ch: which channel, e.g. ch 12
+> ch 12
+  writes false
+  list Show(11)
+  | ch 12 "Club repeater" 443.47500 offset=+5.00000 mode=NFM txtone=100.0 rxtone=off power=low zone=2 pos=45.4075605,-75.6628014
+> ch 999
+  writes false
+  ! ch 999: no such channel
+> ch 4001
+  writes false
+  ! ch: a number from 1 to 4000
+> ch x
+  writes false
+  ! ch: a number from 1 to 4000
+> ch 12 power high
+  writes true
+  = Channel 12 saved
+> ch 12 power ultra
+  writes true
+  ! power: low, mid, high
+> ch 12 tone 100.0
+  writes true
+  = Channel 12 saved
+> ch 12 tone 300.0
+  writes true
+  ! tone: 300.0 Hz is outside 60.0 to 260.0 Hz
+> ch 12 tone D023I
+  writes true
+  = Channel 12 saved
+> ch 12 tone D028N
+  writes true
+  ! tone: off, a CTCSS tone (100.0) or a DCS code (D023N, D023I)
+> ch 12 tone=D023N
+  writes true
+  = Channel 12 saved
+> ch 12 rx 700
+  writes true
+  ! rx: 0.15-64 MHz (HF), 64-630 or 756-1300 MHz
+> ch 12 rx 30
+  writes true
+  ! mode: an HF channel is AM, USB, LSB or CW (FM from 18 MHz)
+> ch 12 mode usb
+  writes true
+  ! mode: USB, LSB and CW are for HF channels
+> ch 12 mode am
+  writes true
+  = Channel 12 saved
+> ch 12 zone 9
+  writes true
+  ! zone: zone 9 doesn't exist; the radio has 6
+> ch 12 zone 1
+  writes true
+  = Channel 12 saved
+> ch 12 "Name
+  writes true
+  ! a name has no closing quote
+> ch 12 name "New one"
+  writes true
+  = Channel 12 saved
+> ch 12 name "Club \"north\""
+  writes true
+  = Channel 12 saved
+> ch 12 offset +0.6
+  writes true
+  = Channel 12 saved
+> ch 12 offset x
+  writes true
+  ! offset: simplex, or MHz with a sign, e.g. +5 or -0.6
+> ch 12 offset off
+  writes true
+  ! offset: simplex, or MHz with a sign, e.g. +5 or -0.6
+> ch 12 tx 147.0
+  writes true
+  = Channel 12 saved
+> ch 12 step 12.5
+  writes true
+  ! step: one of the radio's steps, e.g. 12.5kHz or 25kHz
+> ch 12 step 7
+  writes true
+  ! step: one of the radio's steps, e.g. 12.5kHz or 25kHz
+> ch 12 squelch 6
+  writes true
+  = Channel 12 saved
+> ch 12 squelch 99
+  writes true
+  ! squelch: global, or 0 to 9
+> ch 12 squelch global
+  writes true
+  = Channel 12 saved
+> ch 12 busy on
+  writes true
+  = Channel 12 saved
+> ch 12 reverse on
+  writes true
+  = Channel 12 saved
+> ch 12 skip on
+  writes true
+  = Channel 12 saved
+> ch 12 aprs on
+  writes true
+  = Channel 12 saved
+> ch 12 rxonly on
+  writes true
+  = Channel 12 saved
+> ch 12 hidden on
+  writes true
+  = Channel 12 saved
+> ch 12 priority on
+  writes true
+  = Channel 12 saved
+> ch 12 bw narrow
+  writes true
+  = Channel 12 saved
+> ch 12 bw x
+  writes true
+  ! bw: wide, narrow
+> ch 12 rxtone 88.5
+  writes true
+  = Channel 12 saved
+> ch 12 txtone off
+  writes true
+  = Channel 12 saved
+> ch 12 rxtone dcs-n 023
+  writes true
+  ! rxtone: off, a CTCSS tone (100.0) or a DCS code (D023N, D023I)
+> ch 12 frob 1
+  writes true
+  ! frob: no such field; help lists them
+> ch 12 busy maybe
+  writes true
+  ! busy: off, on
+> ch 12
+  writes false
+  list Show(11)
+  | ch 12 "Club -north-" 443.47500 offset=split tx=147.00000 mode=AM txtone=off rxtone=88.5 power=high zone=1 squelch=global busy=on reverse aprs rxonly hidden priority pos=45.4075605,-75.6628014
+> ch 12 end beep
+  writes true
+  ! end: no such field; help lists them
+> ch 12 tail on
+  writes true
+  = Channel 12 saved
+> ch 300 "Test" 146.6 offset=-0.6 tone=100.0 power=mid zone=1 skip squelch=6
+  writes true
+  = Channel 300 saved
+> ch 300
+  writes false
+  list Show(299)
+  | ch 300 "Test" 146.60000 offset=-0.60000 mode=NFM tone=100.0 power=mid zone=1 squelch=6 skip
+> ch 301 "Two20" 223.5 power=high
+  writes true
+  = Channel 301 saved
+> ch 301 power mid
+  writes true
+  = Channel 301 saved
+> ch 302 "Bad" 146.6 frob=1
+  writes true
+  ! frob: no such field; help lists them
+> ch 303 "Bad"
+  writes true
+  ! ch: the RX MHz after the name
+> ch 300 delete
+  writes true
+  = Channel 300 deleted
+> ch 300 delete
+  writes true
+  ! ch 300: no such channel
+> ch 12 split 146.0
+  writes true
+  ! split: no such field; help lists them
+> ch 12 rx 146.52 tx 146.0
+  writes true
+  ! ch: one field at a time
+> zone
+  writes false
+  ! zone: which zone, e.g. zone 2 "Repeaters"
+> zone 1
+  writes false
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+> zone 9 "Far"
+  writes true
+  ! zone 9: zones are made in order; the radio has 6, so the next is zone 7
+> zone 7 "Next"
+  writes true
+  = Zone 7 saved
+> zone 7
+  writes false
+  ! zone 7: its name in quotes, e.g. zone 7 "Repeaters"
+> zone 1 scan=on
+  writes true
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+> zone 1 frob=1
+  writes true
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+> zone x
+  writes false
+  ! zone: a number from 1 to 512
+> zone 1 resume=5 dwell=3
+  writes true
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+> zone 1 pri1=12
+  writes true
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+> zone 1 distance=10
+  writes true
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+> preset
+  writes false
+  ! preset: which one, e.g. preset 1 "2 m" 144 148
+> preset 1
+  writes false
+  ! preset: its name in quotes, then start and end in MHz
+> preset 1 "2 m" 144 148
+  writes true
+  = Preset 1 saved
+> preset 1 step=5
+  writes true
+  ! preset: its name in quotes, then start and end in MHz
+> preset 99
+  writes false
+  ! preset: a number from 1 to 16
+> preset 1 "x" 148 144
+  writes true
+  ! preset: the end must be above the start
+> home
+  writes false
+  ! home: a channel number, or none
+> home 12
+  writes true
+  = Home channel: 12
+> home none
+  writes true
+  = No home channel
+> home 999
+  writes true
+  ! home: channel 999 doesn't exist
+> home x
+  writes true
+  ! home: a number from 1 to 4000
+> quick
+  writes false
+  ! quick 3 "On my way", quick 3 factory, or quick 3 to show it
+> quick 3
+  writes false
+  = quick 3 "On my way" factory
+> quick 3 "On my way"
+  writes true
+  = Quick message 3 saved
+> quick 3
+  writes false
+  = quick 3 "On my way"
+> quick 3 factory
+  writes true
+  = Quick message 3 saved
+> quick 99
+  writes false
+  ! quick: a number from 1 to 9
+> quick 3 "
+  writes true
+  ! a name has no closing quote
+> slot
+  writes false
+  list Slots
+  | A* vfo 146.52000 mode=FM power=low tone=off
+  | B  vfo 443.47500 mode=FM power=low tone=off
+  | C  vfo 118.95000 mode=AM power=low tone=off
+> slot A
+  writes false
+  = A* vfo 146.52000 mode=FM power=low tone=off
+> slot B
+  writes false
+  = B  vfo 443.47500 mode=FM power=low tone=off
+> slot C
+  writes false
+  = C  vfo 118.95000 mode=AM power=low tone=off
+> slot D
+  writes false
+  ! slot A|B|C [vfo] [FREQ] [MODE] [POWER] [tone|rxtone|txtone T] [offset N] [split TX] [active]
+> slot A 146.52 nfm high tone 100.0
+  writes true
+  = A* vfo 146.52000 mode=NFM power=high tone=100.0
+> slot A vfo
+  writes true
+  = A* vfo 146.52000 mode=NFM power=high tone=100.0
+> slot B active
+  writes true
+  = B* vfo 443.47500 mode=FM power=low tone=off
+> slot A offset -0.6
+  writes true
+  = A  vfo 146.52000 mode=NFM power=high tone=100.0 offset=-0.60000
+> slot A offset off
+  writes true
+  = A  vfo 146.52000 mode=NFM power=high tone=100.0
+> slot A split 446.0
+  writes true
+  = A  vfo 146.52000 mode=NFM power=high tone=100.0 tx=446.00000
+> slot A 9999
+  writes true
+  ! slot: the frequency in MHz, e.g. 146.52: MHz from 0.15 to 1300, e.g. 146.52
+> slot A frob
+  writes true
+  ! frob: not a slot word; slot A|B|C [vfo] [FREQ] [MODE] [POWER] [tone|rxtone|txtone T] [offset N] 
+> slot A rxtone ctcss 88.5
+  writes true
+  = A  vfo 146.52000 mode=NFM power=high txtone=100.0 rxtone=88.5 tx=446.00000
+> slot A txtone dcs-i 023
+  writes true
+  = A  vfo 146.52000 mode=NFM power=high txtone=D023I rxtone=88.5 tx=446.00000
+> slot A am
+  writes true
+  = A  vfo 146.52000 mode=AM power=high txtone=D023I rxtone=88.5 tx=446.00000
+> slot A low
+  writes true
+  = A  vfo 146.52000 mode=AM power=low txtone=D023I rxtone=88.5 tx=446.00000
+> slot
+  writes false
+  list Slots
+  | A  vfo 146.52000 mode=AM power=low txtone=D023I rxtone=88.5 tx=446.00000
+  | B* vfo 443.47500 mode=FM power=low tone=off
+  | C  vfo 118.95000 mode=AM power=low tone=off
+> ui
+  writes true
+  list Ui
+  | screen Home "Home" title=""
+  | state frame=0 ago=16300 dark=0 locked=0 active=B keyed=- remote=0 mode=off fm=0 leave=0
+  | bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=off bt_on=0 bt=0 battery=0 low=0 cutoff=0 dry=0 lpm=0 mcu=0 switches=0 held_us=0 why=0 clock=14:32 utc=0 call=""
+  | card A active=0 head="VFO · VHF" state="off" freq=146.52000 name="" mode="AM" tone="D023I*" shift="SPLIT" power="No TX" s="+60" meter=20 rx=0 scan=0 kind=slot
+  | card B active=1 head="VFO · UHF" state="idle" freq=443.47500 name="" mode="FM" tone="" shift="" power="No TX" s="+60" meter=20 rx=0 scan=0 kind=slot
+  | card C active=0 head="VFO · Airband" state="off" freq=118.95000 name="" mode="AM" tone="" shift="" power="No TX" s="+60" meter=20 rx=0 scan=0 kind=slot
+  | hints "SLOT" "A·B·C" "OK" "Quick" "<>" "Band"
+> ui keys
+  writes true
+  list UiKeys
+  | SIDE1 0 PF1
+  | SIDE2 1 PF2
+  | VM 2 V/M
+  | SLOT 3 ABC
+  | LEFT 4
+  | RIGHT 5
+  | MENU 6 OK
+  | UP 7
+  | DOWN 8
+  | BACK 9 EXIT
+  | 1 10
+  | 2 11
+  | 3 12
+  | STAR 13 *
+  | 4 14
+  | 5 15
+  | 6 16
+  | 0 17
+  | 7 18
+  | 8 19
+  | 9 20
+  | HASH 21 #
+  | knob +N|-N (1-20 steps; + clockwise)
+> ui status
+  writes true
+  list UiStatus
+  | st scr=Home act=B keyed=- remote=0 mode=off A=off/20 B=-/20 C=off/20 xb=0
+> ui frob
+  writes true
+  ! ui, ui keys or ui status
+> key
+  writes true
+  ! key NAME [long|down|up]: ui keys lists the names
+> key MENU
+  writes true
+  = key MENU short
+> key EXIT long
+  writes true
+  = key BACK long
+> key FROB
+  writes true
+  ! FROB: no such key; ui keys lists them
+> key MENU sideways
+  writes true
+  ! key NAME [long|down|up]: ui keys lists the names
+> key EXIT
+  writes true
+  ! key: busy: a long press is still held
+> key EXIT up
+  writes true
+  = key BACK up
+> knob
+  writes true
+  ! knob +N or -N: 1 to 20 steps, + clockwise
+> knob +3
+  writes true
+  = knob +3
+> knob -2
+  writes true
+  = knob -2
+> knob 30
+  writes true
+  ! knob +N or -N: 1 to 20 steps, + clockwise
+> knob x
+  writes true
+  ! knob +N or -N: 1 to 20 steps, + clockwise
+> knob +0
+  writes true
+  ! knob +N or -N: 1 to 20 steps, + clockwise
+> xb
+  writes false
+  = Crossband: off (A 146.52000 <-> B 443.48750)
+> xb start
+  writes true
+  ! xb start: can't start: No transmit in this build
+> xb stop
+  writes true
+  ! xb stop: the repeater isn't running
+> xb stop
+  writes true
+  ! xb stop: the repeater isn't running
+> xb frob
+  writes true
+  ! xb, xb start or xb stop: the crossband repeater
+> dump
+  writes false
+  dump
+  | # Ferrite dump v1, firmware 0.1.0
+  | # One command per line, as typed after : in the terminal; :load reads it back. # starts a note.
+  | # Channels and zones are merged by number: lines replace what they name, nothing else is deleted.
+  | # Settings, by their numbers in the radio's menu
+  | set 0 1 1 Off                     # Watch
+  | set 0 1 2 5 s                     # Resume
+  | set 0 1 3 Every 2 s               # Priority check
+  | set 0 1 6 1 1 min                 # Pause time
+  | set 0 1 6 2 Up                    # Direction
+  | set 0 1 6 3 Off                   # Scan inputs
+  | set 0 1 6 4 Start                 # Return to
+  | set 0 2 4 Name                    # Channel display
+  | set 0 2 5 50 km                   # Local zone
+  | set 0 3 1 1 100 kHz               # Step
+  | set 0 3 1 2 Auto                  # AGC
+  | set 0 3 1 3 On                    # Radio monitor
+  | set 0 3 1 4 Off                   # Sleep timer
+  | set 0 3 2 1 60                    # Bars
+  | set 0 3 2 2 25 kHz                # Step
+  | set 0 3 2 3 10.0 ms               # Sweep speed
+  | set 0 3 2 4 Off                   # Trigger
+  | set 0 3 2 5 Off                   # Waterfall row
+  | set 0 4 2 1 Off                   # Decode
+  | set 0 4 2 2 439.987               # Frequency
+  | set 0 4 2 3 None                  # Capcode filter
+  | set 0 4 3 On                      # DTMF decode
+  | set 0 4 4 On                      # Popups
+  | set 0 5 3 Off                     # APRS mode
+  | set 0 5 4 144.390                 # Frequency
+  | set 0 5 5 1 7 Handheld            # SSID
+  | set 0 5 5 2 Person                # Symbol
+  | set 0 5 5 3 None                  # Comment
+  | set 0 5 5 4 GPS                   # Position source
+  | set 0 5 5 6 Exact                 # Ambiguity
+  | set 0 5 5 7 Off                   # Mic-E
+  | set 0 5 6 1 Off                   # Mode
+  | set 0 5 6 2 Off                   # After voice TX
+  | set 0 5 6 3 Low                   # Power
+  | set 0 5 6 4 Off                   # Telemetry
+  | set 0 5 7 1 Off                   # Digipeat
+  | set 0 5 7 2 WIDE1-1               # Aliases
+  | set 0 5 7 3 0 s                   # Wait
+  | set 0 5 8 Off                     # KISS TNC
+  | set 0 5 9 1 WIDE1-1,WIDE2-1       # Path
+  | set 0 5 9 2 None                  # Custom path
+  | set 0 5 9 3 300 ms                # TX delay
+  | set 0 5 9 4 Mid                   # TX level
+  | set 0 5 9 5 16 bytes              # FX.25 on TX
+  | set 0 5 9 6 On                    # Mute speaker
+  | set 0 5 9 7 APRS first            # Shared VHF
+  | set 0 6 1 Auto                    # GPS
+  | set 0 6 3 DDM                     # Coordinate format
+  | set 0 6 4 Metric                  # Units
+  | set 0 6 5 UTC                     # Time zone
+  | set 0 6 6 24 h, GPS               # Clock
+  | set 0 6 8 Always on               # GPS during RX/TX
+  | set 0 7 1 Night red               # Theme
+  | set 0 7 2 Watch                   # Home layout
+  | set 0 7 3 1 Bars                  # S-meter
+  | set 0 7 3 2 Callsign              # Power-on message
+  | set 0 7 3 3 Logo                  # Boot screen
+  | set 0 7 4 1 1 min                 # Timeout
+  | set 0 7 4 2 3                     # Brightness
+  | set 0 7 4 3 On                    # On transmit
+  | set 0 7 4 4 Keys and RX           # Wake screen on
+  | set 0 7 4 5 With screen           # Keypad light
+  | set 0 7 5 1 On                    # Key beep
+  | set 0 7 5 2 Mid                   # Beep volume
+  | set 0 7 5 3 On                    # Alert tones
+  | set 0 7 5 4 On                    # Arrival tone
+  | set 0 7 5 5 Packet                # Message sound
+  | set 0 7 5 6 Max                   # Message volume
+  | set 0 7 6 RX, TX and heartbeat    # LEDs
+  | set 0 7 7 1 Level 1               # Battery Save
+  | set 0 7 7 2 Auto                  # Low Power Mode
+  | set 0 7 7 3 20 %                  # Auto below
+  | set 0 7 8 Off                     # Auto power off
+  | set 0 7 9 30 s                    # Menu timeout
+  | set 0 8 1 120 s                   # Timeout
+  | set 0 8 2 1 Off                   # VOX
+  | set 0 8 2 2 5                     # Level
+  | set 0 8 2 3 2 s                   # Tail
+  | set 0 8 3 5                       # Mic gain
+  | set 0 8 4 Off                     # End tone
+  | set 0 8 5 3 100 ms                # Speed
+  | set 0 8 5 4 On                    # Sidetone
+  | set 0 8 5 5 300 ms                # First digit delay
+  | set 0 8 6 2 Off                   # CW ID
+  | set 0 8 7 Off                     # Busy lockout default
+  | set 0 8 8 1 Normal                # Subtone level
+  | set 0 8 8 2 Off                   # Tail elimination
+  | set 0 8 8 3 55 Hz                 # Phase
+  | set 0 9 1 1 Off                   # Auto lock
+  | set 0 9 2 1 Off                   # Bluetooth
+  | set 0 9 2 3 Auto                  # Cable port
+  | set 0 9 5 Software                # Squelch
+  | set 0 9 9 3 Off                   # Cable log
+  | set 0 9 9 4 Off                   # Terminal colour
+  | set 0 9 9 5 Dynamic               # MCU clock
+  | # 0 9 4 Region: Not set (changes only on the radio)
+  | # Zones (a channel's zone=N is one of these)
+  | zone 1 "Simplex" scan=off shown=on distance=off resume=radio dwell=radio
+  | zone 2 "Repeaters" scan=on shown=on distance=off resume=radio dwell=radio pri1=12
+  | zone 3 "Empty" scan=off shown=on distance=off resume=radio dwell=radio
+  | zone 4 "Air" scan=off shown=on distance=off resume=carrier dwell=radio
+  | zone 5 "Marine" scan=off shown=on distance=off resume=radio dwell=radio
+  | zone 6 "Weather" scan=off shown=off distance=off resume=radio dwell=radio
+  | zone 7 "Next" scan=off shown=on distance=off resume=radio dwell=radio
+  | # Range presets (0 1 4)
+  | preset 1 "2 m" 144.00000 148.00000 step=12.5kHz mode=NFM
+  | preset 2 "70 cm" 430.00000 450.00000 step=12.5kHz mode=FM
+  | preset 3 "Airband" 118.00000 137.00000 step=25kHz mode=AM resume=carrier
+  | preset 4 "Marine" 156.00000 162.02500 step=25kHz mode=FM
+  | # Channels (22 of 4000)
+  | ch 1 "Calling 2 m" 146.52000 offset=simplex mode=NFM tone=off power=low zone=1
+  | ch 2 "Calling 70 cm" 446.00000 offset=simplex mode=NFM tone=off power=low zone=1
+  | ch 3 "Simplex B" 147.55500 offset=simplex mode=NFM tone=off power=low zone=1
+  | ch 4 "Simplex C" 146.58000 offset=simplex mode=NFM tone=off power=low zone=1
+  | ch 10 "North hill" 146.94000 offset=-0.60000 mode=NFM txtone=100.0 rxtone=off power=low zone=2 pos=45.5454922,-75.7283492
+  | ch 12 "Club -north-" 443.47500 offset=split tx=147.00000 mode=AM txtone=off rxtone=88.5 power=high zone=1 squelch=global busy=on tail=on reverse aprs rxonly hidden priority pos=45.4075605,-75.6628014
+  | ch 15 "Downtown DCS" 444.20000 offset=+5.00000 mode=NFM txtone=D023N rxtone=off power=low zone=2 pos=45.417809,-75.7116483
+  | ch 17 "Camp Fortune" 147.15000 offset=+0.60000 mode=NFM txtone=100.0 rxtone=off power=low zone=2 pos=45.1800612,-75.8958003
+  | ch 18 "Far east" 145.29000 offset=-0.60000 mode=NFM txtone=110.9 rxtone=off power=low zone=2 pos=45.3838771,-75.08452
+  | ch 31 "Guard" 121.50000 offset=simplex mode=AM tone=off power=low zone=4
+  | ch 32 "Tower" 119.10000 offset=simplex mode=AM tone=off power=low zone=4
+  | ch 33 "ATIS" 132.95000 offset=simplex mode=AM tone=off power=low zone=4
+  | ch 41 "Marine 16" 156.80000 offset=simplex mode=FM tone=off power=low zone=5
+  | ch 42 "Marine 68" 156.42500 offset=simplex mode=FM tone=off power=low zone=5
+  | ch 43 "Marine 72" 156.62500 offset=simplex mode=FM tone=off power=low zone=5
+  | ch 51 "WX1" 162.55000 offset=simplex mode=FM tone=off power=low zone=6
+  | ch 52 "WX2" 162.40000 offset=simplex mode=FM tone=off power=low zone=6
+  | ch 53 "WX3" 162.47500 offset=simplex mode=FM tone=off power=low zone=6
+  | ch 61 "ISS downlink" 145.80000 offset=simplex mode=NFM tone=off power=low
+  | ch 62 "Hotspot" 438.80000 offset=simplex mode=NFM tone=off power=low
+  | ch 63 "FRS 1" 462.56250 offset=simplex mode=NFM tone=off power=low
+  | ch 301 "Two20" 223.50000 offset=simplex mode=NFM tone=off power=mid
+  | end
+> load
+  writes true
+  load
+> gps
+  writes false
+  debug job
+> gps query
+  writes false
+  debug job
+> gps nmea off
+  writes true
+  debug job
+> gps frob
+  writes true
+  ! gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (1-65535 s)
+> sat
+  writes false
+  list Sats
+  | No satellites. Load them from Ferrite Console, or sat add to paste a TLE.
+> sat add
+  writes true
+  sat paste
+> sat del 1
+  writes true
+  ! No satellite at 1
+> sat del x
+  writes true
+  ! sat del N: N as sat lists it, 1-32
+> sat frob
+  writes true
+  ! sat lists them; sat add pastes a TLE or OMM CSV; sat del N deletes one
+> clear
+  writes true
+  ! clear channels N: deletes every channel
+> clear frob
+  writes true
+  ! clear channels N: deletes every channel
+> clear channels 3
+  writes true
+  ! This deletes all 22 channels. To go ahead, type: clear channels 22
+> clear channels
+  writes true
+  ! This deletes all 22 channels. To go ahead, type: clear channels 22
+> mem 20000000 4
+  writes false
+  debug job
+> mem32 40010808 1
+  writes false
+  debug job
+> gpio
+  writes false
+  debug job
+> bk 0 30
+  writes true
+  debug job
+> bk settle
+  writes false
+  debug job
+> bk save
+  writes false
+  debug job
+> si 10 00
+  writes true
+  debug job
+> bt AT
+  writes true
+  debug job
+> rx both
+  writes true
+  debug job
+> mic
+  writes false
+  debug job
+> af
+  writes false
+  debug job
+> txtest sweep
+  writes true
+  debug job
+> lcd
+  writes false
+  debug job
+> fsk
+  writes false
+  debug job
+> meter
+  writes false
+  debug job
+> synthfsk
+  writes true
+  ! synthfsk cal MS SHIFT DEV, or synthfsk MS SUB SHIFT DEV G0 G1 G2 G3: while keyed, Dry TX only
+> pin
+  writes true
+  ! pin pa15|pc12|pc9|pb8|pe1|pe4 0|1|u|d (u, d: an input with a pull), until the next path step
+< set 0 7 1 Dark
+  = 0 7 1 Theme: Dark
+< ch 12 power low
+  ! power: this channel is RX only
+< zone 1
+  ! zone 1: its name in quotes, e.g. zone 1 "Repeaters"
+< preset 1
+  ! preset: its name in quotes, then start and end in MHz
+< home 12
+  = Home channel: 12
+< quick 3
+  ! quick can't be in a load
+< get
+  ! get can't be in a load
+< slot
+  ! slot can't be in a load
+< dump
+  ! dump can't be in a load
+< sat
+  ! sat can't be in a load
+< frob
+  ! frob can't be in a load
+> clear channels 22
+  writes true
+  = All 22 channels deleted
+> dump
+  writes false
+  dump
+  | # Ferrite dump v1, firmware 0.1.0
+  | # One command per line, as typed after : in the terminal; :load reads it back. # starts a note.
+  | # Channels and zones are merged by number: lines replace what they name, nothing else is deleted.
+  | # Settings, by their numbers in the radio's menu
+  | set 0 1 1 Off                     # Watch
+  | set 0 1 2 5 s                     # Resume
+  | set 0 1 3 Every 2 s               # Priority check
+  | set 0 1 6 1 1 min                 # Pause time
+  | set 0 1 6 2 Up                    # Direction
+  | set 0 1 6 3 Off                   # Scan inputs
+  | set 0 1 6 4 Start                 # Return to
+  | set 0 2 4 Name                    # Channel display
+  | set 0 2 5 50 km                   # Local zone
+  | set 0 3 1 1 100 kHz               # Step
+  | set 0 3 1 2 Auto                  # AGC
+  | set 0 3 1 3 On                    # Radio monitor
+  | set 0 3 1 4 Off                   # Sleep timer
+  | set 0 3 2 1 60                    # Bars
+  | set 0 3 2 2 25 kHz                # Step
+  | set 0 3 2 3 10.0 ms               # Sweep speed
+  | set 0 3 2 4 Off                   # Trigger
+  | set 0 3 2 5 Off                   # Waterfall row
+  | set 0 4 2 1 Off                   # Decode
+  | set 0 4 2 2 439.987               # Frequency
+  | set 0 4 2 3 None                  # Capcode filter
+  | set 0 4 3 On                      # DTMF decode
+  | set 0 4 4 On                      # Popups
+  | set 0 5 3 Off                     # APRS mode
+  | set 0 5 4 144.390                 # Frequency
+  | set 0 5 5 1 7 Handheld            # SSID
+  | set 0 5 5 2 Person                # Symbol
+  | set 0 5 5 3 None                  # Comment
+  | set 0 5 5 4 GPS                   # Position source
+  | set 0 5 5 6 Exact                 # Ambiguity
+  | set 0 5 5 7 Off                   # Mic-E
+  | set 0 5 6 1 Off                   # Mode
+  | set 0 5 6 2 Off                   # After voice TX
+  | set 0 5 6 3 Low                   # Power
+  | set 0 5 6 4 Off                   # Telemetry
+  | set 0 5 7 1 Off                   # Digipeat
+  | set 0 5 7 2 WIDE1-1               # Aliases
+  | set 0 5 7 3 0 s                   # Wait
+  | set 0 5 8 Off                     # KISS TNC
+  | set 0 5 9 1 WIDE1-1,WIDE2-1       # Path
+  | set 0 5 9 2 None                  # Custom path
+  | set 0 5 9 3 300 ms                # TX delay
+  | set 0 5 9 4 Mid                   # TX level
+  | set 0 5 9 5 16 bytes              # FX.25 on TX
+  | set 0 5 9 6 On                    # Mute speaker
+  | set 0 5 9 7 APRS first            # Shared VHF
+  | set 0 6 1 Auto                    # GPS
+  | set 0 6 3 DDM                     # Coordinate format
+  | set 0 6 4 Metric                  # Units
+  | set 0 6 5 UTC                     # Time zone
+  | set 0 6 6 24 h, GPS               # Clock
+  | set 0 6 8 Always on               # GPS during RX/TX
+  | set 0 7 1 Dark                    # Theme
+  | set 0 7 2 Watch                   # Home layout
+  | set 0 7 3 1 Bars                  # S-meter
+  | set 0 7 3 2 Callsign              # Power-on message
+  | set 0 7 3 3 Logo                  # Boot screen
+  | set 0 7 4 1 1 min                 # Timeout
+  | set 0 7 4 2 7                     # Brightness
+  | set 0 7 4 3 On                    # On transmit
+  | set 0 7 4 4 Keys and RX           # Wake screen on
+  | set 0 7 4 5 With screen           # Keypad light
+  | set 0 7 5 1 On                    # Key beep
+  | set 0 7 5 2 Mid                   # Beep volume
+  | set 0 7 5 3 On                    # Alert tones
+  | set 0 7 5 4 On                    # Arrival tone
+  | set 0 7 5 5 Packet                # Message sound
+  | set 0 7 5 6 Max                   # Message volume
+  | set 0 7 6 RX, TX and heartbeat    # LEDs
+  | set 0 7 7 1 Level 1               # Battery Save
+  | set 0 7 7 2 Auto                  # Low Power Mode
+  | set 0 7 7 3 20 %                  # Auto below
+  | set 0 7 8 Off                     # Auto power off
+  | set 0 7 9 30 s                    # Menu timeout
+  | set 0 8 1 120 s                   # Timeout
+  | set 0 8 2 1 Off                   # VOX
+  | set 0 8 2 2 5                     # Level
+  | set 0 8 2 3 2 s                   # Tail
+  | set 0 8 3 5                       # Mic gain
+  | set 0 8 4 Off                     # End tone
+  | set 0 8 5 3 100 ms                # Speed
+  | set 0 8 5 4 On                    # Sidetone
+  | set 0 8 5 5 300 ms                # First digit delay
+  | set 0 8 6 2 Off                   # CW ID
+  | set 0 8 7 Off                     # Busy lockout default
+  | set 0 8 8 1 Normal                # Subtone level
+  | set 0 8 8 2 Off                   # Tail elimination
+  | set 0 8 8 3 55 Hz                 # Phase
+  | set 0 9 1 1 Off                   # Auto lock
+  | set 0 9 2 1 Off                   # Bluetooth
+  | set 0 9 2 3 Auto                  # Cable port
+  | set 0 9 5 Software                # Squelch
+  | set 0 9 9 3 Off                   # Cable log
+  | set 0 9 9 4 Off                   # Terminal colour
+  | set 0 9 9 5 Dynamic               # MCU clock
+  | # 0 9 4 Region: Not set (changes only on the radio)
+  | # Zones (a channel's zone=N is one of these)
+  | zone 1 "Simplex" scan=off shown=on distance=off resume=radio dwell=radio
+  | zone 2 "Repeaters" scan=on shown=on distance=off resume=radio dwell=radio pri1=12
+  | zone 3 "Empty" scan=off shown=on distance=off resume=radio dwell=radio
+  | zone 4 "Air" scan=off shown=on distance=off resume=carrier dwell=radio
+  | zone 5 "Marine" scan=off shown=on distance=off resume=radio dwell=radio
+  | zone 6 "Weather" scan=off shown=off distance=off resume=radio dwell=radio
+  | zone 7 "Next" scan=off shown=on distance=off resume=radio dwell=radio
+  | # Range presets (0 1 4)
+  | preset 1 "2 m" 144.00000 148.00000 step=12.5kHz mode=NFM
+  | preset 2 "70 cm" 430.00000 450.00000 step=12.5kHz mode=FM
+  | preset 3 "Airband" 118.00000 137.00000 step=25kHz mode=AM resume=carrier
+  | preset 4 "Marine" 156.00000 162.02500 step=25kHz mode=FM
+  | # Channels (0 of 4000)
+  | end
