@@ -851,7 +851,7 @@ impl Session {
         let (w, idx) = (p[0], le16(&p[1..]));
         match w {
             what::CHANNEL if idx < MAX_CHANNELS => {
-                if crate::term::list::radio_channel(app) == Some(idx) {
+                if crate::term::radio_channel(app) == Some(idx) {
                     return Status::Busy; // open in the radio's editor (TERM-17's rule here too)
                 }
                 if st.get(idx).is_none() {
@@ -1561,7 +1561,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
     match w {
         what::CHANNEL if idx < MAX_CHANNELS && rec.is_empty() => {
             // LINK-41.2: a record of length 0 deletes the channel (none there: nothing to do)
-            if crate::term::list::radio_channel(app) == Some(idx) {
+            if crate::term::radio_channel(app) == Some(idx) {
                 return Status::Busy; // open in the radio's editor (TERM-17)
             }
             if st.get(idx).is_some() {
@@ -1603,7 +1603,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if let Err(m) = crate::term::cmd::check(&c) {
                 return invalid(o, m.as_bytes());
             }
-            if crate::term::list::radio_channel(app) == Some(idx) {
+            if crate::term::radio_channel(app) == Some(idx) {
                 return Status::Busy; // open in the radio's editor: the radio wins (TERM-17)
             }
             if st.get(idx) != Some(c) {

@@ -30,14 +30,18 @@ case "$1" in
     tx) name=ferrite-tx build="fw --features tx" ;;
     tx-bench) name=ferrite-txbench build="fw --features tx-bench" ;; # tx + bench, Dry TX on at power-on
     reader) name=ferrite-reader build="fw-reader" elf=ferrite-reader ;;
-    *) echo "usage: $0 [bringup | tx | tx-bench | reader] [clock-24 | clock-48 | clock-96 | clock-144 | clock-192 | clock-240]" >&2; exit 2 ;;
+    *) echo "usage: $0 [bringup | tx | tx-bench | reader] [clock-24 | clock-48 | clock-96 | clock-144 | clock-192 | clock-240 | no-vt100]" >&2; exit 2 ;;
 esac
 case "$2" in
     "") ;;
     clock-24|clock-48|clock-96|clock-144|clock-192|clock-240)
         name="$name-${2#clock-}"
         case "$build" in *--features*) build="$build,$2" ;; *) build="$build --features $2" ;; esac ;;
-    *) echo "unknown clock: $2" >&2; exit 2 ;;
+    no-vt100)
+        # decision 342: without the terminal's full-screen pages (the command line stays), to compare sizes
+        name="$name-novt100"
+        case "$build" in *--features*) build="$build,sat-predict --no-default-features" ;; *) build="$build --features sat-predict --no-default-features" ;; esac ;;
+    *) echo "unknown clock or variant: $2" >&2; exit 2 ;;
 esac
 [ "$elf" = ferrite-reader ] && [ -n "$2" ] && { echo "the reader has no clock builds" >&2; exit 2; }
 cargo $build

@@ -7,9 +7,8 @@
 //! channels runs one channel write per poll, after the store has taken the last one, as a load does
 //! (TERM-13).
 
-use super::{cmd::Msg, list_len, Page, Term};
+use super::{cmd::Msg, list_len, radio_channel, Page, Term};
 use crate::chan::{Channel, ChannelStore, MAX_CHANNELS, NO_ZONE, ZoneId};
-use crate::screens::Screen;
 use crate::App;
 use core::cmp::Ordering;
 use ferrite_core::freq::mhz;
@@ -98,28 +97,6 @@ fn matches(c: &Channel, t: &[u8]) -> bool {
     let name = c.name();
     let in_name = name.len() >= t.len() && name.windows(t.len()).any(|w| w.eq_ignore_ascii_case(t));
     in_name || super::mhz5(c.rx).as_bytes().starts_with(t)
-}
-
-/// The channel open in one of the radio's editors (TERM-17): the active slot's channel while its channel
-/// editor, or an editor opened from it, is on the radio's screen.
-pub(crate) fn radio_channel(app: &App) -> Option<u16> {
-    let from_editor = app.back.iter().flatten().any(|s| matches!(s, Screen::ChEdit(_)));
-    let open = match app.screen {
-        Screen::ChEdit(_) => true,
-        Screen::Value(_) | Screen::Tones(_) | Screen::Text(_) | Screen::Entry(_) => from_editor,
-        _ => false,
-    };
-    let s = &app.slots[app.active as usize];
-    s.ch.filter(|_| open && s.on_channel()).map(|c| c.num)
-}
-
-/// The setting highlighted in the radio's menu (TERM-17): the knob changes it there at once (MENU-16).
-pub(super) fn radio_setting(app: &App) -> Option<([u8; 3], usize)> {
-    match app.screen {
-        Screen::Group(g) if g.sub == 0 => Some(([g.g, g.row + 1, 0], 2)),
-        Screen::Group(g) => Some(([g.g, g.sub, g.row + 1], 3)),
-        _ => None,
-    }
 }
 
 impl Term {

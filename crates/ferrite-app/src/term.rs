@@ -13,12 +13,9 @@
 //! [`cmd`]; a command that answers in several lines (a dump, a load's report, help) uses the console, which
 //! streams lines and then waits for Enter. Not yet: marking or colour (TERM-14, 18).
 
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_RX_ONLY, NO_ZONE, ZoneId};
+use crate::chan::ChannelStore;
 pub(crate) use crate::chfield::parse_mhz;
-use crate::chfield::{ChField as F, Ctx, Op};
-use crate::screens::groups::{self, SUBS};
 use crate::settings::CABLE_PORTS;
-use crate::slot::Item;
 use crate::App;
 use ferrite_core::freq::Freq10;
 use ferrite_core::msg::{Device, LiveAll};
@@ -40,8 +37,16 @@ macro_rules! put {
 
 pub mod cmd;
 pub mod debug;
+#[cfg(feature = "vt100")]
 pub(crate) mod list;
+#[cfg(feature = "vt100")]
+mod pages;
+#[cfg(feature = "vt100")]
 mod tpl;
+#[cfg(feature = "vt100")]
+use pages::*;
+#[cfg(not(feature = "vt100"))]
+mod line;
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {
@@ -58,6 +63,7 @@ pub const MAX_ROWS: u8 = 64;
 /// A lone ESC is the Esc key once nothing follows it for this long (arrows and PF keys start with ESC).
 const ESC_MS: u32 = 60;
 /// Every row is checked again this often: the clock, live activity, edits made on the radio (TERM-10).
+#[cfg(feature = "vt100")]
 const REFRESH_MS: u32 = 1000;
 /// The most a row can take on the wire: its text plus the cursor move and attributes.
 const ROW_MAX: usize = MAX_COLS as usize + 48;
@@ -118,6 +124,7 @@ enum Con {
     /// Esc or Ctrl-C: say so, then wait.
     Stop,
     /// Over: Enter or Esc goes back to the page.
+    #[cfg_attr(not(feature = "vt100"), allow(dead_code))]
     Done,
 }
 
@@ -137,51 +144,39 @@ fn cmd_trim(s: &[u8]) -> &[u8] {
     &s[a..b]
 }
 
-/// The channel editor's fields, in order (the radio's editor: EDIT-2, CHAN-4), with their rules in [`crate::chfield`].
-const FIELDS: [F; 16] = [
-    F::Name,
-    F::Zone,
-    F::Rx,
-    F::It(Item::Mode),
-    F::It(Item::RxTone),
-    F::It(Item::Tones),
-    F::It(Item::Offset),
-    F::Tx,
-    F::It(Item::Power),
-    F::It(Item::Squelch),
-    F::It(Item::BusyLock),
-    F::Scan,
-    F::Flag(FLAG_APRS),
-    F::Flag(FLAG_RX_ONLY),
-    F::Flag(FLAG_HIDDEN),
-    F::Home,
-];
-
-/// The channel list's "every channel" filter.
-const ALL: ZoneId = 0xFFFD;
-/// What the main menu's entries open (their names are the template's).
-const MAIN: [Page; 7] = [Page::Channels, Page::Zones, Page::Settings, Page::Monitor, Page::Mail, Page::Tnc, Page::About];
-
 pub struct Term {
     page: Page,
+    #[cfg(feature = "vt100")]
     help: bool,
     /// Ctrl-C: say goodbye on the next poll and wait for Enter again.
     bye: bool,
+    #[cfg(feature = "vt100")]
     main_sel: u8,
     /// Channel list: the filter (a zone, [`NO_ZONE`] or [`ALL`]), selection and first row shown.
-    zone: ZoneId,
+    #[cfg(feature = "vt100")]
+    zone: crate::chan::ZoneId,
+    #[cfg(feature = "vt100")]
     chan_sel: u16,
+    #[cfg(feature = "vt100")]
     chan_top: u16,
+    #[cfg(feature = "vt100")]
     from_zones: bool,
+    #[cfg(feature = "vt100")]
     zone_sel: u16,
     /// Settings: group (0 = the list of groups), third-level list (0 = none), selection.
+    #[cfg(feature = "vt100")]
     g: u8,
+    #[cfg(feature = "vt100")]
     sub: u8,
+    #[cfg(feature = "vt100")]
     set_sel: u8,
     /// The channel being edited: the terminal's own copy, written through the App on every change.
-    edit: Option<Channel>,
+    #[cfg(feature = "vt100")]
+    edit: Option<crate::chan::Channel>,
+    #[cfg(feature = "vt100")]
     field: u8,
     /// A value being typed (the name, a frequency), when Some.
+    #[cfg(feature = "vt100")]
     line: Option<Buf<24>>,
     /// The note under the page: what a change did or why it was refused.
     note: cmd::Msg,
@@ -207,13 +202,16 @@ pub struct Term {
     rows: u8,
     /// Rows to check, and the hash of what each row last sent (0 = never sent).
     dirty: u64,
+    #[cfg(feature = "vt100")]
     hash: [u32; MAX_ROWS as usize],
     clear: bool,
+    #[cfg(feature = "vt100")]
     ask_size: bool,
     esc: Seq,
     esc_at: u32,
     num: [u16; 2],
     nn: u8,
+    #[cfg(feature = "vt100")]
     last: u32,
     /// The time of the last poll (ms): debug answers time out against it.
     now: u32,
@@ -221,16 +219,27 @@ pub struct Term {
     /// number), a sorted page (channel numbers, its row count, whether it is current, the list's length when it
     /// was filled), the selected row in it and its first channel, what is being asked, the last thing found,
     /// and a change to several channels in progress.
+    #[cfg(feature = "vt100")]
     sort: u8,
+    #[cfg(feature = "vt100")]
     marks: [u8; list::MARK_BYTES],
+    #[cfg(feature = "vt100")]
     vis: [u16; list::VIS],
+    #[cfg(feature = "vt100")]
     vis_n: u8,
+    #[cfg(feature = "vt100")]
     vis_ok: bool,
+    #[cfg(feature = "vt100")]
     vis_len: u16,
+    #[cfg(feature = "vt100")]
     srow: u8,
+    #[cfg(feature = "vt100")]
     first: u16,
+    #[cfg(feature = "vt100")]
     ask: list::Ask,
+    #[cfg(feature = "vt100")]
     find: Buf<16>,
+    #[cfg(feature = "vt100")]
     bulk: Option<list::Bulk>,
     /// Bluetooth (TERM-25): auto start only (the cable port setting is the cable's). While the radio's PIN lock is
     /// on, a Bluetooth terminal asks for the PIN first and does nothing else until it's right (LINK-30, LINK-31):
@@ -252,19 +261,32 @@ impl Term {
     pub const fn new() -> Self {
         Term {
             page: Page::Off,
+            #[cfg(feature = "vt100")]
             help: false,
             bye: false,
+            #[cfg(feature = "vt100")]
             main_sel: 0,
+            #[cfg(feature = "vt100")]
             zone: ALL,
+            #[cfg(feature = "vt100")]
             chan_sel: 0,
+            #[cfg(feature = "vt100")]
             chan_top: 0,
+            #[cfg(feature = "vt100")]
             from_zones: false,
+            #[cfg(feature = "vt100")]
             zone_sel: 0,
+            #[cfg(feature = "vt100")]
             g: 0,
+            #[cfg(feature = "vt100")]
             sub: 0,
+            #[cfg(feature = "vt100")]
             set_sel: 0,
+            #[cfg(feature = "vt100")]
             edit: None,
+            #[cfg(feature = "vt100")]
             field: 0,
+            #[cfg(feature = "vt100")]
             line: None,
             note: Buf::new(),
             warn: false,
@@ -281,30 +303,44 @@ impl Term {
             cols: MIN_COLS,
             rows: MIN_ROWS,
             dirty: 0,
+            #[cfg(feature = "vt100")]
             hash: [0; MAX_ROWS as usize],
             clear: false,
+            #[cfg(feature = "vt100")]
             ask_size: false,
             esc: Seq::None,
             esc_at: 0,
             num: [0; 2],
             nn: 0,
+            #[cfg(feature = "vt100")]
             last: 0,
             now: 0,
+            #[cfg(feature = "vt100")]
             sort: 0,
+            #[cfg(feature = "vt100")]
             marks: [0; list::MARK_BYTES],
+            #[cfg(feature = "vt100")]
             vis: [0; list::VIS],
+            #[cfg(feature = "vt100")]
             vis_n: 0,
+            #[cfg(feature = "vt100")]
             vis_ok: false,
+            #[cfg(feature = "vt100")]
             vis_len: 0,
+            #[cfg(feature = "vt100")]
             srow: 0,
+            #[cfg(feature = "vt100")]
             first: list::START,
+            #[cfg(feature = "vt100")]
             ask: list::Ask::None,
             bt: false,
             pin_need: false,
             pin_ok: false,
             pin: [0; 6],
             pin_n: 0,
+            #[cfg(feature = "vt100")]
             find: Buf::new(),
+            #[cfg(feature = "vt100")]
             bulk: None,
         }
     }
@@ -329,7 +365,7 @@ impl Term {
     /// Rows are still waiting for room in the sink, a line waits to run, or the console is streaming: poll
     /// again soon.
     pub fn busy(&self) -> bool {
-        self.page != Page::Off && (self.dirty != 0 || self.clear || self.bye || self.pending || self.bulk.is_some() || matches!(self.con, Con::Start(_) | Con::Run(_)))
+        self.page != Page::Off && (self.dirty != 0 || self.clear || self.bye || self.pending || self.bulk_on() || matches!(self.con, Con::Start(_) | Con::Run(_)))
     }
 
     /// It takes another byte now. False while a whole line waits to run (a load waits for the store between
@@ -395,8 +431,19 @@ impl Term {
     /// Everything again: clear the screen, forget what each row showed (Ctrl-L, TERM-16).
     fn redraw(&mut self) {
         self.clear = true;
-        self.hash = [0; MAX_ROWS as usize];
+        #[cfg(feature = "vt100")]
+        {
+            self.hash = [0; MAX_ROWS as usize];
+        }
         self.all_dirty();
+    }
+
+    /// Several channels changing (TERM-14): the poll has more to do.
+    fn bulk_on(&self) -> bool {
+        #[cfg(feature = "vt100")]
+        return self.bulk.is_some();
+        #[cfg(not(feature = "vt100"))]
+        false
     }
 
     fn all_dirty(&mut self) {
@@ -405,17 +452,16 @@ impl Term {
 
     fn start(&mut self) {
         *self = Term { cols: self.cols, rows: self.rows, bt: self.bt, pin_need: self.pin_need, ..Term::new() };
-        self.page = Page::Splash;
-        self.ask_size = true;
+        #[cfg(feature = "vt100")]
+        {
+            self.page = Page::Splash;
+            self.ask_size = true;
+        }
+        #[cfg(not(feature = "vt100"))]
+        {
+            self.page = Page::Main; // the command line: the banner, then a prompt
+        }
         self.redraw();
-    }
-
-    fn go(&mut self, p: Page) {
-        self.page = p;
-        self.help = false;
-        self.line = None;
-        self.note.clear();
-        (self.warn, self.bnote) = (false, false);
     }
 
     fn say(&mut self, s: &[u8], warn: bool) {
@@ -610,190 +656,12 @@ impl Term {
             K::CtrlL => return self.redraw(),
             _ => {}
         }
-        // A value being typed takes every key until Enter or Esc.
-        if let Some(mut l) = self.line {
-            match k {
-                K::Enter => {
-                    self.line = None;
-                    if self.ask == list::Ask::None {
-                        self.commit(app, l.as_bytes());
-                    } else {
-                        self.answer(app, l.as_bytes(), store);
-                    }
-                }
-                K::Esc => (self.line, self.ask) = (None, list::Ask::None),
-                K::Bs => {
-                    let n = l.len().saturating_sub(1);
-                    let t = Buf::<24>::from(&l.as_bytes()[..n]);
-                    self.line = Some(t);
-                }
-                K::Ch(c) if l.len() < self.line_max() => {
-                    l.push(&[c]);
-                    self.line = Some(l);
-                }
-                _ => {}
-            }
-            return;
-        }
-        if self.help {
-            if matches!(k, K::Esc | K::Ch(b'?') | K::Pf(1) | K::Enter) {
-                self.help = false;
-            }
-            return;
-        }
-        if matches!(k, K::Ch(b'?') | K::Pf(1)) {
-            self.help = true;
-            return;
-        }
-        if k == K::Ch(b':') && self.page != Page::Off {
-            (self.cmd, self.clen) = (true, 0);
-            return;
-        }
-        match self.page {
-            Page::Off => {}
-            Page::Channels => {
-                if !self.list_key(app, k, store) {
-                    self.tpl_key(app, k, store);
-                    self.keep_in_view();
-                }
-            }
-            Page::Edit if self.edit.is_none() => self.go(Page::Channels),
-            Page::Settings if self.g != 0 && groups::items(self.g, self.sub).is_empty() => self.settings_up(),
-            _ => {
-                self.tpl_key(app, k, store);
-            }
-        }
-    }
-
-    fn open_main(&mut self) {
-        let p = MAIN[self.main_sel as usize % MAIN.len()];
-        match p {
-            Page::Channels => {
-                (self.zone, self.from_zones) = (ALL, false);
-                self.list_reset();
-            }
-            Page::Settings => (self.g, self.sub, self.set_sel) = (0, 0, 0),
-            _ => {}
-        }
-        self.go(p);
-    }
-
-    /// Rows the channel list shows at once.
-    fn page_rows(&self) -> u16 {
-        (self.rows as u16).saturating_sub(8).max(1)
-    }
-
-    fn line_max(&self) -> usize {
-        if self.ask != list::Ask::None {
-            return 16;
-        }
-        match FIELDS[self.field as usize % FIELDS.len()] {
-            F::Name => 16,
-            _ => 10,
-        }
-    }
-
-    /// ◀▶ on a field: the same steps and checks as the radio's channel editor (TERM-6, TERM-7).
-    fn change<S: ChannelStore>(&mut self, app: &mut App, c: Channel, f: F, d: i32, store: &S) {
-        match f {
-            F::Name => return self.say("Enter types the name (16 characters)".as_bytes(), false),
-            F::Tx if !c.cfg.split => return self.say("TX: Enter types a TX frequency (split)".as_bytes(), false),
-            _ => {}
-        }
-        self.apply(app, c, f, Op::Step(d), store.zones(), &|z| store.zone_room(z, c.num));
-        if f == F::It(Item::Offset) && self.edit.is_some_and(|n| n.cfg.split && !c.cfg.split) {
-            // Split on today's TX, as the radio's knob: the TX row, typing another
-            self.field = FIELDS.iter().position(|x| *x == F::Tx).unwrap_or(0) as u8;
-            self.line = Some(Buf::new());
-            self.say("Split: type the TX frequency, then Enter".as_bytes(), false);
-        }
-    }
-
-    /// # on a field: its default (MENU-18).
-    fn default(&mut self, app: &mut App, c: Channel, f: F) {
-        self.apply(app, c, f, Op::Reset, 0, &crate::chfield::any_room);
-    }
-
-    /// A typed value: the name, or the RX or split TX frequency in MHz.
-    fn commit(&mut self, app: &mut App, s: &[u8]) {
-        let Some(c) = self.edit else { return };
-        let f = FIELDS[self.field as usize % FIELDS.len()];
-        self.apply(app, c, f, Op::Typed(s), 0, &crate::chfield::any_room);
-    }
-
-    /// A field's change through its rules: saved, Home set, or the refusal said.
-    fn apply(&mut self, app: &mut App, c: Channel, f: F, op: Op, zones: ZoneId, room: &dyn Fn(ZoneId) -> bool) {
-        let (mut n, mut home) = (c, app.set.home_ch);
-        if let Err(r) = f.change(&mut n, &mut home, op, Ctx { zones, region: app.set.region(), room }) {
-            let mut m = Buf::<96>::new();
-            r.line(&mut m);
-            return self.say(m.as_bytes(), true);
-        }
-        if home != app.set.home_ch {
-            app.set.home_ch = home;
-            let on = home == Some(c.num);
-            return self.say(if on { "Home channel: hold 0 on home jumps here".as_bytes() } else { "No longer the home channel".as_bytes() }, false);
-        }
-        self.save(app, n);
-    }
-
-    fn save(&mut self, app: &mut App, n: Channel) {
-        if list::radio_channel(app) == Some(n.num) {
-            // TERM-17: the radio's editor has it; its copy wins and shows here.
-            return self.say("Open in the radio's editor: change it there".as_bytes(), true);
-        }
-        if Some(n) != self.edit {
-            app.put_channel(n);
-            self.edit = Some(n);
-            self.say(b"Saved", false);
-        }
-    }
-
-    fn settings_up(&mut self) {
-        if self.sub != 0 {
-            (self.set_sel, self.sub) = (self.sub - 1, 0);
-        } else if self.g != 0 {
-            (self.set_sel, self.g) = (self.g - 1, 0);
-        } else {
-            return self.go(Page::Main);
-        }
-        self.note.clear();
-    }
-
-    /// The highlighted item's path after MENU 0 (the radio's numbers, TERM-6).
-    fn path(&self, row: u8) -> ([u8; 3], usize) {
-        if self.sub == 0 { ([self.g, row + 1, 0], 2) } else { ([self.g, self.sub, row + 1], 3) }
-    }
-
-    fn settings_open(&mut self, app: &mut App) {
-        self.note.clear();
-        if self.g == 0 {
-            (self.g, self.set_sel) = (self.set_sel + 1, 0);
-            return;
-        }
-        if self.sub == 0 && SUBS.iter().any(|(q, _)| *q == (self.g, self.set_sel + 1)) {
-            (self.sub, self.set_sel) = (self.set_sel + 1, 0);
-            return;
-        }
-        self.settings_change(app, 1);
-    }
-
-    fn settings_change(&mut self, app: &mut App, d: i32) {
-        let (p, pl) = self.path(self.set_sel);
-        if list::radio_setting(app) == Some((p, pl)) {
-            return self.say("Open on the radio's menu: change it there".as_bytes(), true); // TERM-17
-        }
-        let p = &p[..pl];
-        if blocked(p) {
-            return self.say("Change this one on the radio".as_bytes(), true);
-        }
-        if let Some(why) = groups::greyed(app, p) {
-            return self.say(why.as_bytes(), true);
-        }
-        if groups::change(app, p, d) {
-            self.say(b"Changed", false);
-        } else {
-            self.say("Not settable yet".as_bytes(), true);
+        #[cfg(feature = "vt100")]
+        self.page_key(app, k, store);
+        #[cfg(not(feature = "vt100"))]
+        {
+            let _ = (app, store);
+            self.line_key(k);
         }
     }
 
@@ -835,10 +703,12 @@ impl Term {
             *self = Term { cols: self.cols, rows: self.rows, ..Term::new() };
             return;
         }
+        #[cfg(feature = "vt100")]
         if now.wrapping_sub(self.last) >= REFRESH_MS {
             self.last = now;
             self.all_dirty();
         }
+        #[cfg(feature = "vt100")]
         if self.ask_size {
             if out.room() < 32 {
                 return;
@@ -847,26 +717,9 @@ impl Term {
             out.put(b"\x1b7\x1b[999;999H\x1b[6n\x1b8");
             self.ask_size = false;
         }
-        if self.clear && self.con == Con::Off {
-            if out.room() < 16 {
-                return;
-            }
-            out.put(b"\x1b[0m\x1b[2J");
-            self.clear = false;
-        }
-        // Several channels changing (TERM-14): one write each time the store has taken the last.
-        if self.bulk.is_some() && !app.write_pending() && !store.data().busy() {
-            self.bulk_step(app, store);
-            if self.bulk.is_none() {
-                self.chan_sel = self.chan_sel.min(list_len(self.zone, store).saturating_sub(1));
-            }
-        }
-        if self.page == Page::Channels && self.sort != 0 && (!self.vis_ok || self.vis_len != list_len(self.zone, store)) {
-            self.fill(store);
-        }
-        // TERM-17: a channel open in the radio's editor shows the radio's copy.
-        if let Some(c) = self.edit.filter(|c| self.page == Page::Edit && list::radio_channel(app) == Some(c.num)) {
-            self.edit = store.get(c.num).or(Some(c));
+        #[cfg(feature = "vt100")]
+        if !self.page_poll(app, store, out) {
+            return;
         }
         // A whole line: run it once the store has taken the last one's writes (TERM-13 never drops a line).
         if self.pending && !app.write_pending() && !store.data().busy() && out.room() >= 2 * ROW_MAX {
@@ -876,29 +729,10 @@ impl Term {
         if self.con != Con::Off {
             return self.console(app, store, dev, live, out);
         }
-        let cx = Cx { app, store, dev, live };
-        for r in 0..self.rows {
-            if self.dirty & (1 << r) == 0 {
-                continue;
-            }
-            let mut h = Hash(0x811C_9DC5);
-            let colour = app.set.term_colour; // TERM-18, 0 9 9 4
-            self.row(r, &cx, &mut W { o: &mut h, col: 0, cols: self.cols as u16, rev: false, colour });
-            let h = h.0 | 1;
-            if h != self.hash[r as usize] {
-                if out.room() < ROW_MAX {
-                    return;
-                }
-                let mut p = Buf::<12>::new();
-                put!(p, "\x1b[{};1H", r as u16 + 1);
-                out.put(p.as_bytes());
-                let mut s = SinkOut(out);
-                self.row(r, &cx, &mut W { o: &mut s, col: 0, cols: self.cols as u16, rev: false, colour });
-                out.put(b"\x1b[0m\x1b[K");
-                self.hash[r as usize] = h;
-            }
-            self.dirty &= !(1 << r);
-        }
+        #[cfg(feature = "vt100")]
+        self.draw(app, store, dev, live, out);
+        #[cfg(not(feature = "vt100"))]
+        self.prompt(out);
     }
 
     /// Runs the line in the buffer: a typed command, or a load's next line (its result and the count go out).
@@ -946,7 +780,18 @@ impl Term {
             }
             Err(m) => (m, true),
         };
-        (self.note, self.warn, self.bnote) = (m, warn, true);
+        #[cfg(feature = "vt100")]
+        {
+            (self.note, self.warn, self.bnote) = (m, warn, true);
+        }
+        #[cfg(not(feature = "vt100"))]
+        {
+            let _ = warn;
+            out.put(b"\r\x1b[K  ");
+            out.put(m.as_bytes());
+            out.put(b"\r\n");
+            self.clen = 0;
+        }
         self.all_dirty();
     }
 
@@ -959,7 +804,7 @@ impl Term {
                 if out.room() < LINE_ROOM {
                     return;
                 }
-                out.put(b"\x1b[0m\x1b[2J\x1b[H");
+                out.put(if cfg!(feature = "vt100") { b"\x1b[0m\x1b[2J\x1b[H" } else { b"\r\x1b[K" });
                 if let (Body::Load { .. }, Some(_)) = (b, self.sat) {
                     out.put("Paste satellites: a TLE (name, line 1, line 2) or OMM CSV lines. One with a catalogue number\r\nheld gets the new elements; another is added. It ends at \"end\" or Ctrl-D; Ctrl-C stops.\r\n\r\n".as_bytes());
                 } else if let Body::Load { .. } = b {
@@ -1015,124 +860,19 @@ impl Term {
     }
 
     fn done(&mut self, out: &mut impl Sink) {
-        out.put("\r\n  Enter or Esc returns to the menu.".as_bytes());
-        (self.con, self.clen) = (Con::Done, 0);
-    }
-
-    fn row<S: ChannelStore>(&self, r: u8, cx: &Cx<S>, w: &mut W) {
-        if r == 0 {
-            return self.top(cx, w);
+        #[cfg(feature = "vt100")]
+        {
+            out.put("\r\n  Enter or Esc returns to the menu.".as_bytes());
+            (self.con, self.clen) = (Con::Done, 0);
         }
-        if self.pin_gate() {
-            // LINK-30: the PIN prompt, alone.
-            match r {
-                2 => w.s("  This radio has a PIN lock. Type its PIN, then Enter.".as_bytes()),
-                4 => {
-                    w.s(b"  PIN: ");
-                    for _ in 0..self.pin_n {
-                        w.s(b"*");
-                    }
-                }
-                6 if !self.note.is_empty() => w.s(self.note.as_bytes()),
-                _ if r == self.rows - 1 => w.s(" Enter Check   Ctrl-C Leave".as_bytes()),
-                _ => {}
-            }
-            return;
-        }
-        if r == self.rows - 1 {
-            return self.hints(w);
-        }
-        let b = r - 1;
-        if self.help {
-            return self.help_row(b, w);
-        }
-        self.tpl_row(b, cx, w);
-    }
-
-    /// The top line (TERM-11): firmware, callsign and model; the link in the middle; the clock at the right.
-    fn top<S: ChannelStore>(&self, cx: &Cx<S>, w: &mut W) {
-        w.rev();
-        w.s(b" Ferrite ");
-        w.s(version());
-        if let Some(c) = cx.app.set.boot_callsign() {
-            w.s(b"   ");
-            w.s(c);
-        }
-        w.s(b"   RT-950 Pro");
-        let link: &[u8] = if self.bt { b"bluetooth 9600" } else { b"cable 115200" };
-        w.at((self.cols as u16).saturating_sub(link.len() as u16) / 2 + 8);
-        w.s(link);
-        let mut t = Buf::<8>::new();
-        match cx.dev.clock_min {
-            Some(m) => {
-                put!(t, "{}:{}", Zero(m as u32 / 60 % 24, 2), Zero(m as u32 % 60, 2));
-            }
-            None => t.set(b"--:--"),
-        }
-        w.at(self.cols as u16 - 7);
-        w.s(t.as_bytes());
-        w.fill();
-    }
-
-    /// The bottom line: the keys for this page (TERM-11).
-    fn hints(&self, w: &mut W) {
-        if self.cmd {
-            // The command line: its tail, when it is wider than the row.
-            let n = self.clen as usize;
-            let keep = (self.cols as usize).saturating_sub(4);
-            w.s(b" :");
-            w.s(&self.cbuf[n.saturating_sub(keep)..n]);
-            w.s(b"_");
-            return;
-        }
-        if self.bnote {
-            w.rev();
-            w.s(b" ");
-            if self.warn {
-                w.warn(self.note.as_bytes());
-            } else {
-                w.s(self.note.as_bytes());
-            }
-            w.fill();
-            return;
-        }
-        let keys = if self.line.is_some() {
-            tpl::global(tpl::KEYS_TYPE)
-        } else if self.help {
-            tpl::global(tpl::KEYS_HELP)
-        } else {
-            tpl::hints(self.tpl_page())
-        };
-        w.rev();
-        w.s(b" ");
-        let mut i = 0;
-        while let Some(kl) = piece(keys, b'|', i) {
-            w.bold(piece(kl, b'=', 0).unwrap_or_default());
-            w.s(b" ");
-            w.s(piece(kl, b'=', 1).unwrap_or_default());
-            w.s(b"   ");
-            i += 1;
-        }
-        w.fill();
-    }
-
-    fn help_row(&self, b: u8, w: &mut W) {
-        let lines = tpl::help(self.tpl_page());
-        if b == 1 {
-            w.s(b" ");
-            w.bold(b"Help");
-        } else if let Some(l) = (b as usize).checked_sub(3).and_then(|i| piece(lines, b'\n', i)) {
-            w.s(b"  ");
-            w.s(l);
+        #[cfg(not(feature = "vt100"))]
+        {
+            let _ = out;
+            (self.con, self.clen) = (Con::Off, 0);
+            self.all_dirty(); // the prompt again
         }
     }
 
-}
-
-fn item(it: Item, c: &Channel, w: &mut W) {
-    let mut v = Buf::<16>::new();
-    it.text(&c.cfg, false, &mut v);
-    w.s(v.as_bytes());
 }
 
 // ---- Helpers ----
@@ -1165,76 +905,33 @@ fn mhz5(f: Freq10) -> Buf<12> {
     b
 }
 
-/// "12 s ago", "3 min ago", "2 h ago".
-fn ago(s: u32, b: &mut Buf<16>) {
-    match s {
-        crate::data::AGO_UNKNOWN => put!(b, "earlier"), // INBOX-6.1
-        0..=59 => put!(b, "{} s ago", s),
-        60..=3599 => put!(b, "{} min ago", s / 60),
-        _ => put!(b, "{} h ago", s / 3600),
+use crate::screens::Screen;
+
+/// The channel open in one of the radio's editors (TERM-17): the active slot's channel while its channel
+/// editor, or an editor opened from it, is on the radio's screen.
+pub(crate) fn radio_channel(app: &App) -> Option<u16> {
+    let from_editor = app.back.iter().flatten().any(|s| matches!(s, Screen::ChEdit(_)));
+    let open = match app.screen {
+        Screen::ChEdit(_) => true,
+        Screen::Value(_) | Screen::Tones(_) | Screen::Text(_) | Screen::Entry(_) => from_editor,
+        _ => false,
     };
+    let s = &app.slots[app.active as usize];
+    s.ch.filter(|_| open && s.on_channel()).map(|c| c.num)
 }
 
-/// The zones list's i-th entry: every channel, each zone, then no zone.
-fn zone_of<S: ChannelStore>(i: u16, st: &S) -> ZoneId {
-    match i {
-        0 => ALL,
-        _ if i <= st.zones() => i - 1,
-        _ => NO_ZONE,
+/// The setting highlighted in the radio's menu (TERM-17): the knob changes it there at once (MENU-16).
+pub(crate) fn radio_setting(app: &App) -> Option<([u8; 3], usize)> {
+    match app.screen {
+        Screen::Group(g) if g.sub == 0 => Some(([g.g, g.row + 1, 0], 2)),
+        Screen::Group(g) => Some(([g.g, g.sub, g.row + 1], 3)),
+        _ => None,
     }
-}
-
-fn zone_name<S: ChannelStore>(z: ZoneId, st: &S) -> Buf<16> {
-    if z == ALL {
-        return Buf::from(b"All channels");
-    }
-    st.zone_label(z, b"No zone", b"?")
-}
-
-fn list_len<S: ChannelStore>(z: ZoneId, st: &S) -> u16 {
-    if z == ALL { st.count() } else { st.zone_len(z) }
-}
-
-fn chan_at<S: ChannelStore>(z: ZoneId, i: u16, st: &S) -> Option<Channel> {
-    if z == ALL { st.by_number(i) } else { st.zone_at(z, i) }
 }
 
 /// The cable port setting's names (0 9 2 3), for the radio's menu too.
 pub fn port_name(p: u8) -> &'static str {
     CABLE_PORTS[p as usize % CABLE_PORTS.len()]
-}
-
-// ---- Writing a row ----
-
-struct Cx<'a, S> {
-    app: &'a App,
-    store: &'a S,
-    dev: &'a Device,
-    live: &'a LiveAll,
-}
-
-/// Where a row's bytes go: the hash that tells whether it changed, or the sink.
-trait Out {
-    fn out(&mut self, b: &[u8]);
-}
-
-/// FNV-1a over the row's bytes, attributes included.
-struct Hash(u32);
-
-impl Out for Hash {
-    fn out(&mut self, b: &[u8]) {
-        for &c in b {
-            self.0 = (self.0 ^ c as u32).wrapping_mul(0x0100_0193);
-        }
-    }
-}
-
-struct SinkOut<'a, T: Sink>(&'a mut T);
-
-impl<T: Sink> Out for SinkOut<'_, T> {
-    fn out(&mut self, b: &[u8]) {
-        self.0.put(b);
-    }
 }
 
 /// `n` in decimal, written into the end of `d`: one formatter for every number the terminal shows.
@@ -1251,107 +948,7 @@ pub(crate) fn digits(mut n: u32, d: &mut [u8; 10]) -> &[u8] {
     }
 }
 
-/// One row: text clipped to the width, columns counted (attributes take none), reverse video and bold only
-/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 9 4), ANSI colours in their place: the top line
-/// and the selection white on blue, headings cyan, warnings yellow.
-struct W<'a> {
-    o: &'a mut dyn Out,
-    col: u16,
-    cols: u16,
-    rev: bool,
-    colour: bool,
-}
-
-impl W<'_> {
-    /// Text, printable ASCII; anything else shows as `?` ("·" as a dot).
-    fn s(&mut self, b: &[u8]) {
-        let mut i = 0;
-        while i < b.len() && self.col < self.cols {
-            let c = b[i];
-            let (c, skip) = match c {
-                0x20..=0x7E => (c, 1),
-                0xC2 if b.get(i + 1) == Some(&0xB7) => (b'.', 2), // U+00B7, the UI's middle dot
-                0xB7 => (b'.', 1),
-                _ => (b'?', 1),
-            };
-            self.o.out(&[c]);
-            self.col += 1;
-            i += skip;
-        }
-    }
-
-    /// A number in decimal.
-    fn n(&mut self, n: u32) {
-        self.s(digits(n, &mut [0; 10]));
-    }
-
-    fn digit(&mut self, d: u8) {
-        self.s(&[b'0' + d % 10]);
-    }
-
-    /// Spaces up to column `c`.
-    fn at(&mut self, c: u16) {
-        while self.col < c.min(self.cols) {
-            self.o.out(b" ");
-            self.col += 1;
-        }
-    }
-
-    /// Spaces to the end of the row (a reverse-video bar or selection runs the whole width).
-    fn fill(&mut self) {
-        self.at(self.cols);
-    }
-
-    fn rev(&mut self) {
-        self.o.out(if self.colour { b"\x1b[0;97;44m" } else { b"\x1b[7m" });
-        self.rev = true;
-    }
-
-    /// What the attributes go back to after bold or a warning.
-    fn back(&mut self) {
-        self.o.out(match (self.rev, self.colour) {
-            (true, true) => b"\x1b[0;97;44m",
-            (true, false) => b"\x1b[0m\x1b[7m",
-            (false, _) => b"\x1b[0m",
-        });
-    }
-
-    /// A warning: bold, or yellow in colour.
-    fn warn(&mut self, b: &[u8]) {
-        self.won();
-        self.s(b);
-        self.back();
-    }
-
-    /// A warning's attributes on.
-    fn won(&mut self) {
-        if !self.colour {
-            return self.bon();
-        }
-        self.o.out(if self.rev { b"\x1b[1;93;44m" } else { b"\x1b[1;33m" });
-    }
-
-    /// Bold on (cyan in colour, heading colours on the selection).
-    fn bon(&mut self) {
-        self.o.out(match (self.rev, self.colour) {
-            (true, true) => b"\x1b[1;97;44m",
-            (false, true) => b"\x1b[1;36m",
-            _ => b"\x1b[1m",
-        });
-    }
-
-    fn plain(&mut self) {
-        self.o.out(b"\x1b[0m");
-        self.rev = false;
-    }
-
-    fn bold(&mut self, b: &[u8]) {
-        self.bon();
-        self.s(b);
-        // VT100 has no "bold off": all off, then reverse (or the colours) again if it was on.
-        self.back();
-    }
-}
-
-#[cfg(test)]
+#[cfg(all(test, feature = "vt100"))]
 mod tests;
+#[cfg(all(test, not(feature = "vt100")))]
+mod tests_line;

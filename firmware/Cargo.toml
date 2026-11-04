@@ -16,8 +16,11 @@ bench = false
 [features]
 # Satellite mode predicts passes on the radio (SGP4 and the pass predictor, SAT-4, SAT-6); without it the radio
 # only reads the passes and tracks Console computes (`ferrite_core::sat::track`).
-default = ["sat-predict"]
+default = ["sat-predict", "vt100"]
 sat-predict = []
+# The terminal's full-screen VT100 pages (decision 342); without them the cable terminal is a plain command line.
+# The line commands, dump and load are in every build. `tools/mkbtf.sh tx no-vt100` builds without.
+vt100 = ["ferrite-app/vt100"]
 # Transmit. Off until milestone 4: without it the build has no transmit code at all (the bk4829 crate's tx feature).
 tx = ["bk4829/tx", "ferrite-radio/tx"]
 # The bench radio's build (decision 193): the full-power transmit build with the bench commands, starting every

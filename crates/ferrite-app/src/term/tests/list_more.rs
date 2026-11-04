@@ -228,12 +228,12 @@ fn radio_editor_and_setting_paths() {
     let mut r = Rig::list();
     let c = r.store.get(9).unwrap();
     r.app.set_channel_rec(0, c);
-    assert_eq!(list::radio_channel(&r.app), None, "home: no editor open");
+    assert_eq!(radio_channel(&r.app), None, "home: no editor open");
     r.app.open(Dest::ChannelEdit);
-    assert_eq!(list::radio_channel(&r.app), Some(9));
+    assert_eq!(radio_channel(&r.app), Some(9));
     r.app.open(Dest::Value(crate::slot::Item::Squelch));
-    assert_eq!(list::radio_channel(&r.app), Some(9), "a value opened from the channel editor");
+    assert_eq!(radio_channel(&r.app), Some(9), "a value opened from the channel editor");
     r.app.open(Dest::Sub(7, 3));
-    let (p, n) = list::radio_setting(&r.app).expect("a third-level list");
+    let (p, n) = radio_setting(&r.app).expect("a third-level list");
     assert_eq!((&p[..n], n), (&[7, 3, 1][..], 3));
 }

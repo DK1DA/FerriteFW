@@ -704,6 +704,7 @@ impl App {
 
     /// A channel given another number by the terminal (TERM-14): the record moves, and slots on it and the home
     /// channel go with it (CHAN-18), as the radio's editor does (EDIT-5).
+    #[cfg_attr(not(feature = "vt100"), allow(dead_code))] // the terminal pages' renumbering
     pub(crate) fn renumber_channel(&mut self, c: chan::Channel, to: u16) {
         let n = chan::Channel { num: to, ..c };
         self.write(ChanWrite::Put { ch: n, from: Some(c.num) });

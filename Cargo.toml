@@ -14,7 +14,7 @@ publish = false
 [workspace.dependencies]
 ferrite-core = { path = "crates/ferrite-core" }
 ferrite-ui = { path = "crates/ferrite-ui" }
-ferrite-app = { path = "crates/ferrite-app" }
+ferrite-app = { path = "crates/ferrite-app", default-features = false } # the vt100 pages: each user says
 ferrite-store = { path = "crates/ferrite-store", default-features = false }
 ferrite-radio = { path = "crates/ferrite-radio" }
 ufmt = "0.2"

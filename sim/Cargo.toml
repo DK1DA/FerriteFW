@@ -28,7 +28,7 @@ bench = ["ferrite-core/bench", "ferrite-app/bench"]
 
 [dependencies]
 ferrite-core.workspace = true
-ferrite-app.workspace = true
+ferrite-app = { workspace = true, features = ["vt100"] }
 ferrite-ui = { workspace = true, features = ["std"] }
 ferrite-store = { workspace = true, features = ["std"] }
 
