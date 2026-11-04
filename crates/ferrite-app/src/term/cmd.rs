@@ -1680,6 +1680,11 @@ const CMDS: &[(&str, C)] = &[
 
 pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], loading: bool) -> Result<Done, Msg> {
     let mut t = Toks::new(line);
+    // Decision 347: a user build has no line commands (Console uses the records); the compiler drops them.
+    if !cfg!(feature = "line-cmds") {
+        let _ = no!(t, "Line commands: not in this build.");
+        return Err(t.e);
+    }
     match line_run(app, st, dev, loading, &mut t) {
         Ok(d) => Ok(d),
         Err(No) => Err(t.e),
@@ -2572,6 +2577,9 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
 /// The console's lists: help, the settings not at their defaults, one channel.
 pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrite_core::msg::LiveAll, l: List, i: u16, out: &mut Line) -> bool {
     out.clear();
+    if !cfg!(feature = "line-cmds") && !matches!(l, List::Ui | List::UiKeys | List::UiStatus | List::UiTexts) {
+        return false; // decision 347: the text lists are the line commands'; the readback stays
+    }
     match l {
         List::Ui | List::UiTexts => crate::uistate::line(app, st, dev, live, i, out), // the texts: the link's own
         List::UiKeys => crate::uistate::key_line(i, out),

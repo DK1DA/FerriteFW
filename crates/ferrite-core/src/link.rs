@@ -262,6 +262,12 @@ pub mod caps2 {
     /// Satellite mode's records (LINK-63 – LINK-65, decision 340): [`super::what::SAT`], [`super::what::SAT_INFO`]
     /// by `READ_MANY` and `WRITE_MANY`, and [`super::msg::CLOCK`].
     pub const SATS: u8 = 4;
+    /// Decision 347: the [`super::what::RADIO`] record, and the APRS record with every MENU 0 5 value (LINK-43), so
+    /// Console needs no line commands.
+    pub const RADIO: u8 = 8;
+    /// The line commands answer: `CMD` (LINK-34) and the terminal's command line. Without it (a user build,
+    /// decision 347) `CMD` is refused and Console uses the records alone.
+    pub const LINE_CMDS: u8 = 16;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -478,12 +484,20 @@ pub mod what {
     /// none), 2 bytes 0, the satellite data's build time (u32, UTC seconds), when Console wrote it (u32), 4 bytes
     /// 0: [`super::SAT_INFO_LEN`] bytes.
     pub const SAT_INFO: u8 = 13;
+    /// The radio's own state the settings record doesn't hold, index 0 (LINK-66, decision 347): Watch (0 1 1: 0-2),
+    /// Battery Save (0 7 7 1: 0-3), the GPS fix (0 none, 2 2D, 3 3D; read only), 0, latitude and longitude (i32
+    /// each, 1e-7 degree, north and east positive; the fixed position when there is no fix and it is on, GPS-3),
+    /// the fix's age in seconds (u16, 0xFFFF none): [`super::RADIO_LEN`] bytes. A write takes the first two bytes,
+    /// each as the menu changes it; the rest is ignored. Only from radios that say [`super::caps2::RADIO`].
+    pub const RADIO: u8 = 14;
 }
 
 /// A satellite record's length (LINK-63).
 pub const SAT_LEN: usize = crate::sat::wire::REC_LEN;
 /// The satellites' info record's length (LINK-64).
 pub const SAT_INFO_LEN: usize = crate::sat::wire::INFO_LEN;
+/// [`what::RADIO`]'s length.
+pub const RADIO_LEN: usize = 14;
 /// The most satellites (SAT-2).
 pub const SATS_MAX: u16 = 32;
 

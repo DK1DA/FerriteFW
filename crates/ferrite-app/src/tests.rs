@@ -678,6 +678,7 @@ mod group_a;
 mod watch_heard;
 mod ports;
 mod sound_vox;
+#[cfg(feature = "line-cmds")] // the `slot` command's tests; the link's SLOT is tested in link::tests
 mod slotctl;
 /// DISP-29: what redraws cost.
 mod redraw_cost;

@@ -1,5 +1,6 @@
 //! TERM-47: the terminal without its pages (decision 342), a plain command line: the build without the `vt100`
 //! feature, or one with it whose template part is missing (UPD-21; `NO_VT` here).
+#![cfg_attr(not(feature = "line-cmds"), allow(unused))] // helpers for the tests gated on the line commands
 
 use super::*;
 use crate::sample::Sample;
@@ -64,6 +65,7 @@ impl Rig {
 
 /// TERM-47: Enter starts it with a banner and a prompt; a line runs as a command and its answer follows; a leading `:`
 /// is taken; lists stream, then the prompt comes back; Ctrl-C leaves.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn command_line_only() {
     let mut r = Rig::new();

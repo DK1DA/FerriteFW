@@ -121,16 +121,34 @@ fn aprs_settings_record() {
     let c = pc.app.aprs_cfg();
     assert_eq!((c.ssid, c.power, c.digi_on(), c.digi_wait_s(), c.custom_text(), c.path), (9, 2, true, 3, &b"WIDE2-2"[..], crate::aprs::PATH_CUSTOM));
     assert_eq!(pc.aprs_rec(), new);
-    // APRS-45: FX.25 on transmit, the last byte (16 by default); a record without it keeps the radio's.
-    assert_eq!(rec[APRS_REC - 1], crate::aprs::FX25_DEFAULT);
-    new[APRS_REC - 1] = 64;
+    let fx = super::APRS_V1 - 1;
+    // APRS-45: FX.25 on transmit, after the custom path (16 by default); a record without it keeps the radio's.
+    assert_eq!(rec[fx], crate::aprs::FX25_DEFAULT);
+    new[fx] = 64;
     assert_eq!(pc.aprs_write(&new).0, 0);
     assert_eq!(pc.app.aprs_cfg().fx25, 64);
-    new[APRS_REC - 1] = 32;
-    assert_eq!(pc.aprs_write(&new[..APRS_REC - 1]).0, 0);
+    new[fx] = 32;
+    assert_eq!(pc.aprs_write(&new[..fx]).0, 0);
     assert_eq!(pc.app.aprs_cfg().fx25, 64, "a short record keeps it");
-    new[APRS_REC - 1] = 64;
-    let bad: [(usize, u8, &str); 7] = [(7, 16, "SSID"), (3, 3, "power"), (2, 40, "beacon"), (5, 0x61, "digipeater"), (8, b'w', "custom"), (4, 9, "path"), (APRS_REC - 1, 20, "FX.25")];
+    new[fx] = 64;
+    // Protocol 4 (decision 347): every MENU 0 5 value is in the record, read and written.
+    let v2 = super::APRS_V1;
+    (new[v2], new[v2 + 1], new[v2 + 2], new[v2 + 3]) = (2, 3, 50, 1); // sound, symbol, TX delay, TX level
+    new[v2 + 4..v2 + 4 + 9].copy_from_slice(b"Ferrite!!");
+    let end = v2 + 4 + crate::aprs::COMMENT_LEN;
+    (new[end], new[end + 1], new[end + 2]) = (2, 3, 1); // ambiguity, Mic-E, telemetry
+    assert_eq!(pc.aprs_write(&new).0, 0);
+    let c = pc.app.aprs_cfg();
+    assert_eq!((c.sound, c.symbol, c.txdelay, c.tx_level, &c.comment[..9], c.ambiguity, c.mic_e, c.telemetry), (2, 3, 50, 1, &b"Ferrite!!"[..], 2, 3, true));
+    assert_eq!(pc.aprs_rec(), new);
+    let bad2: [(usize, u8); 7] = [(v2, 6), (v2 + 1, 10), (v2 + 2, 5), (v2 + 3, 3), (v2 + 4, 7), (end, 5), (end + 2, 2)];
+    for (at, v) in bad2 {
+        let mut b = new.clone();
+        b[at] = v;
+        assert_eq!(pc.aprs_write(&b).0, Status::Invalid as u8, "byte {at} = {v}");
+        assert_eq!(pc.aprs_rec(), new, "unchanged after byte {at}");
+    }
+    let bad: [(usize, u8, &str); 7] = [(7, 16, "SSID"), (3, 3, "power"), (2, 40, "beacon"), (5, 0x61, "digipeater"), (8, b'w', "custom"), (4, 9, "path"), (fx, 20, "FX.25")];
     for (at, v, why) in bad {
         let mut b = new.clone();
         b[at] = v;

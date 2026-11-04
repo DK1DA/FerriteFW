@@ -1,4 +1,5 @@
 //! Zones, presets and deletes over the link, and the refusals at their edges (LINK-5, LINK-21, LINK-41).
+#![cfg_attr(not(feature = "line-cmds"), allow(unused))] // helpers for the tests gated on the line commands
 
 use super::*;
 
@@ -163,6 +164,7 @@ fn audio_on_and_bad() {
 
 /// LINK-34, TERM-30: `gps` over the link waits for the firmware's GGA (MORE answers "still working"), then its
 /// lines; a blank command line answers nothing to follow.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn gps_over_the_link_waits_for_the_answer() {
     let mut pc = Pc::new(true);
@@ -286,6 +288,7 @@ fn flashes(pc: &mut Pc, live: &LiveAll, ms: u32) -> (u32, bool) {
 /// a `STREAM` of it), keys and commands don't. Receive's steady green and transmit's red win; 0 7 6 Off shows
 /// nothing. On Bluetooth with the PIN lock on, a refused request flashes nothing, and a `STREAM` is refused before
 /// AUTH as everything else is (LINK-30).
+#[cfg(feature = "line-cmds")]
 #[test]
 fn big_transfers_flash_the_led() {
     let quiet = LiveAll::default();

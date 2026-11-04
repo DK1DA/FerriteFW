@@ -1,6 +1,7 @@
 //! The two remote ports (roadmap 3d): the terminal and the link on Bluetooth, the cable's priority for the
 //! terminal, a link session on each port at once (LINK-28), KISS beside them, and the PIN Bluetooth gives
 //! (TERM-25, LINK-7, LINK-30).
+#![cfg_attr(not(feature = "line-cmds"), allow(unused))] // helpers for the tests gated on the line commands
 
 use crate::link;
 use crate::chan::ChannelStore;
@@ -94,6 +95,7 @@ impl Rig {
 
 /// TERM-25: the terminal opens on Bluetooth with Enter and draws there, not on the cable; with no PIN lock it
 /// reads and writes at once, with no prompt on the radio (LINK-7, decision 104).
+#[cfg(feature = "line-cmds")]
 #[test]
 fn bluetooth_terminal_without_pin() {
     let mut r = Rig::new();
@@ -110,6 +112,7 @@ fn bluetooth_terminal_without_pin() {
 
 /// LINK-30, LINK-31: with the PIN lock on, a Bluetooth terminal asks for the radio's PIN before anything else
 /// (shown as *, nothing else read); wrong ones count toward the radio's own wait (PIN-3); the cable never asks.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn bluetooth_terminal_asks_for_the_pin() {
     let mut r = Rig::new();
@@ -216,6 +219,7 @@ fn bluetooth_off_by_default() {
 /// LINK-28 (decision 152): a link session on the cable and one on Bluetooth at the same time, each answered on its
 /// own port; a Bluetooth link session neither takes nor is blocked by the cable's terminal, and the cable's link
 /// frames leave a Bluetooth terminal open.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn a_session_on_each_port() {
     let mut r = Rig::new();
@@ -580,6 +584,7 @@ fn receive_audio_without_room_is_counted() {
 
 /// TERM-21, LINK-34: one debug request in flight at a time, from the terminal or either session's `CMD`; its
 /// answer goes back to whoever asked.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn debug_requests_one_at_a_time() {
     use ferrite_core::msg::{DebugAns, DebugReq, GGA_MAX};

@@ -506,7 +506,7 @@ impl Session {
             // LINK-30: on Bluetooth with the PIN lock on, nothing else until AUTH.
             _ if !self.authorised(app) => Status::NotAuthorised,
             msg::INFO => info(app, st, dev, &mut o),
-            msg::READ => read(app, p, &mut o),
+            msg::READ => read(app, st.data().fix(), p, &mut o),
             msg::USED => used(st, p, &mut o),
             msg::READ_MANY => read_many(st, p, &mut o),
             msg::LOG_READ => log_read(st, p, &mut o),
@@ -714,7 +714,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS]); // LINK-35.2: two bytes
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }]); // LINK-35.2: two bytes
         layouts(st, o); // LINK-62
         Status::Ok
     }
@@ -785,6 +785,7 @@ impl Session {
         let s = match w {
             what::SETTINGS if idx == 0 => apply_settings(app, rec),
             what::APRS if idx == 0 => sub::aprs_apply(app, rec, o), // LINK-43
+            what::RADIO if idx == 0 => radio_apply(app, rec), // LINK-66
             _ => Status::Refused,
         };
         if s == Status::Ok && self.session {
@@ -1248,6 +1249,30 @@ fn settings_record(app: &App, w: &mut Window) -> usize {
     w.n
 }
 
+/// The radio record (LINK-66): Watch, Battery Save, then the position the radio would use (GPS-3) and its fix.
+fn radio_record(app: &App, fix: Option<crate::data::Fix>, w: &mut Window) {
+    let (kind, pos, age) = match fix {
+        Some(f) if f.age_s != crate::gpsdata::FIXED_AGE => (if f.three_d { 3 } else { 2 }, Some(f.pos), f.age_s),
+        _ => (0, (app.set.fixed_on).then_some(app.set.fixed), 0xFFFF),
+    };
+    let pos = pos.unwrap_or(crate::data::Pos { lat: 0, lon: 0 });
+    w.put(&[app.watch, app.bsave, kind, 0]);
+    w.put(&pos.lat.to_le_bytes());
+    w.put(&pos.lon.to_le_bytes());
+    w.put(&age.to_le_bytes());
+}
+
+/// A radio record written (LINK-66): Watch and Battery Save, each changed as the menu changes it.
+fn radio_apply(app: &mut App, rec: &[u8]) -> Status {
+    let [watch, bsave, ..] = *rec else { return Status::BadArg };
+    if watch > 2 || bsave > 3 {
+        return Status::Invalid;
+    }
+    app.change(crate::Item::Watch, watch as i32 - app.watch as i32);
+    app.change(crate::Item::BatterySave, bsave as i32 - app.bsave as i32);
+    Status::Ok
+}
+
 /// Settings the link never changes (LINK-5): the region, Extend TX, the PIN, setup, the cable port (the link
 /// would lose its own port), the KISS port and the spare bytes. Dry TX (TX-48) isn't in the record at all. A written
 /// record keeps the radio's. The callsign is written, in capitals as on the radio (LINK-26, decision 77: as nicFW's
@@ -1361,7 +1386,7 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
     Status::Ok
 }
 
-fn read(app: &App, p: &[u8], o: &mut Out) -> Status {
+fn read(app: &App, fix: Option<crate::data::Fix>, p: &[u8], o: &mut Out) -> Status {
     if p.len() < 6 {
         return Status::BadArg;
     }
@@ -1372,6 +1397,7 @@ fn read(app: &App, p: &[u8], o: &mut Out) -> Status {
         // LINK-21: the records bigger than a frame; a channel, zone or preset goes by `READ_MANY`
         what::SETTINGS if idx == 0 => _ = settings_record(app, &mut win),
         what::APRS if idx == 0 => sub::aprs_record(app, &mut win), // LINK-43
+        what::RADIO if idx == 0 => radio_record(app, fix, &mut win), // LINK-66
         _ => return Status::BadArg,
     }
     let total = win.n;

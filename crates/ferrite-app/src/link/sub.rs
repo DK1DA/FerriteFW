@@ -11,7 +11,7 @@
 //!   `HELLO`, a new connection) or when the session has sent nothing for [`ev::QUIET_MS`].
 
 use super::{Out, Session, Window};
-use crate::aprs::{path_ok, region_freq, AprsCfg, BEACON_MODES, CUSTOM_LEN, F_MAX, F_MIN};
+use crate::aprs::{path_ok, region_freq, AprsCfg, BEACON_MODES, COMMENT_LEN, CUSTOM_LEN, F_MAX, F_MIN};
 use crate::chan::ChannelStore;
 use crate::data::{Draft, Message, MsgState, Op, Station};
 use crate::persist::Sink as PSink;
@@ -23,9 +23,13 @@ use ferrite_core::liveview::{fnv, Track, DICT_VERSION, FNV0, MORE};
 use ferrite_core::msg::{Device, LiveAll};
 use ferrite_ui::text::Buf;
 
-/// The APRS record's length (LINK-43): eight bytes, the custom path, FX.25 on transmit (APRS-45). A record
-/// written without the last byte (Console before it) keeps the radio's FX.25 setting.
-pub const APRS_REC: usize = 8 + CUSTOM_LEN + 1;
+/// The APRS record's length (LINK-43): eight bytes, the custom path, FX.25 on transmit (APRS-45), then (protocol
+/// 4, decision 347) the message sound (APRS-6.1), symbol (APRS-47), TX delay (APRS-48), TX level (APRS-49), the
+/// comment (APRS-50), ambiguity (APRS-51), Mic-E (APRS-52) and telemetry (APRS-54): every MENU 0 5 value, so
+/// Console needs no terminal for them. A shorter record (Console before them) keeps the radio's values past its end.
+pub const APRS_REC: usize = APRS_V1 + 4 + COMMENT_LEN + 3;
+/// The record before protocol 4: up to FX.25.
+const APRS_V1: usize = 8 + CUSTOM_LEN + 1;
 /// The newest messages watched for events.
 const WATCHED: usize = 4;
 
@@ -526,14 +530,16 @@ pub(super) fn aprs_record(app: &App, w: &mut Window) {
     w.put(&c.f5k.to_le_bytes());
     w.put(&[c.beacon, c.power, c.path, c.digi, c.after_voice as u8, c.ssid]);
     w.put(&c.custom);
-    w.put(&[c.fx25]);
+    w.put(&[c.fx25, c.sound, c.symbol, c.txdelay, c.tx_level]);
+    w.put(&c.comment);
+    w.put(&[c.ambiguity, c.mic_e, c.telemetry as u8]);
 }
 
 /// A whole APRS record written (LINK-43): checked as MENU 0 5's editors check each value, then kept as they keep
 /// it (written back at the next tick, slot C retuned when it is the APRS slot). Nothing changes if any value is
 /// refused.
 pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
-    if rec.len() != APRS_REC && rec.len() != APRS_REC - 1 {
+    if rec.len() != APRS_REC && rec.len() != APRS_V1 && rec.len() != APRS_V1 - 1 {
         return Status::BadArg;
     }
     let invalid = |o: &mut Out, why: &str| {
@@ -546,7 +552,29 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
     if custom[n..].iter().any(|&b| b != 0) || n > 0 && !path_ok(&custom[..n]) {
         return invalid(o, "custom path: one or two entries like WIDE2-2");
     }
-    let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7], fx25: rec.get(8 + CUSTOM_LEN).copied().unwrap_or(app.aprs_cfg().fx25), ..app.aprs_cfg() }; // APRS-6.1, APRS-47 - APRS-51 aren't in the record yet: kept
+    let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7], fx25: rec.get(8 + CUSTOM_LEN).copied().unwrap_or(app.aprs_cfg().fx25), ..app.aprs_cfg() };
+    if rec.len() == APRS_REC {
+        let t = &rec[APRS_V1..];
+        let (head, tail) = t.split_at(4);
+        let (comment, last) = tail.split_at(COMMENT_LEN);
+        (c.sound, c.symbol, c.txdelay, c.tx_level) = (head[0], head[1], head[2], head[3]);
+        c.comment.copy_from_slice(comment);
+        (c.ambiguity, c.mic_e, c.telemetry) = (last[0], last[1], last[2] == 1);
+        let n = c.comment.iter().position(|&b| b == 0).unwrap_or(COMMENT_LEN);
+        // As the menu and the terminal check them (APRS-6.1, APRS-47 - APRS-52, APRS-54).
+        if c.sound as usize >= ferrite_core::tonegen::CHIMES.len() || c.symbol as usize >= crate::aprs::SYMBOLS.len() {
+            return invalid(o, "message sound or symbol out of range");
+        }
+        if !(crate::aprs::TXDELAY_MIN..=crate::aprs::TXDELAY_MAX).contains(&c.txdelay) || c.tx_level > 2 {
+            return invalid(o, "TX delay: 10-100 (in 10 ms); TX level: 0-2");
+        }
+        if c.comment[n..].iter().any(|&b| b != 0) || !c.comment[..n].iter().all(|&b| (b' '..=b'~').contains(&b)) {
+            return invalid(o, "comment: up to 40 characters");
+        }
+        if c.ambiguity > 4 || c.mic_e as usize >= crate::aprs::MIC_E_NAMES.len() || last[2] > 1 {
+            return invalid(o, "ambiguity, Mic-E or telemetry out of range");
+        }
+    }
     if c.f5k != 0 {
         let f = c.f5k as u32 * 500;
         if !(F_MIN..=F_MAX).contains(&f) {

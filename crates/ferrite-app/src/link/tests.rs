@@ -1,4 +1,5 @@
 //! The link session against the sample store: what a PC tool sees on the cable.
+#![cfg_attr(not(feature = "line-cmds"), allow(unused))] // helpers for the tests gated on the line commands
 
 use super::*;
 use crate::keys::Press;
@@ -188,7 +189,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63), then the layouts (LINK-62)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63; RADIO, LINK-66; LINE_CMDS, decision 347), then the layouts (LINK-62)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 8;
         let c = v + 1 + a[v] as usize;
@@ -823,6 +824,7 @@ impl Pc {
 
 /// LINK-34: a terminal command line over the link runs as in the terminal (TERM-12): its answer line, a list
 /// paged over as many `MORE`s as it takes in whole lines, the terminal's refusals as `invalid` with its text.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn terminal_commands_over_the_link() {
     let mut pc = Pc::new(true);
@@ -872,6 +874,7 @@ fn debug_commands_over_the_link() {
 /// LINK-34, TERM-38: over the link a user build refuses the bench commands as its terminal does (Invalid, with the
 /// reason), sends nothing to the firmware, and still answers `gps` (the last fix).
 #[cfg(not(feature = "bench"))]
+#[cfg(feature = "line-cmds")]
 #[test]
 fn bench_commands_refused_over_the_link() {
     let mut pc = Pc::new(true);
@@ -885,6 +888,7 @@ fn bench_commands_refused_over_the_link() {
 }
 
 /// LINK-34, LINK-30: on Bluetooth with a PIN lock, commands only after AUTH, as the terminal's PIN prompt.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn terminal_commands_need_the_pin_on_bluetooth() {
     let mut bt = Pc::new(false);
@@ -1124,6 +1128,9 @@ fn ui_readback_screens() {
     pc.keys("BACK");
     pc.app.go_home();
     // The terminal's commands do the same (here over CMD, LINK-34).
+    if !cfg!(feature = "line-cmds") {
+        return; // the rest uses the line commands (decision 347)
+    }
     assert!(pc.cmd("ui").unwrap().starts_with("screen Home"));
     assert!(pc.cmd("ui keys").unwrap().contains("MENU 6 OK\n"));
     assert_eq!(pc.cmd("key back long").unwrap(), "key BACK long\n");
@@ -1154,6 +1161,7 @@ impl Pc {
 /// XB-20.1, XB-20.4, XB-20.6, LINK-34: `xb start` over the link opens the repeater's screen from wherever the radio
 /// is (home under it) and starts it as # does; the readback says it runs and who started it; `xb` tells; `xb stop`
 /// stops it; each is logged with who and why. Refusals say why and start nothing.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn xb_command_starts_and_stops_the_repeater() {
     let mut pc = Pc::tx();
@@ -1227,6 +1235,7 @@ fn remote_keys_start_and_stop_the_repeater() {
 
 /// XB-20.5: a key on the radio stops a repeater the link started, lit or dark, locked or not, and the press does
 /// nothing else; PTT talks through it (XB-14) and SIDE1 listens (XB-15) without stopping it.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn a_radio_key_stops_a_remote_repeater() {
     let mut pc = Pc::tx();
@@ -1262,6 +1271,7 @@ fn a_radio_key_stops_a_remote_repeater() {
 
 /// XB-20.3, LINK-30: on Bluetooth with a PIN lock, `xb start` and remote keys only after AUTH; `xb start` counts as a
 /// write and `xb` alone as a read (TERM-25).
+#[cfg(feature = "line-cmds")]
 #[test]
 fn xb_over_bluetooth_needs_the_pin() {
     let mut bt = Pc::new(false);
@@ -1328,7 +1338,9 @@ fn ui_status_line() {
     assert_eq!((s, a[0]), (0, 0), "one answer, nothing more");
     let line = text(&a[1..]);
     assert_eq!(line, "st scr=Home act=A keyed=- remote=0 mode=off A=-/20 B=-/20 C=off/20 xb=0\n", "LiveAll::default(): rssi 0 dBm, a full meter");
-    assert_eq!(pc.cmd("ui status").unwrap(), line, "the terminal's ui status");
+    if cfg!(feature = "line-cmds") {
+        assert_eq!(pc.cmd("ui status").unwrap(), line, "the terminal's ui status");
+    }
     let (full, st) = full_and_status(&pc, &LiveAll::default());
     status_matches_cards(&full, &st);
     // Receiving on A, a tone heard on B, C monitored.
@@ -1344,6 +1356,9 @@ fn ui_status_line() {
     status_matches_cards(&full, &st);
     pc.app.monitor = 0;
     // The crossband repeater running: its state and passes.
+    if !cfg!(feature = "line-cmds") {
+        return; // the rest starts the repeater with a line command (decision 347)
+    }
     assert!(pc.cmd("xb start").is_ok());
     live.mode = ferrite_core::msg::ModeLive::Xb(ferrite_core::msg::XbLive { state: 1, passes: 3, ..Default::default() });
     let (full, st) = full_and_status(&pc, &live);
@@ -1425,6 +1440,7 @@ fn settings_write_keeps_coord_format() {
 /// VOX-10, LINK-34: CW ID turned on with no callsign, over the link's `CMD` (the terminal's `set`), says what the
 /// radio's knob says ("set a callsign first"), not a bare "one of Off"; Off still sets, and with a callsign it
 /// turns on.
+#[cfg(feature = "line-cmds")]
 #[test]
 fn cw_id_without_callsign_says_why() {
     let mut pc = Pc::new(true);
@@ -1936,4 +1952,43 @@ fn channel_positions_by_number() {
     assert_eq!(pc.write_many(what::POSITION, &[(free, rec)]).0, 0);
     assert!(pc.st.get(free).is_none() && pc.st.position(free).is_none());
     assert_eq!(pc.ask(msg::USED, &[what::POSITION]).0, Status::BadArg as u8);
+}
+
+/// LINK-66 (decision 347): the radio record: Watch and Battery Save read and written as the menu changes them, a
+/// value past the menu's refused, the fixed position with no fix (GPS-3), and the rest of a write ignored.
+#[test]
+fn radio_record_reads_and_writes() {
+    let mut pc = Pc::new(true);
+    let read = |pc: &mut Pc| {
+        let (s, a) = pc.ask(msg::READ, &[what::RADIO, 0, 0, 0, 0, 200]);
+        assert_eq!(s, 0);
+        assert_eq!(u16::from_le_bytes([a[0], a[1]]) as usize, ferrite_core::link::RADIO_LEN);
+        a[2..].to_vec()
+    };
+    let write = |pc: &mut Pc, rec: &[u8]| {
+        let mut p = std::vec![what::RADIO, 0, 0, 0, 0];
+        p.extend_from_slice(&(rec.len() as u16).to_le_bytes());
+        p.extend_from_slice(rec);
+        pc.ask(msg::WRITE, &p).0
+    };
+    let r = read(&mut pc);
+    assert_eq!((r[0], r[1], r[2]), (pc.app.watch, pc.app.bsave, 3), "the sample's 3D fix");
+    assert_ne!(&r[12..14], &[0xFF, 0xFF], "its age");
+    assert_eq!(write(&mut pc, &[2, 3]), 0);
+    assert_eq!((pc.app.watch, pc.app.bsave), (2, 3));
+    assert_eq!(write(&mut pc, &[0, 0, 9, 9, 9]), 0, "the read-only part is ignored");
+    assert_eq!((pc.app.watch, pc.app.bsave), (0, 0));
+    assert_eq!(write(&mut pc, &[3, 0]), Status::Invalid as u8);
+    assert_eq!(write(&mut pc, &[0, 4]), Status::Invalid as u8);
+    assert_eq!(write(&mut pc, &[1]), Status::BadArg as u8);
+    assert_eq!((pc.app.watch, pc.app.bsave), (0, 0), "unchanged by a refusal");
+    // No fix: the fixed position when it is on (GPS-3), no age.
+    pc.app.set.fixed_on = true;
+    pc.app.set.fixed = crate::data::Pos { lat: 491_234_567, lon: -1_231_234_567 };
+    let mut buf = [0u8; ferrite_core::link::RADIO_LEN];
+    let mut w = super::Window { b: &mut buf, from: 0, n: 0 };
+    super::radio_record(&pc.app, None, &mut w);
+    assert_eq!(buf[2], 0, "no fix");
+    assert_eq!((i32::from_le_bytes(buf[4..8].try_into().unwrap()), i32::from_le_bytes(buf[8..12].try_into().unwrap())), (491_234_567, -1_231_234_567));
+    assert_eq!(&buf[12..14], &[0xFF, 0xFF]);
 }
