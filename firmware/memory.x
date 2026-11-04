@@ -174,7 +174,9 @@ SECTIONS
  * part, or raise this), not an accident. tools/slowcheck.py prints the use against it. After the flash moves of the
  * same day (unnamed constants, the outliner, the GPS task) the tx build uses 81,604 B and the receive-only one
  * 68,200 B; the budget is left where it was until lowering it is decided. */
-__fast_budget = 148K;
+/* Nov 3, 2026 (Alex): raised to 180 KB. tx-bench reached 147.6 KB with satellite mode's fast-flash prediction loop
+ * and the clock-aware LCD strobe; the zero-wait room is 244 KB, so 180 stays a tripwire with real room behind it. */
+__fast_budget = 180K;
 ASSERT(__efast_ui - ORIGIN(FLASH) <= __fast_budget, "fast flash over its budget (__fast_budget in memory.x): move code to the slow part or raise the budget");
 
 /* The fast part (code and the other constants) must end inside the zero-wait region (0x08000000 + 256 KB). */
