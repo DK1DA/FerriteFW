@@ -295,9 +295,11 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ((9, 9), &[
         Entry(concat!("Advanced squelch||", txtc!("Thresholds per band."))),
         Entry(concat!("Calibration||", txtc!("The factory calibration, read only."))),
-        Entry(concat!("Cable log|Off|", txtc!("Plain log on the cable at power on."))),
         Entry(concat!("Terminal colour|Off|", txtc!("ANSI colour on the cable terminal."))),
         Entry(concat!("MCU clock|Dynamic|", txtc!("Fast only while needed, or always."))),
+        // TERM-28: the cable log is in bench builds only; last, so the items above keep their numbers.
+        #[cfg(feature = "bench")]
+        Entry(concat!("Cable log|Off|", txtc!("Plain log on the cable at power on."))),
     ]),
 ];
 
@@ -442,7 +444,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 96] = [
+static SETTINGS: [Setting; 95 + cfg!(feature = "bench") as usize] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -546,9 +548,10 @@ static SETTINGS: [Setting; 96] = [
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
     field!([9, 5, 0], sq_chip: bool, Kind::Flip(&["Software", "Chip"]), Nothing), // SQL-18.3
-    field!([9, 9, 3], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([9, 9, 4], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([9, 9, 5], mcu_fixed: bool, Kind::Flip(&["Dynamic", "Fixed"]), Nothing), // PWR-26.5
+    field!([9, 9, 3], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 9, 4], mcu_fixed: bool, Kind::Flip(&["Dynamic", "Fixed"]), Nothing), // PWR-26.5
+    #[cfg(feature = "bench")]
+    field!([9, 9, 5], cable_log: bool, Kind::Flip(&ON_OFF), Nothing), // TERM-28: bench builds only
 ];
 
 fn row(p: &[u8]) -> Option<&'static Setting> {

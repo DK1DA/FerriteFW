@@ -735,9 +735,8 @@
   | set 0 9 2 1 Off                   # Bluetooth
   | set 0 9 2 3 Auto                  # Cable port
   | set 0 9 5 Software                # Squelch
-  | set 0 9 9 3 Off                   # Cable log
-  | set 0 9 9 4 Off                   # Terminal colour
-  | set 0 9 9 5 Dynamic               # MCU clock
+  | set 0 9 9 3 Off                   # Terminal colour
+  | set 0 9 9 4 Dynamic               # MCU clock
   | # 0 9 4 Region: Not set (changes only on the radio)
   | # Zones (a channel's zone=N is one of these)
   | zone 1 "Simplex" scan=off shown=on distance=off resume=radio dwell=radio
@@ -994,9 +993,8 @@
   | set 0 9 2 1 Off                   # Bluetooth
   | set 0 9 2 3 Auto                  # Cable port
   | set 0 9 5 Software                # Squelch
-  | set 0 9 9 3 Off                   # Cable log
-  | set 0 9 9 4 Off                   # Terminal colour
-  | set 0 9 9 5 Dynamic               # MCU clock
+  | set 0 9 9 3 Off                   # Terminal colour
+  | set 0 9 9 4 Dynamic               # MCU clock
   | # 0 9 4 Region: Not set (changes only on the radio)
   | # Zones (a channel's zone=N is one of these)
   | zone 1 "Simplex" scan=off shown=on distance=off resume=radio dwell=radio

@@ -1,8 +1,9 @@
 //! The cable log (roadmap 1c; TERM-28): plain lines on the programming cable at 115200 baud, so a boot can be
 //! followed without trusting the screen or the key map. The boot report, every raw key code, the knob, the
 //! receiver once a second, beeps, redraw times and a fault's address. The first byte from the PC ends the log and
-//! starts the terminal or link (chapter 37). Every build prints the boot report; after it the bring-up build keeps
-//! logging, the normal build only with Cable log on (0 9 9 3). A fault's report prints in every build.
+//! starts the terminal or link (chapter 37). Bench builds only (the `cable-log` feature, Alex Nov 3, 2026): the boot report,
+//! then the bring-up build keeps logging, tx-bench only with Cable log on (0 9 9 5). A user build prints only a
+//! fault's report (`fault`), which goes straight to the UART in every build.
 
 use crate::chan::{TERM_OUT, TERM_WAKE};
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -13,7 +14,7 @@ pub static ON: AtomicBool = AtomicBool::new(true);
 
 /// One line to the cable (dropped bytes if the ring is full: the log never waits).
 pub fn line(s: &[u8]) {
-    if !ON.load(Relaxed) {
+    if !cfg!(feature = "cable-log") || !ON.load(Relaxed) {
         return;
     }
     // Tasks on every executor write lines into the one single-producer ring: a line goes in whole, with interrupts
@@ -28,7 +29,7 @@ pub fn line(s: &[u8]) {
 
 /// A line built with ufmt.
 pub fn linef(f: impl FnOnce(&mut Buf<96>)) {
-    if ON.load(Relaxed) {
+    if cfg!(feature = "cable-log") && ON.load(Relaxed) {
         let mut b = Buf::<96>::new();
         f(&mut b);
         line(b.as_bytes());

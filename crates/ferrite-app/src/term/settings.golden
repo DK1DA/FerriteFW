@@ -152,8 +152,7 @@ wired [9, 9]: None
 wired [9, 9, 1]: None 
 wired [9, 9, 2]: Some(false) Not checked
 wired [9, 9, 3]: Some(false) Off
-wired [9, 9, 4]: Some(false) Off
-wired [9, 9, 5]: Some(false) Dynamic
+wired [9, 9, 4]: Some(false) Dynamic
 -- dump
 # Ferrite dump v1, firmware 0.1.0
 # One command per line, as typed after : in the terminal; :load reads it back. # starts a note.
@@ -251,9 +250,8 @@ set 0 9 1 1 Off                   # Auto lock
 set 0 9 2 1 Off                   # Bluetooth
 set 0 9 2 3 Auto                  # Cable port
 set 0 9 5 Software                # Squelch
-set 0 9 9 3 Off                   # Cable log
-set 0 9 9 4 Off                   # Terminal colour
-set 0 9 9 5 Dynamic               # MCU clock
+set 0 9 9 3 Off                   # Terminal colour
+set 0 9 9 4 Dynamic               # MCU clock
 # 0 9 4 Region: Not set (changes only on the radio)
 # Zones (a channel's zone=N is one of these)
 # Range presets (0 1 4)
@@ -414,9 +412,8 @@ set 0 7 7 2 Auto                  # Low Power Mode
 :_ :get 0 9 9_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 9 1_ 0 9 9 1 Advanced squelch: a page on the radio, not a setting
 :_ :get 0 9 9 2_ 0 9 9 2 Calibration: Not checked
-:_ :get 0 9 9 3_ 0 9 9 3 Cable log: Off
-:_ :get 0 9 9 4_ 0 9 9 4 Terminal colour: Off
-:_ :get 0 9 9 5_ 0 9 9 5 MCU clock: Dynamic
+:_ :get 0 9 9 3_ 0 9 9 3 Terminal colour: Off
+:_ :get 0 9 9 4_ 0 9 9 4 MCU clock: Dynamic
 -- knob and #
 change [1, 1] 1: true Some(true) A+B+C [Watch(7)] Home
 change [1, 1] -1: true Some(false) A+B [Watch(3)] Home
@@ -1489,20 +1486,13 @@ change [9, 9, 3] -2: true Some(false) Off [] Home
 change [9, 9, 3] 3: true Some(true) On [] Home
 change [9, 9, 3] 0: true Some(false) Off [] Home
 reset [9, 9, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
-change [9, 9, 4] 1: true Some(true) On [] Home
-change [9, 9, 4] -1: true Some(false) Off [] Home
-change [9, 9, 4] 2: true Some(true) On [] Home
-change [9, 9, 4] -2: true Some(false) Off [] Home
-change [9, 9, 4] 3: true Some(true) On [] Home
-change [9, 9, 4] 0: true Some(false) Off [] Home
+change [9, 9, 4] 1: true Some(true) Fixed [] Home
+change [9, 9, 4] -1: true Some(false) Dynamic [] Home
+change [9, 9, 4] 2: true Some(true) Fixed [] Home
+change [9, 9, 4] -2: true Some(false) Dynamic [] Home
+change [9, 9, 4] 3: true Some(true) Fixed [] Home
+change [9, 9, 4] 0: true Some(false) Dynamic [] Home
 reset [9, 9, 4]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
-change [9, 9, 5] 1: true Some(true) Fixed [] Home
-change [9, 9, 5] -1: true Some(false) Dynamic [] Home
-change [9, 9, 5] 2: true Some(true) Fixed [] Home
-change [9, 9, 5] -2: true Some(false) Dynamic [] Home
-change [9, 9, 5] 3: true Some(true) Fixed [] Home
-change [9, 9, 5] 0: true Some(false) Dynamic [] Home
-reset [9, 9, 5]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
 -- set
 A  VFO                   146.52000   FM-N              idle       active  B  VFO                   443.47500   FM-N              idle :_ :set 0 1 1 xyzzy_ Watch: one of A+B, A+B+C, Off
 :_ :set 0 1 1 on_ Watch: one of A+B, A+B+C, Off
@@ -2155,27 +2145,20 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 9 5 2_ Squelch: one of Software, Chip
 :_ :set 0 9 5 10_ Squelch: one of Software, Chip
 :_ :set 0 9 5 none_ Squelch: one of Software, Chip
-:_ :set 0 9 9 3 xyzzy_ Cable log: one of Off, On
-:_ :set 0 9 9 3 on_ 0 9 9 3 Cable log: On
-:_ :set 0 9 9 3 off_ 0 9 9 3 Cable log: Off
-:_ :set 0 9 9 3 1_ Cable log: one of Off, On
-:_ :set 0 9 9 3 2_ Cable log: one of Off, On
-:_ :set 0 9 9 3 10_ Cable log: one of Off, On
-:_ :set 0 9 9 3 none_ Cable log: one of Off, On
-:_ :set 0 9 9 4 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: On
-:_ :set 0 9 9 4 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: Off
-:_ :set 0 9 9 4 1_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 2_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 10_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 none_ Terminal colour: one of Off, On
-:_ :set 0 9 9 5 xyzzy_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 on_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 off_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 1_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 2_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 10_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 none_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 3 xyzzy_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: On
+:_ :set 0 9 9 3 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: Off
+:_ :set 0 9 9 3 1_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 2_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 10_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 none_ Terminal colour: one of Off, On
+:_ :set 0 9 9 4 xyzzy_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 on_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 off_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 1_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 2_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 10_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 none_ MCU clock: one of Dynamic, Fixed
 -- end Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 0, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: false, key_beep: false, beep_vol: 2, alert_tones: false, vox: false, vox_level: 2, vox_tail: 3, mic_gain: 2, tx_timeout: 4, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: false, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 10, fm_monitor: false, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 4, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 0, lpm_below: 10, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 6, keypad_light: 0, leds: 0, auto_off: 3, auto_lock: 3, dtmf_sidetone: false, arrival_tone: false, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 10, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 0, gps_rxtx: 0, arrival: 0, menu_timeout: 1, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: false, dtmf_rx: false, aprs_share: 0, local: 1, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 5, power: 0, path: 2, digi: 32, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10, fx25: 0, sound: 0, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 2, mic_e: 0, telemetry: false }
 == pass 1: Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 2, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 3, kiss_port: 2, same: true, pocsag_on: false, pocsag_freq: 44000625, pocsag_cap: 1234, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 2, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 0, fm_agc: 3, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 3, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 0, scope_step: 1, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 1, lpm_below: 40, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 8, keypad_light: 1, leds: 1, auto_off: 3, auto_lock: 4, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 2, scan_resume: 8, scan_prio: 0, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps: 1, gps_rxtx: 3, arrival: 0, menu_timeout: 1, pause_time: 0, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 1, local: 2, sat_min_el: 2 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 64, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 11, fx25: 16, sound: 0, symbol: 2, txdelay: 40, tx_level: 2, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 2, mic_e: 3, telemetry: false }
 wired [1, 1]: Some(true) Off
@@ -2331,8 +2314,7 @@ wired [9, 9]: None
 wired [9, 9, 1]: None 
 wired [9, 9, 2]: Some(false) Not checked
 wired [9, 9, 3]: Some(false) Off
-wired [9, 9, 4]: Some(false) Off
-wired [9, 9, 5]: Some(false) Dynamic
+wired [9, 9, 4]: Some(false) Dynamic
 -- dump
 # Ferrite dump v1, firmware 0.1.0
 # One command per line, as typed after : in the terminal; :load reads it back. # starts a note.
@@ -2429,9 +2411,8 @@ set 0 9 1 1 5 min                 # Auto lock
 set 0 9 2 1 Off                   # Bluetooth
 set 0 9 2 3 KISS                  # Cable port
 set 0 9 5 Software                # Squelch
-set 0 9 9 3 Off                   # Cable log
-set 0 9 9 4 Off                   # Terminal colour
-set 0 9 9 5 Dynamic               # MCU clock
+set 0 9 9 3 Off                   # Terminal colour
+set 0 9 9 4 Dynamic               # MCU clock
 # 0 9 4 Region: Canada (changes only on the radio)
 # 0 8 6 Callsign: N0CALL (set on the radio)
 # Zones (a channel's zone=N is one of these)
@@ -2645,9 +2626,8 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 9 9_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 9 1_ 0 9 9 1 Advanced squelch: a page on the radio, not a setting
 :_ :get 0 9 9 2_ 0 9 9 2 Calibration: Not checked
-:_ :get 0 9 9 3_ 0 9 9 3 Cable log: Off
-:_ :get 0 9 9 4_ 0 9 9 4 Terminal colour: Off
-:_ :get 0 9 9 5_ 0 9 9 5 MCU clock: Dynamic
+:_ :get 0 9 9 3_ 0 9 9 3 Terminal colour: Off
+:_ :get 0 9 9 4_ 0 9 9 4 MCU clock: Dynamic
 -- knob and #
 change [1, 1] 1: true Some(false) A+B [Watch(0)] Home
 change [1, 1] -1: true Some(true) Off [Watch(0)] Home
@@ -3720,20 +3700,13 @@ change [9, 9, 3] -2: true Some(false) Off [] Home
 change [9, 9, 3] 3: true Some(true) On [] Home
 change [9, 9, 3] 0: true Some(false) Off [] Home
 reset [9, 9, 3]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 5, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 2, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
-change [9, 9, 4] 1: true Some(true) On [] Home
-change [9, 9, 4] -1: true Some(false) Off [] Home
-change [9, 9, 4] 2: true Some(true) On [] Home
-change [9, 9, 4] -2: true Some(false) Off [] Home
-change [9, 9, 4] 3: true Some(true) On [] Home
-change [9, 9, 4] 0: true Some(false) Off [] Home
+change [9, 9, 4] 1: true Some(true) Fixed [] Home
+change [9, 9, 4] -1: true Some(false) Dynamic [] Home
+change [9, 9, 4] 2: true Some(true) Fixed [] Home
+change [9, 9, 4] -2: true Some(false) Dynamic [] Home
+change [9, 9, 4] 3: true Some(true) Fixed [] Home
+change [9, 9, 4] 0: true Some(false) Dynamic [] Home
 reset [9, 9, 4]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 5, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 2, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
-change [9, 9, 5] 1: true Some(true) Fixed [] Home
-change [9, 9, 5] -1: true Some(false) Dynamic [] Home
-change [9, 9, 5] 2: true Some(true) Fixed [] Home
-change [9, 9, 5] -2: true Some(false) Dynamic [] Home
-change [9, 9, 5] 3: true Some(true) Fixed [] Home
-change [9, 9, 5] 0: true Some(false) Dynamic [] Home
-reset [9, 9, 5]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 5, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 2, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
 -- set
 Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Watch: one of A+B, A+B+C, Off
 :_ :set 0 1 1 on_ Watch: one of A+B, A+B+C, Off
@@ -4386,27 +4359,20 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 9 5 2_ Squelch: one of Software, Chip
 :_ :set 0 9 5 10_ Squelch: one of Software, Chip
 :_ :set 0 9 5 none_ Squelch: one of Software, Chip
-:_ :set 0 9 9 3 xyzzy_ Cable log: one of Off, On
-:_ :set 0 9 9 3 on_ 0 9 9 3 Cable log: On
-:_ :set 0 9 9 3 off_ 0 9 9 3 Cable log: Off
-:_ :set 0 9 9 3 1_ Cable log: one of Off, On
-:_ :set 0 9 9 3 2_ Cable log: one of Off, On
-:_ :set 0 9 9 3 10_ Cable log: one of Off, On
-:_ :set 0 9 9 3 none_ Cable log: one of Off, On
-:_ :set 0 9 9 4 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 on_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: On
-:_ :set 0 9 9 4 off_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: Off
-:_ :set 0 9 9 4 1_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 2_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 10_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 none_ Terminal colour: one of Off, On
-:_ :set 0 9 9 5 xyzzy_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 on_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 off_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 1_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 2_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 10_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 none_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 3 xyzzy_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 on_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: On
+:_ :set 0 9 9 3 off_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: Off
+:_ :set 0 9 9 3 1_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 2_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 10_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 none_ Terminal colour: one of Off, On
+:_ :set 0 9 9 4 xyzzy_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 on_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 off_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 1_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 2_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 10_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 none_ MCU clock: one of Dynamic, Fixed
 -- end Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 0, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 5, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 2, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: false, key_beep: false, beep_vol: 2, alert_tones: false, vox: false, vox_level: 2, vox_tail: 3, mic_gain: 2, tx_timeout: 4, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: false, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 10, fm_monitor: false, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 4, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 0, lpm_below: 10, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 6, keypad_light: 0, leds: 0, auto_off: 3, auto_lock: 3, dtmf_sidetone: false, arrival_tone: false, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 10, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 1, gps: 0, gps_rxtx: 0, arrival: 0, menu_timeout: 1, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: false, dtmf_rx: false, aprs_share: 0, local: 1, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 5, power: 0, path: 2, digi: 32, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10, fx25: 0, sound: 0, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 2, mic_e: 0, telemetry: false }
 == pass 2: Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 250, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 250, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 250, scope_step: 250, scope_dwell: 250, scope_trig: 250, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 250, scan_resume: 250, scan_prio: 250, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps: 2, gps_rxtx: 250, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
 wired [1, 1]: Some(false) A+B
@@ -4562,8 +4528,7 @@ wired [9, 9]: None
 wired [9, 9, 1]: None 
 wired [9, 9, 2]: Some(false) Not checked
 wired [9, 9, 3]: Some(false) Off
-wired [9, 9, 4]: Some(false) Off
-wired [9, 9, 5]: Some(false) Dynamic
+wired [9, 9, 4]: Some(false) Dynamic
 -- dump
 # Ferrite dump v1, firmware 0.1.0
 # One command per line, as typed after : in the terminal; :load reads it back. # starts a note.
@@ -4661,9 +4626,8 @@ set 0 9 1 1 Off                   # Auto lock
 set 0 9 2 1 Off                   # Bluetooth
 set 0 9 2 3 Terminal              # Cable port
 set 0 9 5 Software                # Squelch
-set 0 9 9 3 Off                   # Cable log
-set 0 9 9 4 Off                   # Terminal colour
-set 0 9 9 5 Dynamic               # MCU clock
+set 0 9 9 3 Off                   # Terminal colour
+set 0 9 9 4 Dynamic               # MCU clock
 # 0 9 4 Region: Not set (changes only on the radio)
 # Zones (a channel's zone=N is one of these)
 # Range presets (0 1 4)
@@ -4858,9 +4822,8 @@ set 0 9 2 3 Terminal              # Cable port
 :_ :get 0 9 9_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 9 1_ 0 9 9 1 Advanced squelch: a page on the radio, not a setting
 :_ :get 0 9 9 2_ 0 9 9 2 Calibration: Not checked
-:_ :get 0 9 9 3_ 0 9 9 3 Cable log: Off
-:_ :get 0 9 9 4_ 0 9 9 4 Terminal colour: Off
-:_ :get 0 9 9 5_ 0 9 9 5 MCU clock: Dynamic
+:_ :get 0 9 9 3_ 0 9 9 3 Terminal colour: Off
+:_ :get 0 9 9 4_ 0 9 9 4 MCU clock: Dynamic
 -- knob and #
 change [1, 1] 1: true Some(true) A+B+C [Watch(7)] Home
 change [1, 1] -1: true Some(false) A+B [Watch(3)] Home
@@ -5933,20 +5896,13 @@ change [9, 9, 3] -2: true Some(false) Off [] Home
 change [9, 9, 3] 3: true Some(true) On [] Home
 change [9, 9, 3] 0: true Some(false) Off [] Home
 reset [9, 9, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
-change [9, 9, 4] 1: true Some(true) On [] Home
-change [9, 9, 4] -1: true Some(false) Off [] Home
-change [9, 9, 4] 2: true Some(true) On [] Home
-change [9, 9, 4] -2: true Some(false) Off [] Home
-change [9, 9, 4] 3: true Some(true) On [] Home
-change [9, 9, 4] 0: true Some(false) Off [] Home
+change [9, 9, 4] 1: true Some(true) Fixed [] Home
+change [9, 9, 4] -1: true Some(false) Dynamic [] Home
+change [9, 9, 4] 2: true Some(true) Fixed [] Home
+change [9, 9, 4] -2: true Some(false) Dynamic [] Home
+change [9, 9, 4] 3: true Some(true) Fixed [] Home
+change [9, 9, 4] 0: true Some(false) Dynamic [] Home
 reset [9, 9, 4]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
-change [9, 9, 5] 1: true Some(true) Fixed [] Home
-change [9, 9, 5] -1: true Some(false) Dynamic [] Home
-change [9, 9, 5] 2: true Some(true) Fixed [] Home
-change [9, 9, 5] -2: true Some(false) Dynamic [] Home
-change [9, 9, 5] 3: true Some(true) Fixed [] Home
-change [9, 9, 5] 0: true Some(false) Dynamic [] Home
-reset [9, 9, 5]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false }
 -- set
 A  VFO                   146.52000   FM-N              idle       active  B  VFO                   443.47500   FM-N              idle :_ :set 0 1 1 xyzzy_ Watch: one of A+B, A+B+C, Off
 :_ :set 0 1 1 on_ Watch: one of A+B, A+B+C, Off
@@ -6599,25 +6555,18 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 9 5 2_ Squelch: one of Software, Chip
 :_ :set 0 9 5 10_ Squelch: one of Software, Chip
 :_ :set 0 9 5 none_ Squelch: one of Software, Chip
-:_ :set 0 9 9 3 xyzzy_ Cable log: one of Off, On
-:_ :set 0 9 9 3 on_ 0 9 9 3 Cable log: On
-:_ :set 0 9 9 3 off_ 0 9 9 3 Cable log: Off
-:_ :set 0 9 9 3 1_ Cable log: one of Off, On
-:_ :set 0 9 9 3 2_ Cable log: one of Off, On
-:_ :set 0 9 9 3 10_ Cable log: one of Off, On
-:_ :set 0 9 9 3 none_ Cable log: one of Off, On
-:_ :set 0 9 9 4 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: On
-:_ :set 0 9 9 4 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 4 Terminal colour: Off
-:_ :set 0 9 9 4 1_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 2_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 10_ Terminal colour: one of Off, On
-:_ :set 0 9 9 4 none_ Terminal colour: one of Off, On
-:_ :set 0 9 9 5 xyzzy_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 on_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 off_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 1_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 2_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 10_ MCU clock: one of Dynamic, Fixed
-:_ :set 0 9 9 5 none_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 3 xyzzy_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: On
+:_ :set 0 9 9 3 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: Off
+:_ :set 0 9 9 3 1_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 2_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 10_ Terminal colour: one of Off, On
+:_ :set 0 9 9 3 none_ Terminal colour: one of Off, On
+:_ :set 0 9 9 4 xyzzy_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 on_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 off_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 1_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 2_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 10_ MCU clock: one of Dynamic, Fixed
+:_ :set 0 9 9 4 none_ MCU clock: one of Dynamic, Fixed
 -- end Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 0, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 4, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: false, key_beep: false, beep_vol: 2, alert_tones: false, vox: false, vox_level: 2, vox_tail: 3, mic_gain: 2, tx_timeout: 4, fm_sleep: 0, brightness: 10, brightness_night: 99, tx_light: false, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 10, fm_monitor: false, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 4, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 0, lpm_below: 10, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 6, keypad_light: 0, leds: 0, auto_off: 3, auto_lock: 3, dtmf_sidetone: false, arrival_tone: false, show_hidden: false, chan_only: true, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 10, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 0, gps_rxtx: 0, arrival: 0, menu_timeout: 1, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: false, dtmf_rx: false, aprs_share: 0, local: 1, sat_min_el: 2 } aprs AprsCfg { f5k: 0, beacon: 5, power: 0, path: 2, digi: 32, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10, fx25: 0, sound: 0, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 2, mic_e: 0, telemetry: false }

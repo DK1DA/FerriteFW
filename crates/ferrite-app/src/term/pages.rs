@@ -113,7 +113,7 @@ impl<T: Sink> Out for SinkOut<'_, T> {
 
 
 /// One row: text clipped to the width, columns counted (attributes take none), reverse video and bold only
-/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 9 4), ANSI colours in their place: the top line
+/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 9 3), ANSI colours in their place: the top line
 /// and the selection white on blue, headings cyan, warnings yellow.
 pub(super) struct W<'a> {
     pub(super) o: &'a mut dyn Out,
@@ -315,7 +315,7 @@ impl Term {
                 continue;
             }
             let mut h = Hash(0x811C_9DC5);
-            let colour = app.set.term_colour; // TERM-18, 0 9 9 4
+            let colour = app.set.term_colour; // TERM-18, 0 9 9 3
             self.row(r, &cx, &mut W { o: &mut h, col: 0, cols: self.cols as u16, rev: false, colour });
             let h = h.0 | 1;
             if h != self.hash[r as usize] {

@@ -270,7 +270,7 @@ pub fn governor(reasons: u16, last_high_ms: u32, now: u32) -> bool {
 }
 
 /// PWR-26: the speed to switch to this turn: Some(true) 24 MHz, Some(false) the build's, None stay as it is.
-/// Audio running (`audio_busy`) never switches (PWR-26.4); Fixed (0 9 9 5) is the build's speed always (PWR-26.5);
+/// Audio running (`audio_busy`) never switches (PWR-26.4); Fixed (0 9 9 4) is the build's speed always (PWR-26.5);
 /// in Low Power Mode its own timing decides (`lpm_wait`, [`lpm_low_in`]: PWR-24.9, PWR-24.10); otherwise the
 /// governor.
 pub fn clock_target(fixed: bool, lpm_wait: Option<u32>, reasons: u16, last_high_ms: u32, now: u32, audio_busy: bool) -> Option<bool> {

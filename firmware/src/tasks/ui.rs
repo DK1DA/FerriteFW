@@ -417,7 +417,7 @@ pub async fn task() {
         // UPD-16: another layout's data, left alone for Console (the App shows D25 from its first tick)
         (false, ferrite_store::store::Mounted::Update(_)) => b"store: another layout's data: finish the update in Ferrite Console",
     });
-    // TERM-28: after the boot report the normal build logs only with Cable log on (0 9 9 3); the bring-up build
+    // TERM-28: after the boot report the normal build logs only with Cable log on (0 9 9 5); the bring-up build
     // always. Either way the first byte from the PC ends it.
     let mut cable_log = cfg!(feature = "bringup") || set.cable_log;
     if !cable_log {
@@ -853,7 +853,7 @@ pub async fn task() {
         // PWR-24.9, PWR-26: the MCU clock. In Low Power Mode 24 MHz after LPM_CLOCK_MS (and the boost after
         // input, PWR-24.10; transmit stays at 24 MHz); otherwise the governor: 24 MHz at rest, the build's speed
         // while anything needs it (the App's reasons, a live link, audio) and a second after (PWR-26.3); Fixed
-        // (0 9 9 5) the build's speed always. Never while audio runs (PWR-26.4). Here, in thread mode between
+        // (0 9 9 4) the build's speed always. Never while audio runs (PWR-26.4). Here, in thread mode between
         // awaits, nothing is mid-transfer (hal::clock::set_low). Before the draw, so a redraw after a key is at
         // full speed.
         let now = now_ms();
@@ -919,7 +919,7 @@ pub async fn task() {
         // SQL-18.3: who decides the squelch (0 9 5), for the Radio task's tick.
         ferrite_core::softsq::set_chip_decides(app.settings().sq_chip);
         ferrite_core::watch::set_aprs_first(app.settings().aprs_share == 0); // WATCH-17.3
-        // Cable log turned on or off in the menu (0 9 9 3; the bring-up build ignores it: always on).
+        // Cable log turned on or off in the menu (0 9 9 5; the bring-up build ignores it: always on).
         if !cfg!(feature = "bringup") && app.settings().cable_log != cable_log {
             cable_log = app.settings().cable_log;
             bringup::ON.store(cable_log, Relaxed);

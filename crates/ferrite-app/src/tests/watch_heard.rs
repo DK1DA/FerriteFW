@@ -116,7 +116,7 @@ fn muted_active_slot_lets_watched_be_heard() {
 }
 
 /// The two flag bits that were Follow's (decision 81) keep scan inputs' bit in place: old records still load it.
-/// TERM-28: the first is Cable log (0 9 9 3), off by default, toggled from the menu and kept across a save.
+/// TERM-28: the first is Cable log (0 9 9 5), off by default, toggled from the menu and kept across a save.
 #[test]
 fn flags_round_trip_around_the_spare_bits() {
     struct V(Vec<u8>);
@@ -141,15 +141,19 @@ fn flags_round_trip_around_the_spare_bits() {
         let b = load(&save(&a));
         assert_eq!((b.show_hidden, b.chan_only, b.scan_tx, b.cable_log, b.aprs_fixed), (h, c, x, false, false));
     }
-    // TERM-28: Cable log is off by default, 0 9 9 3 toggles it, and it keeps its bit.
+    // TERM-28: Cable log is off by default, 0 9 9 5 toggles it, and it keeps its bit.
     assert!(!d.cable_log);
     let b = load(&save(&crate::settings::Settings { cable_log: true, ..d }));
     assert!(b.cable_log && b.scan_tx == d.scan_tx && b.chan_only == d.chan_only);
+    // The menu item is in bench builds only (TERM-28); a user build has no 0 9 9 5.
     let mut t = T::new();
-    assert!(crate::screens::groups::change(&mut t.app, &[9, 9, 3], 1));
-    assert!(t.app.set.cable_log);
-    assert!(crate::screens::groups::change(&mut t.app, &[9, 9, 3], 1));
-    assert!(!t.app.set.cable_log);
+    let bench = cfg!(feature = "bench");
+    assert_eq!(crate::screens::groups::change(&mut t.app, &[9, 9, 5], 1), bench);
+    assert_eq!(t.app.set.cable_log, bench);
+    if bench {
+        assert!(crate::screens::groups::change(&mut t.app, &[9, 9, 5], 1));
+        assert!(!t.app.set.cable_log);
+    }
     // A record saved with Follow's bits set (Follow off, a change from its old default): ignored.
     let mut v = save(&crate::settings::Settings { scan_tx: !d.scan_tx, ..d });
     let i = v.len() - then_len() - 1; // the flag byte

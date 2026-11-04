@@ -2372,12 +2372,12 @@ fn radio_editor_wins() {
     assert!(r.bottom().contains("open on the radio's menu"), "{}", r.bottom());
 }
 
-/// TERM-18: colour is off by default (reverse video and bold only); 0 9 9 4 turns it on.
+/// TERM-18: colour is off by default (reverse video and bold only); 0 9 9 3 turns it on.
 #[test]
 fn colour_is_optional() {
     let mut r = Rig::main();
     assert!(!r.raw().contains("\x1b[0;97;44m"));
-    r.cmd("set 0 9 9 4 On");
+    r.cmd("set 0 9 9 3 On");
     assert!(r.app.set.term_colour);
     r.send(b"\x0c");
     r.poll();
@@ -2391,8 +2391,9 @@ fn colour_is_optional() {
 /// menu path's value and default flag in three states (the sample radio, a changed one, one with out-of-range
 /// stored values), the dump and the changed list, `get` on every path, the knob's steps and # on every path with
 /// what each sends the Radio task, and `set` with a value that isn't one (its "one of" list walks every value).
-/// Bless a deliberate change with FERRITE_BLESS=1.
+/// Bless a deliberate change with FERRITE_BLESS=1. The user build's menu: bench builds add Cable log (TERM-28).
 #[test]
+#[cfg(not(feature = "bench"))]
 fn settings_golden() {
     use crate::screens::groups;
     use std::fmt::Write as _;
