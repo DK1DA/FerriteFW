@@ -30,6 +30,7 @@ SLOW_CALLS = {
     "tonehint": "tone hint step, at most once a receive tick (TSRCH-12, -13)",
     "chip::heard_tone": "heard-tone decode for the tone hint (TSRCH-12)",
     "gpspower": "GPS power decision, a few times a second (GPS-26 to -33)",
+    "store::part_read": "the SSB patch read from SPI, once per switch to a sideband (HF-19)",
 }
 # Slow tables that interrupt context reads on purpose: none of them per sample or per tick. Each entry is (regex,
 # (min, max) size or None, reason). The regex is matched against the reading function and the functions inlined at
