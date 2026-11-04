@@ -1036,6 +1036,9 @@ pub async fn task() {
             if !busy {
                 sat_log(&app, now_ms().wrapping_sub(at.0), at.1);
                 predict_at = None;
+                // The finished list drawn now: a last slice within FRAME_MIN_MS of a draw had no draw of its own, and
+                // with nothing else to wake it the screen kept the half-filled list until a key (black, Nov 3, 2026).
+                urgent = true;
             }
         } else if let Some(at) = predict_at.take() {
             sat_log(&app, now_ms().wrapping_sub(at.0), at.1);

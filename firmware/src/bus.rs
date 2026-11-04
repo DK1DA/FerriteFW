@@ -112,7 +112,7 @@ fn add_bytes(n: u32) {
 const WR_LOW: u8 = 1 << 0;
 
 #[inline(always)]
-fn byte(b: u8) {
+fn byte(b: u8, reps: u32) {
     // The ST7789 latches on WR rising, so the data may change as WR falls: one write sets both. Then WR stays low
     // for unrolled nops and high for a few more, keeping the 8080 write cycle (66 ns), WR low/high (15 ns) and data
     // setup/hold (10 ns) at 120 MHz. Oct 12, 2026: separate writes and looped nops cost about 1 us a byte (120
@@ -123,48 +123,56 @@ fn byte(b: u8) {
     // Above 120 MHz (a `clock-*` bench build) the nops repeat, so the strobe never gets shorter than at 120.
     gpio::write_high_byte_clear(LCD_DATA_PORT, b, WR_LOW);
     gpio::sync(LCD_DATA_PORT);
-    for _ in 0..NOP_REPEAT {
+    for _ in 0..reps {
         // SAFETY: nops only.
         unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
     }
     LCD_WR.set();
     gpio::sync(LCD_DATA_PORT);
-    for _ in 0..NOP_REPEAT {
+    for _ in 0..reps {
         unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
     }
 }
 
-/// The LCD strobe's nops are counted at 120 MHz: once at that speed or below, more often above. Counted for the
-/// build's speed, the fastest the core runs: at Low Power Mode's 24 MHz (PWR-24.9) the strobe is only longer.
-const NOP_REPEAT: u32 = crate::hal::clock::NORMAL.lcd_nops();
+/// The LCD strobe's nops are counted at 120 MHz: once at that speed or below, more often above. Read from the clock
+/// the core runs at now, once a call (not a byte): the build's speed was fixed at compile time until Nov 3, 2026, and
+/// a redraw during satellite prediction's 240 MHz (PWR-26.8) halved the strobe and left green bars after the drawn
+/// area (black). At 24 MHz (PWR-24.9) the strobe is only longer.
+#[inline(always)]
+fn nop_reps() -> u32 {
+    crate::hal::clock::tree().lcd_nops()
+}
 
 impl st7789::Bus8080 for Lcd {
     fn command(&mut self, cmd: u8) {
         LCD_DC.clr();
-        byte(cmd);
+        byte(cmd, nop_reps());
         LCD_DC.set();
     }
     fn data(&mut self, data: &[u8]) {
         add_bytes(data.len() as u32);
+        let r = nop_reps();
         for &b in data {
-            byte(b)
+            byte(b, r)
         }
     }
     /// Straight from the pixels: copying them into a byte buffer first made a band's send about 0.4 us a byte
     /// against a fill's 0.24 (Oct 23, 2026). The strobe is `byte`'s, unchanged.
     fn pixels(&mut self, px: &[u16]) {
         add_bytes(2 * px.len() as u32);
+        let r = nop_reps();
         for &c in px {
-            byte((c >> 8) as u8);
-            byte(c as u8);
+            byte((c >> 8) as u8, r);
+            byte(c as u8, r);
         }
     }
     fn repeat(&mut self, color: u16, count: u32) {
         let (hi, lo) = ((color >> 8) as u8, color as u8);
         add_bytes(count.wrapping_mul(2));
+        let r = nop_reps();
         for _ in 0..count {
-            byte(hi);
-            byte(lo);
+            byte(hi, r);
+            byte(lo, r);
         }
     }
     fn reset(&mut self, active: bool) {

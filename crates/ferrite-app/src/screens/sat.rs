@@ -246,17 +246,22 @@ impl View for SatScr {
                 Key::Up if row > 0 => pick(app, &mut s, row - 1),
                 Key::Down if row + 1 < n => pick(app, &mut s, row + 1),
                 Key::Left | Key::Right => {
-                    // ◀▶: one satellite at a time, or all
+                    // ◀▶: from all, the selected pass's satellite (its passes, the selection kept on that pass);
+                    // then one satellite at a time, and past either end all again (Alex, Nov 3: it always showed
+                    // the first satellite)
                     let k = app.sat_data().sats();
                     let f = if s.filter == ALL { None } else { Some(s.filter) };
                     let next = match (e.key, f) {
-                        (Key::Right, None) => Some(0),
+                        (_, None) => nth(app, s, row).map(|p| p.sat),
                         (Key::Right, Some(f)) => (f + 1 < k).then_some(f + 1),
-                        (_, None) => k.checked_sub(1),
                         (_, Some(f)) => f.checked_sub(1),
                     };
+                    let keep = (s.sat, s.aos);
                     s.filter = next.filter(|_| k > 0).unwrap_or(ALL);
-                    pick(app, &mut s, 0);
+                    // the same pass if the new list has it, else its first
+                    if !shown(app, s.filter).any(|p| p.sat == keep.0 && p.aos.abs_diff(keep.1) < 120) {
+                        pick(app, &mut s, 0);
+                    }
                 }
                 Key::Menu => {
                     if let Some(p) = nth(app, s, row) {

@@ -357,3 +357,36 @@ fn prediction_in_time_slices() {
     t.hold(Key::Exit);
     assert!(!t.app.sat_busy(), "closed again");
 }
+
+/// SAT-1's list: ◀▶ from all shows the selected pass's satellite and all its passes, the selection staying on that
+/// pass (it always showed the first satellite, Alex, Nov 3, 2026); ◀▶ again step through the satellites.
+#[test]
+fn arrows_filter_to_the_selected_satellite() {
+    let p = a_pass(0);
+    let mut t = sat_app(p.aos - 600);
+    t.open(crate::screens::nav::Dest::Satellites);
+    t.wait(3000);
+    let first = match t.app.screen() { Screen::Sat(s) => s.sat, _ => panic!("{:?}", t.app.screen()) };
+    // down until a pass of another satellite is selected
+    let mut picked = None;
+    for _ in 0..20 {
+        t.tap(Key::Down);
+        if let Screen::Sat(s) = t.app.screen() {
+            if s.sat != first {
+                picked = Some((s.sat, s.aos));
+                break;
+            }
+        }
+    }
+    let (sat, aos) = picked.expect("a second satellite's pass in the list");
+    t.tap(Key::Right);
+    match t.app.screen() {
+        Screen::Sat(s) => {
+            assert_eq!(s.filter, sat, "the selected pass's satellite");
+            assert_eq!((s.sat, s.aos), (sat, aos), "the selection stays on its pass");
+        }
+        sc => panic!("{sc:?}"),
+    }
+    t.tap(Key::Left);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.filter != sat), "◀ steps to another satellite (or all)");
+}
