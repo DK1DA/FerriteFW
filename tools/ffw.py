@@ -396,7 +396,8 @@ def write_parts(ask, hello, parts, say=print, busy_s=15.0, clock=None):
                 raise Refused([f"the radio answered {st} to 0x{ty:02X}: nothing more written; run --parts-only again"])
             clock.sleep(0.02)
 
-    for name, addr, b in parts:
+    for k, (name, addr, b) in enumerate(parts, 1):
+        ask(DATA_WRITE, struct.pack("<BBB", 3, k, len(parts)))  # UPD-16.2: "Part 2 of 4" on the radio; any answer
         for sec in range(addr, addr + len(b), SECTOR):
             go(DATA_WRITE, struct.pack("<BI", 0, sec))
         for off in range(0, len(b), PROGRAM_MAX):

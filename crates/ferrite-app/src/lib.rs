@@ -369,6 +369,8 @@ pub struct App {
     pressed: u32,
     /// The last link frame of a big transfer, for the LED's transfer flash (DISP-30, [`lights`]).
     xfer: u32,
+    /// UPD-16.2: the SPI part being written and how many (`DATA_WRITE` `PART`); (0, 0) before any.
+    pub(crate) update_part: (u8, u8),
     /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed, a transfer seen.
     lit: u8,
     /// The APRS settings from the APRS store ([`aprs`]), and whether they were loaded and need writing back.
@@ -503,6 +505,7 @@ impl App {
             awake: 0,
             pressed: 0,
             xfer: 0,
+            update_part: (0, 0),
             lit: 0,
             aprs: aprs::AprsCfg::DEFAULT,
             aprs_st: 0,

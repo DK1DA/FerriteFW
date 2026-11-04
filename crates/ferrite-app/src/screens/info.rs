@@ -473,6 +473,9 @@ impl View for Info {
         let mut b = Buf::<40>::new();
         let busy = app.transferring();
         if let Some((head, text, c)) = message(self.page, cx.dev, busy, &mut b) {
+            if let (Page::FinishUpdate, true, (i, n @ 1..)) = (self.page, busy, app.update_part) {
+                let _ = uwrite!(b, "Part {} of {}", i, n); // UPD-16.2
+            }
             app.message(lcd, head.as_bytes(), b.as_bytes(), text.as_bytes(), c);
             if self.page == Page::PowerOff || self.page == Page::FinishUpdate && busy {
                 // A bar that moves while writes finish (PWR-17) or the update is written (UPD-16.1).

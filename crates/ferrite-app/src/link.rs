@@ -542,6 +542,14 @@ impl Session {
             // LINK-60: raw writes from the cable only, not while the other port writes
             msg::DATA_WRITE if self.by != crate::remote::BY_CABLE => Status::Refused,
             msg::DATA_WRITE if self.other_writing => Status::Busy,
+            msg::DATA_WRITE if p.first() == Some(&ferrite_core::link::data::PART) => match p {
+                // UPD-16.2: which part the installer writes now, for the Updating page
+                [_, i, n] if (1..=*n).contains(i) => {
+                    app.update_part = (*i, *n);
+                    Status::Ok
+                }
+                _ => Status::BadArg,
+            },
             msg::DATA_WRITE => {
                 let (s, stamp) = data_write(st, p, &mut o);
                 self.reboot |= stamp; // LINK-62: the radio restarts on the stamped layout

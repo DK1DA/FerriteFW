@@ -1785,6 +1785,21 @@ fn raw_data_shapes_ranges_and_ports() {
     assert_eq!(bt.ask(msg::DATA_READ, &[READ, 0, 0, 0, 0, 16]).0, Status::NotFound as u8, "reads go on over Bluetooth");
 }
 
+/// UPD-16.2: `DATA_WRITE` `PART` names the part the installer writes now, for the Updating page; nothing is written.
+#[test]
+fn raw_data_part_mark() {
+    use ferrite_core::link::data::PART;
+    let mut pc = Pc::new(true);
+    assert_eq!(pc.ask(msg::DATA_WRITE, &[PART, 2, 4]).0, Status::Ok as u8);
+    assert_eq!(pc.app.update_part, (2, 4));
+    for bad in [&[PART, 0, 4][..], &[PART, 5, 4], &[PART, 1]] {
+        assert_eq!(pc.ask(msg::DATA_WRITE, bad).0, Status::BadArg as u8, "{bad:?}");
+    }
+    assert_eq!(pc.app.update_part, (2, 4));
+    let mut bt = Pc::new(false);
+    assert_eq!(bt.ask(msg::DATA_WRITE, &[PART, 1, 1]).0, Status::Refused as u8, "the cable only, as every raw write");
+}
+
 /// CHAN-12.1: a zone deleted over the link leaves no slot in it, as the radio's own delete does, so a later edit
 /// of the slot's channel doesn't write the old zone back.
 #[test]

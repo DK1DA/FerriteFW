@@ -211,6 +211,9 @@ pub mod data {
     /// `DATA_WRITE`: layout version (u16, this firmware's): the layout header written (its sector erased first;
     /// magic, version, CRC), then the radio restarts and mounts it. The last write of an update (LINK-62).
     pub const STAMP: u8 = 2;
+    /// `DATA_WRITE`: the part the installer writes next and how many (u8 each, 1 to 255, the first at most the
+    /// second): nothing written, the Updating page shows "Part 2 of 4" (UPD-16.2).
+    pub const PART: u8 = 3;
     /// The most bytes a `DATA_READ` answers.
     pub const READ_MAX: usize = 232;
     /// The most bytes one `PROGRAM` carries (a quarter page: an aligned chunk never crosses a page).
