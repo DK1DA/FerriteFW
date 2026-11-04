@@ -85,7 +85,7 @@ pub(crate) struct Pages {
     pub(super) vis: [u16; VIS],
     pub(super) marks: [u8; MARK_BYTES],
     pub(super) edit: Option<Channel>,
-    pub(super) line: Buf<24>,
+    pub(super) line: Buf<68>,
     pub(super) typing: bool,
     pub(super) lmax: u8,
     pub(super) find: Buf<16>,
@@ -686,6 +686,7 @@ impl Term {
             N_FCHG => return self.fchg(cx, a as usize % FIELDS.len(), x[1], x[2]),
             N_SEEK => return seek(st, a, x[1], x[2], x[3] != 0),
             N_NITEMS | N_INAME | N_IHELP | N_IVAL | N_SCHG | N_SRESET => return self.setting(cx, w, id, x),
+            N_LMHZ | N_SCAN | N_SAPPLY | N_QUICK | N_NLIST | N_LITEM | N_APRSDO | N_GPSL | N_DEVV | N_UILINE | N_RKEY => return self.more(id, x, cx, w),
             _ => {
                 // a slot's state (A, B, C)
                 let i = (a as usize).min(SLOTS - 1);

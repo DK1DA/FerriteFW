@@ -185,7 +185,7 @@ fn full() -> Rig<Blank> {
         b.apply(ChanWrite::Put { ch: ch(n, mhz(146) + n as u32 * 1250), from: None });
     }
     let mut r = Rig::with(b);
-    r.send(b"\r\r1");
+    r.send(b"\r\r2");
     r
 }
 

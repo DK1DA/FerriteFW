@@ -2146,8 +2146,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 9 5 10_ Squelch: one of Software, Chip
 :_ :set 0 9 5 none_ Squelch: one of Software, Chip
 :_ :set 0 9 9 3 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 3 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: On
-:_ :set 0 9 9 3 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: Off
+:_ :set 0 9 9 3 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Radio         the slots, tuning and quick settings (MENU)                   Radio now 0 9 9 3 Terminal colour: On
+:_ :set 0 9 9 3 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Radio         the slots, tuning and quick settings (MENU)                   Radio now 0 9 9 3 Terminal colour: Off
 :_ :set 0 9 9 3 1_ Terminal colour: one of Off, On
 :_ :set 0 9 9 3 2_ Terminal colour: one of Off, On
 :_ :set 0 9 9 3 10_ Terminal colour: one of Off, On
@@ -4360,8 +4360,8 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 9 5 10_ Squelch: one of Software, Chip
 :_ :set 0 9 5 none_ Squelch: one of Software, Chip
 :_ :set 0 9 9 3 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 3 on_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: On
-:_ :set 0 9 9 3 off_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: Off
+:_ :set 0 9 9 3 on_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Radio         the slots, tuning and quick settings (MENU)                   Radio now 0 9 9 3 Terminal colour: On
+:_ :set 0 9 9 3 off_ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Radio         the slots, tuning and quick settings (MENU)                   Radio now 0 9 9 3 Terminal colour: Off
 :_ :set 0 9 9 3 1_ Terminal colour: one of Off, On
 :_ :set 0 9 9 3 2_ Terminal colour: one of Off, On
 :_ :set 0 9 9 3 10_ Terminal colour: one of Off, On
@@ -6556,8 +6556,8 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 9 5 10_ Squelch: one of Software, Chip
 :_ :set 0 9 5 none_ Squelch: one of Software, Chip
 :_ :set 0 9 9 3 xyzzy_ Terminal colour: one of Off, On
-:_ :set 0 9 9 3 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: On
-:_ :set 0 9 9 3 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Channels      21 used of 4000                                               Radio now 0 9 9 3 Terminal colour: Off
+:_ :set 0 9 9 3 on_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Radio         the slots, tuning and quick settings (MENU)                   Radio now 0 9 9 3 Terminal colour: On
+:_ :set 0 9 9 3 off_ Ferrite 0.1.0   RT-950 Pro               cable 115200                   14:32   Ferrite terminal   type a number, or move and press Enter  1  Radio         the slots, tuning and quick settings (MENU)                   Radio now 0 9 9 3 Terminal colour: Off
 :_ :set 0 9 9 3 1_ Terminal colour: one of Off, On
 :_ :set 0 9 9 3 2_ Terminal colour: one of Off, On
 :_ :set 0 9 9 3 10_ Terminal colour: one of Off, On

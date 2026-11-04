@@ -32,7 +32,20 @@ pub(super) const FIELDS: [F; 16] = [
 /// The channel list's "every channel" filter.
 pub(super) const ALL: ZoneId = 0xFFFD;
 /// The program's pages, by number (`pages.vt` lists them in this order).
-pub(super) const PAGES: [Page; 10] = [Page::Splash, Page::Main, Page::Channels, Page::Edit, Page::Zones, Page::Settings, Page::Monitor, Page::Mail, Page::Tnc, Page::About];
+pub(super) const PAGES: [Page; 12] = [
+    Page::Splash,
+    Page::Main,
+    Page::Radio,
+    Page::Channels,
+    Page::Zones,
+    Page::Settings,
+    Page::Aprs,
+    Page::Gps,
+    Page::Monitor,
+    Page::Remote,
+    Page::About,
+    Page::Edit,
+];
 
 pub(super) fn zone_name<S: ChannelStore>(z: ZoneId, st: &S) -> Buf<16> {
     if z == ALL {
@@ -285,7 +298,7 @@ impl Term {
 
 /// What the main menu's entries open (tests).
 #[cfg(test)]
-pub(super) const MAIN: [Page; 7] = [Page::Channels, Page::Zones, Page::Settings, Page::Monitor, Page::Mail, Page::Tnc, Page::About];
+pub(super) const MAIN: [Page; 9] = [Page::Radio, Page::Channels, Page::Zones, Page::Settings, Page::Aprs, Page::Gps, Page::Monitor, Page::Remote, Page::About];
 #[cfg(test)]
 pub(super) use crate::chan::NO_ZONE;
 

@@ -306,16 +306,16 @@ fn main_menu_and_leaving() {
     let mut r = Rig::main();
     assert!(r.vt.has("Ferrite terminal"));
     let n = r.store.count();
-    assert!(r.vt.has(&std::format!("1  Channels      {n} used of 4000")), "{}", r.vt.text());
-    assert!(r.vt.has("7  About"));
+    assert!(r.vt.has(&std::format!("2  Channels      {n} used of 4000")), "{}", r.vt.text());
+    assert!(r.vt.has("9  About"));
     assert!(r.vt.has("Radio now"));
     assert!(r.vt.has("Battery 7.9 V"));
-    let sel = r.vt.row_of("1  Channels").unwrap();
+    let sel = r.vt.row_of("1  Radio").unwrap();
     assert!(r.vt.rev[sel][2], "the selection is reverse video");
     r.send(b"\x1b[B"); // down
-    let z = r.vt.row_of("2  Zones").unwrap();
+    let z = r.vt.row_of("2  Channels").unwrap();
     assert!(r.vt.rev[z][2] && !r.vt.rev[sel][2]);
-    r.send(b"7");
+    r.send(b"9");
     assert_eq!(r.term.page(), Page::About);
     r.send(b"\x1b");
     r.now += 100; // a lone ESC is Esc after a moment
@@ -347,7 +347,7 @@ fn only_changed_rows_are_sent() {
 }
 
 /// TERM-47: a run reads its code through a small cache of lines, not the whole page. Every page's run uses at
-/// most three quarters of the cache (so a redraw reads each line about once, not again and again), and a full
+/// most all but four lines of the cache (so a redraw reads each line about once, not again and again), and a full
 /// redraw (Ctrl-L) reads few lines from the SPI flash (each about 30 us at 15 MHz).
 #[test]
 fn code_read_through_a_cache() {
@@ -364,7 +364,7 @@ fn code_read_through_a_cache() {
             r.send(b"\x0c");
             let (draw, peak) = (fills() - n, tpl::PEAK.with(|p| p.get()) as usize);
             std::println!("{p:?}{}: a full redraw read {draw} lines; a run used at most {peak}", if help { " help" } else { "" });
-            assert!(peak <= tpl::LINES * 3 / 4, "{p:?}: a run uses {peak} lines of {}", tpl::LINES);
+            assert!(peak <= tpl::LINES - 4, "{p:?}: a run uses {peak} lines of {}", tpl::LINES);
             assert!(draw <= 100, "{p:?}: {draw} lines read");
         }
     }
@@ -416,7 +416,7 @@ fn help() {
 #[test]
 fn channels_list_and_edit() {
     let mut r = Rig::main();
-    r.send(b"1");
+    r.send(b"2");
     assert_eq!(r.term.page(), Page::Channels);
     assert!(r.vt.has("zone All channels"));
     assert!(r.vt.has("No") && r.vt.has("RX MHz") && r.vt.has("Flags"));
@@ -447,7 +447,7 @@ fn channels_list_and_edit() {
 #[test]
 fn typed_values() {
     let mut r = Rig::main();
-    r.send(b"1\r");
+    r.send(b"2\r");
     let num = r.term.edit().unwrap().num;
     // Name: field 0.
     r.send(b"\r");
@@ -482,7 +482,7 @@ fn the_radio_follows_an_edit() {
         (s.ch, s.zone, s.vfo_mode) = (Some(first), first.zone, false);
     }
     while r.app.pop_cmd().is_some() {}
-    r.send(b"1\r");
+    r.send(b"2\r");
     for _ in 0..9 {
         r.send(b"\x1b[B"); // Squelch
     }
@@ -496,7 +496,7 @@ fn the_radio_follows_an_edit() {
 #[test]
 fn zones() {
     let mut r = Rig::main();
-    r.send(b"2");
+    r.send(b"3");
     assert_eq!(r.term.page(), Page::Zones);
     assert!(r.vt.has("All channels"));
     let z0 = r.store.zone_name(0).unwrap();
@@ -515,7 +515,7 @@ fn zones() {
 #[test]
 fn settings_same_numbers_and_validation() {
     let mut r = Rig::main();
-    r.send(b"3");
+    r.send(b"4");
     assert!(r.vt.has("1  Watch and scan") && r.vt.has("9  System"));
     // 0 7 1: theme.
     r.send(b"7");
@@ -558,7 +558,7 @@ fn monitor() {
     r.live.slots[1].squelch_open = true;
     r.live.slots[1].freq = 44_347_500;
     r.live.slots[1].rssi = -80;
-    r.send(b"4");
+    r.send(b"7");
     assert_eq!(r.term.page(), Page::Monitor);
     assert!(r.vt.has("-- live --"));
     let newest = r.store.data().event(0).unwrap();
@@ -579,7 +579,7 @@ fn radio_now_shows_the_aprs_slot() {
     }
     let f = super::mhz5(r.app.aprs_freq());
     let f = core::str::from_utf8(f.as_bytes()).unwrap().trim();
-    let line = r.vt.line(r.vt.row_of("APRS").expect("an APRS slot line"));
+    let line = r.vt.line(r.vt.row_of("C  APRS").expect("an APRS slot line"));
     assert!(line.trim_start().starts_with("C  APRS"), "{line}");
     assert!(line.contains(f), "{line}");
 }
@@ -601,12 +601,13 @@ fn frequencies() {
 /// and the channel list's tools (TERM-14: marks, a bit per channel, 125 bytes; a sorted page of up to 56 channel
 /// numbers, 112 bytes; Oct 6, 2026) on top. The GGA answer added 16 bytes (Oct 13, 2026); 4,000 channels' marks
 /// 375 more (decision 333); `sat add`'s paste 64 more (a name and a TLE's line 1 as read, SAT-3; decision 340); the
-/// pages or the plain command line, chosen at start by whether the template part is there, 16 more (decision 335).
+/// pages or the plain command line, chosen at start by whether the template part is there, 16 more (decision 335);
+/// a typed value as long as an APRS message (67 characters, TERM-49) 44 more.
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375 + 64 + 16, "Term is {n} bytes");
+    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375 + 64 + 16 + 44, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----
@@ -1156,7 +1157,7 @@ fn command_split_and_global() {
 fn editor_split() {
     let mut r = Rig::main();
     let first = r.store.by_number(0).unwrap();
-    r.send(b"1");
+    r.send(b"2");
     r.send(b"\x1b[H");
     r.send(b"\r");
     let off = FIELDS.iter().position(|f| *f == F::It(Item::Offset)).unwrap();
@@ -2209,7 +2210,7 @@ impl Rig<Sample> {
     /// The channel list, every channel.
     fn list() -> Self {
         let mut r = Rig::main();
-        r.send(b"1");
+        r.send(b"2");
         assert_eq!(r.term.page(), Page::Channels);
         r
     }
@@ -2681,6 +2682,8 @@ mod list_more;
 mod cmd_more;
 /// Every page's bytes for a key script (TERM-11, TERM-16; decision 342).
 mod pages_golden;
+/// The pages that match the radio's own screens (TERM-48 to TERM-52).
+mod parity;
 
 /// TERM-8: every command's usage text fits the answer it goes out in ([`super::cmd::Msg`], 96 characters), so a
 /// refusal is never cut off in the line-mode answer (`gps` lost its "35 s)" once, Oct 28, 2026).

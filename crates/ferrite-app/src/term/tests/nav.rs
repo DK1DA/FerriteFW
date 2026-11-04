@@ -31,7 +31,7 @@ fn escape_sequences() {
     assert_eq!(r.term.main_sel(), 0);
     // SS3 Enter opens the selection
     r.send(b"\x1bOM");
-    assert_eq!(r.term.page(), Page::Channels);
+    assert_eq!(r.term.page(), Page::Radio);
     // ESC then a letter: Esc (back to the menu), then the letter
     r.send(b"\x1bz");
     assert_eq!(r.term.page(), Page::Main);
@@ -48,7 +48,7 @@ fn escape_sequences() {
 #[test]
 fn channel_list_keys() {
     let mut r = Rig::main();
-    r.send(b"1");
+    r.send(b"2");
     let n = list_len(ALL, &r.store);
     let pg = r.term.page_rows();
     r.send(b"\x1b[F");
@@ -93,7 +93,7 @@ fn channel_list_keys() {
 fn channel_list_without_zones() {
     let mut r = Rig::main();
     r.store.request(crate::data::Op::Wipe);
-    r.send(b"1");
+    r.send(b"2");
     assert!(r.vt.has("No channels here."), "{}", r.vt.text());
     r.send(b"z");
     assert_eq!(r.term.zone(), NO_ZONE);
@@ -106,7 +106,7 @@ fn channel_list_without_zones() {
 #[test]
 fn zones_page_keys() {
     let mut r = Rig::main();
-    r.send(b"2");
+    r.send(b"3");
     assert_eq!(r.term.page(), Page::Zones);
     let n = r.store.zones() + 2;
     r.send(b"\x1b[A");
@@ -135,7 +135,7 @@ fn zones_page_keys() {
 #[test]
 fn editor_fields_and_notes() {
     let mut r = Rig::main();
-    r.send(b"1\r");
+    r.send(b"2\r");
     assert_eq!(r.term.page(), Page::Edit);
     let n = FIELDS.len() as u8;
     r.send(b"\x1b[A");
@@ -173,7 +173,7 @@ fn editor_fields_and_notes() {
 #[test]
 fn settings_page_keys() {
     let mut r = Rig::main();
-    r.send(b"3");
+    r.send(b"4");
     assert_eq!(r.term.page(), Page::Settings);
     r.send(b"\x1b[F");
     assert_eq!(r.term.set_sel() as usize, GROUPS.len() - 1);
@@ -200,7 +200,7 @@ fn settings_page_keys() {
 fn settings_rows_answer() {
     use crate::screens::groups;
     let mut r = Rig::main();
-    r.send(b"3");
+    r.send(b"4");
     let mut seen = std::collections::BTreeSet::new();
     for g in 1..=GROUPS.len() as u8 {
         let n = groups::items(g, 0).len() as u8;
@@ -227,7 +227,7 @@ fn settings_rows_answer() {
     }
     // TERM-17: the row the radio's menu has highlighted
     let mut r = Rig::main();
-    r.send(b"3");
+    r.send(b"4");
     r.app.open(crate::screens::nav::Dest::Group(7));
     let crate::Screen::Group(gr) = r.app.screen() else { panic!("not a group") };
     r.term.set_settings(7, 0, gr.row);
@@ -247,7 +247,7 @@ fn settings_rows_answer() {
 #[test]
 fn settings_enter_and_up_from_a_list() {
     let mut r = Rig::main();
-    r.send(b"3");
+    r.send(b"4");
     let (g, i) = crate::screens::groups::SUBS[0].0;
     r.send(&[b'0' + g]);
     r.term.set_settings(r.term.g(), r.term.sub(), i - 1);
@@ -289,7 +289,16 @@ fn command_line_editing() {
 /// TERM-16: each page's help (`?`) is its own; Esc closes it.
 #[test]
 fn help_per_page() {
-    for (key, page, want) in [(b'1', Page::Channels, "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one."), (b'3', Page::Settings, "MENU 0's settings and numbers. <- -> change, Enter opens a list."), (b'4', Page::Monitor, "The event log (newest last), then the slots receiving now."), (b'7', Page::About, "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves.")] {
+    for (key, page, want) in [
+        (b'1', Page::Radio, "The three slots, and the active one's quick settings as MENU on the radio."),
+        (b'2', Page::Channels, "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one."),
+        (b'4', Page::Settings, "MENU 0's settings and numbers. <- -> change, Enter opens a list or a page."),
+        (b'5', Page::Aprs, "APRS heard and messages, newest first (MENU 0 5 1 and 0 5 2 on the radio)."),
+        (b'6', Page::Gps, "The GPS as the radio's position page (MENU 0 6 2): the fix and position"),
+        (b'7', Page::Monitor, "The event log (newest last), then the slots receiving now."),
+        (b'8', Page::Remote, "The radio's screen as text (its UI readback); keys go to it as its keypad."),
+        (b'9', Page::About, "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."),
+    ] {
         let mut r = Rig::main();
         r.send(&[key]);
         assert_eq!(r.term.page(), page);
@@ -302,23 +311,8 @@ fn help_per_page() {
         assert!(!r.term.help());
     }
     let mut r = Rig::main();
-    r.send(b"1\r?");
+    r.send(b"2\r?");
     assert!(r.vt.has("<- -> change a field; it saves at once."), "{}", r.vt.text());
-}
-
-/// Mail and TNC (manual chapter 38) are placeholders that say so; Esc goes back.
-#[test]
-fn mail_and_tnc_pages() {
-    for (key, name) in [(b'5', "Mail"), (b'6', "TNC")] {
-        let mut r = Rig::main();
-        r.send(&[key]);
-        assert!(r.vt.has(name), "{}", r.vt.text());
-        assert!(r.vt.has("Not built yet (manual chapter 38)."));
-        r.send(b"\x1b");
-        r.now += 100;
-        r.poll();
-        assert_eq!(r.term.page(), Page::Main);
-    }
 }
 
 /// GPS-26: the main menu's radio line says the GPS state and the power manager's phase.
@@ -407,7 +401,7 @@ fn channel_list_flags() {
         r.store.apply(ChanWrite::Put { ch: c, from: None });
     }
     r.app.set.home_ch = Some(0);
-    r.send(b"1");
+    r.send(b"2");
     let flags_of = |r: &Rig, name: &str| -> String { r.vt.line(r.vt.row_of(name).unwrap())[71..].into() };
     assert_eq!(flags_of(&r, "Calling 2 m"), "home skip");
     assert_eq!(flags_of(&r, "Calling 70 cm"), "APRS RX");
@@ -420,7 +414,7 @@ fn channel_list_flags() {
 fn monitor_nothing_yet_and_now() {
     let mut r = Rig::main();
     r.store.request(crate::data::Op::ClearLog);
-    r.send(b"4");
+    r.send(b"7");
     assert!(r.vt.has("Nothing yet."), "{}", r.vt.text());
     r.live.slots[1].squelch_open = true;
     r.live.slots[1].rssi = -73;
@@ -472,7 +466,7 @@ fn ages() {
     let mut r = Rig::main();
     r.term.go(Page::Monitor);
     for (s, want) in [(crate::data::AGO_UNKNOWN, "earlier"), (12, "12 s ago"), (125, "2 min ago"), (7300, "2 h ago")] {
-        let b = r.term.call(tpl::W_MONITOR_AGO, s as i32, &mut r.app, &r.store, &r.dev, &r.live);
+        let b = r.term.call(tpl::W_AGO, s as i32, &mut r.app, &r.store, &r.dev, &r.live);
         assert_eq!(b, want.as_bytes());
     }
 }

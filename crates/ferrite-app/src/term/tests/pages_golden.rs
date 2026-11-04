@@ -11,19 +11,22 @@ fn pages_golden() {
     const STEPS: &[&[u8]] = &[
         b"\r", b"?", b"\x1b", b"\r", b"\x1b[B", b"\x1b[B", b"\x1b[A", b"?", b"\x1b",
         // channels: moves, sort, marks, find, zones
-        b"1", b"\x1b[B", b"\x1b[B", b"\x1b[6~", b"\x1b[F", b"\x1b[H", b"s", b"\x1b[B", b"s", b" ", b" ", b"a", b"u", b"/", b"Club", b"\r",
+        b"2", b"\x1b[B", b"\x1b[B", b"\x1b[6~", b"\x1b[F", b"\x1b[H", b"s", b"\x1b[B", b"s", b" ", b" ", b"a", b"u", b"/", b"Club", b"\r",
         b"/", b"zzzz", b"\r", b"z", b"z", b"Z", b"s", b"s", b"s", b"s", b"s", b"s", b"\x1b[B", b"\x1b[6~", b"\x1b[5~", b"\x1b[F", b"\x1b[H",
         b" ", b" ", b"m", b"9", b"\r", b"m", b"1", b"\r", b"d", b"n", b"c", b"\x1b", b"r", b"\x1b", b"u",
         // the editor
         b"\r", b"\x1b[B", b"\x1b[B", b"\x1b[C", b"\x1b[D", b"#", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[C", b"\x1b[F", b"\x1b[H", b"\r", b"X", b"\x7f", b"\r",
         b"\x1b[B", b"\x1b[B", b"\r", b"146.52", b"\r", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[C", b"\r", b"147.1", b"\r", b"?", b"\x1b", M,
         // zones
-        b"2", b"\x1b[B", b"\x1b[B", b"\x1b[F", b"\x1b[H", b"\x1b[A", b"\r", b"\x1b", b"\x1b[B", b"\r", b"\x1b", M,
+        b"3", b"\x1b[B", b"\x1b[B", b"\x1b[F", b"\x1b[H", b"\x1b[A", b"\r", b"\x1b", b"\x1b[B", b"\r", b"\x1b", M,
         // settings
-        b"3", b"\x1b[B", b"\x1b[F", b"\x1b[H", b"7", b"\x1b[B", b"\x1b[C", b"\x1b[D", b"#", b"1", b"\x1b", b"\x1b", b"9", b"3", b"\x1b[C", b"\x1b", b"\x1b",
+        b"4", b"\x1b[B", b"\x1b[F", b"\x1b[H", b"7", b"\x1b[B", b"\x1b[C", b"\x1b[D", b"#", b"1", b"\x1b", b"\x1b", b"9", b"3", b"\x1b[C", b"\x1b", b"\x1b",
         b"8", b"8", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[C", b"?", b"\x1b", M,
         // the others, and the command line over a page
-        b"4", b"?", b"\x1b", M, b"5", M, b"6", M, b"7", b"?", b"\x1b", M, b":slot\r", b"\r", b":frob\r", b"\x1b[B", b"\x03", b"\r",
+        b"7", b"?", b"\x1b", M, b"9", b"?", b"\x1b", M,
+        // the radio, APRS, GPS and the remote head (TERM-48 to TERM-51)
+        b"1", b"\x1b[B", b"\x1b[C", b"\x1b[D", b"#", b"b", b"a", b"?", b"\x1b", M, b"5", b"\x1b[B", b"\x1b[C", b"\x1b[B", b"?", b"\x1b", M,
+        b"6", b"?", b"\x1b", M, b"8", b"h", b"?", b"\x1b", b"q", M, b":slot\r", b"\r", b":frob\r", b"\x1b[B", b"\x03", b"\r",
     ];
     let mut out = String::new();
     for (colour, size) in [(false, (80, 24)), (true, (80, 24)), (false, (132, 40))] {

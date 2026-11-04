@@ -27,7 +27,7 @@
 # that sets `!chain` to another page runs that page's key or poll next (the channel list's tools are one).
 # The pages' order is term::Page's (a page only chained to comes after them).
 
-vars page help busy chain msel zone csel ctop fromz zsel g sub ssel field sort visn visok vislen srow first ask bop barg bsingle bat bphase bdone btotal bfree
+vars page help busy chain msel zone csel ctop fromz zsel g sub ssel field sort visn visok vislen srow first ask bop barg bsingle bat bphase bdone btotal bfree rsel av asel atop long
 
 locals b end i k n p q rv
 
@@ -41,6 +41,11 @@ natives 2 1 cat room isub nitems
 natives 3 0 iname ihelp ival
 natives 3 1 fchg sreset
 natives 4 1 seek schg
+natives 0 1 lmhz
+natives 0 0 scan
+natives 1 1 nlist gpsl devv uiline
+natives 2 1 quick aprsdo rkey
+natives 3 1 sapply litem
 
 # what the firmware's tests call
 export selch schange ago
@@ -137,6 +142,33 @@ hintsw keys_help "Esc=Close help"
   fill2 @k !visn @srow @visn 1 - 0 max min !srow 1 !visok listlen !vislen ;
 # What a change applies to: the marked channels, else the selected one.
 : targets ( -- n ) nmarks dup 0 = if drop selch then ;
+# A number typed: 1-4000 as shown, back to 0-3999 (-1: not one).
+: num? ( -- n ) lnum dup 1 < over MAXCH > or if drop -1 else 1 - then ;
+# A list's selection moved by a key (up, down, a page, the ends) among n rows; and the top row that keeps it shown.
+: lnav ( code sel n -- sel )
+  1 - 0 max !n !k
+  dup K_UP = if @k 1 - 0 max !k then
+  dup K_DOWN = if @k 1 + @n min !k then
+  dup K_PGUP = if @k pg - 0 max !k then
+  dup K_PGDN = if @k pg + @n min !k then
+  dup K_HOME = if 0 !k then
+  K_END = if @n !k then @k ;
+: inview ( sel top -- top ) !q !k @k @q < if @k else @k @q pg + < not if @k 1 + pg - else @q then then ;
+: slotname ( s -- ) pick "A|B|C" ;
+# "A  VFO  146.52000  FM-N  T 100.0  RX S7  active"
+: slotline
+  2 at @i slotname 5 at
+  @i aprs if "APRS" else @i slotch if "CH " 0 cf 1 + 3 .z " " 14 cname else "VFO" then then
+  27 at @i slotf mhz
+  @i aprs not if 39 at @i slotmode 46 at @i slottone then
+  57 at @i slotoff if "off" else @i sq if "RX " @i rssi else @i scanning if "scanning" else "idle" then then then
+  @i active = if 68 at "active" then ;
+# "12 s ago", "3 min ago", "2 h ago" (-1: earlier, INBOX-6.1).
+: ago ( s -- ) dup 0 < if drop "earlier" exit then dup 60 < if . " s ago" exit then dup 3600 < if 60 / . " min ago" exit then 3600 / . " h ago" ;
+# A radio key from the terminal (the remote keys, LINK-19): code, held long when L came first.
+: press ( code -- ) @long 0 !long rkey drop ;
+# A digit's radio key code (the keypad's stock codes).
+: dcode ( d -- code ) dup 0 = if drop 17 exit then dup 1 - 3 / + 9 + ;
 
 # ---- the pages, in the order of term::Page ----
 
@@ -149,38 +181,69 @@ row 6 2 at bold "Press Enter" " for the menu, ? for help"
 key enter P_MAIN go
 
 page main
-hints "Up/Dn=Move|Enter=Open|1-7=Jump|:=Command|?=Help|Ctrl-C=Leave"
-help "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\n: opens the command line; :help lists the commands.\nCtrl-L redraws, Ctrl-C leaves."
+hints "Up/Dn=Move|Enter=Open|1-9=Jump|?=Help|Ctrl-C=Leave"
+help "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\nCtrl-L redraws, Ctrl-C leaves."
 : sel? @msel = ;
 row 1 " " bold "Ferrite terminal" "   type a number, or move and press Enter"
-list 3 7 @i sel? if rev then 2 at @i 1 + . 5 at @i pick "Channels|Zones|Settings|Monitor|Mail|TNC|About" 19 at @i 0 = if count . " used of 4000" else @i 1 = if zones . " zones" else @i pick "||same numbers as MENU 0 on the radio|the event log and live activity|not built yet|not built yet|version, calibration, self-test" then then @i sel? if fill then
-row 11 " " bold "Radio now"
-list 12 3 slotline
-row 15 2 at status
-key up @msel 6 + 7 mod !msel
-key down @msel 1 + 7 mod !msel
-key digit '0' - dup 7 > if drop exit then 1 - !msel open
+list 3 9 @i sel? if rev then 2 at @i 1 + . 5 at @i pick "Radio|Channels|Zones|Settings|APRS|GPS|Monitor|Remote|About" 19 at mdesc @i sel? if fill then
+row 13 " " bold "Radio now"
+list 14 3 slotline
+row 17 2 at status
+key up @msel 8 + 9 mod !msel
+key down @msel 1 + 9 mod !msel
+key digit '1' - !msel open
 key enter open
 key esc P_SPLASH go
-# What the menu's entries open: channels from the start (every channel), settings at their groups.
+: mdesc
+  @i 1 = if count . " used of 4000" exit then
+  @i 2 = if zones . " zones" exit then
+  @i 4 = if 0 nlist . " heard, " 1 nlist . " messages" exit then
+  @i 5 = if 0 gpsl drop exit then
+  @i pick "the slots, tuning and quick settings (MENU)|||same numbers as MENU 0 on the radio|||the event log and live activity|the radio's screen and keys|version, calibration, self-test" ;
+# What the menu's entries open (the pages after the main menu, in its order): channels from the start (every
+# channel), settings at their groups.
 : open
-  @msel 0 = if ALL !zone 0 !fromz listreset P_CHANNELS go exit then
-  @msel 2 = if 0 !g 0 !sub 0 !ssel then
-  @msel 3 + go ;
-# "A  VFO  146.52000  FM-N  T 100.0  RX S7  active"
-: slotline
-  2 at @i pick "A|B|C" 5 at
-  @i aprs if "APRS" else @i slotch if "CH " 0 cf 1 + 3 .z " " 14 cname else "VFO" then then
-  27 at @i slotf mhz
-  @i aprs not if 39 at @i slotmode 46 at @i slottone then
-  57 at @i slotoff if "off" else @i sq if "RX " @i rssi else @i scanning if "scanning" else "idle" then then then
-  @i active = if 68 at "active" then ;
+  @msel 1 = if ALL !zone 0 !fromz listreset then
+  @msel 3 = if 0 !g 0 !sub 0 !ssel then
+  @msel 2 + go ;
 # Battery, GPS (with the power manager's state, GPS-26), Bluetooth, Battery Save.
 : status
   "Battery " battmv 1000 / . "." battmv 1000 mod 100 / . " V   "
   gps dup 0 = if "GPS off" then dup 1 = if "GPS searching" then 2 = if "GPS fix" then
   gps if gpsph dup 1 = if ", standby " gpss . " s" then dup 2 = if ", waking" then 3 = if ", awake" then then
   "   Bluetooth " btdev if "on" else "off" then "   Battery Save " bsave . ;
+
+page radio
+hints "Up/Dn=Setting|<- ->=Change|A B C=Slot|F=Tune|N=Channel|V=V/M|S=Scan|Esc=Back"
+help "The three slots, and the active one's quick settings as MENU on the radio.\nA, B or C makes that slot active. F tunes its VFO (type MHz).\nN puts it on a channel (type its number). V is V/M: VFO or channel.\nS starts or stops a scan, as SIDE2 on home.\nUp/Dn or 1-9 pick a setting; <- -> change it; # puts its default back."
+row 0 " " bold "Radio" "   slot " bon active slotname back " is active"
+row 2 5 at bold "On" 27 at bold "MHz" 39 at bold "Mode" 46 at bold "Tone" 57 at bold "Signal"
+list 3 3 @i active = if rev then slotline @i active = if fill then
+row 7 " " bold "Quick settings" "   slot " active slotname ", as MENU on the radio      * = not the default"
+list 8 9 @i @rsel = if rev then 3 at @i 1 + . 6 at @i 0 quick 24 at @i 2 quick if "* " else "  " then @i 3 quick if "(" @i 1 quick ")" else @i 1 quick then @i @rsel = if fill then
+bot 2 @ask if "  " won asktext back line "_" exit then "  " noteon bnote not and if snote exit then @rsel 4 quick
+: asktext @ask 1 = if "Tune slot " active slotname " to (MHz): " else "Slot " active slotname " to channel: " then ;
+# TERM-48: each change as the keypad makes it (the same checks); the quick settings as MENU 1-9.
+: onslot ( s -- ) noteclr 2 0 sapply sno ;
+# A slot change's refusal, as the program words it (1: the note already says why).
+: sno ( r -- ) dup 2 < if drop exit then cap 2 - pick "Transmitting: nothing changes while keyed||The slot is scanning: S stops it|No channel on this slot yet: N picks one|No such channel" warn1 ;
+key up @rsel 8 + 9 mod !rsel noteclr
+key down @rsel 1 + 9 mod !rsel noteclr
+key digit '1' - !rsel noteclr
+key left @rsel 7 quick drop
+key right @rsel 6 quick drop
+key "#" @rsel 5 quick drop
+key "a" 0 onslot
+key "b" 1 onslot
+key "c" 2 onslot
+key "f" noteclr 1 !ask 10 lstart
+key "n" noteclr 2 !ask 4 lstart
+key "v" noteclr active 1 0 sapply sno
+key "s" scan
+key line @ask 0 !ask 1 = if tune else tochan then
+key esc P_MAIN go
+: tune lmhz dup 0 < if drop cap "Not a frequency: MHz, like 146.52" warn1 exit then !n active 0 @n sapply sno ;
+: tochan num? dup 0 < if drop cap "A channel number, 1 to 4000" warn1 exit then !n active 3 @n sapply sno ;
 
 page channels
 hints "Enter=Edit|N=New|D=Delete|M=Move|/=Find|Z=Zone|Esc=Back"
@@ -250,6 +313,181 @@ key else kiv
 # The tools have a segment of their own: these keys and the poll chain to it.
 : poll P_CHTOOLS !chain ;
 
+page zones
+hints "Up/Dn=Move|Enter=Channels|Esc=Back"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 0 " " bold "Zones" "   " zones . " zones"
+list 2 zcount @zsel pg 1 + - 0 max @i + !i @i n < not if exit then @i @zsel = if rev then 3 at @i zof zname 26 at @i zof zlen . " channels" @i @zsel = if fill then
+# Every channel, each zone, then no zone; the list scrolls with its selection.
+: n zones 2 + ;
+: zcount n pg 2 + min ;
+: zof ( i -- z ) dup 0 = if drop ALL exit then dup zones > not if 1 - exit then drop NOZONE ;
+key up @zsel n + 1 - n 1 max mod !zsel
+key down @zsel 1 + n 1 max mod !zsel
+key home 0 !zsel
+key end n 1 - 0 max !zsel
+key enter @zsel zof !zone 1 !fromz listreset P_CHANNELS go
+key esc P_MAIN go
+
+page settings
+hints "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back"
+help "MENU 0's settings and numbers. <- -> change, Enter opens a list or a page.\n* marks a value that isn't the default; # puts it back.\nPIN, region and Extend TX change only on the radio; Dry TX goes off only there."
+row 0 @g if " " bon "Settings > 0 " @g . " " @g 1 - gname @sub if " > " @sub . " " @g 0 @sub 1 - iname then back "      * = not the default" else " " bold "Settings" "   as MENU 0 on the radio" then
+list 2 n @i @ssel = if rev then 3 at @i 1 + 10 mod . 6 at @g if @g @sub @i iname @sub 0 = if @g @i 1 + isub if " >" then then 32 at @g @sub @i ival else @i gname " >" 32 at @i gdesc then @i @ssel = if fill then
+tail 1 @g if @ssel ni < if "  " bon @g @sub @ssel iname back ": " @g @sub @ssel ihelp then then
+tail 2 @g if "  Path on the radio: MENU 0 " @g . @sub if " " @sub . then " " @ssel 1 + . then
+tail 4 @g if noteon bnote not and if "  " snote then then
+# MENU 0's groups (@g 0), a group's items, or a third-level list (@sub): the radio's own numbers (TERM-6).
+: ni @g @sub nitems ;
+: n @g if ni else 9 then ;
+key pre @g if ni 0 = if drop sup exit then then
+key up @ssel n + 1 - n 1 max mod !ssel
+key down @ssel 1 + n 1 max mod !ssel
+key home 0 !ssel
+key end n 1 - 0 max !ssel
+key digit '0' - dup n > if drop exit then 1 - !ssel sopen
+key enter sopen
+key left @g if -1 schange then
+key right @g if 1 schange then
+key "#" @g if @g @sub @ssel sreset if cap "Back to the default" say0 then then
+key esc sup
+: sopen
+  noteclr
+  @g 0 = if @ssel 1 + !g 0 !ssel exit then
+  @sub 0 = @g @ssel 1 + isub and if @ssel 1 + !sub 0 !ssel exit then
+  sjump if exit then
+  @g @sub @ssel 1 schg dup 1 = if drop ropen exit then said ;
+# TERM-52: a row that is a page on the radio opens the terminal's own page for it, or the radio's in Remote
+# (the radio goes home, then MENU 0 and the row's numbers, as typed on its keypad).
+: sjump ( -- f )
+  @sub if 0 exit then
+  @g 2 = @ssel 0 = and if ALL !zone 0 !fromz listreset P_CHANNELS go 1 exit then
+  @g 2 = @ssel 2 = and if P_ZONES go 1 exit then
+  @g 4 = @ssel 0 = and if P_MONITOR go 1 exit then
+  @g 5 = @ssel 2 < and if @ssel !av 0 !asel 0 !atop P_APRS go 1 exit then
+  @g 6 = @ssel 1 = and if P_GPS go 1 exit then
+  0 ;
+: ropen 0 3 rkey drop 6 0 rkey drop 17 0 rkey drop @g dcode 0 rkey drop @sub if @sub dcode 0 rkey drop then @ssel 1 + dcode 0 rkey drop P_REMOTE go ;
+# <- -> or Enter on an item: its change through the radio's menu (TERM-7), or why not.
+: schange ( d -- ) !k @g @sub @ssel @k schg said ;
+: said ( r -- )
+  dup 0 = if cap "Changed" say0 then
+  dup 1 = if cap "Not settable yet" warn1 then
+  dup 2 = if cap "Open on the radio's menu: change it there" warn1 then
+  3 = if cap "Change this one on the radio" warn1 then ;
+: sup @sub if @sub 1 - !ssel 0 !sub else @g if @g 1 - !ssel 0 !g else P_MAIN go exit then then noteclr ;
+
+page aprs
+hints "<- ->=Heard/Msgs|Up/Dn=Move|Enter=Open|W=Write|R=Reply|B=Beacon|Esc=Back"
+help "APRS heard and messages, newest first (MENU 0 5 1 and 0 5 2 on the radio).\n<- -> switch lists. Enter on a message marks it read; on a station, writes.\nW writes a message: its callsign, then the text. R replies to one.\nA marks every message read. B sends a beacon now.\nA message goes as Compose sends it; nothing sends without a callsign."
+row 0 " " bold "APRS" "   " @av if bon "Messages" back " (" n . ")   heard " 0 nlist . else bon "Heard" back " (" n . ")   messages " 1 nlist . then
+row 2 @av if bold "  With" 14 at bold "When" 28 at bold "State" 40 at bold "Message" else bold "  Station" 14 at bold "When" 28 at bold "Heard" 35 at bold "Via" 57 at bold "Comment" then
+list 3 pg arow
+bot 2 @ask if "  " won asktext back line "_" exit then "  " noteon bnote not and if snote exit then @av if @asel n < if 1 @asel 2 litem drop then then
+# TERM-49: the lists, a row each; the selected message whole at the bottom.
+: n @av nlist ;
+: arow @atop @i + dup n < not if drop @i 0 = if "  Nothing yet." then exit then !k @k @asel = if rev then @av if mrow else hrow then @k @asel = if fill then ;
+: hrow 2 at 0 @k 0 litem drop 14 at 0 @k 1 litem ago 28 at 0 @k 4 litem . 35 at 0 @k 2 litem drop 57 at 0 @k 3 litem drop ;
+: mrow 1 @k 0 litem if "< " else "> " then 1 @k 1 litem drop 14 at 1 @k 3 litem ago 28 at 1 @k 4 litem dup 8 < if pick "new||pending|acked|failed|rejected|cancelled" else "try " 8 - . "/5" then 40 at 1 @k 2 litem drop ;
+: asktext @ask 1 = if "Message to (callsign): " else "To " 2 0 aprsdo drop ": " then ;
+: move ( code -- ) @asel n lnav !asel @asel @atop inview !atop ;
+: view ( v -- ) !av 0 !asel 0 !atop noteclr ;
+key up K_UP move
+key down K_DOWN move
+key pgup K_PGUP move
+key pgdn K_PGDN move
+key home K_HOME move
+key end K_END move
+key left @av 1 + 2 mod view
+key right @av 1 + 2 mod view
+key enter @asel n < not if exit then @av if 6 @asel aprsdo drop else 0 msgto then
+key "w" 1 !ask 9 lstart noteclr
+key "r" @av @asel n < and if 1 msgto then
+key "a" 7 0 aprsdo drop cap "Every message read" say0
+key "b" 5 0 aprsdo dup if ano else drop cap "Beacon now: queued" say0 then
+key line @ask 0 !ask 1 = if 0 0 aprsdo drop write else 4 0 aprsdo dup if ano else drop cap "Message queued" say0 then then
+key esc P_MAIN go
+: write 2 !ask 67 lstart noteclr ;
+# A message to the selected row's station (list 0) or message's sender (list 1): its callsign as if typed.
+: msgto ( list -- ) cap dup @asel swap litem drop 8 0 aprsdo drop 0 0 aprsdo drop write ;
+# A send's or beacon's refusal, as the program words it (1: the note already says why).
+: ano ( r -- ) dup 2 < if drop exit then cap "Not sent: " 2 - pick "set a callsign first (MENU 0 8 6 1)|W writes a message: a callsign first|nothing to say|4 messages are being tried|the callsign is over 6 characters|APRS and beacons are off" warn1 ;
+
+page gps
+hints "G=GPS on/off/auto|Esc=Back"
+help "The GPS as the radio's position page (MENU 0 6 2): the fix and position\n(in the format of 0 6 3), the tiles, the nearest waypoint, the satellites.\nG steps the GPS setting (0 6 1: Off, Auto, On)."
+row 0 " " bold "GPS" "   " 0 gpsl drop "   " 1 gpsl drop "   setting:" 6 0 0 ival
+row 2 "  " 2 gpsl not if "No position yet" then
+row 3 "  " 3 gpsl drop
+list 5 6 "  " 4 @i + gpsl if 24 at 10 @i + gpsl drop then
+row 12 "  Nearest waypoint  " 16 gpsl not if "none" then
+row 14 " " bold "Satellites in view" "   " 2 nlist .
+row 15 bold "  PRN" 8 at bold "SNR" 14 at bold "Elev" 21 at bold "Azim" 28 at bold "Used"
+list 16 nsat 2 at 2 @i 0 litem . 8 at 2 @i 1 litem . 14 at 2 @i 3 litem . 21 at 2 @i 4 litem . 28 at 2 @i 2 litem if "yes" then
+# TERM-50: G as <- -> on 0 6 1 would; as many satellites as the rows hold.
+: nsat 2 nlist rows 18 - 0 max min ;
+key "g" 6 0 0 1 schg drop
+key esc P_MAIN go
+
+page monitor
+hints "Esc=Back"
+help "The event log (newest last), then the slots receiving now."
+row 0 " " bold "Monitor" "   the event log and the slots receiving now"
+bot 1 " " bold "-- live --" "   newest at the bottom"
+list 2 255 monline
+key esc P_MAIN go
+# Line i: the newest events, oldest first, then the slots receiving now.
+: monline
+  rows 6 - 0 max 0 sq 1 sq + 2 sq + - 0 max nev min !k
+  @i @k < if @k 1 - @i - !p 1 at @p evago ago 11 at @p 1 ev 20 at @p 2 ev 32 at @p 3 ev exit then
+  @i @k - !p 0 begin dup 3 < while dup sq if @p 0 = if !q 1 at "now" 11 at @q pick "A|B|C" " " @q livef freq3 20 at "RX" 32 at @q rssi exit then @p 1 - !p then 1 + repeat drop
+  @i 0 = if "  Nothing yet." then ;
+
+page remote
+hints "0-9*#=Keys|Enter=OK|Esc=BACK|S=SLOT|V=V/M|-+=Knob|[]=Side|L=Long|Q=Leave"
+help "The radio's screen as text (its UI readback); keys go to it as its keypad.\nDigits, * #, arrows, Enter (MENU, OK), Esc (BACK), S (SLOT), V (V/M).\n[ and ] are SIDE1 and SIDE2; - and + turn the knob. L, then a key: held long.\nH goes home. Q leaves this page.\nNothing transmits from here: PTT stays on the radio."
+row 0 " " bold "Remote" "   the radio's screen; the keys go to the radio" @long if "   " won "LONG" back then
+list 2 nui @i uiline drop
+bot 1 "  " noteon if snote then
+: nui rows 5 - ;
+# TERM-51: each key as the radio's own (LINK-19's remote keys, the terminal's).
+key digit '0' - dcode press
+key "0" 17 press
+key "*" 13 press
+key "#" 21 press
+key up 7 press
+key down 8 press
+key left 4 press
+key right 5 press
+key enter 6 press
+key esc 9 press
+key "s" 3 press
+key "v" 2 press
+key "[" 0 press
+key "]" 1 press
+key "-" -1 2 rkey drop
+key "+" 1 2 rkey drop
+key "=" 1 2 rkey drop
+key "l" 1 !long
+key "h" 0 3 rkey drop
+key "q" 0 !long P_MAIN go
+
+page about
+hints "Esc=Back"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 1 " " bold "About"
+row 3 2 at bon "FERRITE " version back " - free firmware for the RT-950 Pro"
+row 4 2 at callsign " - cable 115200"
+row 6 2 at bold "Press Enter" " for the menu, ? for help"
+row 9 2 at "Region        " region
+row 10 2 at "Calibration   " cal
+row 11 2 at "SSB patch     " ssb if "Installed" else "Not installed" then
+row 12 2 at "Transmit      " txbuilt if "Built in" else "Not in this build" then
+row 13 2 at "Channels      " count . " of 4000, " zones . " zones"
+row 14 2 at "Battery       " battmv 1000 / . "." battmv 1000 mod 100 / . " V, " 0 devv . " %"
+row 15 2 at "MCU           " 3 devv dup if . " MHz" else drop "clock not measured" then 2 devv dup 0 < if drop else ", busy " . " %" then 1 devv dup -999 = if drop else ", " . " C" then
+key esc P_MAIN go
+
 page edit
 hints "Up/Dn=Field|<- ->=Change|Enter=Type|#=Default|Esc=Back"
 help "<- -> change a field; it saves at once.\nEnter types the name or a frequency (MHz). # resets a field."
@@ -294,102 +532,6 @@ key line @field 2 0 fchg fsay
   @field 2 = @field 7 = or if 10 lstart exit then
   1 change ;
 
-page zones
-hints "Up/Dn=Move|Enter=Channels|Esc=Back"
-help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 0 " " bold "Zones" "   " zones . " zones"
-list 2 zcount @zsel pg 1 + - 0 max @i + !i @i n < not if exit then @i @zsel = if rev then 3 at @i zof zname 26 at @i zof zlen . " channels" @i @zsel = if fill then
-# Every channel, each zone, then no zone; the list scrolls with its selection.
-: n zones 2 + ;
-: zcount n pg 2 + min ;
-: zof ( i -- z ) dup 0 = if drop ALL exit then dup zones > not if 1 - exit then drop NOZONE ;
-key up @zsel n + 1 - n 1 max mod !zsel
-key down @zsel 1 + n 1 max mod !zsel
-key home 0 !zsel
-key end n 1 - 0 max !zsel
-key enter @zsel zof !zone 1 !fromz listreset P_CHANNELS go
-key esc P_MAIN go
-
-page settings
-hints "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back"
-help "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n* marks a value that isn't the default; # puts it back.\nPIN, region and Extend TX change only on the radio; Dry TX goes off only there."
-row 0 @g if " " bon "Settings > 0 " @g . " " @g 1 - gname @sub if " > " @sub . " " @g 0 @sub 1 - iname then back "      * = not the default" else " " bold "Settings" "   as MENU 0 on the radio" then
-list 2 n @i @ssel = if rev then 3 at @i 1 + 10 mod . 6 at @g if @g @sub @i iname @sub 0 = if @g @i 1 + isub if " >" then then 32 at @g @sub @i ival else @i gname " >" 32 at @i gdesc then @i @ssel = if fill then
-tail 1 @g if @ssel ni < if "  " bon @g @sub @ssel iname back ": " @g @sub @ssel ihelp then then
-tail 2 @g if "  Path on the radio: MENU 0 " @g . @sub if " " @sub . then " " @ssel 1 + . then
-tail 4 @g if noteon bnote not and if "  " snote then then
-# MENU 0's groups (@g 0), a group's items, or a third-level list (@sub): the radio's own numbers (TERM-6).
-: ni @g @sub nitems ;
-: n @g if ni else 9 then ;
-key pre @g if ni 0 = if drop sup exit then then
-key up @ssel n + 1 - n 1 max mod !ssel
-key down @ssel 1 + n 1 max mod !ssel
-key home 0 !ssel
-key end n 1 - 0 max !ssel
-key digit '0' - dup n > if drop exit then 1 - !ssel sopen
-key enter sopen
-key left @g if -1 schange then
-key right @g if 1 schange then
-key "#" @g if @g @sub @ssel sreset if cap "Back to the default" say0 then then
-key esc sup
-: sopen
-  noteclr
-  @g 0 = if @ssel 1 + !g 0 !ssel exit then
-  @sub 0 = @g @ssel 1 + isub and if @ssel 1 + !sub 0 !ssel exit then
-  1 schange ;
-# <- -> or Enter on an item: its change through the radio's menu (TERM-7), or why not.
-: schange ( d -- )
-  !k @g @sub @ssel @k schg
-  dup 0 = if cap "Changed" say0 then
-  dup 1 = if cap "Not settable yet" warn1 then
-  dup 2 = if cap "Open on the radio's menu: change it there" warn1 then
-  3 = if cap "Change this one on the radio" warn1 then ;
-: sup @sub if @sub 1 - !ssel 0 !sub else @g if @g 1 - !ssel 0 !g else P_MAIN go exit then then noteclr ;
-
-page monitor
-hints "Esc=Back"
-help "The event log (newest last), then the slots receiving now."
-row 0 " " bold "Monitor" "   the event log and the slots receiving now"
-bot 1 " " bold "-- live --" "   newest at the bottom"
-list 2 255 monline
-key esc P_MAIN go
-# "12 s ago", "3 min ago", "2 h ago" (-1: earlier, INBOX-6.1).
-: ago ( s -- ) dup 0 < if drop "earlier" exit then dup 60 < if . " s ago" exit then dup 3600 < if 60 / . " min ago" exit then 3600 / . " h ago" ;
-# Line i: the newest events, oldest first, then the slots receiving now.
-: monline
-  rows 6 - 0 max 0 sq 1 sq + 2 sq + - 0 max nev min !k
-  @i @k < if @k 1 - @i - !p 1 at @p evago ago 11 at @p 1 ev 20 at @p 2 ev 32 at @p 3 ev exit then
-  @i @k - !p 0 begin dup 3 < while dup sq if @p 0 = if !q 1 at "now" 11 at @q pick "A|B|C" " " @q livef freq3 20 at "RX" 32 at @q rssi exit then @p 1 - !p then 1 + repeat drop
-  @i 0 = if "  Nothing yet." then ;
-
-page mail
-hints "Esc=Back"
-help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 1 " " bold "Mail"
-row 3 "  Not built yet (manual chapter 38)."
-key esc P_MAIN go
-
-page tnc
-hints "Esc=Back"
-help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 1 " " bold "TNC"
-row 3 "  Not built yet (manual chapter 38)."
-key esc P_MAIN go
-
-page about
-hints "Esc=Back"
-help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 1 " " bold "About"
-row 3 2 at bon "FERRITE " version back " - free firmware for the RT-950 Pro"
-row 4 2 at callsign " - cable 115200"
-row 6 2 at bold "Press Enter" " for the menu, ? for help"
-row 9 2 at "Region        " region
-row 10 2 at "Calibration   " cal
-row 11 2 at "SSB patch     " ssb if "Installed" else "Not installed" then
-row 12 2 at "Transmit      " txbuilt if "Built in" else "Not in this build" then
-row 13 2 at "Channels      " count . " of 4000, " zones . " zones"
-key esc P_MAIN go
-
 # The channel list's tools (TERM-14), chained to from the channel list's keys and poll: find, a new channel, and
 # the changes to several channels.
 page chtools
@@ -416,8 +558,6 @@ key line @ask 0 !ask dup 1 = if drop lfind findnext exit then dup 2 = if drop to
     after dup 0 < @p 0 < not and if drop -1 after then
     dup @p = if drop @p 0 < not if @p cget drop match? if exit then then nomatch exit then
   repeat drop nomatch ;
-# A number typed: 1-4000 as shown, back to 0-3999 (-1: not one).
-: num? ( -- n ) lnum dup 1 < over MAXCH > or if drop -1 else 1 - then ;
 : zfind ( -- z, or -2 )
   cap "none" 0 capcmp cap "0" 0 capcmp or if NOZONE exit then
   num? dup 0 < not over zones < and if exit then drop

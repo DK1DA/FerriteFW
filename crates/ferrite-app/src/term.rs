@@ -40,6 +40,8 @@ pub mod debug;
 #[cfg(feature = "vt100")]
 mod pages;
 #[cfg(feature = "vt100")]
+mod natx;
+#[cfg(feature = "vt100")]
 mod tpl;
 #[cfg(feature = "vt100")]
 use pages::*;
@@ -82,14 +84,20 @@ pub enum Page {
     Off,
     Splash,
     Main,
+    /// The slots and the active one's quick settings (TERM-48).
+    Radio,
     Channels,
-    Edit,
     Zones,
     Settings,
+    /// APRS heard and messages (TERM-49).
+    Aprs,
+    /// The GPS position (TERM-50).
+    Gps,
     Monitor,
-    Mail,
-    Tnc,
+    /// The radio's screen and keys (TERM-51).
+    Remote,
     About,
+    Edit,
 }
 
 /// A decoded key.
