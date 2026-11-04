@@ -1,4 +1,4 @@
-//! The terminal without its pages (decision 342): a plain command line.
+//! TERM-47: the terminal without its pages (decision 342), a plain command line.
 
 use super::*;
 use crate::sample::Sample;
@@ -60,7 +60,7 @@ impl Rig {
     }
 }
 
-/// Enter starts it with a banner and a prompt; a line runs as a command and its answer follows; a leading `:`
+/// TERM-47: Enter starts it with a banner and a prompt; a line runs as a command and its answer follows; a leading `:`
 /// is taken; lists stream, then the prompt comes back; Ctrl-C leaves.
 #[test]
 fn command_line_only() {

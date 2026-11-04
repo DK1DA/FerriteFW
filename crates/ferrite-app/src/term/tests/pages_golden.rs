@@ -1,9 +1,10 @@
-//! TERM-11, TERM-16: every page's bytes on the wire for a script of keys through all of them (plain and in
+//! TERM-11, TERM-16, TERM-47: every page's bytes on the wire for a script of keys through all of them (plain and in
 //! colour, 80 x 24 and larger), kept in `term/golden/pages.txt`: the pages drawn from templates (decision 342) send
 //! what the hand-written pages sent. `UPDATE_GOLDEN=1` writes the file again (look at the diff).
 
 use super::*;
 
+/// TERM-47: the pages drawn from the template pack send the bytes the hand-written pages sent.
 #[test]
 fn pages_golden() {
     const M: &[u8] = b"\x1b\x1b\x1b\x1b\x1b\r"; // back to the main menu from anywhere
