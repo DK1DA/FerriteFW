@@ -169,7 +169,7 @@ fn knob_steps_and_seek() {
 /// BCR-1, BCR-25 (decision 352): MENU 0 3 1 is the broadcast's settings, not a screen; 0 3 1 1 the step, which
 /// the broadcast slot tunes by.
 #[test]
-fn menu_0_3_1_is_the_settings() {
+fn fm_settings_group_not_a_screen() {
     let mut t = ready();
     tune(&mut t, 0, FM1005);
     menu0(&mut t, &[3, 1]);
