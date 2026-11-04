@@ -74,10 +74,12 @@ pub fn open(app: &mut App) -> Screen {
 
 // ---- the list's rows ----
 
-/// The passes shown (the filter's satellite, or all): (index in the source, pass).
+/// The passes shown: the filter's satellite, or all; none under the minimum elevation (SAT-22; the predictor
+/// leaves them out already, Console's tracks may not).
 fn shown(app: &App, filter: u8) -> impl Iterator<Item = Pass> + '_ {
     let d = app.sat_data();
-    (0..d.passes()).filter_map(move |i| d.pass(i)).filter(move |p| filter == ALL || p.sat == filter)
+    let min = app.min_el();
+    (0..d.passes()).filter_map(move |i| d.pass(i)).filter(move |p| (filter == ALL || p.sat == filter) && p.max_el >= min)
 }
 
 /// The row of the selected pass (by identity; the first when it is gone).
@@ -285,10 +287,15 @@ impl View for SatScr {
         app.screen = Screen::Sat(s);
     }
 
-    /// SAT-22: hold MENU on the pass list or a pass page opens the satellite's options (not while keyed or picking).
+    /// SAT-22: hold MENU on the pass list, a pass page, the pointing page or the alarm picker (closing it) opens
+    /// the satellite's options; not while keyed (a toast says so).
     fn options(self, app: &mut App) -> bool {
-        let Some(p) = target(app, self).filter(|_| self.picker == 0 && self.page & TX == 0) else { return false };
-        app.screen = Screen::Sat(SatScr { opt: 1, sat: p.sat, aos: if self.page() == LIST { p.aos } else { self.aos }, ..self });
+        if self.page & TX != 0 {
+            app.show_toast(b"Options", b"after you release PTT", false);
+            return true;
+        }
+        let Some(p) = target(app, self) else { return false };
+        app.screen = Screen::Sat(SatScr { opt: 1, picker: 0, sat: p.sat, aos: if self.page() == LIST { p.aos } else { self.aos }, ..self });
         true
     }
 
@@ -325,6 +332,14 @@ impl View for SatScr {
     fn tick(self, app: &mut App, live: &LiveAll) {
         if self.page() != LIST {
             app.sat_follow(self);
+        } else if self.opt == 0 {
+            // SAT-6: the selection is a pass, not a row: once there is one, rows arriving above it don't move it
+            let row = shown(app, self.filter).position(|p| p.sat == self.sat && p.aos.abs_diff(self.aos) < 120);
+            if let (None, Some(p)) = (row, nth(app, self, 0)) {
+                if let Screen::Sat(m) = &mut app.screen {
+                    (m.sat, m.aos) = (p.sat, p.aos);
+                }
+            }
         }
         let keyed = app.radio.keyed == Some(SAT_SLOT);
         if keyed {
@@ -387,12 +402,13 @@ impl View for SatScr {
 // ---- the satellite's options (SAT-22) ----
 
 /// The rows: Doppler, the uplink's power, duplex, the transponder, the trim; 1 + the row in `SatScr::opt`.
-pub(crate) const OPT_ROWS: [(&str, &str); 5] = [
+pub(crate) const OPT_ROWS: [(&str, &str); 6] = [
     ("Doppler", "Both sides, or the 70 cm side only"),
     ("Uplink power", "Low to start: a Yagi needs little"),
     ("Duplex", "Half mutes the downlink while you talk"),
     ("Transponder", "Which mode PTT and the page use"),
     ("Trim", "Downlink fine tune; OK sets it to 0"),
+    ("Lowest pass", "Every satellite: passes peaking lower aren't listed"),
 ];
 const OPT_TRIM: u8 = 5;
 
@@ -420,11 +436,14 @@ pub(crate) fn opt_value(app: &App, sat: u8, i: u8, b: &mut Buf<16>) {
             let kind = app.sat_data().sat(sat).and_then(|s| s.tp(pr.tp).map(|t| t.kind.name())).unwrap_or("none");
             let _ = uwrite!(b, "{} {}", pr.tp + 1, kind);
         }
-        _ => {
+        5 => {
             let mut k = Buf::<12>::new();
             khz(pr.trim as i32, &mut k);
             b.set(k.as_bytes());
             b.push(b"Hz");
+        }
+        _ => {
+            let _ = uwrite!(b, "{}\u{b0}", app.min_el());
         }
     }
 }
@@ -433,12 +452,14 @@ fn opts_key(app: &mut App, mut s: SatScr, key: Key) {
     let n = OPT_ROWS.len() as u8;
     let mut pr = app.sat_data().prefs(s.sat);
     let ntp = app.sat_data().sat(s.sat).map_or(0, |x| x.ntp);
-    let change = |pr: &mut ferrite_core::sat::data::Prefs, row: u8| match row {
+    let change = |app: &mut App, pr: &mut ferrite_core::sat::data::Prefs, row: u8| match row {
         1 => pr.uhf_only = !pr.uhf_only,
         2 => pr.power = (pr.power + 1) % 3,
         3 => pr.hd = !pr.hd,
         4 => pr.tp = if pr.tp + 1 < ntp { pr.tp + 1 } else { 0 },
-        _ => pr.trim = 0,
+        5 => pr.trim = 0,
+        // SAT-22 (decision 341): the minimum elevation, round 0, 5, 10, 15, 20 degrees; the list predicts again
+        _ => app.set.sat_min_el = (app.set.sat_min_el + 1) % crate::settings::SAT_MIN_EL.len() as u8,
     };
     match key {
         Key::Up => s.opt = if s.opt > 1 { s.opt - 1 } else { n },
@@ -449,7 +470,7 @@ fn opts_key(app: &mut App, mut s: SatScr, key: Key) {
         }
         // MENU-25: a digit picks its row; OK changes it (a press each, round the values)
         Key::Digit(d) if d <= n => s.opt = d,
-        Key::Menu => change(&mut pr, s.opt),
+        Key::Menu => change(app, &mut pr, s.opt),
         Key::Exit => s.opt = 0,
         _ => {}
     }
@@ -458,7 +479,7 @@ fn opts_key(app: &mut App, mut s: SatScr, key: Key) {
 }
 
 fn opts_page(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
-    let mut vals = [Buf::<16>::new(); 5];
+    let mut vals = [Buf::<16>::new(); OPT_ROWS.len()];
     for (i, v) in vals.iter_mut().enumerate() {
         opt_value(app, s.sat, i as u8 + 1, v);
     }
@@ -466,7 +487,7 @@ fn opts_page(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
     let mut p = Buf::<24>::new();
     p.set(name_of(app, s.sat).as_bytes());
     p.push(b" MENU");
-    app.help_box(lcd, super::opts::OPTS_HELP_Y, 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1.as_bytes(), p.as_bytes());
+    app.help_box(lcd, super::opts::OPTS_HELP_Y.max(23 + 22 * (OPT_ROWS.len() as i32 + 1) + 6), 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1.as_bytes(), p.as_bytes());
 }
 
 // ---- drawing parts ----
@@ -553,8 +574,7 @@ fn deg_ring(lcd: &mut impl Panel, x: i32, y: i32, r: i32, c: u16) {
 // ---- the pass list (B22) ----
 
 fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
-    let d = app.sat_data();
-    let state = d.state();
+    let (state, nsats) = (app.sat_data().state(), app.sat_data().sats());
     let now = app.sat_now().unwrap_or(0);
     let n = shown(app, s.filter).count();
     // the head line: what is predicted (SAT-6) and the elements' age (SAT-9: the oldest)
@@ -568,12 +588,16 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
     } else {
         let _ = uwrite!(l, "{} passes in 24 h", n);
     }
-    let (age, lvl) = (0..d.sats()).filter_map(|i| d.sat(i)).map(|x| (x.el.age_days(now), x.age_level(now))).max().unwrap_or((0, 0));
-    let mut r = Buf::<16>::new();
-    if d.sats() > 0 && now != 0 && state != State::Busy {
-        let _ = uwrite!(r, "Elements {} d", age);
-    }
-    if app.dirty(1, H::new().b(l.as_bytes()).b(r.as_bytes()).n(lvl as u32).get()) {
+    // SAT-9: the oldest elements' age, read from every satellite only when the line is drawn (each a record read
+    // from the SPI flash on the radio): its key is the source's version and the hour
+    let aged = nsats > 0 && now != 0 && state != State::Busy;
+    if app.dirty(1, H::new().b(l.as_bytes()).n(app.sat_data().version()).n(if aged { now / 3600 + 1 } else { 0 }).get()) {
+        let d = app.sat_data();
+        let (age, lvl) = (0..d.sats()).filter_map(|i| d.sat(i)).map(|x| (x.el.age_days(now), x.age_level(now))).max().unwrap_or((0, 0));
+        let mut r = Buf::<16>::new();
+        if aged {
+            let _ = uwrite!(r, "Elements {} d", age);
+        }
         let c = [GREEN, AMBER, RED][lvl as usize % 3];
         let rw = w::field(lcd, 120, 112, 22, 40, 34, Align::Right, r.as_bytes(), &UI_12, c, BG);
         w::field(lcd, 8, 224 - rw - 6, 22, 40, 34, Align::Left, l.as_bytes(), &UI_12, SUB, BG);
@@ -614,10 +638,8 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
         // the time column: the rise, or UP; the length, or the time to set while up
         let mut t = Buf::<8>::new();
         let mut m = Buf::<8>::new();
-        let mut nm = Buf::<16>::new();
         let mut el = Buf::<8>::new();
         if let Some(p) = p {
-            nm = name_of(app, p.sat);
             if up {
                 t.set(b"UP");
                 crate::screens::activity::mmss(p.los() - now, &mut m);
@@ -631,6 +653,8 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
         if !app.dirty(3 + k, h) {
             continue;
         }
+        // the name only for a row drawn (a record read from the SPI flash on the radio)
+        let nm = p.map_or(Buf::new(), |p| name_of(app, p.sat));
         let low = p.is_some_and(|p| p.max_el < 10);
         let bg = if sel { FOCUS } else if up { rgb565(0x12, 0x32, 0x1D) } else { BG };
         let fg = if low { DIM } else { TEXT };

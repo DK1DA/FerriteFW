@@ -16,8 +16,11 @@ pub const SAT_SLOT: u8 = 4;
 /// SAT-12: the alarm's lead times in minutes, and Off; 5 minutes to start.
 pub const LEADS: [u8; 5] = [1, 2, 5, 10, 0];
 pub const LEAD_START: u8 = 2;
-/// SAT-6: propagations a tick while predicting (about 4 ms on the radio at 30 µs each), so the UI never waits.
+/// SAT-6: propagations a tick while predicting (the simulator's whole share; the radio adds time slices between
+/// keys and redraws, [`App::sat_work`]).
 pub const BUDGET: u32 = 150;
+/// SAT-6: propagations between two looks at the clock in [`App::sat_work`] (well under a millisecond on the radio).
+pub const CHUNK: u32 = 24;
 /// SAT-10: the arming tone's length.
 pub const ARM_MS: u32 = 2_000;
 /// SAT-8: the uplink is retuned this often while keyed (seconds): every 5 s until the bench shows the BK4829
@@ -106,8 +109,29 @@ impl App {
         matches!(self.screen, Screen::Sat(_)) || self.back.iter().flatten().any(|s| matches!(s, Screen::Sat(_)))
     }
 
+    /// SAT-22: the pass list's minimum elevation, whole degrees.
+    pub(crate) fn min_el(&self) -> u8 {
+        crate::settings::SAT_MIN_EL[self.set.sat_min_el as usize % crate::settings::SAT_MIN_EL.len()]
+    }
+
+    /// SAT-6: more of the prediction under way, in chunks while `more()` says there is time (the radio's UI task
+    /// gives it a few milliseconds a pass, at its top clock, between keys and redraws). True while still predicting.
+    pub fn sat_work(&mut self, more: &mut dyn FnMut() -> bool) -> bool {
+        while self.sat_busy() && more() {
+            if let Some(d) = self.sat_data_mut() {
+                d.work(CHUNK);
+            }
+        }
+        self.sat_busy()
+    }
+
+    /// SAT-6: satellites held and the last prediction's propagations (the firmware's speed line).
+    pub fn sat_stats(&self) -> (u8, u32) {
+        (self.sat_data().sats(), self.sat_data().propagations())
+    }
+
     /// PWR-26.1: predicting wants the build's speed (SAT-6).
-    pub(crate) fn sat_busy(&self) -> bool {
+    pub fn sat_busy(&self) -> bool {
         self.sat_data().state() == State::Busy
     }
 
@@ -117,7 +141,9 @@ impl App {
         let now = self.sat_now();
         let obs = self.sat.here.map(|(a, o, h)| Observer::new(a, o, h));
         let open = self.sat_open();
+        let min = self.min_el();
         if let Some(d) = self.sat_data_mut() {
+            d.set_min_el(min);
             d.tick(now, obs, open, BUDGET);
         }
         let Some(now) = now else { return };

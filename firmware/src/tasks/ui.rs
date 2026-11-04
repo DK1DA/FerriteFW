@@ -498,6 +498,8 @@ pub async fn task() {
     let mut lpm_since: Option<u32> = None;
     // PWR-26.3: when the governor last had a reason for the build's speed.
     let mut clock_high_at = 0u32;
+    // SAT-6: a prediction under way: when it started (ms) and the slices' time so far (us), for its log line.
+    let mut predict_at: Option<(u32, u64)> = None;
     // LINK-13.4: the DSP task codes receive audio for the PC (the cable's session listens).
     let mut listening = 0u8;
     loop {
@@ -863,8 +865,11 @@ pub async fn task() {
         }
         crate::hal::clock::AUDIO_RAISES.store(!fixed && lpm_wait.is_none(), Relaxed);
         let target = ferrite_core::clocktree::clock_target(fixed, lpm_wait, why, clock_high_at, now, audio);
+        // PWR-26.8: satellite passes predicted at the top clock
+        let top = ferrite_core::clocktree::top_wanted(fixed, lpm_wait, why, audio);
         if let Some(low) = target {
-            if crate::hal::clock::set_low(low) && bringup::ON.load(Relaxed) {
+            use crate::hal::clock::{LOW, NORMAL, TOP};
+            if crate::hal::clock::set_tree(if low { LOW } else if top { TOP } else { NORMAL }) && bringup::ON.load(Relaxed) {
                 let (mhz, us) = (crate::hal::clock::mhz(), crate::hal::clock::LAST_SWITCH_US.load(Relaxed));
                 bringup::linef(|b| {
                     let _ = ufmt::uwrite!(b, "clock: {} MHz (interrupts held {} us", mhz, us);
@@ -968,6 +973,9 @@ pub async fn task() {
         if aprs.busy() {
             period = period.min(20); // keying or playing an APRS frame: its unkey on time
         }
+        if app.sat_busy() {
+            period = period.min(1); // SAT-6: the next slice of the prediction at once
+        }
         #[cfg(feature = "bench")]
         if bt_q.is_some() {
             period = period.min(10); // a `bt` query: send and collect on time (a timer, so the link task runs too)
@@ -979,14 +987,19 @@ pub async fn task() {
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         // SBAR-23: the alerts' arm waits for one to be there, and the alert (~3 KB) is taken in its handler: carried
         // in this select's result it sized a temporary in the UI task's frame for every pass.
-        match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.ready_to_receive()).await {
-            Either4::First(l) => live = l,
+        // KEY-25: input first. The select returns the first ready arm, and the Radio task republishes the snapshot
+        // on every tick its values change (satellite mode's downlink level: every 10 ms), so with the snapshot first
+        // a UI pass longer than a tick never reached the keys: they waited for a quiet tick, then a press and its
+        // release came together, a hold read as a short press (hold MENU opened the pass, not the options) and
+        // arrows lagged and jumped (black, Nov 1, 2026). Keys are few; the snapshot is read on the next pass.
+        match select4(INPUT.receive(), live_rx.changed(), wait, ALERTS.ready_to_receive()).await {
+            Either4::Second(l) => live = l,
             // WX-4: a decoded SAME header opens the alert over any screen.
             Either4::Fourth(()) => {
                 urgent = true;
                 super::decode::Decode::take_alert(&mut app, store)
             }
-            Either4::Second(Input::Key(keypad::Event::Press(code))) => {
+            Either4::First(Input::Key(keypad::Event::Press(code))) => {
                 urgent = true;
                 log_input(&Input::Key(keypad::Event::Press(code)));
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
@@ -995,7 +1008,7 @@ pub async fn task() {
                     app.key_down(k, now_ms(), store);
                 }
             }
-            Either4::Second(Input::Key(keypad::Event::Release(code))) => {
+            Either4::First(Input::Key(keypad::Event::Release(code))) => {
                 urgent = true;
                 log_input(&Input::Key(keypad::Event::Release(code)));
                 app.raw_key(code, false);
@@ -1004,8 +1017,8 @@ pub async fn task() {
                     app.key_up(k, now_ms(), store);
                 }
             }
-            Either4::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
-            Either4::Second(Input::Knob(d)) => {
+            Either4::First(Input::Key(_)) => {} // the sampler's own long press and repeat are off
+            Either4::First(Input::Knob(d)) => {
                 urgent = true;
                 log_input(&Input::Knob(d));
                 app.knob(d, now_ms(), store)
@@ -1013,6 +1026,20 @@ pub async fn task() {
             Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
         app.tick(now_ms(), &live, store);
+        // SAT-6: satellite passes predicted in time slices of SAT_SLICE_US between keys and redraws (CPU-bound, not
+        // one small slice a tick); the cable log's speed line when it ends.
+        if app.sat_busy() {
+            let (c0, mhz) = (crate::hal::time::cycles(), crate::hal::clock::mhz());
+            let at = predict_at.get_or_insert((now_ms(), 0));
+            let busy = app.sat_work(&mut || crate::hal::time::cycles().wrapping_sub(c0) < SAT_SLICE_US * mhz);
+            at.1 += (crate::hal::time::cycles().wrapping_sub(c0) / mhz) as u64;
+            if !busy {
+                sat_log(&app, now_ms().wrapping_sub(at.0), at.1);
+                predict_at = None;
+            }
+        } else if let Some(at) = predict_at.take() {
+            sat_log(&app, now_ms().wrapping_sub(at.0), at.1);
+        }
         if let Some(e) = app.take_xb_log() {
             // XB-20.6: every crossband start and stop, with who and why, in the cable log
             bringup::linef(|b| {
@@ -1021,6 +1048,21 @@ pub async fn task() {
             });
         }
     }
+}
+
+/// SAT-6: the slice of each UI pass given to satellite pass prediction while it runs (a key waits at most this
+/// long, plus a redraw).
+const SAT_SLICE_US: u32 = 8_000;
+
+/// SAT-6: the prediction's speed in the cable log: satellites, propagations, the time it took and the time it ran
+/// (the on-radio check of SAT-6's estimate).
+fn sat_log(app: &ferrite_app::App, ms: u32, busy_us: u64) {
+    let (sats, props) = app.sat_stats();
+    let each = if props == 0 { 0 } else { (busy_us * 10 / props as u64) as u32 };
+    bringup::linef(|b| {
+        let _ = ufmt::uwrite!(b, "sat: {} satellites predicted, {} propagations in {} ms ({} ms working, {}.{} us each, {} MHz)",
+            sats, props, ms, (busy_us / 1000) as u32, each / 10, each % 10, crate::hal::clock::mhz());
+    });
 }
 
 /// Bring-up log: a key code down or up (with the key it maps to, if any), or a knob step.

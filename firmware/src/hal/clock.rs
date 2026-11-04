@@ -35,7 +35,10 @@ const MULT: u32 = 30;
 pub const NORMAL: Tree = Tree::new(MULT);
 /// Low Power Mode's speed, 24 MHz (never above the build's).
 pub const LOW: Tree = if ferrite_core::clocktree::LOW.mult < MULT { ferrite_core::clocktree::LOW } else { NORMAL };
-const _: () = assert!(NORMAL.valid() && LOW.valid());
+/// PWR-26.8, SAT-6: the top clock for a burst of work (satellite passes predicted): 240 MHz, the APBs at /4 so every
+/// peripheral and timer runs as at 120 MHz. A `clock-*` bench build stays at its own speed.
+pub const TOP: Tree = if MULT == 15 { Tree::new(30) } else { NORMAL };
+const _: () = assert!(NORMAL.valid() && LOW.valid() && TOP.valid());
 const _: () = assert!(MULT != 15 || NORMAL.pll_cfg() == 0x8035_0000); // stock's value at 120 MHz
 
 /// The current tree's multiplier (a named static: interrupt context reads it, and it stays in fast flash).
@@ -78,7 +81,7 @@ pub fn tmr_hz() -> u32 {
 
 /// True while in the Low Power Mode speed (false at a `clock-24` build, where the two are the same).
 pub fn is_low() -> bool {
-    tree() != NORMAL
+    tree().mult < NORMAL.mult
 }
 
 /// CRM_MISC2 bits 4-5: AUTO_STEP_EN, set by stock around the switch to the PLL so the core steps up gradually.
@@ -175,7 +178,11 @@ pub fn on_pll() -> bool {
 /// Interrupts are held off for the PLL's lock and the register work (logged in [`LAST_SWITCH_US`]); a byte
 /// arriving on the cable meanwhile can be lost (one UART byte is 87 us at 115200).
 pub fn set_low(low: bool) -> bool {
-    let to = if low { LOW } else { NORMAL };
+    set_tree(if low { LOW } else { NORMAL })
+}
+
+/// [`set_low`]'s switch to any of the three trees ([`LOW`], [`NORMAL`], [`TOP`]); the same rules.
+pub fn set_tree(to: Tree) -> bool {
     let from = tree();
     if to == from {
         return false;

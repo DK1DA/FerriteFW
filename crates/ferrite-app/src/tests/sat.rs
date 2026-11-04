@@ -139,3 +139,221 @@ fn options_page() {
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 0 && s.page == 1), "back on the pass page");
 }
+
+
+/// The satellite source counting its record reads (each one an SPI flash read on the radio).
+struct Counting(crate::sat::SimSats, core::cell::Cell<u32>);
+
+impl ferrite_core::sat::SatSource for Counting {
+    fn count(&self) -> u8 {
+        self.0.count()
+    }
+    fn get(&self, i: u8) -> Option<ferrite_core::sat::Sat> {
+        self.1.set(self.1.get() + 1);
+        self.0.get(i)
+    }
+    fn declination(&self) -> Option<i16> {
+        self.0.declination()
+    }
+    fn prefs(&self, i: u8) -> Option<ferrite_core::sat::data::Prefs> {
+        self.0.prefs(i)
+    }
+    fn set_prefs(&self, i: u8, p: ferrite_core::sat::data::Prefs) {
+        self.0.set_prefs(i, p)
+    }
+}
+
+/// SAT-6 (the radio's key-to-screen time, modelled on the host): ▼ on the pass list, while predicting and after:
+/// the pixels sent to the panel (0.24 µs a byte on the radio, TERM-40) and the satellite records read (an SPI
+/// flash read each), per key and per idle redraw.
+#[test]
+fn list_key_to_screen_model() {
+    let src: &'static Counting = std::boxed::Box::leak(std::boxed::Box::new(Counting(crate::sat::SimSats::new(crate::sat::sample()), core::cell::Cell::new(0))));
+    struct Ref(&'static Counting);
+    impl ferrite_core::sat::SatSource for Ref {
+        fn count(&self) -> u8 {
+            self.0.count()
+        }
+        fn get(&self, i: u8) -> Option<ferrite_core::sat::Sat> {
+            self.0.get(i)
+        }
+        fn declination(&self) -> Option<i16> {
+            self.0.declination()
+        }
+        fn prefs(&self, i: u8) -> Option<ferrite_core::sat::data::Prefs> {
+            self.0.prefs(i)
+        }
+        fn set_prefs(&self, i: u8, p: ferrite_core::sat::data::Prefs) {
+            self.0.set_prefs(i, p)
+        }
+    }
+    let mut t = T::new();
+    t.app.set.backlight = 0;
+    t.app.sat_attach(std::boxed::Box::leak(std::boxed::Box::new(Live::new(Ref(src)))));
+    t.app.sat_clock(Some(crate::sat::SIM_T0), true, Some(HERE));
+    let mut fb = FrameBuffer::new();
+    t.open(crate::screens::nav::Dest::Satellites);
+    t.render(&mut fb);
+    let mut keys = 0;
+    let (mut px, mut reads) = (0u64, 0u32);
+    let (mut ipx, mut ireads, mut idle) = (0u64, 0u32, 0);
+    for k in 0..40 {
+        // an idle redraw (the frame every 50 ms), then a key and its redraw
+        fb.begin_pass();
+        let r0 = src.1.get();
+        t.wait(100);
+        t.render(&mut fb);
+        let rep = fb.end_pass(false);
+        (ipx, ireads, idle) = (ipx + rep.writes, ireads + src.1.get() - r0, idle + 1);
+        if k % 2 == 0 {
+            fb.begin_pass();
+            let r0 = src.1.get();
+            t.tap(Key::Down);
+            t.render(&mut fb);
+            let rep = fb.end_pass(false);
+            (px, reads, keys) = (px + rep.writes, reads + src.1.get() - r0, keys + 1);
+        }
+    }
+    let ms = |p: u64, n: u32| p as f64 * 2.0 * 0.24 / 1000.0 / n as f64;
+    std::println!(
+        "SAT-6 model: a key {:.1} ms of panel bus and {:.1} records read; an idle redraw {:.1} ms and {:.1} records",
+        ms(px, keys),
+        reads as f64 / keys as f64,
+        ms(ipx, idle),
+        ireads as f64 / idle as f64
+    );
+    // an idle redraw read every satellite (the head line's elements age) until Nov 3: 14.8 a redraw for 4
+    assert!(ireads <= idle, "{ireads} records in {idle} idle redraws");
+    assert!(reads <= keys * 12, "only the rows drawn read their names");
+}
+
+/// MENU-25, SAT-22: hold MENU opens the satellite's options from every satellite page: the pass list (while it
+/// predicts and after), the pass page before the rise and overhead, the pointing page and the alarm picker (which
+/// it closes); keyed it says so and stays; 0 there is the full menu.
+#[test]
+fn hold_menu_on_every_satellite_page() {
+    let p = a_pass(1);
+    let mut t = sat_app(p.aos - 600);
+    let opts = |t: &T| matches!(t.app.screen(), Screen::Sat(s) if s.opt == 1);
+    t.open(crate::screens::nav::Dest::Satellites);
+    t.hold(Key::Menu);
+    assert!(opts(&t), "the list while predicting: {:?}", t.app.screen());
+    t.tap(Key::Exit);
+    t.wait(3000);
+    t.hold(Key::Menu);
+    assert!(opts(&t), "the list");
+    t.tap(Key::Digit(0));
+    assert!(matches!(t.app.screen(), Screen::Advanced(_)), "0: the full menu");
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 0), "BACK: the list: {:?}", t.app.screen());
+    t.tap(Key::Hash);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.picker != 0));
+    t.hold(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 1 && s.picker == 0), "the picker: closed, the options");
+    t.tap(Key::Exit);
+    t.app.sat.cur = Some(p);
+    t.app.screen = Screen::Sat(SatScr::pass_of(&p));
+    t.wait(200);
+    t.hold(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 1 && s.sat == p.sat), "the pass page before the rise");
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(0));
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.page == 2));
+    t.hold(Key::Menu);
+    assert!(opts(&t), "the pointing page");
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(0));
+    t.app.sat_clock(Some(p.aos + 60), true, Some(HERE));
+    t.wait(1100);
+    t.hold(Key::Menu);
+    assert!(opts(&t), "the pass page overhead");
+    t.tap(Key::Exit);
+    let s = store();
+    t.app.key_down(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
+    t.wait(200);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.page & 0x80 != 0), "keyed");
+    t.hold(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.opt == 0 && s.page & 0x80 != 0), "keyed: no options");
+    assert!(t.app.toast.is_some_and(|x| x.body.as_bytes().starts_with(b"after you release")), "it says why");
+    t.app.key_up(Key::Ptt(ferrite_core::keys::PTT_A), t.t, &s);
+}
+
+/// SAT-6, SAT-22 (decision 341): the options' Lowest pass, 10° to start: no pass under it is listed; OK steps it
+/// (15°) and the list is predicted again without the lower ones; 0° lists them all.
+#[test]
+fn minimum_elevation_on_the_options_page() {
+    let mut t = sat_app(crate::sat::SIM_T0);
+    t.open(crate::screens::nav::Dest::Satellites);
+    t.wait(3000);
+    let d = |t: &T| (0..t.app.sat_data().passes()).filter_map(|i| t.app.sat_data().pass(i)).collect::<Vec<_>>();
+    let ten = d(&t);
+    assert!(!ten.is_empty() && ten.iter().all(|p| p.max_el >= 10), "10° to start");
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(6));
+    let mut v = Buf::<16>::new();
+    crate::screens::sat::opt_value(&t.app, 0, 6, &mut v);
+    assert_eq!(v.as_bytes(), "10\u{b0}".as_bytes());
+    t.tap(Key::Menu);
+    assert_eq!(t.app.settings().sat_min_el, 3);
+    t.wait(3000);
+    let fifteen = d(&t);
+    assert!(fifteen.iter().all(|p| p.max_el >= 15) && fifteen.len() < ten.len(), "predicted again, the lower ones gone");
+    for _ in 0..3 {
+        t.tap(Key::Menu); // 20, then round to 0, 5
+    }
+    assert_eq!(t.app.settings().sat_min_el, 1);
+    for _ in 0..4 {
+        t.tap(Key::Menu); // 10, 15, 20, then 0
+    }
+    assert_eq!(t.app.settings().sat_min_el, 0);
+    t.wait(3000);
+    assert!(d(&t).iter().any(|p| p.max_el < 10), "0°: the low ones too");
+}
+
+/// SAT-6: the selection is a pass, not a row: once the first rows are in it stays on its pass while the rest of
+/// the prediction adds rows, and ▼ moves to the next pass by rise time.
+#[test]
+fn selection_stays_on_its_pass_while_rows_arrive() {
+    let mut t = sat_app(crate::sat::SIM_T0);
+    t.open(crate::screens::nav::Dest::Satellites);
+    while t.app.sat_data().passes() == 0 {
+        t.wait(100);
+    }
+    t.wait(100);
+    let Screen::Sat(first) = t.app.screen() else { panic!() };
+    assert_ne!(first.aos, 0, "pinned to a pass");
+    while t.app.sat_data().state() == ferrite_core::sat::data::State::Busy {
+        t.wait(100);
+        let Screen::Sat(s) = t.app.screen() else { panic!() };
+        assert_eq!((s.sat, s.aos), (first.sat, first.aos), "the same pass while rows arrive");
+    }
+    let list: Vec<_> = (0..t.app.sat_data().passes()).filter_map(|i| t.app.sat_data().pass(i)).collect();
+    let at = list.iter().position(|p| p.sat == first.sat && p.aos == first.aos).unwrap();
+    t.tap(Key::Down);
+    let Screen::Sat(s) = t.app.screen() else { panic!() };
+    assert_eq!((s.sat, s.aos), (list[at + 1].sat, list[at + 1].aos), "▼: the next pass");
+}
+
+/// SAT-6, PWR-26.1: the radio predicts in time slices ([`App::sat_work`]): a slice runs while the platform says
+/// there is time, a long enough one finishes; closed, nothing is predicted and the governor's reason is gone.
+#[test]
+fn prediction_in_time_slices() {
+    let mut t = sat_app(crate::sat::SIM_T0);
+    t.wait(200);
+    // until Nov 3 the source said busy whenever the screen wasn't open: the governor's predict reason held the
+    // build's speed from power on whenever satellites, a clock and a position were there
+    assert!(!t.app.sat_busy(), "closed: not predicting (the clock may drop)");
+    t.open(crate::screens::nav::Dest::Satellites);
+    assert!(t.app.sat_busy());
+    let mut n = 0;
+    assert!(t.app.sat_work(&mut || {
+        n += 1;
+        n <= 3
+    }));
+    assert_eq!(n, 4, "three chunks, then out of time");
+    assert!(!t.app.sat_work(&mut || true), "a long slice finishes it");
+    assert!(t.app.sat_data().passes() > 10);
+    assert_eq!(t.app.clock_reasons(&t.live, t.t) & ferrite_core::clocktree::why::PREDICT, 0);
+    t.hold(Key::Exit);
+    assert!(!t.app.sat_busy(), "closed again");
+}

@@ -59,6 +59,13 @@ pub trait SatData {
     /// Time, the observer (SAT-5), whether the satellite screen is open, and a budget of work: predicting runs
     /// here, in slices, while the screen is open (SAT-6); closed, only an alarm's pass is kept up to date.
     fn tick(&mut self, now: Option<u32>, obs: Option<Observer>, open: bool, budget: u32);
+    /// More of the prediction under way, after the tick (the radio predicts in time slices between keys and
+    /// redraws, SAT-6): up to `budget` propagations.
+    fn work(&mut self, _budget: u32) {}
+    /// SAT-6: the last prediction's propagations (the speed line in the cable log).
+    fn propagations(&self) -> u32 {
+        0
+    }
     /// SAT-12: the pass with an alarm (kept on time when the position or the clock changes), and setting it.
     fn alarm(&self) -> Option<Pass>;
     fn set_alarm(&mut self, p: Option<Pass>);
@@ -72,6 +79,8 @@ pub trait SatData {
     fn declination(&self) -> Option<i16> {
         None
     }
+    /// SAT-6, SAT-22: the lowest highest point a pass needs to be listed (whole degrees); a change predicts again.
+    fn set_min_el(&mut self, _el: u8) {}
 }
 
 /// No satellites (a build without satellite data).
@@ -128,6 +137,8 @@ pub struct Live<S: SatSource> {
     alarm: Option<Pass>,
     /// The plan is finding the alarm's pass again, not the list.
     refining: bool,
+    /// SAT-6: the minimum elevation the list was asked for (the plan's while it predicts the list).
+    min_el: u8,
 }
 
 /// SAT-6: a move that counts as a new position (10 km, in radians of latitude or longitude), a clock change.
@@ -136,7 +147,7 @@ const JUMP_S: u32 = 60;
 
 impl<S: SatSource> Live<S> {
     pub fn new(src: S) -> Self {
-        Live { src, plan: Plan::new(), track: Cell::new(None), obs: None, expect: None, version: 1, no_clock: true, open: false, alarm: None, refining: false }
+        Live { src, plan: Plan::new(), track: Cell::new(None), obs: None, expect: None, version: 1, no_clock: true, open: false, alarm: None, refining: false, min_el: 0 }
     }
 
     /// The prediction's own counters (propagations, satellites done): for the speed check.
@@ -174,7 +185,8 @@ impl<S: SatSource> SatData for Live<S> {
             State::NoClock
         } else if self.obs.is_none() {
             State::NoPosition
-        } else if !self.plan.done || self.refining {
+        } else if self.open && !self.plan.done || self.refining {
+            // closed, nothing runs but an alarm's refinement (the governor's reason, PWR-26.1, goes with it)
             State::Busy
         } else {
             State::Ready
@@ -205,6 +217,7 @@ impl<S: SatSource> SatData for Live<S> {
         };
         let jumped = self.expect.is_some_and(|e| now.abs_diff(e) > JUMP_S);
         let changed = self.src.version() != self.plan.version;
+        let redo = self.plan.min_el != self.min_el; // SAT-22's minimum elevation changed
         self.expect = Some(now);
         if moved {
             self.obs = obs;
@@ -223,9 +236,10 @@ impl<S: SatSource> SatData for Live<S> {
             self.version = self.version.wrapping_add(1);
         }
         self.open = open;
-        if opened || open && (moved || jumped || changed) {
+        if opened || open && (moved || jumped || changed || redo) {
             self.refining = false;
             self.plan.restart(now, self.src.version(), self.obs);
+            self.plan.min_el = self.min_el;
             self.version = self.version.wrapping_add(1);
         } else if !open && (moved || jumped || changed) {
             if let Some(a) = self.alarm {
@@ -233,7 +247,11 @@ impl<S: SatSource> SatData for Live<S> {
                 (self.plan.span, self.plan.only, self.refining) = (3_600, Some(a.sat), true);
             }
         }
-        if !open && !self.refining {
+        self.work(budget);
+    }
+    #[inline(never)]
+    fn work(&mut self, budget: u32) {
+        if !self.open && !self.refining || self.plan.done {
             return;
         }
         let was = (self.plan.n, self.plan.done);
@@ -259,6 +277,12 @@ impl<S: SatSource> SatData for Live<S> {
     }
     fn declination(&self) -> Option<i16> {
         self.src.declination()
+    }
+    fn set_min_el(&mut self, el: u8) {
+        self.min_el = el;
+    }
+    fn propagations(&self) -> u32 {
+        self.plan.work
     }
     fn prefs(&self, sat: u8) -> Prefs {
         prefs_of(&self.src, sat)

@@ -284,6 +284,13 @@ pub fn clock_target(fixed: bool, lpm_wait: Option<u32>, reasons: u16, last_high_
     })
 }
 
+/// PWR-26.8, SAT-6: the build's speed raised to the top clock (240 MHz) for this turn: satellite passes being
+/// predicted, in Dynamic (not Fixed, PWR-26.5), out of Low Power Mode (PWR-24.9) and with no audio running
+/// (PWR-26.4). Only where [`clock_target`] gives the build's speed.
+pub fn top_wanted(fixed: bool, lpm_wait: Option<u32>, reasons: u16, audio_busy: bool) -> bool {
+    !fixed && lpm_wait.is_none() && !audio_busy && reasons & why::PREDICT != 0
+}
+
 /// PWR-26.1: the input reason: a key or the knob `since_input` ms ago, the screen lit.
 pub fn input_holds(since_input: u32, dark: bool) -> bool {
     !dark && since_input < INPUT_MS
@@ -336,6 +343,17 @@ mod tests {
         assert_eq!(clock_target(false, None, 0, 4_500, 5_000, false), Some(false), "the hold");
     }
     use super::*;
+
+    /// PWR-26.8: predicting raises Dynamic to 240 MHz; Fixed, Low Power Mode, audio or no prediction don't.
+    #[test]
+    fn top_clock_only_for_prediction() {
+        assert!(top_wanted(false, None, why::PREDICT | why::INPUT, false));
+        assert!(!top_wanted(false, None, why::INPUT, false), "a key alone: the build's speed");
+        assert!(!top_wanted(true, None, why::PREDICT, false), "Fixed");
+        assert!(!top_wanted(false, Some(0), why::PREDICT, false), "Low Power Mode");
+        assert!(!top_wanted(false, None, why::PREDICT, true), "audio running");
+        assert!(Tree::new(30).valid() && Tree::new(30).mhz() == 240 && Tree::new(30).apb_hz() == Tree::new(15).apb_hz());
+    }
 
     const NORMAL: Tree = Tree::new(15);
     /// The `clock-*` bench builds' trees, plus the two runtime speeds.

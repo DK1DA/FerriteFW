@@ -3,6 +3,7 @@ keys and the pointing page, by the readback's `sat`, `row` and `pass` lines. Nee
 sample (data.ferritefw.dev's fixture in its store, a fixed day when its clock isn't set); on the radio the
 satellites Console or `:sat add` loaded (SAT-2).
 """
+import re
 import time
 
 from .core import test
@@ -179,3 +180,65 @@ def sat_command_lists_and_deletes(t):
     u = open_list(t)
     u = ready(t)
     t.eq(sat_line(u).get("all"), n - 1, "the pass list predicts the satellites held")
+
+
+
+def options_up(t, u, where):
+    t.eq(u.id, "SatOptions", f"hold MENU on {where}: the satellite's options (MENU-25, SAT-22)")
+    t.eq(u.names()[-1:], ["Full menu"], "0: the full menu, as every options page")
+    return t.keys("BACK")
+
+
+@test("SAT-22", "MENU-25", pages=("SatList", "SatPass", "SatPoint", "SatAlarm", "SatOptions"), sim_args=MANY)
+def hold_menu_opens_options_on_every_satellite_page(t):
+    """Hold MENU opens the satellite's options from the pass list (while it predicts and after), the alarm picker
+    (closing it), a pass page and the pointing page; BACK returns to the page it came from."""
+    u = open_list(t)
+    t.check(sat_line(u).get("state") == "busy", "still predicting", sat_line(u))
+    u = options_up(t, t.press("MENU", long=True), "the list while predicting")
+    t.eq(u.id, "SatList", "BACK: the list")
+    ready(t)
+    u = options_up(t, t.press("MENU", long=True), "the list")
+    u = t.keys("HASH")
+    t.eq(u.id, "SatAlarm", "# the alarm picker")
+    u = options_up(t, t.press("MENU", long=True), "the alarm picker")
+    t.eq(u.id, "SatList", "the picker closed")
+    u = t.keys("MENU")
+    t.eq(u.id, "SatPass", "OK: the pass page")
+    u = options_up(t, t.press("MENU", long=True), "the pass page")
+    t.eq(u.id, "SatPass", "BACK: the pass page")
+    u = t.keys("0")
+    t.eq(u.id, "SatPoint", "0: the pointing page")
+    u = options_up(t, t.press("MENU", long=True), "the pointing page")
+    t.eq(u.id, "SatPoint", "BACK: the pointing page")
+
+
+def row_els(u):
+    els = []
+    for r in u.rows:
+        m = re.search(r"(\d+)°", r.get("value", ""))
+        if m:
+            els.append(int(m.group(1)))
+    return els
+
+
+@test("SAT-6", "SAT-22", pages=("SatList", "SatOptions"))
+def minimum_elevation_hides_low_passes(t):
+    """The options' Lowest pass (10° to start) hides the passes peaking lower; 15° predicts the list again
+    without the lower ones; set back to 10° after."""
+    open_list(t)
+    u = ready(t)
+    els = row_els(u)
+    t.check(els and min(els) >= 10, "10° to start: no lower pass listed", els)
+    u = t.press("MENU", long=True)
+    t.eq(u.num(6)["value"], "10°", "Lowest pass 10° to start")
+    u = t.keys("6 MENU")
+    t.eq(u.num(6)["value"], "15°", "OK: 15°")
+    u = t.keys("BACK")
+    u = ready(t)
+    els = row_els(u)
+    t.check(els and min(els) >= 15, "15°: no lower pass listed", els)
+    u = t.press("MENU", long=True)
+    u = t.keys("6 MENU MENU MENU MENU")
+    t.eq(u.num(6)["value"], "10°", "round 20, 0, 5, 10: back to 10°")
+    t.keys("BACK")

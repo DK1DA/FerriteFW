@@ -247,3 +247,74 @@ fn prediction_speed() {
     // adaptive steps, plus about 40 per pass refined
     assert!(p.work < sats.len() as u32 * 1_700);
 }
+
+/// Every satellite's passes over `span` from `t0`, each predicted alone (no cap in play), soonest first.
+fn each_alone(sats: &[Sat], obs: Observer, t0: u32, span: u32) -> Vec<super::pass::Pass> {
+    let mut all = Vec::new();
+    for i in 0..sats.len() as u8 {
+        let mut p = Plan::new();
+        p.restart(t0, 1, Some(obs));
+        (p.span, p.only) = (span, Some(i));
+        while !p.step(&List(sats), 1_000) {}
+        all.extend_from_slice(p.list());
+    }
+    all.sort_by_key(|q| q.aos);
+    all
+}
+
+/// SAT-6: the satellite up now or rising soonest is worked first: when the first satellite is done, the list's
+/// first pass is already the soonest of all; each satellite's passes join together.
+#[test]
+fn soonest_satellite_first() {
+    let fx = fixture();
+    let sats: Vec<Sat> = fx.iter().map(|(_, e)| Sat { el: *e, ..Default::default() }).collect();
+    let obs = Observer::new(453_000_000, -757_000_000, 70);
+    let t0 = fx.iter().map(|(_, e)| e.epoch_unix()).max().unwrap();
+    for h in 0..12 {
+        let from = t0 + h * 7_200;
+        let mut p = Plan::new();
+        p.restart(from, 1, Some(obs));
+        while p.progress().0 == 0 && !p.step(&List(&sats), 50) {}
+        let first = p.list().iter().map(|q| q.sat).collect::<Vec<_>>();
+        assert!(!first.is_empty() && first.iter().all(|&s| s == first[0]), "one satellite's passes at once: {first:?}");
+        let soonest = p.list()[0];
+        while !p.step(&List(&sats), 500) {}
+        assert_eq!(p.list()[0], soonest, "hour {}: the soonest pass came first", h * 2);
+    }
+}
+
+/// SAT-6: with more passes than fit, the 64 kept are the earliest by rise time, whatever order they were found in.
+#[test]
+fn cap_keeps_the_earliest_64() {
+    let fx = fixture();
+    let sats: Vec<Sat> = fx.iter().map(|(_, e)| Sat { el: *e, ..Default::default() }).collect();
+    let obs = Observer::new(453_000_000, -757_000_000, 70);
+    let t0 = fx.iter().map(|(_, e)| e.epoch_unix()).max().unwrap();
+    let span = 3 * 86_400;
+    let all = each_alone(&sats, obs, t0, span);
+    assert!(all.len() > super::pass::MAX, "{} passes", all.len());
+    let mut p = Plan::new();
+    p.restart(t0, 1, Some(obs));
+    p.span = span;
+    while !p.step(&List(&sats), 300) {}
+    let key = |v: &[super::pass::Pass]| v.iter().map(|q| (q.sat, q.aos)).collect::<Vec<_>>();
+    assert_eq!(key(p.list()), key(&all[..super::pass::MAX]));
+}
+
+/// SAT-6, SAT-22: a minimum elevation leaves out the passes whose highest point is under it, and the list fills
+/// with the higher ones instead.
+#[test]
+fn minimum_elevation_hides_low_passes() {
+    let fx = fixture();
+    let sats: Vec<Sat> = fx.iter().map(|(_, e)| Sat { el: *e, ..Default::default() }).collect();
+    let obs = Observer::new(453_000_000, -757_000_000, 70);
+    let t0 = fx.iter().map(|(_, e)| e.epoch_unix()).max().unwrap();
+    let all = each_alone(&sats, obs, t0, 86_400);
+    let mut p = Plan::new();
+    p.restart(t0, 1, Some(obs));
+    p.min_el = 10;
+    while !p.step(&List(&sats), 300) {}
+    let want: Vec<_> = all.iter().filter(|q| q.max_el >= 10).map(|q| (q.sat, q.aos)).collect();
+    assert!(want.len() < all.len(), "some low passes to hide");
+    assert_eq!(p.list().iter().map(|q| (q.sat, q.aos)).collect::<Vec<_>>(), want);
+}

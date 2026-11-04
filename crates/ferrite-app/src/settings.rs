@@ -99,6 +99,11 @@ pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
 /// 0 5 9 7 (WATCH-17.3, decision 295): who wins a chip shared with the APRS slot. 0, the default, APRS first.
 pub const APRS_SHARE: [&str; 2] = ["APRS first", "A\u{b7}B first"];
 
+/// SAT-22 (decision 341): the satellite options' minimum elevation, whole degrees: a pass whose highest point is
+/// lower isn't listed. 10° to start.
+pub const SAT_MIN_EL: [u8; 5] = [0, 5, 10, 15, 20];
+pub const SAT_MIN_EL_START: u8 = 2;
+
 /// FM broadcast step (0 3 1 1) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
 
@@ -310,6 +315,8 @@ pub struct Settings {
     pub aprs_share: u8,
     /// 0 2 5 Local zone (CHAN-34, decision 326): an index into [`crate::local::RANGES`], 0 Off; 50 km by default.
     pub local: u8,
+    /// SAT-22 (decision 341): the pass list's minimum elevation, an index into [`SAT_MIN_EL`]; 10° by default.
+    pub sat_min_el: u8,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -525,6 +532,7 @@ impl Settings {
         dtmf_rx: true,
         aprs_share: 0,
         local: crate::local::DEFAULT_RANGE,
+        sat_min_el: SAT_MIN_EL_START,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
@@ -552,6 +560,9 @@ impl Settings {
         }
         if self.local as usize >= crate::local::RANGES.len() {
             self.local = Self::DEFAULT.local; // CHAN-34
+        }
+        if self.sat_min_el as usize >= SAT_MIN_EL.len() {
+            self.sat_min_el = SAT_MIN_EL_START; // SAT-22
         }
         if !LPM_BELOW.contains(&self.lpm_below) {
             self.lpm_below = Self::DEFAULT.lpm_below; // PWR-24.1: an older record's zero

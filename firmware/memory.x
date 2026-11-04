@@ -85,6 +85,14 @@ SECTIONS
     *(.text.*10ferrite_ui6canvas5bands*);
     *(.text.*10ferrite_ui6canvas5cover*);
     *(.text.*10ferrite_ui6canvasNtB*2Rd*);
+    /* SAT-6: satellite pass prediction's inner loop (SGP4, the look angles, the scan; about 21,000 propagations
+     * for 19 satellites, Nov 3, 2026), CPU-bound in the UI task's time slices: a propagation, its look angles, the
+     * scan and the math under them (about 4.6 KB); the rest of `sat` (a satellite's set-up included) stays slow */
+    *(.text.*12ferrite_core3sat4sgp4*9propagate*);
+    *(.text.*12ferrite_core3sat4look*7Tracker4look*);
+    *(.text.*12ferrite_core3sat4look4gmst*);
+    *(.text.*12ferrite_core3sat5fmath*);
+    *(.text.*12ferrite_core3sat4pass*);
     . = ALIGN(4);
     __efast_ui = .;
   } > FLASH
