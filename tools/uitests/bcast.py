@@ -81,10 +81,10 @@ def broadcast_ignores_watch_and_drops_relay_slots(t):
         t.put_back(stopped)
 
 
-@test("BCR-25", pages=("Fm", "Home"))
+@test("BCR-25", pages=("Home",))
 def knob_tunes_and_arrows_seek_the_broadcast_card(t):
     """On the broadcast card the knob and ▲▼ tune by the FM step (0 3 1 1) and ◀▶ seek, the station found taken
-    into the VFO; the FM screen tunes the same slot."""
+    into the VFO."""
     step = t.get("0 3 1 1")
     t.need(step.endswith("kHz"), f"FM step {step!r}")
     khz = float(step.split()[0])
@@ -104,11 +104,6 @@ def knob_tunes_and_arrows_seek_the_broadcast_card(t):
     f1 = mhz_of_slot(t, "A")
     t.check(87.5 <= f1 <= 108.0, "the station found is in the band", f1)
     t.eq(u.active["kind"], "broadcast", "and the slot plays it")
-    # The FM screen tunes the broadcast slot.
-    u = t.keys("MENU 0 3 1")
-    t.eq(u.id, "Fm", "MENU 0 3 1")
-    t.knob(+1)
-    t.check(abs(mhz_of_slot(t, "A") - (f1 + khz / 1000)) < 1e-4, "the FM screen's knob tunes slot A", t.slot("A"))
 
 
 @test("BCR-7", pages=("More", "Group"))

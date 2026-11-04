@@ -157,8 +157,9 @@ fn ram_is_small() {
     // channel scan's list was sent for and the slots whose list goes again (SCAN-25: 5 bytes), 8 with padding, to 1760;
     // satellite mode (chapter 28a: the source's pointer, 16 on the PC and 8 on the radio, and the App's own clock,
     // observer, alarm, open pass and what the Radio task was sent, 72), 96 with padding, to 1856; the Radio task's
-    // queue 16 to 32 commands (MODE-6.5: the power-on burst with APRS mode and C muted is 17), 128, to 1984
-    assert!(n <= 1984, "App is {n} bytes");
+    // queue 16 to 32 commands (MODE-6.5: the power-on burst with APRS mode and C muted is 17), 128, to 1984; when the
+    // broadcast slot took the broadcast, for the sleep timer (BCR-5, decision 352: 4 bytes), 8 with padding, to 1992
+    assert!(n <= 1992, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -672,7 +673,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 65, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226; C3a sent beacons: APRS-53; C19 FM presets: decision 258; D25 finish the update: decision 333; B22 satellites: chapter 28a)");
+    assert_eq!(ids.len(), 64, "one inventory ID per destination (B11 FM broadcast: decision 352; groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226; C3a sent beacons: APRS-53; C19 FM presets: decision 258; D25 finish the update: decision 333; B22 satellites: chapter 28a)");
 }
 
 mod group_a;

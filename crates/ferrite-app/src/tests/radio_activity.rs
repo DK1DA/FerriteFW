@@ -626,18 +626,6 @@ fn star_enters_split_tx_and_hf() {
     assert_eq!(t.app.set.hf.freq, 707_400);
 }
 
-/// BCR-1: MENU 0 3 1; the knob tunes; BACK turns it off.
-#[test]
-fn fm_broadcast() {
-    let mut t = T::new();
-    t.open(Dest::FmBroadcast);
-    assert!(matches!(t.app.screen(), Screen::Fm(_)));
-    t.knob(1);
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_120))));
-    t.tap(Key::Exit);
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
-}
-
 /// WX-4, WX-6, WX-7: an alert opens over any screen; OK silences, then opens the log; BACK home.
 #[test]
 fn alert_screen() {
@@ -730,7 +718,7 @@ fn radio_screens_draw() {
     let mut t = ready();
     let mut fb = FrameBuffer::new();
     t.app.notify(b"Severe thunderstorm warning", b"Ottawa, Gatineau", true);
-    for d in [Dest::Transmit, Dest::TxRefused, Dest::Emergency, Dest::Scan, Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::FmBroadcast, Dest::HfMode, Dest::Alert, Dest::Crossband, Dest::Squelch, Dest::ShortcutMap] {
+    for d in [Dest::Transmit, Dest::TxRefused, Dest::Emergency, Dest::Scan, Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::HfMode, Dest::Alert, Dest::Crossband, Dest::Squelch, Dest::ShortcutMap] {
         t.hold(Key::Exit);
         t.render(&mut fb);
         t.app.open(d);
@@ -1568,7 +1556,10 @@ fn start(t: &mut T, m: Mode) {
         }
         Mode::Tone => t.open(Dest::ToneSearch),
         Mode::Counter => t.open(Dest::Counter),
-        Mode::Fm => t.open(Dest::FmBroadcast),
+        Mode::Fm => {
+            crate::screens::entry::tune_vfo(&mut t.app, 0, ferrite_core::freq::mhz(100) + 50_000); // BCR-21: a slot in the band
+            t.wait(100);
+        }
         Mode::Hf => t.open(Dest::HfMode),
         Mode::Xb => {
             t.open(Dest::Crossband);
@@ -1581,6 +1572,8 @@ fn start(t: &mut T, m: Mode) {
 }
 
 const MODES: [Mode; 8] = [Mode::Scope, Mode::Strip, Mode::Tone, Mode::Counter, Mode::Fm, Mode::Hf, Mode::Xb, Mode::Sat];
+/// The modes a screen runs (decision 352: FM broadcast is a slot in the band, which plays until it is tuned out).
+const SCREEN_MODES: [Mode; 7] = [Mode::Scope, Mode::Strip, Mode::Tone, Mode::Counter, Mode::Hf, Mode::Xb, Mode::Sat];
 
 /// HOME-2, SCOPE-4 and each mode's own rules: an exclusive mode stops with its screen, however the screen is left
 /// (BACK, hold BACK, the screen's timeout, PTT; the strip by leaving its layout), and only then: the Radio task
@@ -1595,7 +1588,7 @@ fn every_way_out_of_a_mode_stops_it() {
         Ptt,
         Layout,
     }
-    for m in MODES {
+    for m in SCREEN_MODES {
         let outs: &[Out] = if m == Mode::Strip { &[Out::Ptt, Out::Layout] } else { &[Out::Back, Out::HoldBack, Out::Timeout, Out::Ptt] };
         for &out in outs {
             let mut t = ready();
@@ -1646,8 +1639,8 @@ fn every_way_out_of_a_mode_stops_it() {
 /// Starting one exclusive mode stops the one running first: its stop command goes before the new mode's start.
 #[test]
 fn a_mode_stops_the_one_before_it() {
-    for a in MODES {
-        for b in MODES {
+    for a in SCREEN_MODES {
+        for b in SCREEN_MODES {
             if a == b || b == Mode::Strip {
                 continue; // the strip starts only from home's layout
             }
@@ -1845,7 +1838,7 @@ fn random_use_keeps_modes_in_step() {
         Key::Menu, Key::Exit, Key::Up, Key::Down, Key::Left, Key::Right, Key::Slot, Key::VfoMem, Key::Digit(0),
         Key::Digit(1), Key::Digit(3), Key::Digit(7), Key::Star, Key::Hash, Key::Side(1), Key::Side(2),
     ];
-    const DESTS: [Dest; 9] = [Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::FmBroadcast, Dest::HfMode, Dest::Crossband, Dest::Scan, Dest::Squelch, Dest::Satellites];
+    const DESTS: [Dest; 8] = [Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::HfMode, Dest::Crossband, Dest::Scan, Dest::Squelch, Dest::Satellites];
     #[derive(Clone, Copy, PartialEq, Debug)]
     enum Kind {
         Sweep,
@@ -1991,7 +1984,7 @@ fn random_use_keeps_modes_in_step() {
                 assert_eq!(m, Mode::Strip, "seed {seed} step {step} ({what}): only home's strip sweeps beside a broadcast");
                 assert!(!t.app.in_bcast_band(t.app.active), "seed {seed} step {step} ({what}): not with the broadcast slot active (HOME-14)");
             }
-            let mode_screen = |s: &Screen| matches!(s, Screen::Scope(_) | Screen::ToneSearch(_) | Screen::Counter(_) | Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_) | Screen::Sat(_));
+            let mode_screen = |s: &Screen| matches!(s, Screen::Scope(_) | Screen::ToneSearch(_) | Screen::Counter(_) | Screen::Hf(_) | Screen::Crossband(_) | Screen::Sat(_));
             if t.app.screen() == Screen::Home && t.app.set.layout == 0 && !t.app.back.iter().flatten().any(mode_screen) {
                 let want = if t.app.bcast_slot().is_some() && t.app.radio.keyed.is_none() { Mode::Fm } else { Mode::Off };
                 assert_eq!(m, want, "seed {seed} step {step} ({what}): home is normal receive, or the broadcast slot's");

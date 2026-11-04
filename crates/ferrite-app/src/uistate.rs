@@ -554,7 +554,16 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         }
         Screen::Quick(qk) => {
             if quick::fm_rows(app) {
-                return; // BCR-28: FM's own rows (not described yet)
+                // BCR-28, BCR-31: FM's own rows, then the saved stations and More
+                for (i, (name, ..)) in fm::OPTIONS.iter().enumerate() {
+                    let mut v = Buf::<24>::new();
+                    let changed = fm::option_text(app, cx.dev, i as u8, &mut v);
+                    row(d, i as u8 + 1, name.as_bytes(), v.as_bytes(), i as u8 == qk.row, changed, false);
+                }
+                let n = fm::OPTIONS.len() as u8;
+                row(d, n + 1, b"Saved stations", b">", qk.row == n, false, false);
+                row(d, 0, b"More", b">", qk.row > n, false, false);
+                return;
             }
             for (i, item) in QUICK.into_iter().enumerate() {
                 let v = quick::row_value(app, item);
@@ -704,27 +713,6 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             if let Some(l) = d.ln() {
                 l.push(b"text ");
                 q(l, app.text.as_bytes());
-            }
-        }
-        Screen::Fm(f) if f.menu => {
-            for (i, (name, ..)) in fm::OPTIONS.iter().enumerate() {
-                let mut v = Buf::<24>::new();
-                fm::option_text(app, cx.dev, i as u8, &mut v);
-                row(d, i as u8 + 1, name.as_bytes(), v.as_bytes(), i as u8 == f.row, false, false);
-            }
-            row(d, 0, b"Full menu", b">", false, false, false);
-        }
-        Screen::Fm(_) => {
-            if let Some(l) = d.ln() {
-                let f = fm::Fm::shown(app, cx.live);
-                l.push(b"fm freq=");
-                l.push(f.freq.as_bytes());
-                kq(l, "title", f.title.as_bytes());
-                kn(l, "stereo", f.stereo as u32);
-                kn(l, "dbuv", f.dbuv as u32);
-                kn(l, "snr", f.snr as u32);
-                kq(l, "rds", f.rds.as_bytes());
-                kq(l, "monitor", f.monitor.as_bytes());
             }
         }
         Screen::Hf(h) => hf_lines(app, cx, h, d),
@@ -1354,7 +1342,6 @@ pub fn id(s: Screen) -> &'static str {
         Screen::Info(_) => "Info",
         Screen::KeyTest(_) => "KeyTest",
         Screen::Link(_) => "Link",
-        Screen::Fm(_) => "Fm",
         Screen::Hf(_) => "Hf",
         Screen::Alert(_) => "Alert",
         Screen::Coming(_) => "Coming",

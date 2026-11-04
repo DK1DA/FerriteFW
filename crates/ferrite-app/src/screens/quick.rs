@@ -38,18 +38,22 @@ impl View for Quick {
         Some(MENU_TIMEOUT_MS) // MENU-28
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let row = self.row;
         if bcast(app) {
-            let n = FM_ROWS + 1;
+            let n = FM_ROWS + 2;
+            // BCR-31 (decision 352): the saved stations, the channel browser's Broadcast view
+            let stations = |app: &mut App| app.open_screen(Screen::Browse(super::browse::broadcast_view(store, app.set.show_hidden)));
             match (e.key, e.press) {
                 (Key::Up, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row % n + n - 1) % n }),
                 (Key::Down, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row + 1) % n }),
                 (Key::Left | Key::Right, Short | Repeat) if row < FM_ROWS => fm::option_change(app, row, if e.key == Key::Right { 1 } else { -1 }),
                 (Key::Digit(0), Short) => to_advanced(app),
                 (Key::Digit(d @ 1..=FM_ROWS), Short) => app.screen = Screen::Quick(Quick { row: d - 1 }),
-                (Key::Menu, Short) if row >= FM_ROWS => to_advanced(app),
+                (Key::Digit(STATIONS_KEY), Short) => stations(app),
+                (Key::Menu, Short) if row == FM_ROWS => stations(app),
+                (Key::Menu, Short) if row > FM_ROWS => to_advanced(app),
                 (Key::Menu, Short) => fm::option_change(app, row, 1),
                 (Key::Exit, Short) => app.back(),
                 _ => {}
@@ -188,8 +192,9 @@ pub(crate) fn fm_rows(app: &App) -> bool {
     bcast(app)
 }
 
-/// FM's rows on a broadcast slot (BCR-28), then "0 More".
+/// FM's rows on a broadcast slot (BCR-28), then "5 Saved stations" (BCR-31) and "0 More".
 const FM_ROWS: u8 = fm::OPTIONS.len() as u8;
+const STATIONS_KEY: u8 = FM_ROWS + 1;
 
 /// The active slot is in the broadcast band: quick settings are FM's.
 fn bcast(app: &App) -> bool {
@@ -210,21 +215,26 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
         w::field(lcd, 92, 140, 21, 39, 35, "Broadcast FM".as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
         lcd.fill(0, 40, 240, 1, LINE);
     }
-    for i in 0..=FM_ROWS {
+    for i in 0..=FM_ROWS + 1 {
         let mut v = Buf::<24>::new();
         let (name, dot) = if i < FM_ROWS {
             (fm::OPTIONS[i as usize].0, fm::option_text(app, cx.dev, i, &mut v))
         } else {
             v.set(b">");
-            ("More", false)
+            (if i == FM_ROWS { "Saved stations" } else { "More" }, false)
         };
-        let r = Row { num: Some(if i < FM_ROWS { i + 1 } else { 0 }), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i == row, grey: false };
+        let num = if i <= FM_ROWS { i + 1 } else { 0 };
+        let r = Row { num: Some(num), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i == row, grey: false };
         app.list_row(lcd, i as usize, 41 + 22 * i as i32, 22, &r);
     }
-    let i = row.min(FM_ROWS);
-    let help = if i < FM_ROWS { fm::OPTIONS[i as usize].1 } else { txt!("Every setting, by group.") };
+    let i = row.min(FM_ROWS + 1);
+    let help = match i {
+        _ if i < FM_ROWS => fm::OPTIONS[i as usize].1,
+        _ if i == FM_ROWS => txt!("Your broadcast channels: OK plays one."),
+        _ => txt!("Every setting, by group."),
+    };
     let mut p = Buf::<16>::new();
-    let _ = uwrite!(p, "MENU {}", if i < FM_ROWS { i + 1 } else { 0 });
+    let _ = uwrite!(p, "MENU {}", if i <= FM_ROWS { i + 1 } else { 0 });
     app.help_txt(lcd, 265, 33, help, p.as_bytes());
 }
 

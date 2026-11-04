@@ -100,8 +100,6 @@ pub enum Dest {
     Scan,
     /// B10: band scope (hold 1, MENU 0 3 2 6).
     BandScope,
-    /// B11: FM broadcast (MENU 0 3 1).
-    FmBroadcast,
     /// B12, B13: HF mode (MENU 0 3 4 only).
     HfMode,
     /// B14: tone search (MENU 0 3 6).
@@ -222,7 +220,6 @@ impl Dest {
             Emergency => ("Emergency frequency", "15", "B8"),
             Scan => ("Scan", "14", "B9"),
             BandScope => ("Band scope", "21", "B10"),
-            FmBroadcast => ("FM broadcast", "20", "B11"),
             HfMode => ("HF mode", "20a", "B12"),
             ToneSearch => ("Tone search", "22", "B14"),
             Satellites => ("Satellites", "28a", "B22"),
@@ -302,12 +299,12 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 69] = {
+pub const ALL: [Dest; 68] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
         ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, QuickMessages, Contacts, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
-        Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Alert,
+        Transmit, TxRefused, Emergency, Scan, BandScope, HfMode, ToneSearch, Counter, Alert,
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsSent, AprsMessages, AprsMessage,
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
@@ -325,7 +322,7 @@ pub const MENU0: [(&[u8], Dest); 53] = [
     (&[2, 1], Dest::Browse),
     (&[2, 2], Dest::AddRepeater),
     (&[2, 3], Dest::Zones),
-    (&[3, 1], Dest::FmBroadcast), // BCR-1: the screen itself; its options hold 0 3 1 1-4
+    (&[3, 1], Dest::Sub(3, 1)), // BCR-1 (decision 352): FM broadcast's settings; a slot in the band is the receiver
     (&[3, 2], Dest::Sub(3, 2)),
     (&[3, 2, 6], Dest::BandScope),
     (&[3, 3], Dest::Counter),
@@ -462,7 +459,6 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::DtmfMemories => Screen::Dtmf(super::dtmf::DtmfPad::memories()),
         Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
         Dest::WriteProgress => Screen::Link(Link::new(LinkPage::Progress)),
-        Dest::FmBroadcast => fm::open(app),
         Dest::HfMode => hf::open(app),
         Dest::Satellites => sat::open(app),
         Dest::Alert => Screen::Alert(super::alert::Alert { silenced: false }),

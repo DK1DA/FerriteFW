@@ -206,10 +206,8 @@ pub fn run(scale: u32) {
     s.save("key-test");
     s.home();
 
-    // FM broadcast (MENU 0 3 1) and its options.
-    s.open(Dest::FmBroadcast);
-    s.save("fm");
-    s.press(Key::Menu, 800);
+    // FM broadcast's settings (MENU 0 3 1; decision 352: a slot in the band is the receiver).
+    s.menu0(&[3, 1]);
     s.save("fm-menu");
     s.home();
 

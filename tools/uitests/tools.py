@@ -1,4 +1,4 @@
-"""Tools and the rest reached by keys: FM broadcast, scope, scan, crossband, the clock, the link's records."""
+"""Tools and the rest reached by keys: FM broadcast's settings, scope, scan, crossband, the clock, the link's records."""
 import struct
 
 import ferrite_link as fl
@@ -6,15 +6,14 @@ import ferrite_link as fl
 from .core import test
 
 
-@test("BCR-1", pages=("Fm", "Group"))
-def fm_broadcast_screen(t):
-    """MENU 0 3 1 opens FM broadcast (◀▶ seek, OK the saved stations); BACK leaves and the slots are as they were."""
+@test("BCR-1", pages=("Group",))
+def fm_broadcast_settings(t):
+    """MENU 0 3 1 is FM broadcast's settings (decision 352: no FM screen; a slot in the band is the receiver):
+    step, AGC, radio monitor, sleep timer; BACK leaves and the slots are as they were."""
     before = [t.slot(L) for L in "AB"]
     u = t.keys("MENU 0 3 1")
-    t.eq((u.id, u.title), ("Fm", "FM"), "MENU 0 3 1")
-    t.eq(u.hint("<>"), "Seek", "◀▶ seek")
-    u = t.keys("BACK")
-    t.check(u.id != "Fm", "BACK leaves", u.id)
+    t.eq(u.names()[:4], ["Step", "AGC", "Radio monitor", "Sleep timer"], "MENU 0 3 1")
+    t.keys("BACK")
     t.eq([t.slot(L) for L in "AB"], before, "slots A and B unchanged")
 
 

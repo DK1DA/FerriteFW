@@ -258,31 +258,20 @@ fn key_test() {
     assert_eq!(t.app.screen(), Screen::Home, "hold BACK leaves");
 }
 
-/// BCR-1, BCR-16: MENU 0 3 1 starts FM broadcast on the SI4732; tuning sends it; leaving (BACK or PTT) stops it.
+/// BCR-21 (decision 352): a slot tuned into the band starts FM broadcast on the SI4732; tuning sends it; tuned out
+/// it stops (PTT: TX-24's test in tests/bcast.rs).
 #[test]
 fn fm_broadcast() {
     let mut t = T::new();
-    t.open(Dest::FmBroadcast);
-    assert!(matches!(t.app.screen(), Screen::Fm(_)));
+    crate::screens::entry::tune_vfo(&mut t.app, 0, ferrite_core::freq::mhz(101) + 10_000);
+    t.wait(100);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_110))));
     t.knob(1);
+    t.wait(100);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_120))));
-    t.hold(Key::Menu); // its options; 0 the full menu keeps the broadcast
-    t.tap(Key::Digit(0));
-    assert!(matches!(t.app.screen(), Screen::Advanced(_)));
-    assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
-    t.tap(Key::Exit);
-    t.tap(Key::Exit);
-    t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Home);
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
-    t.open(Dest::FmBroadcast);
-    t.cmds();
-    let s = store();
-    t.app.key_down(Key::PTT, t.t, &s);
-    let c = t.cmds();
-    let off = c.iter().position(|c| *c == RadioCmd::Broadcast(BroadcastCmd::Off));
-    assert!(off.is_some(), "PTT stops the broadcast first (BCR-16): {c:?}");
+    crate::screens::entry::tune_vfo(&mut t.app, 0, ferrite_core::freq::mhz(146) + 520_000);
+    t.wait(100);
+    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "tuned out: it stops");
 }
 
 /// HF-1 to HF-8, HF-13, HF-24, HF-28, SBAR-18: MENU 0 3 4 enters HF mode; the status bar says HF without

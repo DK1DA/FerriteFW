@@ -156,30 +156,18 @@ fn scope_redraws_little() {
     }
 }
 
-/// FM broadcast: hold MENU opens its own options (BCR-3); ▲ tunes by the step, digits do nothing on the main
-/// screen but 1-4 (BCR-3), OK opens the saved stations, the browser's Broadcast view (BCR-18, BCR-31.2); it tunes 64-108 MHz, wrapping at the ends (BCR-17); with radio monitor on, a
-/// slot that opens interrupts it (BCR-4).
+/// FM broadcast on a slot (decision 352): a station in slot A plays; ▲ tunes it by the step (BCR-25); quick
+/// settings are FM's (BCR-28) and 5 opens the saved stations, the browser's Broadcast view (BCR-31.2).
 #[test]
 fn broadcast() {
     let mut r = Radio::new();
-    r.run("menu 0 3 1; wait 500ms; expect screen \"FM broadcast\"; expect text \"101.1\"");
-    r.run("hold OK; expect text \"Step\"; expect text \"AGC\"; expect text \"Radio monitor\"; press BACK");
-    r.run("press UP; wait 300ms; expect text \"101.2\"");
-    r.run("press 7; wait 300ms; expect screen \"FM broadcast\"; expect text \"101.2\"");
-    for _ in 0..372 {
-        r.press(Key::Down); // 101.2 down to the bottom of the band
-    }
-    r.expect_text("64.0");
-    r.press(Key::Down); // past it: round to the top, never below 64
-    r.expect_text("108.0");
-    // C's airband scan hears something
-    for _ in 0..300 {
-        if r.wait(100).has("broadcast paused") {
-            break;
-        }
-    }
-    r.expect_text("broadcast paused");
-    r.run("press OK; expect screen \"Channel browser\"; expect text \"Broadcast\"; expect text \"No stations saved\"");
+    r.home();
+    r.event(Event::FmStation);
+    r.wait(1000);
+    r.expect_text("100.5");
+    r.run("press UP; wait 300ms; expect text \"100.6\"");
+    r.run("press OK; expect text \"Step\"; expect text \"Radio monitor\"; expect text \"Saved stations\"");
+    r.run("press 5; expect screen \"Channel browser\"; expect text \"Broadcast\"");
 }
 
 /// Hold MENU in HF mode opens its options: step, bandwidth, AGC and the recent list (HF-14); LNA and fine tune

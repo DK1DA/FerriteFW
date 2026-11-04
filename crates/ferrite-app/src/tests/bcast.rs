@@ -166,26 +166,23 @@ fn knob_steps_and_seek() {
     assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_650))), "not tuned again");
 }
 
-/// BCR-25, BCR-27: the FM screen (MENU 0 3 1) shows and tunes the broadcast slot; MENU 0 3 1 1 still reaches
-/// the step (decision 258: the presets row went).
+/// BCR-1, BCR-25 (decision 352): MENU 0 3 1 is the broadcast's settings, not a screen; 0 3 1 1 the step, which
+/// the broadcast slot tunes by.
 #[test]
-fn fm_screen_shares_the_slot() {
+fn menu_0_3_1_is_the_settings() {
     let mut t = ready();
     tune(&mut t, 0, FM1005);
     menu0(&mut t, &[3, 1]);
-    assert!(matches!(t.app.screen(), Screen::Fm(f) if !f.menu));
-    assert_eq!(t.app.fm_freq(), 10_050);
+    assert!(matches!(t.app.screen(), Screen::Group(_)), "{:?}", t.app.screen());
+    assert_eq!(t.app.radio.mode, Mode::Fm, "the slot still plays");
+    menu0(&mut t, &[3, 1, 1]);
+    t.knob(1);
+    assert_eq!(t.app.set.fm_step, 2);
+    t.hold(Key::Exit);
     t.cmds();
     t.knob(1);
     t.wait(100);
-    assert_eq!(t.app.slot(0).freq(), mhz(100) + 60_000, "the slot moved");
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_060))));
-    t.hold(Key::Exit);
-    assert_eq!(t.app.radio.mode, Mode::Fm, "home: the slot still plays");
-    menu0(&mut t, &[3, 1, 1]);
-    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu && f.row == 0), "{:?}", t.app.screen());
-    t.knob(1);
-    assert_eq!(t.app.set.fm_step, 2);
+    assert_eq!(t.app.slot(0).freq(), mhz(100) + 70_000, "the slot moved by the 200 kHz step");
 }
 
 fn menu0(t: &mut T, path: &[u8]) {
@@ -341,20 +338,18 @@ fn lease_drop_restarts_both() {
     assert!(!c.contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "{c:?}");
 }
 
-/// BCR-29.4: the sleep timer (BCR-5) ends the FM screen's broadcast only: a broadcast slot plays on past it until
-/// it is tuned out.
+/// BCR-5 (decision 352): the sleep timer quick-mutes the broadcast slot once its time is up; the slot stays, and
+/// \* on it plays it again.
 #[test]
-fn sleep_timer_leaves_a_broadcast_slot_playing() {
+fn sleep_timer_mutes_the_broadcast_slot() {
     let mut t = ready();
     crate::screens::groups::change(&mut t.app, &[3, 1, 4], 1); // 15 min
-    t.open(crate::screens::nav::Dest::FmBroadcast);
-    t.wait(15 * 60_000 + 1_000);
-    assert_eq!(t.app.screen(), Screen::Home, "the FM screen's broadcast ends at 15 min");
-    t.cmds();
     tune(&mut t, 0, FM1005);
-    t.wait(16 * 60_000);
-    assert_eq!(t.app.bcast_slot(), Some(0), "the broadcast slot plays on past the sleep time");
-    assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
-    let c = tune(&mut t, 0, TWO_M);
-    assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "tuned out: it ends");
+    t.wait(14 * 60_000);
+    assert_eq!(t.app.mute & 1, 0, "still playing at 14 min");
+    t.cmds();
+    t.wait(61_000);
+    assert_eq!(t.app.mute & 1, 1, "muted at 15 min");
+    assert!(t.cmds().contains(&RadioCmd::Mute(1)));
+    assert_eq!(t.app.bcast_slot(), Some(0), "the slot is still the broadcast slot")
 }

@@ -124,13 +124,13 @@ fn menu_paths_reach_the_lists() {
         t.tap(Key::Exit);
         assert!(t.name().starts_with("Settings") || t.name() == "Settings group", "{path:?}: BACK returns to the group, not {}", t.name());
     }
-    // MENU 0 3 1 1: the FM screen's options on its first row, the step (BCR-3; decision 258)
+    // MENU 0 3 1 1: the broadcast's step (BCR-3; decision 352: 0 3 1 is its settings group, no screen)
     let mut t = T::new();
     t.hold(Key::Menu);
     t.tap(Key::Digit(3));
     t.tap(Key::Digit(1));
     t.tap(Key::Digit(1));
-    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu && f.row == 0), "MENU 0 3 1 1: {}", t.name());
+    assert_eq!(t.name(), "Settings group", "MENU 0 3 1 1");
 }
 
 #[test]
@@ -456,54 +456,39 @@ fn stations(t: &T) {
     t.s.apply(ChanWrite::Put { ch: channel(71, NO_ZONE, mhz(91) + 50_000, "CBC 2", DEFAULT_CFG), from: None });
 }
 
-/// BCR-31.2, BCR-31.3: OK on the FM screen opens the channel browser's Broadcast view, every saved station in any zone;
-/// OK there plays one.
+/// BCR-31.2, BCR-31.3, BCR-25 (decision 352): on a broadcast slot, quick settings' 5 opens the channel browser's
+/// Broadcast view, every saved station in any zone; OK there plays one in that slot's VFO and goes back.
 #[test]
-fn fm_ok_opens_the_saved_stations_and_ok_plays_one() {
+fn saved_stations_from_the_broadcast_slot() {
     let mut t = T::new();
     stations(&t);
-    t.open(Dest::FmBroadcast);
+    t.app.set_vfo(1, 10_050_000);
+    t.tap(Key::Slot); // B active
+    t.wait(100);
+    assert_eq!(t.app.bcast_slot(), Some(1));
     t.tap(Key::Menu);
+    t.tap(Key::Digit(5));
     assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == crate::screens::browse::V_BROADCAST), "{}", t.name());
     t.tap(Key::Down);
     t.cmds();
     t.tap(Key::Menu);
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(ferrite_core::msg::BroadcastCmd::Fm(9150))));
-    assert_eq!(t.name(), "FM broadcast");
-}
-
-/// BCR-31.3, BCR-25: with a slot playing broadcast, a saved station plays in that slot's VFO (one FM state).
-#[test]
-fn fm_station_plays_in_the_broadcast_slot() {
-    let mut t = T::new();
-    stations(&t);
-    t.app.set_vfo(1, 10_050_000);
-    t.wait(100);
-    assert_eq!(t.app.bcast_slot(), Some(1));
-    t.open(Dest::FmBroadcast);
-    t.tap(Key::Menu);
-    t.tap(Key::Down);
-    t.tap(Key::Menu);
     assert_eq!(t.app.slot(1).freq(), 9_150_000);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(ferrite_core::msg::BroadcastCmd::Fm(9150))));
+    assert!(matches!(t.app.screen(), Screen::Quick(_)), "back where it was picked from: {}", t.name());
 }
 
-/// BCR-31.3: a station picked from the FM screen returns to that FM screen: one BACK leaves FM broadcast.
+/// BCR-31.3 (decision 352): with no broadcast slot, a saved station tunes the active slot's VFO, which makes it the
+/// broadcast slot.
 #[test]
-fn fm_station_returns_to_the_same_fm_screen() {
+fn saved_station_without_a_broadcast_slot() {
     let mut t = T::new();
-    t.open(Dest::FmBroadcast); // BCR-1
-    t.tap(Key::Menu);
-    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == crate::screens::browse::V_BROADCAST), "{}", t.name());
-    t.tap(Key::Exit);
-    t.tap(Key::Exit);
-    assert_eq!(t.name(), "FM broadcast", "BACK twice: the views, then FM");
     stations(&t);
+    let v = crate::screens::browse::broadcast_view(&t.s, false);
+    t.app.open_screen(Screen::Browse(v));
     t.tap(Key::Menu);
-    t.tap(Key::Menu);
-    assert!(matches!(t.app.screen(), Screen::Fm(f) if !f.menu));
-    t.tap(Key::Exit);
-    assert!(matches!(t.app.screen(), Screen::Home), "one BACK leaves FM: {}", t.name());
+    assert_eq!(t.app.slot(0).freq(), 8_850_000);
+    t.wait(100);
+    assert_eq!(t.app.bcast_slot(), Some(0));
 }
 
 #[test]
@@ -562,7 +547,7 @@ fn every_hint_bar_fits() {
     }
     // Option pages and the lock.
     let mut t = T::new();
-    for d in [Dest::FmBroadcast, Dest::HfMode, Dest::EventLog] {
+    for d in [Dest::HfMode, Dest::EventLog] {
         t.open(d);
         t.wait(3000);
         t.hold(Key::Menu);
@@ -687,10 +672,6 @@ fn hold_menu_is_options_everywhere() {
         assert_eq!(t.app.screen(), under, "BACK returns to the screen");
         t.hold(Key::Exit);
     }
-    t.open(Dest::FmBroadcast); // its own page, drawn in the same style
-    t.hold(Key::Menu);
-    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu));
-    t.hold(Key::Exit);
     for d in [Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Quick, Dest::Status] {
         t.open(d);
         let s = t.app.screen();

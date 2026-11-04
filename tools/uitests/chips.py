@@ -280,12 +280,13 @@ def cable_tx_pin_high_when_quiet(t):
     t.check(mode != 0, "PC10 an output (CFGHR mode bits not input)", f"{crh:08X}")
 
 
-@test("BCR-14", "HF-16", needs=("bench",), where="radio", pages=("Fm", "Hf"))
+@test("BCR-14", "HF-16", needs=("bench",), where="radio", pages=("Home", "Hf"))
 def si_input_pins_by_mode(t):
     """PA7/PC5 (the SI4732's inputs): 0/0 for FM broadcast, 1/1 for HF mode's AM."""
     t.bench()
     from .modes import HfVfo, hf_mode, hf_type
-    u = t.keys("MENU 0 3 1")
+    t.cmd("slot A vfo 98.5")  # BCR-21: a slot in the band plays broadcast (decision 352: no FM screen)
+    u = t.home()
     time.sleep(1.0)
     t.eq((t.pin("PA7"), t.pin("PC5")), (0, 0), "FM broadcast: PA7/PC5 0/0")
     vfo = HfVfo(t)

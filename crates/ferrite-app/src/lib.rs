@@ -1480,7 +1480,7 @@ impl App {
         // PWR-24.4: Low Power Mode has no scan, band scope, counter, broadcast, HF mode or crossband (two VFOs):
         // nothing that keeps a receiver sweeping or listening; menus, editing and tone search stay.
         if self.low_power()
-            && matches!(dest, Dest::Scan | Dest::BandScope | Dest::Counter | Dest::FmBroadcast | Dest::HfMode | Dest::Crossband)
+            && matches!(dest, Dest::Scan | Dest::BandScope | Dest::Counter | Dest::HfMode | Dest::Crossband)
         {
             return self.lpm_refuse();
         }

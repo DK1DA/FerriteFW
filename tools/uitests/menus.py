@@ -279,7 +279,7 @@ def back_keeps_the_place(t):
     t.eq((u.id, u.sel and u.sel["name"]), ("Status", "Watch"), "BACK: Status, on Watch")
 
 
-@test("MENU-25", pages=("More", "Fm", "Options", "Scope", "Status"))
+@test("MENU-25", pages=("More", "Options", "Scope", "Status"))
 def hold_menu_options(t):
     """Hold MENU on another screen opens its options (numbered, 0 the full menu), or "No options here"."""
     t.keys("MENU 0 0")
@@ -295,11 +295,6 @@ def hold_menu_options(t):
     t.eq(nums[:-1], list(range(1, len(nums))), "numbered rows")
     u = t.keys("0")
     t.check(u.id in ("More", "Quick"), "0 opens the full menu", u.id)
-    t.home()
-    u = t.keys("MENU 0 3 1")
-    t.eq(u.id, "Fm", "MENU 0 3 1 opens FM broadcast")
-    u = t.press("MENU", long=True)
-    t.eq(u.hint("0"), "Full menu", "FM's options name 0 the full menu")
 
 
 @test("MENU-28", slow=True, pages=("Group", "Home"))

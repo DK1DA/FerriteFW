@@ -52,8 +52,9 @@ fn on_and_off_restore_everything() {
     // Scan and the mode screens are refused with a toast.
     t.tap(Key::Side(2));
     assert_eq!(t.app.screen, Screen::Home, "no scan");
-    t.app.open(Dest::FmBroadcast);
-    assert_eq!(t.app.screen, Screen::Home, "no broadcast");
+    crate::screens::entry::tune_vfo(&mut t.app, 0, ferrite_core::freq::mhz(100) + 50_000);
+    t.wait(100);
+    assert!(!t.app.radio.fm_on, "no broadcast: a slot in the band doesn't play it (BCR-21)");
     t.app.open(Dest::Crossband);
     assert_eq!(t.app.screen, Screen::Home, "no crossband (two VFOs)");
     t.app.open(Dest::BandScope);

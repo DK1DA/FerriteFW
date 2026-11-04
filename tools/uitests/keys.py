@@ -10,7 +10,7 @@ WALK = ["MENU", "MENU 0", "MENU 0 1", "MENU 0 7", "MENU 0 7 5", "MENU 0 9 1", "M
         "1:long", "SIDE2:long", "VM:long"]
 
 
-@test("KEY-9", "SBAR-5", "MENU-16", pages=("More", "Counter", "Crossband", "Edit", "Entry", "Fm", "Group", "Home", "Info", "Quick", "Save", "Scope", "Shortcut", "Status", "Text", "Tones", "Value", "Zones"))
+@test("KEY-9", "SBAR-5", "MENU-16", pages=("More", "Counter", "Crossband", "Edit", "Entry", "Group", "Home", "Info", "Quick", "Save", "Scope", "Shortcut", "Status", "Text", "Tones", "Value", "Zones"))
 def hint_bars_and_names_fit(t):
     """Every screen walked: at most three hint pairs, the universal BACK last when shown; the status bar's
     screen name at most 8 characters (none on home); lists' hint bars name the knob."""

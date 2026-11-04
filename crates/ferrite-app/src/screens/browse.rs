@@ -450,18 +450,19 @@ fn zone_name(store: &impl ChannelStore, z: ZoneId) -> Buf<16> {
     store.zone_label(z, b"No zone", b"No zone")
 }
 
-/// BCR-31: a saved station into the broadcast receiver (the broadcast slot's while one plays, BCR-25), then the
-/// FM screen it was picked from (replaced, not opened again: one BACK leaves FM), or quick settings on a broadcast
-/// slot (BCR-28); from elsewhere, FM opens over it.
+/// BCR-31 (decision 352): a saved station plays on the broadcast slot while one plays (BCR-25); otherwise the
+/// active slot's VFO goes there, which makes it the broadcast slot (BCR-21). Then back where it was picked from.
 fn play(app: &mut App, c: Channel) {
-    let f = (c.rx / 1000) as u16;
-    app.fm_set(f.clamp(super::fm::LO, super::fm::HI)); // the reconciler retunes (MODE-2)
-    app.back();
-    match app.screen {
-        Screen::Fm(f) => app.screen = Screen::Fm(super::fm::Fm { menu: false, ..f }),
-        Screen::Quick(_) => {}
-        _ => app.open(Dest::FmBroadcast),
+    let (lo, hi) = app.fm_range();
+    let f = ((c.rx / 1000) as u16).clamp(lo, hi);
+    if app.radio.bcast.is_some() {
+        app.fm_set(f); // the reconciler retunes (MODE-2)
+    } else if app.aprs_slot(app.active) {
+        return app.show_toast(b"APRS slot", b"pick A or B", false);
+    } else {
+        super::entry::tune_vfo(app, app.active, f as Freq10 * 1000);
     }
+    app.back();
     app.show_toast(c.name(), b"", false);
 }
 

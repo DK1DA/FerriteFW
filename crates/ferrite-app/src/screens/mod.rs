@@ -148,7 +148,6 @@ pub enum Screen {
     Info(info::Info),
     KeyTest(keytest::KeyTest),
     Link(link::Link),
-    Fm(fm::Fm),
     Hf(hf::Hf),
     Alert(alert::Alert),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
@@ -210,7 +209,6 @@ macro_rules! each {
             Screen::Info($s) => $e,
             Screen::KeyTest($s) => $e,
             Screen::Link($s) => $e,
-            Screen::Fm($s) => $e,
             Screen::Hf($s) => $e,
             Screen::Alert($s) => $e,
             Screen::Coming($s) => $e,

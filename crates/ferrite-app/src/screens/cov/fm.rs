@@ -1,5 +1,5 @@
-//! The FM broadcast screen (chapter 20): playing with stereo and RDS (radio text, or the station name), the
-//! monitor off, and the readback.
+//! FM broadcast on a broadcast slot (chapter 20; decision 352 retired the FM screen): stereo and RDS on the home
+//! card, and the MHz text.
 
 use super::*;
 use ferrite_core::msg::ModeLive;
@@ -13,29 +13,20 @@ fn fm_live(t: &mut T, rt: &[u8], ps: &[u8; 8]) {
     t.wait(200);
 }
 
-/// BCR-2, BCR-30: playing: STEREO, the radio text wrapped, else the station name big; the readback's fm line.
+/// BCR-26.2, BCR-26.3, BCR-30: a broadcast slot playing shows STEREO and the radio text on its card, else the
+/// station name.
 #[test]
 fn playing_with_rds() {
     let mut t = T::ready();
-    t.open(Dest::FmBroadcast);
-    assert!(matches!(t.screen(), Screen::Fm(_)), "{}", t.name());
+    crate::screens::entry::tune_vfo(&mut t.app, 0, ferrite_core::freq::mhz(100) + 50_000);
+    t.wait(200);
+    assert_eq!(t.app.bcast_slot(), Some(0));
     fm_live(&mut t, b"Morning show with news at the top of every hour", b"CBC     ");
     assert!(t.app.radio.fm_on, "the reconciler started it");
     t.shows("STEREO");
-    t.shows("Morning show with news");
-    t.reads("fm");
-    t.reads("stereo=1 dbuv=45 snr=22 rds=\"Morning show");
+    t.shows("Morning show");
     fm_live(&mut t, b"", b"CBC     ");
     t.shows("CBC");
-}
-
-/// BCR-24: with the radio monitor off the screen says the slots aren't heard.
-#[test]
-fn monitor_off() {
-    let mut t = T::ready();
-    t.app.set.fm_monitor = false;
-    t.open(Dest::FmBroadcast);
-    t.shows("Monitor off: slots not heard");
 }
 
 /// BCR-1: a frequency on the 10 kHz step shows its second decimal.

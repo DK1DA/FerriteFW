@@ -53,7 +53,17 @@ impl App {
         let next = pick(came).or(self.radio.bcast.filter(|&s| inb & 1 << s != 0)).or_else(|| pick(inb));
         if next != self.radio.bcast {
             self.radio.bcast = next;
+            self.radio.bcast_since = self.now;
             self.out.push(RadioCmd::BcastSlot(next));
+        }
+        // BCR-5 (decision 352: the slot's, the FM screen's before): the sleep timer mutes the broadcast slot once
+        // its time is up (quick mute, HOME-15: never saved, so it plays again after a restart or a \* on it)
+        let min = crate::settings::SLEEP_TIMES[self.set.fm_sleep as usize % crate::settings::SLEEP_TIMES.len()] as u32;
+        if let Some(s) = next.filter(|&s| min != 0 && self.mute & 1 << s == 0 && self.now.wrapping_sub(self.radio.bcast_since) >= min * 60_000) {
+            self.mute |= 1 << s;
+            self.out.push(RadioCmd::Mute(self.mute));
+            self.radio.bcast_since = self.now;
+            self.show_toast(b"Sleep timer", b"broadcast muted", false);
         }
     }
 
@@ -65,16 +75,11 @@ impl App {
         }
     }
 
-    /// The FM tuning range (10 kHz): the broadcast band while a slot has the broadcast (tuning never takes it out
-    /// from the FM screen), else the FM screen's 64-108 MHz (BCR-17).
+    /// The FM tuning range (10 kHz): the region's broadcast band (BCR-21; decision 352 retired the FM screen's
+    /// 64-108 MHz).
     pub(crate) fn fm_range(&self) -> (u16, u16) {
-        match self.radio.bcast {
-            Some(_) => {
-                let (lo, hi) = band(self.set.region());
-                ((lo / 1000) as u16, (hi / 1000) as u16)
-            }
-            None => (crate::screens::fm::LO, crate::screens::fm::HI),
-        }
+        let (lo, hi) = band(self.set.region());
+        ((lo / 1000) as u16, (hi / 1000) as u16)
     }
 
     /// A new FM station (tuned, sought or a preset, BCR-25): into the broadcast slot, on its VFO (a channel slot

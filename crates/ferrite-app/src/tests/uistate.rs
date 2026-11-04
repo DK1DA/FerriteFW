@@ -112,7 +112,7 @@ fn state_and_bar_words() {
     let v = ui_dev(&t, &Device { gps: GpsState::Fix, ..Default::default() });
     assert!(find(&v, "bar").contains(" gps=fix"));
     assert!(!v.iter().any(|l| l.starts_with("audio")), "no audio line before any audio");
-    for (dest, word) in [(Dest::BandScope, "scope"), (Dest::FmBroadcast, "fm"), (Dest::HfMode, "hf")] {
+    for (dest, word) in [(Dest::BandScope, "scope"), (Dest::HfMode, "hf")] {
         t.hold(Key::Exit);
         t.open(dest);
         t.wait(300);
@@ -320,24 +320,19 @@ fn coming_emergency_and_editors() {
     assert!(ui(&t)[0].starts_with("screen ChEdit "));
 }
 
-/// BCR, HF (LINK-19): FM's and HF mode's option menus read back as rows with Full menu; HF reads back the SSB
-/// patch's load while it loads.
+/// BCR-28, BCR-31, HF (LINK-19): a broadcast slot's quick settings read back as FM's rows, Saved stations and
+/// More; HF mode's options as rows with Full menu; HF reads back the SSB patch's load while it loads.
 #[test]
 fn fm_and_hf_menus() {
     use ferrite_core::msg::ModeLive;
     let mut t = T::new();
-    t.open(Dest::FmBroadcast);
+    crate::screens::entry::tune_vfo(&mut t.app, 0, ferrite_core::freq::mhz(100) + 50_000);
     t.wait(300);
-    if let crate::Screen::Fm(mut f) = t.app.screen() {
-        f.menu = true;
-        f.row = 0;
-        t.app.screen = crate::Screen::Fm(f);
-    } else {
-        panic!("not FM");
-    }
+    t.tap(Key::Menu);
     let v = ui(&t);
-    assert!(v.iter().any(|l| l.starts_with("row 1 ") && l.ends_with(" sel")), "{v:#?}");
-    assert!(v.iter().any(|l| l == r#"row 0 "Full menu" ">""#), "{v:#?}");
+    assert!(v.iter().any(|l| l.starts_with("row 1 \"Step\"") && l.ends_with(" sel")), "{v:#?}");
+    assert!(v.iter().any(|l| l == r#"row 5 "Saved stations" ">""#), "{v:#?}");
+    assert!(v.iter().any(|l| l == r#"row 0 "More" ">""#), "{v:#?}");
     t.hold(Key::Exit);
     t.open(Dest::HfMode);
     t.wait(300);
@@ -472,7 +467,7 @@ fn broadcast_card_and_report() {
     t.open(Dest::Quick);
     let v = ui(&t);
     assert!(v[0].starts_with("screen Quick "), "{v:#?}");
-    assert!(!v.iter().any(|l| l.starts_with("row ")), "FM's rows aren't described: {v:#?}");
+    assert!(v.iter().any(|l| l.starts_with("row 1 \"Step\"")), "FM's rows (BCR-28): {v:#?}");
 }
 
 /// MENU-17 (LINK-19): a greyed setting's editor reads back why (Step on a channel: VFO only).

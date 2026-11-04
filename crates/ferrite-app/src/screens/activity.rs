@@ -131,6 +131,8 @@ pub struct RadioUi {
     /// takes the broadcast).
     pub bcast: Option<u8>,
     pub bcast_in: u8,
+    /// BCR-5: when the broadcast slot took the broadcast, for the sleep timer.
+    pub bcast_since: u32,
     /// The broadcast plays on the SI4732: in [`Mode::Fm`] (the FM screen, or a broadcast slot), or beside home's
     /// strip while another slot than the active one plays broadcast (MODE-5, decision 115). Started and stopped
     /// by [`App::reconcile_mode`] apart from the exclusive mode, so the strip coming and going never restarts it.
@@ -173,6 +175,7 @@ impl RadioUi {
             refresh: 0,
             want_seen: 0,
             bcast: None,
+            bcast_since: 0,
             bcast_in: 0,
             fm_on: false,
             fm_sent: 0,
@@ -268,8 +271,7 @@ impl App {
                 Screen::Scope(_) => Mode::Scope,
                 Screen::ToneSearch(_) => Mode::Tone,
                 Screen::Counter(_) => Mode::Counter,
-                Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_) if self.low_power() => continue,
-                Screen::Fm(_) => Mode::Fm,
+                Screen::Hf(_) | Screen::Crossband(_) if self.low_power() => continue,
                 Screen::Hf(_) => Mode::Hf,
                 Screen::Sat(_) => Mode::Sat,
                 Screen::Crossband(_) if self.radio.xb_on => Mode::Xb,

@@ -34,7 +34,7 @@ fn broadcast_rows() {
     t.tap(Key::Menu);
     t.tap(Key::Up);
     t.tap(Key::Up); // wraps to More
-    assert_eq!(row(&t), 4);
+    assert_eq!(row(&t), 5);
     t.shows("Every setting, by group.");
     t.knob(1); // nothing on More
     t.tap(Key::Digit(2));

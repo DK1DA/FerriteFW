@@ -198,7 +198,7 @@ fn tone_hint_matches_its_goldens() {
 
 /// BCR-26.1, BCR-26.2, BCR-26.3, BCR-26.6, BCR-27, BCR-28: slot A tuned to 100.5 MHz plays broadcast FM: its card with
 /// the full radio text, stereo and SNR; 99.1 (no radio text: the station name); slot B tuned in too takes it ("FM on B"
-/// on A); the FM screen, quick settings and the other two layouts with the broadcast slot.
+/// on A); quick settings and the other two layouts with the broadcast slot.
 #[test]
 fn broadcast_slot_matches_its_goldens() {
     use ferrite_core::keys::Key;
@@ -210,9 +210,6 @@ fn broadcast_slot_matches_its_goldens() {
     failures.extend(check("bcast-home", &r.sim.screen_rgb()));
     r.press(Key::Menu).wait(1000);
     failures.extend(check("bcast-quick", &r.sim.screen_rgb()));
-    r.home();
-    r.menu("0 3 1").wait(3000);
-    failures.extend(check("bcast-fm-screen", &r.sim.screen_rgb()));
     r.home();
     r.event(Event::FmStation); // 99.1: the station name only
     r.wait(3000);

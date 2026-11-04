@@ -173,17 +173,3 @@ fn vox_never_on_an_emergency_frequency() {
     assert!(!matches!(t.app.screen(), crate::Screen::Emergency(_)), "no prompt for VOX to answer");
 }
 
-/// BCR-5: the sleep timer ends the broadcast once its time is up.
-#[test]
-fn broadcast_sleep_timer() {
-    let mut t = T::new();
-    crate::screens::groups::change(&mut t.app, &[3, 1, 4], 1); // 15 min
-    t.open(Dest::FmBroadcast);
-    assert_eq!(t.app.screen().name(), Dest::FmBroadcast.name());
-    t.cmds();
-    t.wait(14 * 60_000);
-    assert_eq!(t.app.screen().name(), Dest::FmBroadcast.name(), "still playing at 14 min");
-    t.wait(61_000);
-    assert_eq!(t.app.screen(), Screen::Home, "off at 15 min");
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(ferrite_core::msg::BroadcastCmd::Off)));
-}

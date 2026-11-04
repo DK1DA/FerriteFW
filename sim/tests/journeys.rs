@@ -300,11 +300,11 @@ fn hf_mode() {
     assert_ne!(r.sim.app().settings().hf.freq, 958_000, "seek moved");
 }
 
-/// FM broadcast opens from 0 3 1 on the SI4732 (BCR-1, BCR-2.1).
+/// MENU 0 3 1 is FM broadcast's settings (BCR-1, decision 352: a slot in the band is the receiver).
 #[test]
 fn fm_broadcast() {
     let mut r = Radio::new();
-    r.run("menu 0 3 1; expect screen \"FM broadcast\"; expect text \"MHz\"; expect text \"Signal\"");
+    r.run("menu 0 3 1; expect text \"Step\"; expect text \"Sleep timer\"");
 }
 
 /// Hold # locks the keypad and offers * and 0; locked, OK does nothing; hold # unlocks; * in the popup's time locks

@@ -1,9 +1,9 @@
 """The mode screens by their readback (chapters 19, 20, 20a, 21: XB-*, BCR-*, HF-*, SCOPE-*): HF mode's `hf` line,
-the FM screen's `fm` line, a broadcast card's report, the band scope's `scope` line, crossband's start page, and
+a broadcast card's report (decision 352: no FM screen), the band scope's `scope` line, crossband's start page, and
 the `mode=`/`fm=` the state line gives (MODE-1: which exclusive mode runs).
 
 HF mode keeps its own VFO (the settings record, not in `dump`): every HF test puts the frequency and mode back
-(`HfVfo`). The FM screen's last station likewise (`fm_back`).
+(`HfVfo`).
 """
 import time
 
@@ -263,81 +263,56 @@ def no_patch_no_ssb_modes(t):
 
 # ---- FM broadcast ----
 
-def fm_line(u):
-    return u["fm"] or {}
+def bcast_line(u, slot="A"):
+    """The broadcast card's report (`bcast A ...`, BCR-26): rds, stereo, dbuv, snr."""
+    return u.bcast.get(slot, {})
 
 
-def fm_find_station(t, want=lambda f: f.get("rds"), seeks=12):
-    """On the FM screen: seek up until a station has what `want` asks (RDS text by default); its `fm` line, or
-    None."""
+def bcast_find_station(t, want=lambda b: b.get("rds"), seeks=12):
+    """Slot A in the broadcast band and active: ▶ seeks (BCR-25) until its card has what `want` asks (RDS text by
+    default); the readback then, or None. Decision 352: the slot is the receiver, there is no FM screen."""
     u = t.ui()
     for _ in range(seeks):
-        if want(fm_line(u)):
+        if want(bcast_line(u)):
             return u
-        f0 = fm_line(u).get("freq")
+        f0 = u.cards["A"]["freq"]
         t.keys("RIGHT")
-        u = t.wait(lambda u: fm_line(u).get("freq") != f0, timeout=8, what="the seek lands")
+        u = t.wait(lambda u: u.cards["A"]["freq"] != f0, timeout=8, what="the seek lands")
         time.sleep(2.0)  # RDS needs a few seconds (BCR-30: radio text shown once complete)
         u = t.ui()
-    return u if want(fm_line(u)) else None
+    return u if want(bcast_line(u)) else None
 
 
-def fm_back(t, freq):
-    """The FM screen's station back to `freq` (MHz text) by the knob at the FM step."""
-    u = t.ui()
-    if u.id != "Fm":
-        u = t.keys("MENU 0 3 1")
-    step = t.get("0 3 1 1")
-    khz = float(step.split()[0])
-    now = float(fm_line(u).get("freq", freq))
-    n = round((float(freq) - now) * 1000 / khz)
-    while n:
-        k = max(-20, min(20, n))
-        t.knob(k)
-        n -= k
-    got = fm_line(t.ui()).get("freq")
-    if got != freq:
-        t.note(f"FM screen left on {got}, was {freq}")
-
-
-@test("BCR-2.2", "BCR-2.3", needs=("fm-station",), pages=("Fm",))
-def fm_screen_rds_and_stereo(t):
-    """The FM screen on a station with RDS shows its text (radio text, else the station name), and STEREO on a
+@test("BCR-2.2", "BCR-2.3", "BCR-26.2", "BCR-26.3", needs=("fm-station",), pages=("Home",))
+def broadcast_rds_and_stereo(t):
+    """A broadcast slot on a station with RDS shows its text (radio text, else the station name), and STEREO on a
     stereo station (the simulator's 98.1 MHz sends both)."""
-    u = t.keys("MENU 0 3 1")
-    f0 = fm_line(u)["freq"]
-    try:
-        u = fm_find_station(t, lambda f: f.get("rds") and f.get("stereo") == 1)
-        t.check(u is not None, "a station with RDS and the stereo pilot within 12 seeks", fm_line(t.ui()))
-        f = fm_line(u)
-        t.check(f["rds"].strip(), "its RDS text shows", f)
-        t.eq(f["stereo"], 1, "STEREO")
-        t.check(f["dbuv"] > 0, "a signal in dBuV", f)
-        t.note(f"{f['freq']} MHz: {f['rds']!r}, {f['dbuv']} dBuV, SNR {f['snr']} dB")
-    finally:
-        fm_back(t, f0)
+    t.cmd("slot A vfo 98.1" if t.sim else "slot A vfo 88.1")
+    t.home()
+    u = bcast_find_station(t, lambda b: b.get("rds") and b.get("stereo") == 1)
+    t.check(u is not None, "a station with RDS and the stereo pilot within 12 seeks", bcast_line(t.ui()))
+    b = bcast_line(u)
+    t.check(b["rds"].strip(), "its RDS text shows", b)
+    t.eq(b["stereo"], 1, "STEREO")
+    t.check(b["dbuv"] > 0, "a signal in dBuV", b)
+    t.note(f"{u.cards['A']['freq']} MHz: {b['rds']!r}, {b['dbuv']} dBuV, SNR {b['snr']} dB")
 
 
 def bcast_station(t):
-    """A local station's frequency (MHz text): the simulator's 98.1, else one the FM screen's seek finds with RDS."""
+    """A local station's frequency (MHz text): the simulator's 98.1, else one slot A's seek finds with RDS."""
     if t.sim:
         return "98.1"
-    u = t.keys("MENU 0 3 1")
-    f0 = fm_line(u)["freq"]
-    try:
-        u = fm_find_station(t)
-        t.need(u is not None, "no station with RDS found by seeking")
-        return fm_line(u)["freq"]
-    finally:
-        fm_back(t, f0)
-        t.home()
+    t.cmd("slot A vfo 88.1")
+    t.home()
+    u = bcast_find_station(t)
+    t.need(u is not None, "no station with RDS found by seeking")
+    return u.cards["A"]["freq"].split()[0]
 
 
 @test("BCR-26.1", "BCR-26.2", "BCR-26.3", needs=("fm-station",), pages=("Fm", "Home"))
 def broadcast_card_report(t):
     """A slot tuned to a local station: its card has the frequency, the signal (dBuV) and SNR, STEREO when the
-    pilot is heard, and the RDS text (the radio text whole, else the station name, else none: "No RDS"), the same
-    the FM screen reads."""
+    pilot is heard, and the RDS text (the radio text whole, else the station name, else none: "No RDS")."""
     f = bcast_station(t)
     t.cmd(f"slot A vfo {f}")
     t.home()
@@ -349,10 +324,6 @@ def broadcast_card_report(t):
     t.check(a["freq"].startswith(f), "the card's frequency", a["freq"])
     t.check(b["dbuv"] > 0 and b["snr"] >= 0, "the signal and SNR", b)
     t.check(b["rds"], "the RDS text (radio text, else the station name)", b)
-    u = t.keys("MENU 0 3 1")
-    fm = fm_line(u)
-    t.eq(b["rds"], fm["rds"], "the card's text is the FM screen's for the same station")
-    t.eq(b["stereo"], fm["stereo"], "STEREO as the FM screen has it")
 
 
 @test("BCR-26.6", "BCR-26.7", needs=("fm-station",), pages=("Home",))

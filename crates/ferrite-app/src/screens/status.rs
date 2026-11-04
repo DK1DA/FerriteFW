@@ -224,7 +224,7 @@ const GO: [Go; 20] = [
     Go::Later,
     Go::Quick(8),
     Go::Open(Dest::GpsPosition),
-    Go::Open(Dest::FmBroadcast),
+    Go::Open(Dest::Sub(3, 1)), // the broadcast's settings (decision 352: no FM screen)
     Go::Open(Dest::Group(6)),
     Go::Open(Dest::Sub(9, 2)),
     Go::Later, // Speaker mic: nothing to set

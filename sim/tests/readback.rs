@@ -74,26 +74,6 @@ fn broadcast_card_readback() {
     drawn(&mut r, &format!("SNR {} dB", field(&card, "snr")));
 }
 
-/// BCR-2.2, BCR-27, BCR-4: the FM screen's readback: frequency, title, signal, SNR, RDS and the monitor line, as
-/// drawn.
-#[test]
-fn fm_screen_readback() {
-    let mut r = Radio::new();
-    r.type_("98.1").press(common::key("OK")).wait(2000);
-    r.menu("0 3 1").wait(2000);
-    let l = line(&r, "fm");
-    assert_eq!(field(&l, "freq"), "98.1", "{l}");
-    drawn(&mut r, "98.1");
-    drawn(&mut r, &field(&l, "title"));
-    drawn(&mut r, &format!("{} dBuV", field(&l, "dbuv")));
-    drawn(&mut r, &field(&l, "monitor"));
-    let rds = field(&l, "rds");
-    assert!(!rds.is_empty(), "{l}");
-    drawn(&mut r, &rds);
-    r.hold(common::key("OK")).wait(300);
-    assert!(r.sim.readback().contains("row 1 \"Step\""), "{}", r.sim.readback());
-}
-
 /// SCOPE-5: the band scope's readback counts the blank bars: across 64 MHz the bars past it stay blank.
 #[test]
 fn scope_readback_counts_blank_bars() {
