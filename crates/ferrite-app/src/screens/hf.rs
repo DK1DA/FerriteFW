@@ -953,10 +953,13 @@ impl View for Hf {
         // SIDE2's mode row for a moment (HF-12), over the band strip and the meter; else those.
         // HF-3, HF-19: the patch's progress in a box of the same place while it streams.
         let picking = app.radio.hf_pick_at != 0 && app.now.wrapping_sub(app.radio.hf_pick_at) < PICK_MS;
-        let covered = picking || loading;
+        // DISP-25: a centre popup (the lock's) sits over the strip and the meter: they wait, or the meter paints
+        // into it (black, Nov 3, 2026); its going redraws them
+        let popup = app.toast.is_some_and(|t| t.center);
+        let covered = picking || loading || popup;
         let marker = band_i.map_or(0, |b| strip_x(h.freq, BANDS[b].1, BANDS[b].2));
         let shown = if loading { 2 } else { picking as u32 };
-        if app.dirty(R_TOP, Mix::new().h(&shown).h(&h.mode).h(&band_i.map_or(99, |b| b as u32)).h(&marker).get()) {
+        if !popup && app.dirty(R_TOP, Mix::new().h(&shown).h(&h.mode).h(&band_i.map_or(99, |b| b as u32)).h(&marker).get()) {
             if loading {
                 patch_box(lcd);
             } else if picking {
@@ -969,7 +972,7 @@ impl View for Hf {
             }
         }
         let lit = w::meter_level(rssi);
-        if loading && app.dirty(R_SUB, Mix::new().h(&pct).get()) {
+        if loading && !popup && app.dirty(R_SUB, Mix::new().h(&pct).get()) {
             patch_progress(lcd, pct); // only the bar and the percent change as it goes
         }
         if !covered && app.dirty(R_SUB, Mix::new().h(&lit).get()) {

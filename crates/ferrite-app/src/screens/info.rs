@@ -473,8 +473,9 @@ impl View for Info {
         let mut b = Buf::<40>::new();
         let busy = app.transferring();
         if let Some((head, text, c)) = message(self.page, cx.dev, busy, &mut b) {
+            // UPD-16.2: which part, and whether it is being written or read back (each part's bar runs twice)
             if let (Page::FinishUpdate, true, (i, n @ 1..)) = (self.page, busy, app.update_part) {
-                let _ = uwrite!(b, "Part {} of {}", i, n); // UPD-16.2
+                let _ = uwrite!(b, "Part {} of {}: {}", i, n, if app.update_checking { "checking" } else { "writing" });
             }
             app.message(lcd, head.as_bytes(), b.as_bytes(), text.as_bytes(), c);
             if self.page == Page::PowerOff || self.page == Page::FinishUpdate && busy {

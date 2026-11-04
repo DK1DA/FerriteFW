@@ -8,7 +8,7 @@ const HF_SEEK_KHZ: (u16, u16) = (150, 18_000);
 /// 13-33 dBuV of indoor noise on the whip, which a receiver measured at the antenna shows as about S2-S5.
 const SI_FRONT_DB: i16 = 20;
 /// HF-19: the SI4732's I2C half period for the patch download, us (5 otherwise, about 50 kHz).
-const PATCH_HALF_US: u32 = 2;
+const PATCH_HALF_US: u32 = 1;
 /// HF mode's modes as the UI sends them (`screens::hf`): USB, LSB, CW.
 const MODE_USB: u8 = 3;
 const MODE_LSB: u8 = 4;
@@ -139,7 +139,7 @@ impl Radio {
         let mut buf = [0u8; 64];
         let live = LIVE.sender();
         let t0 = now_ms();
-        // The download only on a faster clock (2 us half periods, about 2.5 times the 5 us ones), within the chip's
+        // The download only on a faster clock (1 us half periods against the usual 5), within the chip's
         // 400 kHz and gentle on SDA's internal pull-up; back to the usual after, whatever happened.
         let slow = core::mem::replace(&mut self.si.bus_mut().0.half_us, PATCH_HALF_US);
         let r = async {
@@ -152,14 +152,16 @@ impl Radio {
                 for r in buf[..n].as_chunks::<8>().0 {
                     self.si.patch_record(r, &mut BusyDelay)?;
                 }
-                // This task runs above the UI and the link: a turn for them every 8 records, or the screen freezes
-                // for the whole download (black, Nov 3, 2026)
-                if off % 1024 == 0 {
-                    let loading = (off as u64 * 100 / p.len as u64) as u8;
-                    self.live.mode = ModeLive::Hf { freq, rssi: -127, snr: 0, si4732: true, loading };
-                    live.send(self.live);
+                // This task runs above the UI and the link: a turn for them every 32 records (a few ms), or the
+                // screen freezes for the whole download (black, Nov 3, 2026)
+                if off % 256 == 0 {
+                    if off % 1024 == 0 {
+                        let loading = (off as u64 * 100 / p.len as u64) as u8;
+                        self.live.mode = ModeLive::Hf { freq, rssi: -127, snr: 0, si4732: true, loading };
+                        live.send(self.live);
+                    }
+                    Timer::after_millis(1).await;
                 }
-                Timer::after_millis(1).await;
             }
             Ok(())
         }

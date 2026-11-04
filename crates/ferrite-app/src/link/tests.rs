@@ -1796,6 +1796,11 @@ fn raw_data_part_mark() {
         assert_eq!(pc.ask(msg::DATA_WRITE, bad).0, Status::BadArg as u8, "{bad:?}");
     }
     assert_eq!(pc.app.update_part, (2, 4));
+    use ferrite_core::link::data::{CRC, ERASE};
+    pc.ask(msg::DATA_READ, &[CRC, 0, 0, 9, 0, 16, 0, 0, 0]);
+    assert!(pc.app.update_checking, "a read-back: checking");
+    pc.ask(msg::DATA_WRITE, &[ERASE, 0, 0, 9, 0]);
+    assert!(!pc.app.update_checking, "a write: writing");
     let mut bt = Pc::new(false);
     assert_eq!(bt.ask(msg::DATA_WRITE, &[PART, 1, 1]).0, Status::Refused as u8, "the cable only, as every raw write");
 }
