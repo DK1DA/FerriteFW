@@ -28,6 +28,8 @@ use ferrite_ui::gfx::BG;
 /// KEY-3, KEY-4), rarely otherwise (toasts, undo, timeouts, the clock), so the MCU sleeps.
 const TICK_HELD_MS: u64 = 20;
 const TICK_IDLE_MS: u64 = 250;
+/// PWR-26.1: how long after the panel wakes the build's speed holds for its whole redraw.
+const WAKE_FAST_MS: u32 = 1_000;
 
 /// A port's output for the terminal and the link: its transmit ring, emptied by the Link task (the cable's
 /// `TERM_OUT`, Bluetooth's `BT_OUT`). `Out(ring, false)`: held (the cable while its log has it, TERM-28): no
@@ -882,6 +884,11 @@ pub async fn task() {
         }
         if audio || crate::hal::clock::AUDIO_WAITING.load(Relaxed) != 0 {
             why |= ferrite_core::clocktree::why::AUDIO;
+        }
+        // PWR-26.1: the panel just woke (a key, or a signal with 0 7 4 4's wake on receive): its whole redraw at full
+        // speed (at 24 MHz it took 880 ms on black, Nov 4, 2026)
+        if !panel_asleep && now_ms().wrapping_sub(panel_at) < WAKE_FAST_MS {
+            why |= ferrite_core::clocktree::why::INPUT;
         }
         if why != 0 {
             clock_high_at = now;
