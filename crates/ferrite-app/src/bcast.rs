@@ -24,11 +24,14 @@ pub fn band(r: Option<Region>) -> (Freq10, Freq10) {
 /// A seek that hasn't landed by now is given up (the receiver found nothing new).
 const SEEK_MS: u32 = 10_000;
 
+/// BCR-33 (decision 353): a WFM slot plays broadcast anywhere the SI4732's FM covers, 64-108 MHz (10 Hz).
+pub const WFM_BAND: (ferrite_core::freq::Freq10, ferrite_core::freq::Freq10) = (6_400_000, 10_800_000);
+
 impl App {
     /// Slot `s` is tuned into the broadcast FM band (BCR-21); the APRS slot never is (it is held to its
     /// frequency, APRS-19).
     pub fn in_bcast_band(&self, s: u8) -> bool {
-        let (lo, hi) = band(self.set.region());
+        let (lo, hi) = if self.tuned_cfg(s).mode == crate::slot::WFM { WFM_BAND } else { band(self.set.region()) };
         !self.aprs_slot(s) && (lo..=hi).contains(&self.tuned_freq(s))
     }
 
@@ -101,7 +104,8 @@ impl App {
     /// The FM tuning range (10 kHz): the region's broadcast band (BCR-21; decision 352 retired the FM screen's
     /// 64-108 MHz).
     pub(crate) fn fm_range(&self) -> (u16, u16) {
-        let (lo, hi) = band(self.set.region());
+        let wfm = self.radio.bcast.is_some_and(|s| self.tuned_cfg(s).mode == crate::slot::WFM);
+        let (lo, hi) = if wfm { WFM_BAND } else { band(self.set.region()) };
         ((lo / 1000) as u16, (hi / 1000) as u16)
     }
 

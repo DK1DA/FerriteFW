@@ -376,3 +376,20 @@ fn radio_monitor_off_keeps_the_slots_quiet() {
     c.extend(t.cmds());
     assert!(c.contains(&RadioCmd::Mute(0)), "the broadcast over: heard again: {c:?}");
 }
+
+/// BCR-33 (decision 353, as nicFW's tuner channels): a slot in WFM is a broadcast slot anywhere 64-108 MHz, and
+/// tunes there (the low band too); in FM the same frequency is a two-way slot; WFM never transmits.
+#[test]
+fn wfm_is_a_broadcast_slot_on_64_to_108() {
+    let mut t = ready();
+    tune(&mut t, 0, mhz(70) + 50_000);
+    t.wait(100);
+    assert_eq!(t.app.bcast_slot(), None, "FM on 70.05: a two-way slot");
+    while t.app.slot(0).cfg().mode != crate::slot::WFM {
+        t.app.change(crate::slot::Item::Mode, 1);
+    }
+    t.wait(100);
+    assert_eq!(t.app.bcast_slot(), Some(0), "WFM on 70.05: broadcast");
+    assert_eq!(t.app.fm_range(), (6_400, 10_800), "its range is the SI4732's");
+    assert_eq!(crate::screens::transmit::refusal(&t.app, 0), Some(ferrite_core::txplan::Refusal::ReceiveOnlyHere));
+}

@@ -1141,6 +1141,7 @@ impl App {
         if self.wake(now) && !matches!(key, Key::Ptt(_)) && !self.remote_in {
             self.swallow(true);
             self.keys.down(key, now);
+            self.last_input = now; // PWR-26.1: the wake's redraw at full speed
             return;
         }
         // PWR-24.4: SIDE1 + SIDE2 held in Low Power Mode leaves it; neither does its own thing meanwhile.

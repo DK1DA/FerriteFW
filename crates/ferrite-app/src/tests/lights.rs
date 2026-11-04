@@ -342,3 +342,18 @@ fn remote_key_wakes_and_acts() {
     assert!(!t.app.dark());
     assert_ne!(t.freq(), f, "the remote knob acts too");
 }
+
+/// PWR-26.1: the key that wakes the screen is a reason for the build's speed at once, so the wake's full redraw
+/// runs at 120 MHz (judged from the screen's state, not the backlight's duty, which is still 0 as it ramps: on
+/// black the wake redraw took 885 ms at 24 MHz, Nov 3, 2026).
+#[test]
+fn waking_key_raises_the_clock() {
+    use ferrite_core::clocktree::why;
+    let mut t = T::new();
+    t.app.set.backlight = 3;
+    t.wait(16_000);
+    assert!(t.app.dark());
+    assert_eq!(t.app.clock_reasons(&t.live, t.t) & why::INPUT, 0, "dark and idle: no input reason");
+    t.tap(Key::Up);
+    assert_eq!(t.app.clock_reasons(&t.live, t.t) & why::INPUT, why::INPUT, "the waking key");
+}

@@ -7,7 +7,7 @@
 //! TX-37); a refusal names its field, so each caller heads it its own way ("Power: ...", `power: ...`).
 
 use crate::chan::{rx_ok, Channel, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE, ZoneId};
-use crate::slot::{band_near, band_step, Item, BANDS, SLOT_MODES, STEPS};
+use crate::slot::{band_near, band_step, Item, BANDS, STEPS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
@@ -125,7 +125,7 @@ pub fn check_edit(c: &Channel) -> Result<(), Refusal> {
         }
         return Ok(());
     }
-    if g.mode as usize >= SLOT_MODES {
+    if !crate::slot::slot_mode_ok(g.mode) {
         return Err(Refusal::NotHf);
     }
     if !ferrite_core::txplan::relay_ok(g.rx_of(c.rx), g.tx_of(c.rx)) {

@@ -305,8 +305,8 @@ def band_follows_the_frequency(t):
     u = t.keys("MENU 3")
     t.eq(u.sel and u.sel["name"], "Mode", "MENU 3")
     seen = []
-    for _ in range(4):
+    for _ in range(5):
         seen.append(u.sel["value"])
         u = t.knob(+1)
-    t.eq(sorted(set(seen)), ["AM", "FM", "NFM"], f"the knob goes round FM, NFM and AM ({seen})")
+    t.eq(sorted(set(seen)), ["AM", "FM", "NFM", "WFM"], f"the knob goes round FM, NFM, AM and WFM (BCR-33) ({seen})")
     tune(t)

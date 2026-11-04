@@ -11,7 +11,7 @@ use crate::data::{Op, Pos, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SUBS};
 use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
 use crate::chfield::{self, ChField, Refusal};
-use crate::slot::{Item, SLOT_MODES, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SQ_GLOBAL, STEPS, STEP_12K5};
+use crate::slot::{Item, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SQ_GLOBAL, STEPS, STEP_12K5};
 use crate::text::Txt;
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
@@ -1087,7 +1087,7 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, No> {
         if same(k, b"step") {
             p.step = step(v, t)?;
         } else if same(k, b"mode") {
-            p.mode = pick(v, &MODES[..SLOT_MODES], "mode", t)?;
+            p.mode = pick(v, &MODES[..3], "mode", t)?; // a range preset: FM, NFM or AM
             p.narrow = p.mode == 1; // VFO-20
         } else if same(k, b"bw") {
             // older dumps: FM and NFM follow it
@@ -2708,7 +2708,7 @@ static HELP_BENCH: [Txt; 3] = [
 
 // ---- Slots (TERM-35) ----
 
-/// `slot`, `slot X`, `slot X [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]`: the
+/// `slot`, `slot X`, `slot X [vfo] [FREQ] [fm|nfm|am|wfm] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]`: the
 /// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing. T is
 /// one word (off, 100.0, D023N) or a mode and a value (ctcss 100.0, dcs-n 023, dcs-i 023; TONE-2.1).
 fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
@@ -2721,8 +2721,8 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No
     let mut c = crate::slotctl::SlotChange::default();
     while let Some(tok) = t.next()? {
         let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
-        if let Some(m) = ["fm", "nfm", "am"].iter().position(|m| same(w, m.as_bytes())) {
-            c.mode = Some(m as u8);
+        if let Some(m) = ["fm", "nfm", "am", "wfm"].iter().position(|m| same(w, m.as_bytes())) {
+            c.mode = Some(crate::slot::SLOT_MODE_IDS[m]); // BCR-33: wfm is mode 6
         } else if let Some(p) = POWERS.iter().position(|p| same(w, p.as_bytes())) {
             c.power = Some(p as u8);
         } else if same(w, b"vfo") {

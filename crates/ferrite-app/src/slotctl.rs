@@ -13,7 +13,7 @@
 
 use crate::chan::ChannelStore;
 use crate::screens::{entry, tones};
-use crate::slot::{Item, SLOT_MODES};
+use crate::slot::Item;
 use crate::App;
 use ferrite_core::freq::Freq10;
 use ferrite_core::msg::{RadioCmd, SLOTS};
@@ -93,8 +93,8 @@ impl App {
         if s as usize >= SLOTS {
             return Err("no such slot: A, B or C");
         }
-        if ch.mode.is_some_and(|m| m as usize >= SLOT_MODES) {
-            return Err("mode: fm, nfm or am");
+        if ch.mode.is_some_and(|m| !crate::slot::slot_mode_ok(m)) {
+            return Err("mode: fm, nfm, am or wfm");
         }
         if ch.power.is_some_and(|p| p > 2) {
             return Err("power: low, mid or high");

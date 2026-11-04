@@ -217,7 +217,9 @@ impl App {
         use ferrite_core::clocktree::{input_holds, why};
         use ferrite_core::msg::ModeLive;
         let mut r = 0;
-        if input_holds(now.wrapping_sub(self.last_input), self.backlight_duty() == 0) {
+        // the screen's own state, not the backlight's duty: on a waking key the duty is still 0 (it ramps), and
+        // the wake's full redraw ran at 24 MHz (885 ms on black, Nov 3, 2026)
+        if input_holds(now.wrapping_sub(self.last_input), self.dark()) {
             r |= why::INPUT;
         }
         // SAME only while a slot is on a weather channel (162.400-162.550 MHz, ferrite_radio::chip::WX): the

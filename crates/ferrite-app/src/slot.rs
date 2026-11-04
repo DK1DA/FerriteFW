@@ -93,9 +93,18 @@ impl Default for SlotCfg {
     }
 }
 
-pub const MODES: [&str; 6] = ["FM", "NFM", "AM", "USB", "LSB", "CW"];
-/// Channels and home VFOs use the first three: FM, NFM, AM (CHAN-23, VFO-4). USB, LSB and CW are HF mode's.
-pub const SLOT_MODES: usize = 3;
+pub const MODES: [&str; 7] = ["FM", "NFM", "AM", "USB", "LSB", "CW", "WFM"];
+/// Channels and home VFOs use FM, NFM, AM and WFM (CHAN-23, VFO-4, BCR-33); USB, LSB and CW are HF mode's.
+pub const SLOT_MODES: usize = 4;
+/// BCR-33 (decision 353, as nicFW's tuner channels): wide FM on the SI4732, a broadcast slot anywhere 64-108 MHz.
+pub const WFM: u8 = 6;
+/// The slot modes in the order the knob steps through them (their stored numbers: WFM after HF's three).
+pub const SLOT_MODE_IDS: [u8; SLOT_MODES] = [0, 1, 2, WFM];
+
+/// A mode a slot or channel may have (FM, NFM, AM, WFM).
+pub fn slot_mode_ok(m: u8) -> bool {
+    SLOT_MODE_IDS.contains(&m)
+}
 
 /// Steps in 10 Hz units and their names (MENU 6).
 pub const STEPS: [(u32, &str); 14] = [
@@ -434,7 +443,7 @@ impl Item {
             Item::Tones => (tone_index(c.tx_tone), TONES),
             Item::Offset => (if c.split { 3 } else { (c.offset.signum() + 3) % 3 }, 4), // simplex, +, -, split
             Item::Step => (c.step as i32, STEPS.len() as i32),
-            Item::Mode => (c.mode as i32, SLOT_MODES as i32),
+            Item::Mode => (SLOT_MODE_IDS.iter().position(|&m| m == c.mode).unwrap_or(0) as i32, SLOT_MODES as i32),
             Item::BusyLock => (c.busy.min(1) as i32, 2),
             Item::Reverse => (c.reverse as i32, 2),
             _ => (0, 1),
@@ -474,9 +483,9 @@ impl Item {
                 return None; // the UI's own: the radio only sees frequencies
             }
             Item::Mode => {
-                c.mode = v as u8;
-                c.narrow = v == 1; // VFO-20: the App sends the bandwidth with it
-                (Param::Mode, v)
+                c.mode = SLOT_MODE_IDS[v as usize % SLOT_MODES];
+                c.narrow = c.mode == 1; // VFO-20: the App sends the bandwidth with it
+                (Param::Mode, c.mode as i32)
             }
             Item::BusyLock => {
                 c.busy = v as u8;

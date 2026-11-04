@@ -14,7 +14,7 @@ use crate::persist::{Persist, Sink as PSink, Source};
 use crate::screens::link::LinkAnswer;
 use crate::screens::pin::RemotePin;
 use crate::settings::Settings;
-use crate::slot::{SlotCfg, MODES, SLOT_MODES, STEPS};
+use crate::slot::{SlotCfg, STEPS};
 use crate::term::Sink;
 use crate::App;
 use ferrite_core::freq::mhz;
@@ -1641,7 +1641,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if !st.zone_room(c.zone, idx) {
                 return invalid(o, crate::text::load(crate::term::cmd::ZONE_FULL).or(b"zone: full")); // CHAN-35
             }
-            if c.cfg.mode as usize >= SLOT_MODES || c.cfg.step as usize >= STEPS.len() {
+            if !crate::slot::slot_mode_ok(c.cfg.mode) || c.cfg.step as usize >= STEPS.len() {
                 return invalid(o, "mode or step out of range".as_bytes());
             }
             if let Err(m) = crate::term::cmd::check(&c) {
@@ -1715,7 +1715,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if !(mhz(18)..=mhz(1300)).contains(&p.start) || p.end <= p.start || p.end > mhz(1300) {
                 return invalid(o, "start and end: 18 to 1300 MHz, end above start".as_bytes());
             }
-            if p.step as usize >= STEPS.len() || p.mode as usize >= SLOT_MODES.min(MODES.len()) {
+            if p.step as usize >= STEPS.len() || !crate::slot::slot_mode_ok(p.mode) {
                 return invalid(o, "step or mode out of range".as_bytes());
             }
             if let Some(old) = st.data().preset(idx as u8) {
