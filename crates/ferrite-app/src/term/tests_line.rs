@@ -41,7 +41,7 @@ impl Rig {
             while !self.term.ready() {
                 self.poll();
             }
-            self.term.feed(&mut self.app, c, self.now, &self.store);
+            self.term.feed(&mut self.app, c, self.now, &self.store, &self.dev, &Default::default());
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);
             }

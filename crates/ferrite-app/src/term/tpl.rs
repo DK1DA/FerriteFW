@@ -1,68 +1,99 @@
-//! The full-screen pages as templates and their interpreter (TERM-11, TERM-16; decision 342). The pages' text,
-//! layout, list rows, hints, help and keys are data: the template pack, compiled by `build.rs` from `pages.vt`.
-//! The firmware keeps only what reads the radio (the sources, conditions, counts) and what a key does (the
-//! actions). The pack is in MCU flash for now, in the byte format the SPI flash would hold it:
+//! The full-screen pages as a program in the SPI flash, and the interpreter that runs it (TERM-11 to TERM-20,
+//! TERM-47; decision 346). Everything a page shows and does is the program's: the text, layout, list rows,
+//! hints, help, each key's action, the channel list's sorting, find, marks and changes to several channels. It is
+//! written in a small stack language (`pages.vt`, described there), compiled by `build.rs` into the template pack,
+//! an SPI part (UPD-21). The firmware keeps this interpreter and a few generic natives: a value (the terminal's
+//! size, the store's counts, a device reading), a channel's field by number through the store, a setting by its
+//! menu number through the menu's own tables (`groups`), the radio's own formatters (MHz, tones, a field's text), and
+//! the writes the App already has (a channel saved, deleted, renumbered; a setting changed).
+//!
+//! The pack (format 2), read from the part for each redraw, key or poll step (never kept):
 //!
 //! ```text
-//! pack    "FVT" 1 (format 1) | u8 pages | u8 globals | u16 global string[globals] | u16 page[pages]
-//! page    u16 hints string | u16 help string | u16 keys | rules | 0
-//! rule    u8 kind (1 row N, 2 bot K, 3 list N COUNT, 4 tail K) | u8 N or K | u8 COUNT | u8 len | ops[len]
-//! ops     10 S len text | 11 AT col | 12 SRC id | 13 BON | 14 WON | 15 BACK | 16 SEL | 17 SELFILL | 18 FILL
-//!         19 PLAIN | 1A DIGIT | 1B PICK len text | 1C PICKN id len text | 1D CTX id
-//!         20 IF cond | 21 IFNOT cond | 22 IFI n | 23 ELSE | 24 FI | 25 RET
-//! keys    (u8 key, u8 action, u16 arg)... | 0; key: printable ASCII (letters lower case) or 80 up, 81 down,
-//!         82 left, 83 right, 84 PgUp, 85 PgDn, 86 Home, 87 End, 88 Enter, 89 Esc, 8A a digit 1-9;
-//!         arg: a page (go) or a string, a line command (cmd)
-//! string  u16 len | bytes
+//! pack     "FVT" 2 | u8 segments | u8 0 | u16 lib length | (u16 offset, u16 length)[segments] | lib | segment...
+//! lib      JMP frame | JMP key | JMP prep | JMP poll | words...      (code at address 0)
+//! segment  JMP draw | JMP key | JMP hints | JMP help | JMP prep | JMP poll | words... | 0 0   (after the lib)
 //! ```
 //!
-//! Numbers are little-endian; offsets are from the pack's start. Every name's number is `pages.vt`'s.
+//! The segments are the pages in `pages.vt`'s order (`term::Page`'s, then any a page chains to: the channel
+//! list's tools), then each page's help (`NPAGES` on: read in place of the page while its help shows). The lib and
+//! one segment are read one after the other into one buffer: a segment's code is placed at the lib's length, so it
+//! calls the lib's words directly and the lib calls the segment's through its table (PCALL k). A run that sets
+//! `chain` is followed by the same entry in that segment. Numbers are little-endian. Code is bytes: an opcode,
+//! then its inline argument; a segment ends with two zeros, so an opcode's two bytes after it are always there.
+//!
+//! ```text
+//! 00 RET  01 LIT8 i8  02 LIT16 i16  03 JMP a16  04 JZ a16 (pops)  05 CALL a16
+//! 06 DUP  07 DROP  08 SWAP  09 OVER  0A + 0B - 0C * 0D / 0E mod 0F = 10 < 11 > 12 and 13 or (bitwise) 14 not
+//! 15 min  16 max  17 GET v  18 SET v  19 AGET (i -- x)  1A ASET (x i --): the sorted page's numbers
+//! 1B STR n bytes (print: columns counted, clipped at the width)  1C RAW n bytes (an escape sequence)
+//! 1D AT (col --: spaces up to it)  1E NUM (n --)  1F NUMW c (n width --, padded with c)  20 PCALL k
+//! 21 NAT id io (io: what the native takes from the stack, low nibble, and gives back, high)
+//! ```
+//!
+//! A run starts with one number on the stack (the row, or the key) and ends at its last RET. Nothing in a bad pack
+//! can panic or hang the radio: the stacks wrap, a read past the code is RET, and a run stops after `FUEL` steps.
 
-use super::{cmd, digits, item, list, list_len, mhz5, piece, zone_name, zone_of, Cx, Page, Term, ALL, FIELDS, K, W};
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP};
-use crate::chfield::ChField as F;
+use super::{blocked, cmd, cmd_trim, digits, list_len, mhz5, radio_channel, radio_setting, version, zone_name, Cx, Term, W, ALL, FIELDS};
+use crate::chan::{Channel, ChannelStore, ZoneId, MAX_CHANNELS, NO_ZONE};
+use crate::chfield::{any_room, check_edit, Ctx, Op};
 use crate::screens::advanced::GROUPS;
 use crate::screens::groups::{self, SUBS};
 use crate::slot::{mode_chip, tone_text, Item};
-use crate::App;
-use ferrite_core::freq::Freq10;
+use core::cmp::Ordering;
+use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::gpspower::GpsPhase;
-use ferrite_core::msg::{GpsState, SLOTS};
-use ferrite_ui::text::{Buf, Zero};
+use ferrite_core::msg::SLOTS;
+use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 
 #[allow(dead_code)]
 mod pack {
     include!(concat!(env!("OUT_DIR"), "/vt_pack.rs"));
 }
-use pack::*;
+pub(super) use pack::*;
 
-/// What a channel source shows with no channel (never drawn: the template checks `ch` first).
-const BLANK: Channel = Channel { num: 0, zone: crate::chan::NO_ZONE, rx: 0, name: [0; 16], cfg: crate::slot::DEFAULT_CFG, flags: 0, tones: 0 };
+/// The most the lib and one page take together: the stack buffer they are read into.
+pub(super) const PACK_MAX: usize = 4096;
+const _: () = assert!(CODE_MOST <= PACK_MAX, "the lib and a page must fit tpl::PACK_MAX");
+/// Steps a run may take (a sorted page's fill or a mark-all is a few tens of thousands).
+const FUEL: u32 = 2_000_000;
+/// Rows a sorted page holds at most: the tallest terminal less the list's other rows.
+pub(super) const VIS: usize = 56;
+/// Bytes of marks: one bit per channel number (TERM-14).
+pub(super) const MARK_BYTES: usize = MAX_CHANNELS as usize / 8;
 
-/// Page `pg`'s binding for key `code` (TERM-11): its action, argument, and a line command's bytes (TERM-12) copied
-/// out, so the pack's buffer is gone before the action runs.
-#[inline(never)]
-fn binding(pg: u8, code: u8) -> Option<(u8, usize, [u8; 64], usize)> {
-    let mut buf = [0u8; PACK_MAX];
-    let pk = load(&mut buf)?;
-    let mut p = u16_at(pk, page_at(pk, pg) + 4);
-    while p + 4 <= pk.len() && pk[p] != 0 {
-        let (key, act, arg) = (pk[p], pk[p + 1], u16_at(pk, p + 2));
-        p += 4;
-        if key == code || key == 0x8A && (b'1'..=b'9').contains(&code) {
-            let s = string(pk, arg);
-            let mut cmd = [0u8; 64];
-            let n = s.len().min(cmd.len());
-            cmd[..n].copy_from_slice(&s[..n]);
-            return Some((act, arg, cmd, n));
-        }
-    }
-    None
+// The program's names for the firmware's values.
+const _: () = assert!(C_ALL == ALL as i16 as i32 && C_NOZONE == NO_ZONE as i16 as i32 && NL <= 8 && C_MAXCH == MAX_CHANNELS as i32 && C_VIS == VIS as i32);
+const _: () = {
+    use crate::chan::*;
+    assert!(C_FLAG_SKIP == FLAG_SKIP as i32 && C_FLAG_APRS == FLAG_APRS as i32 && C_FLAG_RX_ONLY == FLAG_RX_ONLY as i32);
+    assert!(C_FLAG_HIDDEN == FLAG_HIDDEN as i32 && C_FLAG_PRIORITY == FLAG_PRIORITY as i32);
+};
+
+/// What C holds with no channel.
+const BLANK: Channel = Channel { num: 0, zone: NO_ZONE, rx: 0, name: [0; 16], cfg: crate::slot::DEFAULT_CFG, flags: 0, tones: 0 };
+
+/// The pages' state: the program's variables (which page, selections, the change in progress), the sorted
+/// page, the marks, the channel being edited (the terminal's own copy, written through the App on every change),
+/// a value being typed, and the last thing found.
+#[derive(Clone, Copy)]
+pub(crate) struct Pages {
+    pub(super) v: [i16; NV],
+    pub(super) vis: [u16; VIS],
+    pub(super) marks: [u8; MARK_BYTES],
+    pub(super) edit: Option<Channel>,
+    pub(super) line: Buf<24>,
+    pub(super) typing: bool,
+    pub(super) lmax: u8,
+    pub(super) find: Buf<16>,
 }
 
-/// The pack's largest size: the stack buffer it is read into (build.rs checks it fits).
-pub(super) const PACK_MAX: usize = 4096;
+impl Pages {
+    pub(super) const fn new() -> Self {
+        Pages { v: [0; NV], vis: [0; VIS], marks: [0; MARK_BYTES], edit: None, line: Buf::new(), typing: false, lmax: 0, find: Buf::new() }
+    }
+}
 
 /// The pack as built with this crate (host builds: the packer writes it; tests and the simulators without parts
 /// read it).
@@ -76,680 +107,615 @@ pub(super) fn present() -> bool {
     (cfg!(not(target_os = "none")) && !ferrite_core::part::has_reader()) || ferrite_core::part::ok(&ferrite_core::part::TERM)
 }
 
-/// The pack: the template part read into `buf` (3.6 KB at SPI speed, about 2.5 ms; once a redraw or key, never
-/// kept), or a host build's own with no reader set. None when the part isn't there.
-#[inline(never)]
-pub(super) fn load(buf: &mut [u8; PACK_MAX]) -> Option<&[u8]> {
-    use ferrite_core::part::{self, TERM};
+fn read(off: usize, b: &mut [u8]) -> bool {
     #[cfg(not(target_os = "none"))]
-    if !part::has_reader() {
-        return Some(&PACK);
+    if !ferrite_core::part::has_reader() {
+        return match PACK.get(off..off + b.len()) {
+            Some(s) => {
+                b.copy_from_slice(s);
+                true
+            }
+            None => false,
+        };
     }
-    let n = (part::len(&TERM) as usize).min(PACK_MAX);
-    (n > 6 && part::read_body(&TERM, 0, &mut buf[..n]) && buf[..3] == *b"FVT").then_some(&buf[..n])
+    ferrite_core::part::read_body(&ferrite_core::part::TERM, off as u32, b)
 }
 
-fn u16_at(pk: &[u8], p: usize) -> usize {
-    pk.get(p).map_or(0, |&b| b as usize) | pk.get(p + 1).map_or(0, |&b| b as usize) << 8
+fn u16_at(b: &[u8], i: usize) -> usize {
+    b[i] as usize | (b[i + 1] as usize) << 8
 }
 
-fn string(pk: &[u8], off: usize) -> &[u8] {
-    pk.get(off + 2..off + 2 + u16_at(pk, off)).unwrap_or_default()
+/// The lib and page `pg` read into `buf` (about 3 KB at SPI speed, 2 ms; once a redraw, key or poll step), and
+/// the lib's length; None when the part isn't there or is bad.
+#[inline(never)]
+pub(super) fn load(buf: &mut [u8; PACK_MAX], pg: i16) -> Option<(&[u8], usize)> {
+    let mut h = [0u8; 8];
+    if !read(0, &mut h) || h[..4] != *b"FVT\x02" || pg as u32 >= h[4] as u32 {
+        return None;
+    }
+    let lib = u16_at(&h, 6);
+    let mut e = [0u8; 4];
+    let ok = read(8 + 4 * pg as usize, &mut e);
+    let (off, len) = (u16_at(&e, 0), u16_at(&e, 2));
+    (ok && lib + len <= PACK_MAX && read(8 + 4 * h[4] as usize, &mut buf[..lib]) && read(off, &mut buf[lib..lib + len])).then_some((&buf[..lib + len], lib))
 }
 
-fn page_at(pk: &[u8], pg: u8) -> usize {
-    u16_at(pk, 6 + 2 * pk[5] as usize + 2 * pg as usize)
+/// The number stack: it wraps, so a bad program can't index past it.
+struct Stk {
+    s: [i32; 16],
+    p: usize,
 }
 
-/// A string the pages share (the hints while typing, or in help).
-pub(super) fn global(pk: &[u8], id: u8) -> &[u8] {
-    string(pk, u16_at(pk, 6 + 2 * id as usize))
-}
+impl Stk {
+    #[inline(never)]
+    fn pop(&mut self) -> i32 {
+        self.p = self.p.wrapping_sub(1);
+        self.s[self.p & 15]
+    }
 
-pub(super) const KEYS_TYPE: u8 = STR_KEYS_TYPE;
-pub(super) const KEYS_HELP: u8 = STR_KEYS_HELP;
+    #[inline(never)]
+    fn push(&mut self, v: i32) {
+        self.s[self.p & 15] = v;
+        self.p = self.p.wrapping_add(1);
+    }
 
-/// The page's hints line (TERM-11) and help (TERM-16).
-pub(super) fn hints(pk: &[u8], pg: u8) -> &[u8] {
-    string(pk, u16_at(pk, page_at(pk, pg)))
-}
+    fn flag(&mut self, b: bool) {
+        self.push(b as i32);
+    }
 
-pub(super) fn help(pk: &[u8], pg: u8) -> &[u8] {
-    string(pk, u16_at(pk, page_at(pk, pg) + 2))
-}
-
-/// The bytes an op takes after its code.
-fn arg_len(pk: &[u8], q: usize) -> usize {
-    match pk[q] {
-        0x10 | 0x1B => 1 + pk.get(q + 1).map_or(0, |&b| b as usize),
-        0x1C => 2 + pk.get(q + 2).map_or(0, |&b| b as usize),
-        0x11 | 0x12 | 0x1D | 0x20 | 0x21 | 0x22 => 1,
-        _ => 0,
+    fn u(&mut self) -> usize {
+        self.pop() as usize
     }
 }
 
-/// From an IF (or ELSE) not taken: past the matching ELSE (`at_else`) or FI.
-fn skip(pk: &[u8], mut q: usize, end: usize, at_else: bool) -> usize {
-    let mut depth = 0;
-    while q < end {
-        let op = pk[q];
-        let n = 1 + arg_len(pk, q);
-        q += n;
-        match op {
-            0x20..=0x22 => depth += 1,
-            0x23 if depth == 0 && at_else => return q,
-            0x24 if depth == 0 => return q,
-            0x24 => depth -= 1,
-            _ => {}
+/// A sort column's order for two channels (TERM-14): the column as one number (a name's 16 bytes in any case,
+/// big-endian), then the channel number, so the order is total.
+pub(super) fn order(col: i32, a: &Channel, b: &Channel) -> Ordering {
+    let key = |c: &Channel| -> (u128, u16) {
+        let k = match col {
+            1 => {
+                let mut n = [0u8; 16];
+                for (d, s) in n.iter_mut().zip(c.name()) {
+                    *d = s.to_ascii_lowercase();
+                }
+                u128::from_be_bytes(n)
+            }
+            2 => c.rx as u128,
+            3 => c.cfg.tx_of(c.rx) as u128,
+            4 => (c.cfg.mode as u128) << 1 | c.cfg.narrow as u128,
+            5 => (c.cfg.tx_tone as u128) << 16 | c.cfg.rx_tone as u128,
+            6 => c.cfg.power as u128,
+            7 => c.flags as u128,
+            _ => 0,
+        };
+        (k, c.num)
+    };
+    key(a).cmp(&key(b))
+}
+
+/// The channel after (or before) channel `from` in the sort order, in the list (`zone`, or every channel): one
+/// pass over every channel. `from` -1 (or gone): the first (or last).
+#[inline(never)]
+fn seek<S: ChannelStore>(st: &S, from: i32, zone: i32, col: i32, after: bool) -> i32 {
+    let a = if from < 0 { None } else { st.get(from as u16) };
+    let want = if after { Ordering::Greater } else { Ordering::Less };
+    let mut best: Option<Channel> = None;
+    for n in 0..MAX_CHANNELS {
+        let Some(c) = st.get(n).filter(|c| zone as ZoneId == ALL || c.zone == zone as ZoneId) else { continue };
+        if a.as_ref().is_none_or(|a| order(col, &c, a) == want) && best.as_ref().is_none_or(|b| order(col, &c, b) == want.reverse()) {
+            best = Some(c);
         }
     }
-    q
+    best.map_or(-1, |c| c.num as i32)
+}
+
+/// A setting's path after MENU 0: item `row` of group `g` (or of its third-level list `sub`).
+fn path(g: i32, sub: i32, row: i32) -> ([u8; 3], usize) {
+    let (g, sub, r) = (g as u8, sub as u8, row as u8 + 1);
+    if sub == 0 { ([g, r, 0], 2) } else { ([g, sub, r], 3) }
 }
 
 impl Term {
-    /// The template for what shows (Settings has two: the groups, and a group's items).
-    pub(super) fn tpl_page(&self) -> u8 {
-        match self.page {
-            Page::Off | Page::Splash => PAGE_SPLASH,
-            Page::Main => PAGE_MAIN,
-            Page::Channels => PAGE_CHANNELS,
-            Page::Edit => PAGE_EDIT,
-            Page::Zones => PAGE_ZONES,
-            Page::Settings if self.g == 0 => PAGE_SETTINGS_TOP,
-            Page::Settings => PAGE_SETTINGS_ITEMS,
-            Page::Monitor => PAGE_MONITOR,
-            Page::Mail => PAGE_MAIL,
-            Page::Tnc => PAGE_TNC,
-            Page::About => PAGE_ABOUT,
-        }
+    pub(super) fn marked(&self, num: u16) -> bool {
+        self.pg.marks.get(num as usize / 8).is_some_and(|b| b >> (num % 8) & 1 != 0)
     }
 
-    /// Body row `b` of the page: the first rule that takes it.
+    pub(super) fn marks_n(&self) -> u16 {
+        self.pg.marks.iter().map(|b| b.count_ones() as u16).sum()
+    }
+
+    /// Runs the code from `pc` with `arg` on the stack, until its last return.
     #[inline(never)]
-    pub(super) fn tpl_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        if self.page == Page::Off || self.page == Page::Edit && self.edit.is_none() {
-            return;
-        }
-        let pk = cx.pk;
-        let mut p = page_at(pk, self.tpl_page()) + 6;
-        let body = self.rows as i32 - 2;
-        let mut end = 0u16;
-        loop {
-            let kind = pk.get(p).copied().unwrap_or(0);
-            if kind == 0 || p + 4 > pk.len() {
-                return;
-            }
-            let (x, y, len) = (pk[p + 1], pk[p + 2], pk[p + 3] as usize);
-            let ops = p + 4;
-            p = ops + len;
-            let i = match kind {
-                1 => (b == x).then_some(0),
-                2 => (b as i32 == body - x as i32).then_some(0),
-                3 => {
-                    end = x as u16 + self.count(y, cx);
-                    (b >= x && (b as u16) < end).then(|| b as u16 - x as u16)
-                }
-                _ => (b as u16 == end + x as u16).then_some(0),
+    pub(super) fn vm<S: ChannelStore>(&mut self, code: &[u8], lib: usize, mut pc: usize, arg: i32, cx: &mut Cx<S>, w: &mut W) {
+        let mut k = Stk { s: [0; 16], p: 0 };
+        let (mut rs, mut rp) = ([0u16; 16], 0usize);
+        let mut c = BLANK;
+        let mut loc = [0i32; 8];
+        k.push(arg);
+        for _ in 0..FUEL {
+            // an opcode and up to two bytes after it (a page's code ends with two zeros, so this reads no further)
+            let [op, a, b] = match code.get(pc..pc + 3) {
+                Some(&[x, y, z]) => [x, y, z],
+                _ => [OP_RET; 3],
             };
-            let Some(mut i) = i else { continue };
-            if kind == 3 && y == COUNT_ZONES {
-                // the zones list scrolls with its selection
-                i += self.zone_sel.saturating_sub(self.page_rows() + 1);
-                if i >= cx.store.zones() + 2 {
-                    return;
-                }
-            }
-            return self.run(ops, p, i, cx, w);
-        }
-    }
-
-    fn run<S: ChannelStore>(&self, mut q: usize, end: usize, i: u16, cx: &Cx<S>, w: &mut W) {
-        let (pk, mut ch) = (cx.pk, None);
-        let end = end.min(pk.len());
-        while q < end {
-            let op = pk[q];
-            let a = pk.get(q + 1).copied().unwrap_or(0);
-            let next = (q + 1 + arg_len(pk, q)).min(end);
+            let a16 = a as usize | (b as usize) << 8;
+            pc += 1;
             match op {
-                0x10 => w.s(pk.get(q + 2..next).unwrap_or_default()),
-                0x11 => w.at(a as u16),
-                0x12 => self.src(a, i, ch.as_ref(), cx, w),
-                0x13 => w.bon(),
-                0x14 => w.won(),
-                0x15 => w.back(),
-                0x16 if self.sel(i) => w.rev(),
-                0x17 if self.sel(i) => w.fill(),
-                0x18 => w.fill(),
-                0x19 => w.plain(),
-                0x1A => w.digit(i as u8 + 1),
-                0x1B => w.s(piece(pk.get(q + 2..next).unwrap_or_default(), b'|', i as usize).unwrap_or_default()),
-                0x1C => w.s(piece(pk.get(q + 3..next).unwrap_or_default(), b'|', self.pickn(a, cx) as usize).unwrap_or_default()),
-                0x1D => {
-                    ch = match a {
-                        CTX_ROW => self.row_chan(i, cx.store),
-                        CTX_SELECTED => self.selected(cx.store),
-                        _ => self.edit,
+                OP_RET => {
+                    if rp == 0 {
+                        return;
+                    }
+                    rp -= 1;
+                    pc = rs[rp & 15] as usize;
+                }
+                OP_LIT8 => {
+                    k.push(a as i8 as i32);
+                    pc += 1;
+                }
+                OP_LIT16 => {
+                    k.push(a16 as i16 as i32);
+                    pc += 2;
+                }
+                OP_JMP => pc = a16,
+                OP_JZ => pc = if k.pop() == 0 { a16 } else { pc + 2 },
+                OP_CALL | OP_PCALL => {
+                    rs[rp & 15] = (pc + if op == OP_CALL { 2 } else { 1 }) as u16;
+                    rp += 1;
+                    pc = if op == OP_CALL { a16 } else { lib + 3 * a as usize };
+                }
+                OP_DUP | OP_DROP | OP_NOT | OP_AGET | OP_AT | OP_NUM => {
+                    let x = k.pop();
+                    match op {
+                        OP_DUP => {
+                            k.push(x);
+                            k.push(x);
+                        }
+                        OP_NOT => k.flag(x == 0),
+                        OP_AGET => k.push(self.pg.vis.get(x as usize).map_or(0, |&n| n as i32)),
+                        OP_AT => w.at(x as u16),
+                        OP_NUM => w.n(x as u32),
+                        _ => {}
                     }
                 }
-                0x20..=0x22 => {
-                    let yes = match op {
-                        0x22 => i == a as u16,
-                        _ => self.cond(a, i, ch.as_ref(), cx) == (op == 0x20),
+                OP_SWAP..=OP_MAX | OP_ASET => {
+                    let y = k.pop();
+                    let x = k.pop();
+                    let r = match op {
+                        OP_SWAP => {
+                            k.push(y);
+                            x
+                        }
+                        OP_OVER => {
+                            k.push(x);
+                            k.push(y);
+                            x
+                        }
+                        OP_ADD => x.wrapping_add(y),
+                        OP_SUB => x.wrapping_sub(y),
+                        OP_MUL => x.wrapping_mul(y),
+                        OP_DIV => x.checked_div(y).unwrap_or(0),
+                        OP_MOD => x.checked_rem(y).unwrap_or(0),
+                        OP_EQ => (x == y) as i32,
+                        OP_LT => (x < y) as i32,
+                        OP_GT => (x > y) as i32,
+                        OP_AND => x & y,
+                        OP_OR => x | y,
+                        OP_MIN => x.min(y),
+                        OP_MAX => x.max(y),
+                        _ => {
+                            if let Some(v) = self.pg.vis.get_mut(y as usize) {
+                                *v = x as u16;
+                            }
+                            continue;
+                        }
                     };
-                    if !yes {
-                        q = skip(pk, next, end, true);
-                        continue;
+                    k.push(r);
+                }
+                OP_GET => {
+                    let a = a as usize;
+                    k.push(if a < NV { self.pg.v[a] as i32 } else { loc[a & 7] });
+                    pc += 1;
+                }
+                OP_SET => {
+                    let (a, x) = (a as usize, k.pop());
+                    if a < NV {
+                        self.pg.v[a] = x as i16;
+                    } else {
+                        loc[a & 7] = x;
+                    }
+                    pc += 1;
+                }
+                OP_STR | OP_RAW => {
+                    let s = code.get(pc + 1..pc + 1 + a as usize).unwrap_or_default();
+                    pc += 1 + a as usize;
+                    if op == OP_RAW {
+                        w.put(s);
+                    } else {
+                        w.s(s);
                     }
                 }
-                0x23 => {
-                    q = skip(pk, next, end, false);
-                    continue;
+                OP_NUMW => {
+                    let wd = k.u();
+                    let mut d = [0; 10];
+                    let s = digits(k.pop() as u32, &mut d);
+                    for _ in s.len()..wd.min(16) {
+                        w.s(&[a]);
+                    }
+                    w.s(s);
+                    pc += 1;
                 }
-                0x25 => return,
-                _ => {}
+                OP_NAT => {
+                    let io = b;
+                    pc += 2;
+                    let mut x = [0; 4];
+                    for j in (0..(io as usize & 7).min(4)).rev() {
+                        x[j] = k.pop();
+                    }
+                    let r = self.nat(a, x, &mut c, cx, w);
+                    if io >> 4 != 0 {
+                        k.push(r);
+                    }
+                }
+                _ => return,
             }
-            q = next;
         }
     }
 
-    /// A list's length.
-    fn count<S: ChannelStore>(&self, id: u8, cx: &Cx<S>) -> u16 {
-        match id {
-            COUNT_MAIN => super::MAIN.len() as u16,
-            COUNT_SLOTS => SLOTS as u16,
-            COUNT_PAGE_ROWS => self.page_rows(),
-            COUNT_FIELDS => FIELDS.len() as u16,
-            COUNT_ZONES => (cx.store.zones() + 2).min(self.page_rows() + 2),
-            COUNT_GROUPS => GROUPS.len() as u16,
-            COUNT_ITEMS => groups::items(self.g, self.sub).len() as u16,
-            _ => 255,
-        }
-    }
-
-    /// Whether list row `i` is the selected one.
-    fn sel(&self, i: u16) -> bool {
-        match self.page {
-            Page::Main => i == self.main_sel as u16,
-            Page::Channels => self.row_selected(i),
-            Page::Edit => i == self.field as u16,
-            Page::Zones => i == self.zone_sel,
-            Page::Settings => i == self.set_sel as u16,
-            _ => false,
-        }
-    }
-
-    fn pickn<S: ChannelStore>(&self, id: u8, _cx: &Cx<S>) -> u8 {
-        match id {
-            PICKN_SORT => self.sort % list::SORTS.len() as u8,
-            _ => match FIELDS[self.field as usize % FIELDS.len()] {
-                F::Name => 0,
-                F::Rx => 1,
-                F::Tx => 2,
-                _ => 3,
-            },
-        }
-    }
-
-    fn cond<S: ChannelStore>(&self, id: u8, i: u16, ch: Option<&Channel>, cx: &Cx<S>) -> bool {
-        let st = cx.store;
-        let c = ch.copied().unwrap_or(BLANK);
-        match id {
-            COND_MARKS => self.marks_n() > 0,
-            COND_CH => ch.is_some(),
-            COND_LIST_EMPTY => list_len(self.zone, st) == 0,
-            COND_ASKING => self.ask != list::Ask::None,
-            COND_TYPING => self.line.is_some(),
-            COND_CH_HOME => cx.app.set.home_ch == Some(c.num),
-            COND_SEL => self.sel(i),
-            COND_NOTE => !self.note.is_empty() && !self.bnote,
-            COND_SPLIT => c.cfg.split,
-            COND_OFFSET => c.cfg.offset != 0,
-            COND_ITEM_SUB => self.sub == 0 && SUBS.iter().any(|(q, _)| *q == (self.g, i as u8 + 1)),
-            COND_HAS_ITEM => (self.set_sel as usize) < groups::items(self.g, self.sub).len(),
-            COND_SUB => self.sub != 0,
-            COND_SSB => cx.dev.selftest.ssb_patch,
-            _ => cx.dev.tx_built,
-        }
-    }
-
-    /// What a source shows.
+    /// The natives: what the program asks of the firmware. `x` holds what it takes from the stack (the deepest
+    /// first); what it gives back is returned (`NAT_IO` says whether there is any).
     #[inline(never)]
-    fn src<S: ChannelStore>(&self, id: u8, i: u16, ch: Option<&Channel>, cx: &Cx<S>, w: &mut W) {
-        let (app, st) = (cx.app, cx.store);
-        let c = ch.copied().unwrap_or(BLANK);
-        let mut v = Buf::<24>::new();
-        match id {
-            SRC_VERSION => w.s(super::version()),
-            SRC_CALLSIGN => w.s(app.set.boot_callsign().unwrap_or(b"No callsign set")),
-            SRC_COUNT => w.n(st.count() as u32),
-            SRC_ZONES => w.n(st.zones() as u32),
-            SRC_REGION => w.s(app.set.region_name().as_bytes()),
-            SRC_CAL => w.s(groups::cal_text(cx.dev.selftest.cal).as_bytes()),
-            SRC_SLOT => slot_line(i as u8, cx, w),
-            SRC_STATUS => status(cx, w),
-            SRC_ZONE_NAME => w.s(zone_name(self.zone, st).as_bytes()),
-            SRC_LIST_LEN => w.n(list_len(self.zone, st) as u32),
-            SRC_MARKS_N => w.n(self.marks_n() as u32),
-            SRC_CH_NUM => {
-                let mut d = [0; 10];
-                let num = digits(c.num as u32 + 1, &mut d);
-                w.at(4u16.saturating_sub(num.len() as u16));
-                w.s(num);
-                if self.marked(c.num) {
-                    w.s(b"*"); // TERM-14: marked
+    fn nat<S: ChannelStore>(&mut self, id: u8, x: [i32; 4], c: &mut Channel, cx: &mut Cx<S>, w: &mut W) -> i32 {
+        let st = cx.store;
+        let dev = cx.dev;
+        let mut v = Buf::<16>::new();
+        let (a, z) = (x[0], x[0] as ZoneId);
+        let mut ld = |o: Option<Channel>| {
+            *c = o.unwrap_or(BLANK);
+            o.is_some() as i32
+        };
+        let s: &[u8] = match id {
+            N_ROWS => return self.rows as i32,
+            N_COLS => return self.cols as i32,
+            N_BT => return self.bt as i32,
+            N_PIN => return self.pin_gate() as i32,
+            N_PINN => return self.pin_n as i32,
+            N_CMDON => return self.cmd as i32,
+            N_BNOTE => return self.bnote as i32,
+            N_WARN => return self.warn as i32,
+            N_NOTEON => return !self.note.is_empty() as i32,
+            N_TYPING => return self.pg.typing as i32,
+            N_LNUM => {
+                let s = cmd_trim(self.pg.line.as_bytes());
+                let ok = !s.is_empty() && s.len() <= 4 && s.iter().all(u8::is_ascii_digit);
+                return if ok { s.iter().fold(0, |n, &d| n * 10 + (d - b'0') as i32) } else { -1 };
+            }
+            N_HASCALL => return cx.app.set.boot_callsign().is_some() as i32,
+            N_SSB => return dev.selftest.ssb_patch as i32,
+            N_TXBUILT => return dev.tx_built as i32,
+            N_CLOCK => return dev.clock_min.map_or(-1, |m| m as i32),
+            N_BATTMV => return dev.battery_mv as i32,
+            N_GPS => return dev.gps as i32,
+            N_COLOUR => return cx.app.set.term_colour as i32,
+            N_GPSPH => {
+                return match dev.gps_phase {
+                    GpsPhase::Standby(_) => 1,
+                    GpsPhase::Waking => 2,
+                    GpsPhase::Running | GpsPhase::Searching => 3,
+                    _ => 0,
                 }
             }
-            SRC_CH_NAME => w.s(c.name()),
-            SRC_CH_RX => w.s(mhz5(c.rx).as_bytes()),
-            SRC_CH_OFFSET => item(Item::Offset, &c, w),
-            SRC_CH_MODE => {
-                let mut v = Buf::<16>::new();
-                mode_chip(&c.cfg, &mut v);
-                w.s(v.as_bytes());
+            N_GPSS => return if let GpsPhase::Standby(s) = dev.gps_phase { s as i32 } else { 0 },
+            N_BTDEV => return dev.bt as i32,
+            N_BSAVE => return cx.app.bsave as i32,
+            N_COUNT => return st.count() as i32,
+            N_ZONES => return st.zones() as i32,
+            N_CEDIT => return ld(self.pg.edit),
+            N_RADIOCH => return radio_channel(cx.app).map_or(-1, |n| n as i32),
+            N_HOMECH => return cx.app.set.home_ch.map_or(-1, |n| n as i32),
+            N_NMARKS => return self.marks_n() as i32,
+            N_ACTIVE => return cx.app.active() as i32,
+            N_NEV => return st.data().events() as i32,
+            N_CMDTAIL => {
+                // the command line's tail, when it is wider than the row
+                let n = self.clen as usize;
+                &self.cbuf[n.saturating_sub((self.cols as usize).saturating_sub(4))..n]
             }
-            SRC_CH_TONE => {
-                let mut v = Buf::<16>::new();
-                tone_text(c.cfg.tx_tone, &mut v);
-                w.s(if v.is_empty() { b"-" } else { v.as_bytes() });
+            N_CMDOPEN => {
+                (self.cmd, self.clen) = (true, 0);
+                b""
             }
-            SRC_CH_POWER => item(Item::Power, &c, w),
-            SRC_CH_FLAGS => flags(&c, app, w),
-            SRC_ASK_TEXT => {
-                let mut q = cmd::Msg::new();
-                self.ask_text(st, &mut q);
-                w.s(q.as_bytes());
+            N_NOTE => self.note.as_bytes(),
+            N_NOTECLR => {
+                self.note.clear();
+                (self.warn, self.bnote) = (false, false);
+                b""
             }
-            SRC_LINE => w.s(self.line.unwrap_or_default().as_bytes()),
-            SRC_CH_N1 => w.n(c.num as u32 + 1),
-            SRC_CH_ZONE => w.s(zone_name(c.zone, st).as_bytes()),
-            SRC_FIELD_LABEL => w.s(FIELDS[i as usize].label(true).as_bytes()),
-            SRC_FIELD_VALUE => {
-                let f = FIELDS[i as usize];
-                match (f, self.line.filter(|_| self.sel(i))) {
-                    (_, Some(l)) => {
-                        w.s(l.as_bytes());
-                        w.s(b"_");
-                    }
-                    (F::Zone, _) => w.s(zone_name(c.zone, st).as_bytes()),
-                    (F::Rx, _) => {
-                        w.s(mhz5(c.rx).as_bytes());
-                        w.s(b" MHz");
-                    }
-                    (F::Tx, _) => {
-                        w.s(mhz5(c.cfg.tx_of(c.rx)).as_bytes());
-                        w.s(if c.cfg.split { b" MHz, split" } else { b" MHz" });
-                    }
-                    (_, _) => {
-                        let mut v = Buf::<16>::new();
-                        f.text(&c, app.set.home_ch, true, &mut v);
-                        w.s(v.as_bytes());
-                    }
+            N_CAP => {
+                w.cap(true);
+                b""
+            }
+            N_LNAME => {
+                self.pg.line = Buf::from(c.name());
+                b""
+            }
+            N_LSTOP => {
+                self.pg.typing = false;
+                b""
+            }
+            N_LINE => self.pg.line.as_bytes(),
+            N_LFIND => {
+                let s = cmd_trim(self.pg.line.as_bytes());
+                if !s.is_empty() {
+                    self.pg.find = Buf::from(&s[..s.len().min(16)]);
+                }
+                b""
+            }
+            N_FIND => self.pg.find.as_bytes(),
+            N_VERSION => version(),
+            N_CALLSIGN => cx.app.set.boot_callsign().unwrap_or(b"No callsign set"),
+            N_REGION => cx.app.set.region_name().as_bytes(),
+            N_CAL => groups::cal_text(dev.selftest.cal).as_bytes(),
+            N_ESET => {
+                self.pg.edit = Some(*c);
+                b""
+            }
+            N_ECLR => {
+                self.pg.edit = None;
+                b""
+            }
+            N_ELOAD => {
+                self.pg.edit = self.pg.edit.map(|e| st.get(e.num).unwrap_or(e));
+                b""
+            }
+            N_CMODE | N_CTONE | N_CITEM | N_FTEXT => {
+                match id {
+                    N_CMODE => mode_chip(&c.cfg, &mut v),
+                    N_CTONE => tone_text(c.cfg.tx_tone, &mut v),
+                    N_CITEM => (if a == 0 { Item::Offset } else { Item::Power }).text(&c.cfg, false, &mut v),
+                    _ => FIELDS[a as usize % FIELDS.len()].text(c, cx.app.set.home_ch, true, &mut v),
+                }
+                if v.is_empty() && id == N_CTONE { b"-" } else { v.as_bytes() }
+            }
+            N_CPUT => {
+                cx.app.put_channel(*c);
+                b""
+            }
+            N_UNMARK => {
+                self.pg.marks = [0; MARK_BYTES];
+                b""
+            }
+            N_SAY => {
+                // 0 say, 1 a warning; 2 and 3 on the bottom row until the next key
+                (self.note, self.warn, self.bnote) = (w.cap(false), a & 1 != 0, a & 2 != 0);
+                self.all_dirty();
+                b""
+            }
+            N_LSTART => {
+                (self.pg.lmax, self.pg.line, self.pg.typing) = (a as u8, Buf::new(), true);
+                b""
+            }
+            N_ZNAME => {
+                w.s(zone_name(z, st).as_bytes());
+                b""
+            }
+            N_MHZ => {
+                w.s(mhz5(a as Freq10).as_bytes());
+                b""
+            }
+            N_FREQ3 => {
+                w.s(w::freq3(a as Freq10).as_bytes());
+                b""
+            }
+            N_CDEL => {
+                cx.app.delete_channel(a as u16, st);
+                b""
+            }
+            N_CREN => {
+                cx.app.renumber_channel(*c, a as u16);
+                b""
+            }
+            N_FLABEL => FIELDS[a as usize % FIELDS.len()].label(true).as_bytes(),
+            N_CNAME => {
+                let n = c.name();
+                &n[..n.len().min(a as usize)]
+            }
+            N_GNAME => GROUPS[a as usize % GROUPS.len()].0.as_bytes(),
+            N_GDESC => {
+                w.s(crate::text::load(GROUPS[a as usize % GROUPS.len()].1).as_bytes());
+                b""
+            }
+            N_CAPCMP => {
+                // 0: the typed line, any case; 1: holds the text found, any case; 2: starts with it
+                let m = w.cap(false);
+                let (m, t) = (m.as_bytes(), if a == 0 { cmd_trim(self.pg.line.as_bytes()) } else { self.pg.find.as_bytes() });
+                return match a {
+                    0 => m.eq_ignore_ascii_case(t),
+                    1 => t.is_empty() || m.windows(t.len()).any(|x| x.eq_ignore_ascii_case(t)),
+                    _ => m.starts_with(t),
+                } as i32;
+            }
+            N_ZLEN => return list_len(z, st) as i32,
+            N_CGET => return ld(st.get(a as u16)),
+            N_CF => {
+                return match a {
+                    0 => c.num as i32,
+                    1 => c.zone as i16 as i32,
+                    2 => c.rx as i32,
+                    3 => c.cfg.tx_of(c.rx) as i32,
+                    4 => c.cfg.split as i32,
+                    5 => c.cfg.offset,
+                    _ => c.flags as i32,
                 }
             }
-            SRC_SPLIT_TX => w.s(mhz5(c.cfg.offset.max(0) as Freq10).as_bytes()),
-            SRC_OFF_TX => w.s(mhz5((c.rx as i64 + c.cfg.offset as i64).max(0) as Freq10).as_bytes()),
-            SRC_NOTE => {
-                if self.warn {
-                    w.warn(self.note.as_bytes());
+            N_NEWCH => return self.new_channel(cx, z),
+            N_MARK => return self.marked(a as u16) as i32,
+            N_NEXTMARK => return (a.max(0) as u16..MAX_CHANNELS).find(|&n| self.marked(n)).map_or(-1, |n| n as i32),
+            N_PREVMARK => return (0..a.clamp(0, MAX_CHANNELS as i32) as u16).rev().find(|&n| self.marked(n)).map_or(-1, |n| n as i32),
+            N_MARKBELOW => return (0..a.clamp(0, MAX_CHANNELS as i32) as u16).filter(|&n| self.marked(n)).count() as i32,
+            N_CSET => {
+                if x[1] == 0 {
+                    c.num = a as u16;
                 } else {
-                    w.s(self.note.as_bytes());
+                    c.zone = z;
                 }
+                b""
             }
-            SRC_ZROW_NAME => w.s(zone_name(zone_of(i, st), st).as_bytes()),
-            SRC_ZROW_LEN => w.n(list_len(zone_of(i, st), st) as u32),
-            SRC_GROUP_NAME => w.s(GROUPS[i as usize].0.as_bytes()),
-            SRC_GROUP_DESC => w.s(crate::text::load(GROUPS[i as usize].1).as_bytes()),
-            SRC_SET_G => w.n(self.g as u32),
-            SRC_GROUP_NAME_G => w.s(GROUPS[(self.g as usize).clamp(1, 9) - 1].0.as_bytes()),
-            SRC_SET_SUB => w.n(self.sub as u32),
-            SRC_SUB_NAME => w.s(groups::items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.name()).as_bytes()),
-            SRC_ITEM_NAME => w.s(groups::items(self.g, self.sub)[i as usize].name().as_bytes()),
-            SRC_ITEM_VALUE => {
-                let (p, pl) = self.path(i as u8);
-                let e = groups::items(self.g, self.sub)[i as usize];
-                let dot = match groups::wired(app, cx.dev, &p[..pl], &mut v) {
+            N_MARKSET => {
+                let n = a as usize;
+                if let Some(b) = self.pg.marks.get_mut(n / 8) {
+                    *b = *b & !(1 << (n % 8)) | ((x[1] != 0) as u8) << (n % 8);
+                }
+                b""
+            }
+            N_EVAGO => return st.data().event(a as u16).map_or(0, |e| e.ago_s as i32),
+            N_EV => {
+                let Some(e) = st.data().event(a as u16) else { return 0 };
+                match x[1] {
+                    1 => w.s(e.src.name().as_bytes()),
+                    2 => w.s(e.name.as_bytes()),
+                    _ => w.s(e.text.as_bytes()),
+                }
+                b""
+            }
+            N_CAT => return ld(super::chan_at(z, x[1] as u16, st)),
+            N_ROOM => return st.zone_room(z, x[1] as u16) as i32,
+            N_ISUB => return SUBS.iter().any(|(q, _)| *q == (a as u8, x[1] as u8)) as i32,
+            N_FCHG => return self.fchg(cx, a as usize % FIELDS.len(), x[1], x[2]),
+            N_SEEK => return seek(st, a, x[1], x[2], x[3] != 0),
+            N_NITEMS | N_INAME | N_IHELP | N_IVAL | N_SCHG | N_SRESET => return self.setting(cx, w, id, x),
+            _ => {
+                // a slot's state (A, B, C)
+                let i = (a as usize).min(SLOTS - 1);
+                let (s, l) = (cx.app.slot(i as u8), cx.live.slots[i]);
+                match id {
+                    N_SLOTCH => return ld(s.ch.filter(|_| s.on_channel())),
+                    N_APRS => return cx.app.aprs_slot(i as u8) as i32,
+                    N_SLOTF => return if l.scanning { l.freq } else { cx.app.tuned_freq(i as u8) } as i32,
+                    N_SLOTOFF => return cx.app.slot_off(i as u8) as i32,
+                    N_SQ => return l.squelch_open as i32,
+                    N_SCANNING => return l.scanning as i32,
+                    N_LIVEF => return l.freq as i32,
+                    N_SLOTMODE => mode_chip(s.cfg(), &mut v),
+                    N_SLOTTONE => tone_text(s.cfg().tx_tone, &mut v),
+                    _ => {
+                        w.s(w::s_text(l.rssi).as_bytes());
+                        return 0;
+                    }
+                }
+                w.s(v.as_bytes());
+                return 0;
+            }
+        };
+        w.s(s);
+        0
+    }
+
+    /// A setting by its menu numbers (group, third-level list or 0, row): the count, an item's name, help or value,
+    /// a reset, or a change (TERM-6, TERM-7): 0 changed, 1 not settable yet, 2 open on the radio's menu (TERM-17),
+    /// 3 left to the radio, 4 greyed (the note says why).
+    #[inline(never)]
+    fn setting<S: ChannelStore>(&mut self, cx: &mut Cx<S>, w: &mut W, id: u8, x: [i32; 4]) -> i32 {
+        let (g, sub, i, d) = (x[0], x[1], if id == N_NITEMS { 0 } else { x[2] }, x[3]);
+        let items = groups::items(g as u8, sub as u8);
+        let (p, pl) = path(g, sub, i);
+        let p = &p[..pl];
+        let e = items.get(i as usize);
+        match id {
+            N_NITEMS => return items.len() as i32,
+            N_INAME => w.s(e.map_or("", |e| e.name()).as_bytes()),
+            N_IHELP => w.s(e.and_then(|e| e.help()).map(crate::text::load).as_ref().map_or(&b""[..], |t| t.as_bytes())),
+            N_IVAL => {
+                let mut v = Buf::<24>::new();
+                let dot = match groups::wired(cx.app, cx.dev, p, &mut v) {
                     Some(d) => d,
                     None => {
-                        match &p[..pl] {
+                        match p {
                             [2, 1] => {
-                                v.push(digits(st.count() as u32, &mut [0; 10]));
+                                v.push(digits(cx.store.count() as u32, &mut [0; 10]));
                                 v.push(b" channels");
                             }
-                            _ => v.set(e.value().as_bytes()),
+                            _ => v.set(e.map_or("", |e| e.value()).as_bytes()),
                         }
                         false
                     }
                 };
-                if let Some(why) = groups::greyed(app, &p[..pl]) {
+                if let Some(why) = groups::greyed(cx.app, p) {
                     v.set(why.as_bytes());
                 }
                 w.s(if dot { b"* " } else { b"  " });
                 w.s(v.as_bytes());
             }
-            SRC_ITEM_SEL_NAME => w.s(groups::items(self.g, self.sub)[self.set_sel as usize].name().as_bytes()),
-            SRC_ITEM_SEL_HELP => w.s(groups::items(self.g, self.sub)[self.set_sel as usize].help().map(crate::text::load).as_ref().map_or(&b""[..], |t| t.as_bytes())),
-            SRC_PATH_SEL => {
-                let (p, pl) = self.path(self.set_sel);
-                for x in &p[..pl] {
-                    w.s(b" ");
-                    w.n(*x as u32);
+            N_SRESET => {
+                let ok = !blocked(p);
+                if ok {
+                    groups::reset(cx.app, p);
                 }
+                return ok as i32;
             }
-            _ => self.monitor(i, cx, w),
-        }
-    }
-
-    /// The monitor's line `k`: the newest events, oldest first, then the slots receiving now.
-    fn monitor<S: ChannelStore>(&self, k: u16, cx: &Cx<S>, w: &mut W) {
-        let body = self.rows - 2;
-        let space = body.saturating_sub(4) as u16;
-        let open: [bool; SLOTS] = core::array::from_fn(|i| cx.live.slots[i].squelch_open);
-        let nopen = open.iter().filter(|&&o| o).count() as u16;
-        let d = cx.store.data();
-        let nev = d.events().min(space.saturating_sub(nopen));
-        if k < nev {
-            // Newest at the bottom: line k shows event nev - 1 - k (event 0 is the newest).
-            let Some(e) = d.event(nev - 1 - k) else { return };
-            let mut v = Buf::<16>::new();
-            super::ago(e.ago_s, &mut v);
-            w.at(1);
-            w.s(v.as_bytes());
-            w.at(11);
-            w.s(e.src.name().as_bytes());
-            w.at(20);
-            w.s(e.name.as_bytes());
-            w.at(32);
-            w.s(e.text.as_bytes());
-        } else if let Some(s) = (0..SLOTS).filter(|&i| open[i]).nth((k - nev) as usize) {
-            let l = cx.live.slots[s];
-            w.at(1);
-            w.s(b"now");
-            w.at(11);
-            w.s(&[w::LETTERS[s]]);
-            w.s(b" ");
-            w.s(w::freq3(l.freq).as_bytes());
-            w.at(20);
-            w.s(b"RX");
-            w.at(32);
-            w.s(w::s_text(l.rssi).as_bytes());
-        } else if k == 0 {
-            w.s("  Nothing yet.".as_bytes());
-        }
-    }
-
-    // ---- Keys ----
-
-    /// A key on the page, by the template's bindings: true when one took it.
-    pub(super) fn tpl_key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S) -> bool {
-        let code = match k {
-            K::Ch(c) => c.to_ascii_lowercase(),
-            K::Up => 0x80,
-            K::Down => 0x81,
-            K::Left => 0x82,
-            K::Right => 0x83,
-            K::PgUp => 0x84,
-            K::PgDn => 0x85,
-            K::Home => 0x86,
-            K::End => 0x87,
-            K::Enter => 0x88,
-            K::Esc => 0x89,
-            _ => return false,
-        };
-        match binding(self.tpl_page(), code) {
-            Some((act, arg, cmd, n)) => {
-                self.act(app, act, arg, &cmd[..n], code, k, store);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// What a key does.
-    fn act<S: ChannelStore>(&mut self, app: &mut App, act: u8, arg: usize, s: &[u8], code: u8, k: K, store: &S) {
-        let n = self.sel_n(store);
-        let cur = self.sel_get();
-        match act {
-            ACT_PREV => self.sel_set((cur + n - 1) % n.max(1)),
-            ACT_NEXT => self.sel_set((cur + 1) % n.max(1)),
-            ACT_FIRST => self.sel_set(0),
-            ACT_LAST => self.sel_set(n.saturating_sub(1)),
-            ACT_DIGITOPEN => {
-                let d = (code - b'0') as u16;
-                if d <= n {
-                    self.sel_set(d - 1);
-                    self.open(app, store);
-                }
-            }
-            ACT_OPEN => self.open(app, store),
-            ACT_BACK => self.back(),
-            ACT_GO => self.go(match arg as u8 {
-                PAGE_SPLASH => Page::Splash,
-                _ => Page::Main,
-            }),
-            ACT_LEFT | ACT_RIGHT => {
-                let d = if act == ACT_RIGHT { 1 } else { -1 };
-                match self.page {
-                    Page::Edit => {
-                        if let Some(c) = self.edit {
-                            let f = FIELDS[self.field as usize % FIELDS.len()];
-                            self.change(app, c, f, d, store);
-                        }
-                    }
-                    _ if self.g != 0 => self.settings_change(app, d),
-                    _ => {}
-                }
-            }
-            ACT_DEFAULT => match self.page {
-                Page::Edit => {
-                    if let Some(c) = self.edit {
-                        self.default(app, c, FIELDS[self.field as usize % FIELDS.len()]);
-                    }
-                }
-                _ if self.g != 0 => {
-                    let (p, pl) = self.path(self.set_sel);
-                    if !super::blocked(&p[..pl]) {
-                        groups::reset(app, &p[..pl]);
-                        self.say("Back to the default".as_bytes(), false);
-                    }
-                }
-                _ => {}
-            },
-            ACT_CHNAV => self.chan_nav(k, store),
-            ACT_ZONENEXT => {
-                // The next zone, then no zone, then every channel.
-                let z = store.zones();
-                self.zone = match self.zone {
-                    ALL if z > 0 => 0,
-                    ALL => crate::chan::NO_ZONE,
-                    crate::chan::NO_ZONE => ALL,
-                    x if x + 1 < z => x + 1,
-                    _ => crate::chan::NO_ZONE,
-                };
-                self.list_reset();
-            }
+            _ if radio_setting(cx.app).is_some_and(|(r, rl)| r[..rl] == *p) => return 2, // TERM-17: the radio's menu has it
+            _ if blocked(p) => return 3,
             _ => {
-                // a line command, as typed after `:` (TERM-12)
-                self.cbuf[..s.len()].copy_from_slice(s);
-                (self.clen, self.pending) = (s.len() as u8, true);
-            }
-        }
-    }
-
-    /// The selection's list length on this page.
-    fn sel_n<S: ChannelStore>(&self, st: &S) -> u16 {
-        match self.page {
-            Page::Main => super::MAIN.len() as u16,
-            Page::Edit => FIELDS.len() as u16,
-            Page::Zones => st.zones() + 2,
-            Page::Settings if self.g == 0 => GROUPS.len() as u16,
-            Page::Settings => groups::items(self.g, self.sub).len() as u16,
-            _ => 0,
-        }
-    }
-
-    fn sel_get(&self) -> u16 {
-        match self.page {
-            Page::Main => self.main_sel as u16,
-            Page::Edit => self.field as u16,
-            Page::Zones => self.zone_sel,
-            _ => self.set_sel as u16,
-        }
-    }
-
-    fn sel_set(&mut self, v: u16) {
-        match self.page {
-            Page::Main => self.main_sel = v as u8,
-            Page::Edit => self.field = v as u8,
-            Page::Zones => self.zone_sel = v,
-            _ => self.set_sel = v as u8,
-        }
-    }
-
-    /// Enter on the page.
-    fn open<S: ChannelStore>(&mut self, app: &mut App, store: &S) {
-        match self.page {
-            Page::Splash => self.go(Page::Main),
-            Page::Main => self.open_main(),
-            Page::Channels => {
-                if let Some(c) = self.selected(store) {
-                    (self.edit, self.field) = (Some(c), 0);
-                    self.go(Page::Edit);
+                if let Some(why) = groups::greyed(cx.app, p) {
+                    self.note.set(why.as_bytes());
+                    (self.warn, self.bnote) = (true, false);
+                    return 4;
                 }
+                return !groups::change(cx.app, p, d) as i32;
             }
-            Page::Edit => {
-                let Some(c) = self.edit else { return };
-                match FIELDS[self.field as usize % FIELDS.len()] {
-                    F::Name => self.line = Some(Buf::from(c.name())),
-                    F::Rx | F::Tx => self.line = Some(Buf::new()),
-                    f => self.change(app, c, f, 1, store),
-                }
-            }
-            Page::Zones => {
-                self.zone = zone_of(self.zone_sel, store);
-                self.from_zones = true;
-                self.list_reset();
-                self.go(Page::Channels);
-            }
-            _ => self.settings_open(app),
         }
+        0
     }
 
-    /// Esc on the page.
-    fn back(&mut self) {
-        match self.page {
-            Page::Channels => self.go(if self.from_zones { Page::Zones } else { Page::Main }),
-            Page::Edit => {
-                self.edit = None;
-                self.go(Page::Channels);
-            }
-            _ => self.settings_up(),
-        }
-    }
-
-    /// Arrows, pages and the ends in the channel list (number order; a sorted list moves in `list`).
-    fn chan_nav<S: ChannelStore>(&mut self, k: K, store: &S) {
-        let last = list_len(self.zone, store).saturating_sub(1);
-        let pg = self.page_rows();
-        self.chan_sel = match k {
-            K::Up => self.chan_sel.saturating_sub(1),
-            K::Down => (self.chan_sel + 1).min(last),
-            K::PgUp => self.chan_sel.saturating_sub(pg),
-            K::PgDn => (self.chan_sel + pg).min(last),
-            K::Home => 0,
-            _ => last,
+    /// A field's change through its rules (the radio's channel editor: TERM-6, TERM-7): 0 refused (the note says
+    /// why), 1 and 2 the home channel set or not, 3 open in the radio's editor (TERM-17), 4 saved, 5 the same.
+    #[inline(never)]
+    fn fchg<S: ChannelStore>(&mut self, cx: &mut Cx<S>, i: usize, op: i32, d: i32) -> i32 {
+        let Some(c) = self.pg.edit else { return 5 };
+        let (app, st, line) = (&mut *cx.app, cx.store, self.pg.line);
+        let room = |z| st.zone_room(z, c.num);
+        let (o, zones, room): (_, _, &dyn Fn(ZoneId) -> bool) = match op {
+            0 => (Op::Step(d), st.zones(), &room),
+            1 => (Op::Reset, 0, &any_room),
+            _ => (Op::Typed(line.as_bytes()), 0, &any_room),
         };
-    }
-}
-
-// ---- Sources shared by pages ----
-
-/// "A  VFO  146.520 00  FM-N  T 100.0   RX S7   active".
-fn slot_line<S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W) {
-    let s = cx.app.slot(i);
-    let l = cx.live.slots[i as usize];
-    w.at(2);
-    w.s(&[w::LETTERS[i as usize]]);
-    w.at(5);
-    // The APRS slot shows what it's on, the APRS frequency, not the channel or VFO it keeps underneath (APRS-21).
-    let aprs = cx.app.aprs_slot(i);
-    match s.ch.filter(|_| s.on_channel() && !aprs) {
-        _ if aprs => w.s(b"APRS"),
-        Some(c) => {
-            let mut v = Buf::<32>::new();
-            put!(v, "CH {} ", Zero(c.num as u32 + 1, 3));
-            let n = c.name();
-            v.push(&n[..n.len().min(14)]); // "CH 012 " + 14 leaves a space before column 27
-            w.s(v.as_bytes());
+        let (mut n, mut home) = (c, app.set.home_ch);
+        if let Err(r) = FIELDS[i].change(&mut n, &mut home, o, Ctx { zones, region: app.set.region(), room }) {
+            let mut m = cmd::Msg::new();
+            r.line(&mut m);
+            (self.note, self.warn, self.bnote) = (m, true, false);
+            return 0;
         }
-        None => w.s(b"VFO"),
-    }
-    w.at(27);
-    let f = if l.scanning { l.freq } else { cx.app.tuned_freq(i) };
-    w.s(mhz5(f).as_bytes());
-    if !aprs {
-        w.at(39);
-        let mut v = Buf::<16>::new();
-        mode_chip(s.cfg(), &mut v);
-        w.s(v.as_bytes());
-        w.at(46);
-        v.clear();
-        tone_text(s.cfg().tx_tone, &mut v);
-        w.s(v.as_bytes());
-    }
-    w.at(57);
-    if cx.app.slot_off(i) {
-        w.s(b"off");
-    } else if l.squelch_open {
-        w.s(b"RX ");
-        w.s(w::s_text(l.rssi).as_bytes());
-    } else if l.scanning {
-        w.s(b"scanning");
-    } else {
-        w.s(b"idle");
-    }
-    if i == cx.app.active() {
-        w.at(68);
-        w.s(b"active");
-    }
-}
-
-/// The main page's status line: battery, GPS (with the power manager's state, GPS-26), Bluetooth, Battery Save.
-fn status<S: ChannelStore>(cx: &Cx<S>, w: &mut W) {
-    let d = cx.dev;
-    let mut v = Buf::<80>::new();
-    let gps = match d.gps {
-        GpsState::Off => "GPS off",
-        GpsState::Searching => "GPS searching",
-        GpsState::Fix => "GPS fix",
-    };
-    put!(v, "Battery {}.{} V   {}", d.battery_mv / 1000, d.battery_mv % 1000 / 100, gps);
-    match d.gps_phase {
-        GpsPhase::Standby(s) if d.gps != GpsState::Off => put!(v, ", standby {} s", s),
-        GpsPhase::Waking if d.gps != GpsState::Off => put!(v, ", waking"),
-        GpsPhase::Running | GpsPhase::Searching if d.gps != GpsState::Off => put!(v, ", awake"),
-        _ => {}
-    }
-    put!(v, "   Bluetooth {}   Battery Save ", if d.bt { "on" } else { "off" });
-    put!(v, "{}", cx.app.bsave);
-    w.s(v.as_bytes());
-}
-
-fn flags(c: &Channel, app: &App, w: &mut W) {
-    let mut first = true;
-    for (on, s) in [
-        (app.set.home_ch == Some(c.num), &b"home"[..]),
-        (c.flags & FLAG_SKIP != 0, b"skip"),
-        (c.flags & FLAG_APRS != 0, b"APRS"),
-        (c.flags & FLAG_RX_ONLY != 0, b"RX"),
-        (c.flags & FLAG_HIDDEN != 0, b"hidden"),
-        (c.flags & FLAG_PRIORITY != 0, b"prio"),
-    ] {
-        if on {
-            if !first {
-                w.s(b" ");
-            }
-            first = false;
-            w.s(s);
+        if home != app.set.home_ch {
+            app.set.home_ch = home;
+            return if home == Some(c.num) { 1 } else { 2 };
         }
+        if radio_channel(app) == Some(n.num) {
+            return 3;
+        }
+        if Some(n) == self.pg.edit {
+            return 5;
+        }
+        app.put_channel(n);
+        self.pg.edit = Some(n);
+        4
+    }
+
+    /// A new channel at the first free number, in `zone`, on the active slot's frequency (TERM-14), now the one
+    /// edited: its number, -1 with every number used, -2 when the slot's settings don't fit a channel (said).
+    #[inline(never)]
+    fn new_channel<S: ChannelStore>(&mut self, cx: &mut Cx<S>, zone: ZoneId) -> i32 {
+        let Some(num) = cx.store.free_num(0) else { return -1 };
+        let s = &cx.app.slots[cx.app.active as usize];
+        let rx = s.freq().clamp(mhz(64), mhz(1300)); // CHAN-22
+        let c = Channel { num, zone, rx, name: [0; 16], cfg: *s.cfg(), flags: 0, tones: 0 };
+        if let Err(r) = check_edit(&c) {
+            let mut m = cmd::Msg::new();
+            r.line(&mut m);
+            (self.note, self.warn, self.bnote) = (m, true, true);
+            return -2; // the slot's TX wouldn't fit a channel (CHAN-22, TX-37)
+        }
+        cx.app.put_channel(c);
+        self.pg.edit = Some(c);
+        num as i32
     }
 }

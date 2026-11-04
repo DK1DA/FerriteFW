@@ -48,7 +48,7 @@ impl Rig {
         for &b in bytes {
             let t = self.p.route(&self.app, port, b, self.now);
             to.push(t);
-            self.p.feed(&mut self.app, &self.st, t, b, self.now);
+            self.p.feed(&mut self.app, &self.st, &Default::default(), &Default::default(), t, b, self.now);
             while let Some(w) = self.app.pop_write() {
                 self.st.apply(w);
             }
@@ -650,7 +650,7 @@ fn a_waiting_frame_holds_its_port() {
     let n = wire::build(msg::INFO, 1, &[], &mut w).unwrap();
     for &b in [&[0u8][..], &w[..n]].concat().iter() {
         let t = r.p.route(&r.app, Port::Bt, b, r.now);
-        r.p.feed(&mut r.app, &r.st, t, b, r.now);
+        r.p.feed(&mut r.app, &r.st, &Default::default(), &Default::default(), t, b, r.now);
     }
     assert!(!r.p.ready_for(Port::Bt));
     assert!(r.p.ready_for(Port::Cable));

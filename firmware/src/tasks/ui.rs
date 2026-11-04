@@ -541,7 +541,7 @@ pub async fn task() {
                 let Some(b) = ring.get() else { break };
                 match ports.route(&app, port, b, now_ms()) {
                     ferrite_app::ports::To::Kiss => aprs.kiss_in(b), // KISS has this port (chapter 26)
-                    to => ports.feed(&mut app, store, to, b, now_ms()),
+                    to => ports.feed(&mut app, store, &dev, &live, to, b, now_ms()),
                 }
                 while let Some(w) = app.pop_write() {
                     store.apply(w);

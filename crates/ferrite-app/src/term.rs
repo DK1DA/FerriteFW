@@ -38,8 +38,6 @@ macro_rules! put {
 pub mod cmd;
 pub mod debug;
 #[cfg(feature = "vt100")]
-pub(crate) mod list;
-#[cfg(feature = "vt100")]
 mod pages;
 #[cfg(feature = "vt100")]
 mod tpl;
@@ -158,38 +156,11 @@ pub struct Term {
     /// The full-screen pages: a vt100 build with its template part there (TERM-47, UPD-21; decided at start);
     /// otherwise the plain command line.
     vt: bool,
-    #[cfg(feature = "vt100")]
-    help: bool,
     /// Ctrl-C: say goodbye on the next poll and wait for Enter again.
     bye: bool,
+    /// The pages' state (the template program's variables, marks, the channel edited).
     #[cfg(feature = "vt100")]
-    main_sel: u8,
-    /// Channel list: the filter (a zone, [`NO_ZONE`] or [`ALL`]), selection and first row shown.
-    #[cfg(feature = "vt100")]
-    zone: crate::chan::ZoneId,
-    #[cfg(feature = "vt100")]
-    chan_sel: u16,
-    #[cfg(feature = "vt100")]
-    chan_top: u16,
-    #[cfg(feature = "vt100")]
-    from_zones: bool,
-    #[cfg(feature = "vt100")]
-    zone_sel: u16,
-    /// Settings: group (0 = the list of groups), third-level list (0 = none), selection.
-    #[cfg(feature = "vt100")]
-    g: u8,
-    #[cfg(feature = "vt100")]
-    sub: u8,
-    #[cfg(feature = "vt100")]
-    set_sel: u8,
-    /// The channel being edited: the terminal's own copy, written through the App on every change.
-    #[cfg(feature = "vt100")]
-    edit: Option<crate::chan::Channel>,
-    #[cfg(feature = "vt100")]
-    field: u8,
-    /// A value being typed (the name, a frequency), when Some.
-    #[cfg(feature = "vt100")]
-    line: Option<Buf<24>>,
+    pg: tpl::Pages,
     /// The note under the page: what a change did or why it was refused.
     note: cmd::Msg,
     warn: bool,
@@ -227,32 +198,6 @@ pub struct Term {
     last: u32,
     /// The time of the last poll (ms): debug answers time out against it.
     now: u32,
-    /// The channel list's tools (TERM-14, `list`): the sort column (0: number order), marks (a bit per channel
-    /// number), a sorted page (channel numbers, its row count, whether it is current, the list's length when it
-    /// was filled), the selected row in it and its first channel, what is being asked, the last thing found,
-    /// and a change to several channels in progress.
-    #[cfg(feature = "vt100")]
-    sort: u8,
-    #[cfg(feature = "vt100")]
-    marks: [u8; list::MARK_BYTES],
-    #[cfg(feature = "vt100")]
-    vis: [u16; list::VIS],
-    #[cfg(feature = "vt100")]
-    vis_n: u8,
-    #[cfg(feature = "vt100")]
-    vis_ok: bool,
-    #[cfg(feature = "vt100")]
-    vis_len: u16,
-    #[cfg(feature = "vt100")]
-    srow: u8,
-    #[cfg(feature = "vt100")]
-    first: u16,
-    #[cfg(feature = "vt100")]
-    ask: list::Ask,
-    #[cfg(feature = "vt100")]
-    find: Buf<16>,
-    #[cfg(feature = "vt100")]
-    bulk: Option<list::Bulk>,
     /// Bluetooth (TERM-25): auto start only (the cable port setting is the cable's). While the radio's PIN lock is
     /// on, a Bluetooth terminal asks for the PIN first and does nothing else until it's right (LINK-30, LINK-31):
     /// whether it's needed, given, and the digits typed so far.
@@ -274,33 +219,9 @@ impl Term {
         Term {
             page: Page::Off,
             vt: false,
-            #[cfg(feature = "vt100")]
-            help: false,
             bye: false,
             #[cfg(feature = "vt100")]
-            main_sel: 0,
-            #[cfg(feature = "vt100")]
-            zone: ALL,
-            #[cfg(feature = "vt100")]
-            chan_sel: 0,
-            #[cfg(feature = "vt100")]
-            chan_top: 0,
-            #[cfg(feature = "vt100")]
-            from_zones: false,
-            #[cfg(feature = "vt100")]
-            zone_sel: 0,
-            #[cfg(feature = "vt100")]
-            g: 0,
-            #[cfg(feature = "vt100")]
-            sub: 0,
-            #[cfg(feature = "vt100")]
-            set_sel: 0,
-            #[cfg(feature = "vt100")]
-            edit: None,
-            #[cfg(feature = "vt100")]
-            field: 0,
-            #[cfg(feature = "vt100")]
-            line: None,
+            pg: tpl::Pages::new(),
             note: Buf::new(),
             warn: false,
             bnote: false,
@@ -328,37 +249,16 @@ impl Term {
             #[cfg(feature = "vt100")]
             last: 0,
             now: 0,
-            #[cfg(feature = "vt100")]
-            sort: 0,
-            #[cfg(feature = "vt100")]
-            marks: [0; list::MARK_BYTES],
-            #[cfg(feature = "vt100")]
-            vis: [0; list::VIS],
-            #[cfg(feature = "vt100")]
-            vis_n: 0,
-            #[cfg(feature = "vt100")]
-            vis_ok: false,
-            #[cfg(feature = "vt100")]
-            vis_len: 0,
-            #[cfg(feature = "vt100")]
-            srow: 0,
-            #[cfg(feature = "vt100")]
-            first: list::START,
-            #[cfg(feature = "vt100")]
-            ask: list::Ask::None,
             bt: false,
             pin_need: false,
             pin_ok: false,
             pin: [0; 6],
             pin_n: 0,
-            #[cfg(feature = "vt100")]
-            find: Buf::new(),
-            #[cfg(feature = "vt100")]
-            bulk: None,
         }
     }
 
     /// What it shows now ([`Page::Off`] until it has been started).
+    #[cfg(not(feature = "vt100"))]
     pub fn page(&self) -> Page {
         self.page
     }
@@ -452,10 +352,8 @@ impl Term {
     }
 
     /// Several channels changing (TERM-14): the poll has more to do.
+    #[cfg(not(feature = "vt100"))]
     fn bulk_on(&self) -> bool {
-        #[cfg(feature = "vt100")]
-        return self.bulk.is_some();
-        #[cfg(not(feature = "vt100"))]
         false
     }
 
@@ -494,7 +392,7 @@ impl Term {
 
     /// One byte from the cable, `now` in ms. Call the App's `pop_write` after each byte: a channel edit writes
     /// one channel per key.
-    pub fn feed<S: ChannelStore>(&mut self, app: &mut App, b: u8, now: u32, store: &S) {
+    pub fn feed<S: ChannelStore>(&mut self, app: &mut App, b: u8, now: u32, store: &S, dev: &Device, live: &LiveAll) {
         if self.page == Page::Off {
             // TERM-2: auto starts on a typed Enter; terminal on any byte; link and KISS never. COBS link frames
             // (the 0x00 delimiter) select the link protocol in milestone 3.
@@ -530,8 +428,8 @@ impl Term {
             (Seq::Started, _) => {
                 // ESC then something else: the Esc key, then that byte.
                 self.esc = Seq::None;
-                self.key(app, K::Esc, store);
-                return self.feed(app, b, now, store);
+                self.key(app, K::Esc, store, dev, live);
+                return self.feed(app, b, now, store, dev, live);
             }
             (Seq::Csi, b'0'..=b'9') => {
                 let i = (self.nn as usize).min(1);
@@ -592,7 +490,7 @@ impl Term {
             (Seq::None, 0x20..=0x7E) => K::Ch(b),
             _ => return,
         };
-        self.key(app, k, store);
+        self.key(app, k, store, dev, live);
     }
 
     /// A byte of a load (TERM-13): lines, not keys. Ctrl-C stops, Ctrl-D or a line `end` finishes.
@@ -660,7 +558,7 @@ impl Term {
         }
     }
 
-    fn key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S) {
+    fn key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S, dev: &Device, live: &LiveAll) {
         self.all_dirty();
         if self.con != Con::Off {
             return self.con_key(k);
@@ -679,9 +577,9 @@ impl Term {
         }
         if self.vt {
             #[cfg(feature = "vt100")]
-            self.page_key(app, k, store);
+            self.page_key(app, k, store, dev, live);
         } else {
-            let _ = (app, store);
+            let _ = (app, store, dev, live);
             self.line_key(k);
         }
     }
@@ -710,7 +608,7 @@ impl Term {
         self.now = now;
         if self.esc == Seq::Started && now.wrapping_sub(self.esc_at) >= ESC_MS {
             self.esc = Seq::None;
-            self.key(app, K::Esc, store);
+            self.key(app, K::Esc, store, dev, live);
         }
         if self.page == Page::Off {
             return;
@@ -739,7 +637,7 @@ impl Term {
             self.ask_size = false;
         }
         #[cfg(feature = "vt100")]
-        if self.vt && !self.page_poll(app, store, out) {
+        if self.vt && !self.page_poll(app, store, dev, live, out) {
             return;
         }
         // A whole line: run it once the store has taken the last one's writes (TERM-13 never drops a line).
@@ -901,16 +799,6 @@ impl Term {
 /// power).
 fn blocked(p: &[u8]) -> bool {
     matches!(p, [9, 3] | [9, 3, 1] | [8, 8, 4] | [8, 8, 5] | [9, 4])
-}
-
-/// The `i`-th piece of `t` cut at each `sep` (a page's hints and help lines).
-#[inline(never)]
-#[cfg(feature = "vt100")]
-fn piece(mut t: &[u8], sep: u8, i: usize) -> Option<&[u8]> {
-    for _ in 0..i {
-        t = &t[t.iter().position(|&c| c == sep)? + 1..];
-    }
-    Some(&t[..t.iter().position(|&c| c == sep).unwrap_or(t.len())])
 }
 
 /// "0.1.0" from "v0.1.0".

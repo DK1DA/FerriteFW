@@ -196,7 +196,7 @@ impl<S: ChannelStore + Apply> Rig<S> {
             while !self.term.ready() {
                 self.poll();
             }
-            self.term.feed(&mut self.app, c, self.now, &self.store);
+            self.term.feed(&mut self.app, c, self.now, &self.store, &self.dev, &self.live);
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);
             }
@@ -220,6 +220,12 @@ impl<S: ChannelStore + Apply> Rig<S> {
         self.send(b"\r");
         self.poll();
         self.poll();
+    }
+
+    /// <- -> (or Enter) on the settings item the term has selected, through the program (TERM-7).
+    fn settings_change(&mut self, d: i32) {
+        self.term.go(Page::Settings);
+        let _ = self.term.call(tpl::W_SETTINGS_SCHANGE, d, &mut self.app, &self.store, &self.dev, &self.live);
     }
 
     fn bottom(&self) -> String {
@@ -396,9 +402,9 @@ fn channels_list_and_edit() {
     assert!(r.vt.has(&name), "{}", r.vt.text());
     // PgDn moves a page; Home comes back.
     r.send(b"\x1b[6~");
-    assert!(r.term.chan_sel > 0);
+    assert!(r.term.chan_sel() > 0);
     r.send(b"\x1b[H");
-    assert_eq!(r.term.chan_sel, 0);
+    assert_eq!(r.term.chan_sel(), 0);
     // Edit the first channel: power up one step.
     r.send(b"\r");
     assert_eq!(r.term.page(), Page::Edit);
@@ -406,7 +412,7 @@ fn channels_list_and_edit() {
     for _ in 0..8 {
         r.send(b"\x1b[B"); // down to Power (past Offset and TX)
     }
-    assert_eq!(FIELDS[r.term.field as usize], F::It(Item::Power));
+    assert_eq!(FIELDS[r.term.field() as usize], F::It(Item::Power));
     r.send(b"\x1b[C");
     let after = r.store.by_num(first.num).unwrap().0;
     assert_eq!(after.cfg.power, (first.cfg.power + 1) % 3, "saved in the store");
@@ -418,7 +424,7 @@ fn channels_list_and_edit() {
 fn typed_values() {
     let mut r = Rig::main();
     r.send(b"1\r");
-    let num = r.term.edit.unwrap().num;
+    let num = r.term.edit().unwrap().num;
     // Name: field 0.
     r.send(b"\r");
     for _ in 0..20 {
@@ -456,7 +462,7 @@ fn the_radio_follows_an_edit() {
     for _ in 0..9 {
         r.send(b"\x1b[B"); // Squelch
     }
-    assert_eq!(FIELDS[r.term.field as usize], F::It(Item::Squelch));
+    assert_eq!(FIELDS[r.term.field() as usize], F::It(Item::Squelch));
     r.send(b"\x1b[C");
     let next = if first.cfg.squelch >= 9 { crate::slot::SQ_GLOBAL } else { first.cfg.squelch + 1 }; // 9, then Global
     assert_eq!(r.app.slot(0).cfg().squelch, next, "the slot's copy follows");
@@ -473,7 +479,7 @@ fn zones() {
     assert!(r.vt.has(core::str::from_utf8(z0.as_bytes()).unwrap()));
     r.send(b"\x1b[B\r");
     assert_eq!(r.term.page(), Page::Channels);
-    assert_eq!(r.term.zone, 0);
+    assert_eq!(r.term.zone(), 0);
     r.send(b"\x1b");
     r.now += 100;
     r.poll();
@@ -1135,7 +1141,7 @@ fn editor_split() {
     }
     // Simplex -> Split is one step left (the 4th choice wraps).
     r.send(b"\x1b[D");
-    assert_eq!(FIELDS[r.term.field as usize], F::Tx, "typing the TX now");
+    assert_eq!(FIELDS[r.term.field() as usize], F::Tx, "typing the TX now");
     r.send(b"144.39\r");
     r.poll();
     let c = r.store.by_num(first.num).unwrap().0;
@@ -1194,8 +1200,8 @@ fn editor_shared_rules() {
     let mut r = Rig::main();
     r.cmd("ch 340 \"Ed\" 146.52 squelch=7");
     let open = |r: &mut Rig<Sample>, f: F| {
-        r.term.edit = r.store.get(339);
-        r.term.field = FIELDS.iter().position(|x| *x == f).unwrap() as u8;
+        r.term.set_edit(r.store.get(339));
+        r.term.set_field(FIELDS.iter().position(|x| *x == f).unwrap() as u8);
         r.term.go(Page::Edit);
         r.poll();
     };
@@ -1209,7 +1215,7 @@ fn editor_shared_rules() {
     assert_eq!(r.store.get(339).unwrap().flags & (FLAG_SKIP | FLAG_PRIORITY), FLAG_PRIORITY);
     open(&mut r, F::It(Item::Offset));
     r.send(b"\x1b[D");
-    assert_eq!(FIELDS[r.term.field as usize], F::Tx, "typing the TX now");
+    assert_eq!(FIELDS[r.term.field() as usize], F::Tx, "typing the TX now");
     r.send(b"\x1b");
     let c = r.store.get(339).unwrap();
     assert!(c.cfg.split && c.cfg.offset == c.rx as i32, "split on today's TX: {:?}", c.cfg);
@@ -2187,12 +2193,12 @@ impl Rig<Sample> {
     /// Polls until a change to several channels is done.
     fn settle(&mut self) {
         for _ in 0..200 {
-            if self.term.bulk.is_none() {
+            if !self.term.bulk_on() {
                 break;
             }
             self.poll();
         }
-        assert!(self.term.bulk.is_none(), "the change finished");
+        assert!(!self.term.bulk_on(), "the change finished");
         self.poll();
     }
 
@@ -2339,7 +2345,7 @@ fn list_new_channel() {
     r.send(b"n");
     assert_eq!(r.term.page(), Page::Edit);
     assert_eq!(r.store.count(), n + 1);
-    assert_eq!(r.term.edit.unwrap().num, free);
+    assert_eq!(r.term.edit().unwrap().num, free);
     assert!(r.bottom().contains("New channel") || r.vt.has("New channel"), "{}", r.vt.text());
 }
 

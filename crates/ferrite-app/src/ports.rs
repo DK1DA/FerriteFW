@@ -223,9 +223,9 @@ impl Ports {
 
     /// A routed byte to the terminal or a link session (call the App's `pop_write` after each: a channel edit
     /// writes one channel per key).
-    pub fn feed<S: ChannelStore>(&mut self, app: &mut App, store: &S, to: To, b: u8, now: u32) {
+    pub fn feed<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, to: To, b: u8, now: u32) {
         match to {
-            To::Term => self.term.feed(app, b, now, store),
+            To::Term => self.term.feed(app, b, now, store, dev, live),
             To::Link(p) if self.z.owner == Some(p.i()) => {
                 let s = &mut self.links[p.i()];
                 self.z.take(b, &mut |c| s.feed(c, now)); // LINK-51: decoded, then the session's as ever

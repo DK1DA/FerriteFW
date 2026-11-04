@@ -838,7 +838,7 @@ impl SimCore {
                     match self.ports.route(&self.app, port, b, self.now) {
                         To::Kiss if self.kiss_in.len() < 4096 => self.kiss_in.push(b),
                         To::Kiss => {}
-                        to => self.ports.feed(&mut self.app, &*self.store, to, b, self.now),
+                        to => self.ports.feed(&mut self.app, &*self.store, &self.dev, &self.radio.live, to, b, self.now),
                     }
                     while let Some(w) = self.app.pop_write() {
                         self.store.apply(w); // one channel write per key

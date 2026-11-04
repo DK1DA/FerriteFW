@@ -125,7 +125,7 @@ fn dump_load_through_the_terminal_into_flash() {
         while !term.ready() {
             poll(&mut b, &mut term, &s, &mut out, &mut now);
         }
-        term.feed(&mut b, c, now, &s);
+        term.feed(&mut b, c, now, &s, &Default::default(), &Default::default());
         while let Some(w) = b.pop_write() {
             assert!(s.apply(w));
         }
@@ -170,7 +170,7 @@ fn sat_paste_through_the_terminal() {
         while !term.ready() {
             poll(&mut b, &mut term, &s, &mut out, &mut now);
         }
-        term.feed(&mut b, c, now, &s);
+        term.feed(&mut b, c, now, &s, &Default::default(), &Default::default());
         poll(&mut b, &mut term, &s, &mut out, &mut now);
     }
     for _ in 0..20 {

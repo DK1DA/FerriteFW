@@ -9,26 +9,26 @@ use super::*;
 fn escape_sequences() {
     let mut r = Rig::main();
     r.send(b"\x1b[A"); // up from the first wraps to the last
-    assert_eq!(r.term.main_sel as usize, MAIN.len() - 1);
+    assert_eq!(r.term.main_sel() as usize, MAIN.len() - 1);
     r.send(b"\x1bOB"); // SS3 down wraps back
-    assert_eq!(r.term.main_sel, 0);
+    assert_eq!(r.term.main_sel(), 0);
     r.send(b"\x1bOA");
-    assert_eq!(r.term.main_sel as usize, MAIN.len() - 1);
+    assert_eq!(r.term.main_sel() as usize, MAIN.len() - 1);
     r.send(b"\x1b[B");
-    assert_eq!(r.term.main_sel, 0);
+    assert_eq!(r.term.main_sel(), 0);
     // PF1 (both forms) opens help, Esc or PF1 closes it
     r.send(b"\x1bOP");
-    assert!(r.term.help);
+    assert!(r.term.help());
     r.send(b"\x1bOP");
-    assert!(!r.term.help);
+    assert!(!r.term.help());
     r.send(b"\x1b[11~");
-    assert!(r.term.help);
+    assert!(r.term.help());
     r.send(b"\r");
-    assert!(!r.term.help);
+    assert!(!r.term.help());
     // unknown finals and numbers are dropped
     r.send(b"\x1b[9~\x1b[Z\x1bOZ");
     assert_eq!(r.term.page(), Page::Main);
-    assert_eq!(r.term.main_sel, 0);
+    assert_eq!(r.term.main_sel(), 0);
     // SS3 Enter opens the selection
     r.send(b"\x1bOM");
     assert_eq!(r.term.page(), Page::Channels);
@@ -52,31 +52,31 @@ fn channel_list_keys() {
     let n = list_len(ALL, &r.store);
     let pg = r.term.page_rows();
     r.send(b"\x1b[F");
-    assert_eq!(r.term.chan_sel, n - 1);
+    assert_eq!(r.term.chan_sel(), n - 1);
     r.send(b"\x1b[H");
-    assert_eq!(r.term.chan_sel, 0);
+    assert_eq!(r.term.chan_sel(), 0);
     r.send(b"\x1b[4~");
-    assert_eq!(r.term.chan_sel, n - 1);
+    assert_eq!(r.term.chan_sel(), n - 1);
     r.send(b"\x1b[1~");
-    assert_eq!(r.term.chan_sel, 0);
+    assert_eq!(r.term.chan_sel(), 0);
     r.send(b"\x1bOF");
-    assert_eq!(r.term.chan_sel, n - 1);
+    assert_eq!(r.term.chan_sel(), n - 1);
     r.send(b"\x1bOH");
-    assert_eq!(r.term.chan_sel, 0);
+    assert_eq!(r.term.chan_sel(), 0);
     r.send(b"\x1b[6~");
-    assert_eq!(r.term.chan_sel, pg.min(n - 1));
+    assert_eq!(r.term.chan_sel(), pg.min(n - 1));
     r.send(b"\x1b[5~");
-    assert_eq!(r.term.chan_sel, 0);
+    assert_eq!(r.term.chan_sel(), 0);
     r.send(b"\x1b[B\x1b[B");
-    assert_eq!(r.term.chan_sel, 2);
+    assert_eq!(r.term.chan_sel(), 2);
     r.send(b"\x1b[A");
-    assert_eq!(r.term.chan_sel, 1);
+    assert_eq!(r.term.chan_sel(), 1);
     // z: zone 0, 1, ... the last, no zone, every channel
     let z = r.store.zones();
     let mut seen = Vec::new();
     for _ in 0..z + 2 {
         r.send(b"z");
-        seen.push(r.term.zone);
+        seen.push(r.term.zone());
     }
     assert_eq!(seen[0], 0);
     assert_eq!(seen[z as usize - 1], z - 1);
@@ -96,9 +96,9 @@ fn channel_list_without_zones() {
     r.send(b"1");
     assert!(r.vt.has("No channels here."), "{}", r.vt.text());
     r.send(b"z");
-    assert_eq!(r.term.zone, NO_ZONE);
+    assert_eq!(r.term.zone(), NO_ZONE);
     r.send(b"z");
-    assert_eq!(r.term.zone, ALL);
+    assert_eq!(r.term.zone(), ALL);
 }
 
 /// TERM-14: the zones page: arrows wrap, Home and End, Enter opens that zone's channels, Esc from them comes back
@@ -110,16 +110,16 @@ fn zones_page_keys() {
     assert_eq!(r.term.page(), Page::Zones);
     let n = r.store.zones() + 2;
     r.send(b"\x1b[A");
-    assert_eq!(r.term.zone_sel, n - 1);
+    assert_eq!(r.term.zone_sel(), n - 1);
     r.send(b"\x1b[B");
-    assert_eq!(r.term.zone_sel, 0);
+    assert_eq!(r.term.zone_sel(), 0);
     r.send(b"\x1b[F");
-    assert_eq!(r.term.zone_sel, n - 1);
+    assert_eq!(r.term.zone_sel(), n - 1);
     r.send(b"\x1b[H");
-    assert_eq!(r.term.zone_sel, 0);
+    assert_eq!(r.term.zone_sel(), 0);
     r.send(b"\x1b[B\r"); // the first zone (every channel is the row above it)
     assert_eq!(r.term.page(), Page::Channels);
-    assert_eq!(r.term.zone, 0);
+    assert_eq!(r.term.zone(), 0);
     r.send(b"\x1b");
     r.now += 100;
     r.poll();
@@ -139,22 +139,22 @@ fn editor_fields_and_notes() {
     assert_eq!(r.term.page(), Page::Edit);
     let n = FIELDS.len() as u8;
     r.send(b"\x1b[A");
-    assert_eq!(r.term.field, n - 1);
+    assert_eq!(r.term.field(), n - 1);
     r.send(b"\x1b[B");
-    assert_eq!(r.term.field, 0);
+    assert_eq!(r.term.field(), 0);
     r.send(b"\x1b[F");
-    assert_eq!(r.term.field, n - 1);
+    assert_eq!(r.term.field(), n - 1);
     r.send(b"\x1b[H");
-    assert_eq!(r.term.field, 0);
+    assert_eq!(r.term.field(), 0);
     let at = |f: F| FIELDS.iter().position(|x| *x == f).unwrap() as u8;
-    r.term.field = at(F::Name);
+    r.term.set_field(at(F::Name));
     r.send(b"\x1b[C");
     assert_eq!(r.term.note.as_bytes(), b"Enter types the name (16 characters)");
-    r.term.field = at(F::Tx);
+    r.term.set_field(at(F::Tx));
     r.send(b"\x1b[C");
     assert_eq!(r.term.note.as_bytes(), b"TX: Enter types a TX frequency (split)");
     if let Some(h) = FIELDS.iter().position(|x| *x == F::Home) {
-        r.term.field = h as u8;
+        r.term.set_field(h as u8);
         r.send(b"\r");
         assert_eq!(r.term.note.as_bytes(), b"Home channel: hold 0 on home jumps here");
         r.send(b"\x1b");
@@ -162,7 +162,7 @@ fn editor_fields_and_notes() {
         r.poll();
         assert!(r.vt.has("\u{b7} home channel") || r.raw().contains("home channel"), "the list's foot says so: {}", r.vt.text());
         r.send(b"\r");
-        r.term.field = h as u8;
+        r.term.set_field(h as u8);
         r.send(b"\r");
         assert_eq!(r.term.note.as_bytes(), b"No longer the home channel");
     }
@@ -176,18 +176,18 @@ fn settings_page_keys() {
     r.send(b"3");
     assert_eq!(r.term.page(), Page::Settings);
     r.send(b"\x1b[F");
-    assert_eq!(r.term.set_sel as usize, GROUPS.len() - 1);
+    assert_eq!(r.term.set_sel() as usize, GROUPS.len() - 1);
     r.send(b"\x1b[H");
-    assert_eq!(r.term.set_sel, 0);
+    assert_eq!(r.term.set_sel(), 0);
     r.send(b"7"); // Display, sound, power
-    assert_eq!((r.term.g, r.term.set_sel), (7, 0));
+    assert_eq!((r.term.g(), r.term.set_sel()), (7, 0));
     r.send(b"\x1b[F");
-    let last = r.term.set_sel;
+    let last = r.term.set_sel();
     assert!(last > 0);
     r.send(b"\x1b");
     r.now += 100;
     r.poll();
-    assert_eq!((r.term.g, r.term.set_sel), (0, 6), "up to the groups, on the one it was in");
+    assert_eq!((r.term.g(), r.term.set_sel()), (0, 6), "up to the groups, on the one it was in");
     r.send(b"\x1b");
     r.now += 100;
     r.poll();
@@ -210,9 +210,9 @@ fn settings_rows_answer() {
                 if subs.is_some() && k == 0 {
                     continue;
                 }
-                (r.term.g, r.term.sub, r.term.set_sel) = (g, if k == 0 { 0 } else { i }, if k == 0 { i - 1 } else { k - 1 });
+                r.term.set_settings(g, if k == 0 { 0 } else { i }, if k == 0 { i - 1 } else { k - 1 });
                 r.term.note.clear();
-                r.term.settings_change(&mut r.app, 1);
+                r.settings_change(1);
                 let note = String::from_utf8_lossy(r.term.note.as_bytes()).into_owned();
                 assert!(!note.is_empty(), "0 {g} {i} {k}: no answer");
                 seen.insert(note);
@@ -230,15 +230,15 @@ fn settings_rows_answer() {
     r.send(b"3");
     r.app.open(crate::screens::nav::Dest::Group(7));
     let crate::Screen::Group(gr) = r.app.screen() else { panic!("not a group") };
-    (r.term.g, r.term.sub, r.term.set_sel) = (7, 0, gr.row);
-    r.term.settings_change(&mut r.app, 1);
+    r.term.set_settings(7, 0, gr.row);
+    r.settings_change(1);
     assert_eq!(r.term.note.as_bytes(), b"Open on the radio's menu: change it there");
     // a greyed row says why (WX-3: SAME outside the US and Canada)
     r.app.go_home();
     r.app.set.region = 5;
     if groups::greyed(&r.app, &[4, 5, 1]).is_some() {
-        (r.term.g, r.term.sub, r.term.set_sel) = (4, 5, 0);
-        r.term.settings_change(&mut r.app, 1);
+        r.term.set_settings(4, 5, 0);
+        r.settings_change(1);
         assert_eq!(r.term.note.as_bytes(), b"US/Canada only");
     }
 }
@@ -250,15 +250,15 @@ fn settings_enter_and_up_from_a_list() {
     r.send(b"3");
     let (g, i) = crate::screens::groups::SUBS[0].0;
     r.send(&[b'0' + g]);
-    r.term.set_sel = i - 1;
+    r.term.set_settings(r.term.g(), r.term.sub(), i - 1);
     r.send(b"\r");
-    assert_eq!((r.term.g, r.term.sub), (g, i), "into the list");
+    assert_eq!((r.term.g(), r.term.sub()), (g, i), "into the list");
     r.send(b"\r");
     assert!(!r.term.note.is_empty(), "Enter on a row answers as ▶ does");
     r.send(b"\x1b");
     r.now += 100;
     r.poll();
-    assert_eq!((r.term.g, r.term.sub, r.term.set_sel), (g, 0, i - 1), "back on its row");
+    assert_eq!((r.term.g(), r.term.sub(), r.term.set_sel()), (g, 0, i - 1), "back on its row");
 }
 
 /// TERM-12: the command line: Backspace takes a character back; Up on an empty line brings the last command back;
@@ -299,7 +299,7 @@ fn help_per_page() {
         r.send(b"\x1b");
         r.now += 100;
         r.poll();
-        assert!(!r.term.help);
+        assert!(!r.term.help());
     }
     let mut r = Rig::main();
     r.send(b"1\r?");
@@ -375,7 +375,7 @@ fn pin_prompt() {
 fn editor_foot_says_where_tx_goes() {
     let mut r = Rig::main();
     let (c, _) = r.store.by_num(9).unwrap(); // North hill: -600 kHz
-    r.term.edit = Some(c);
+    r.term.set_edit(Some(c));
     r.term.go(Page::Edit);
     r.term.redraw();
     r.poll();
@@ -384,13 +384,13 @@ fn editor_foot_says_where_tx_goes() {
     let mut s = c;
     s.cfg.split = true;
     s.cfg.offset = 14_600_000;
-    r.term.edit = Some(s);
+    r.term.set_edit(Some(s));
     r.term.redraw();
     r.poll();
     assert!(r.vt.has("Split: TX 146.00000 MHz, whatever RX is."), "{}", r.vt.text());
     let mut x = c;
     x.cfg.offset = 0;
-    r.term.edit = Some(x);
+    r.term.set_edit(Some(x));
     r.term.redraw();
     r.poll();
     assert!(r.vt.has("Simplex. Saved as you go."), "{}", r.vt.text());
@@ -469,10 +469,11 @@ fn cable_port_names() {
 /// INBOX-6.1: an age the radio doesn't know is "earlier"; seconds, minutes and hours otherwise.
 #[test]
 fn ages() {
+    let mut r = Rig::main();
+    r.term.go(Page::Monitor);
     for (s, want) in [(crate::data::AGO_UNKNOWN, "earlier"), (12, "12 s ago"), (125, "2 min ago"), (7300, "2 h ago")] {
-        let mut b = Buf::<16>::new();
-        ago(s, &mut b);
-        assert_eq!(b.as_bytes(), want.as_bytes());
+        let b = r.term.call(tpl::W_MONITOR_AGO, s as i32, &mut r.app, &r.store, &r.dev, &r.live);
+        assert_eq!(b, want.as_bytes());
     }
 }
 

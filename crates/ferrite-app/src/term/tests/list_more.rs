@@ -15,20 +15,20 @@ fn sort_orders_by_each_column() {
     let mut b = ch(2, mhz(145));
     a.set_name(b"beta");
     b.set_name(b"Alpha");
-    assert_eq!(list::order(1, &a, &b), Ordering::Greater, "name, any case");
-    assert_eq!(list::order(2, &a, &b), Ordering::Greater, "RX");
+    assert_eq!(tpl::order(1, &a, &b), Ordering::Greater, "name, any case");
+    assert_eq!(tpl::order(2, &a, &b), Ordering::Greater, "RX");
     b.cfg.offset = 2_000_000;
-    assert_eq!(list::order(3, &a, &b), Ordering::Less, "TX: b's is 147");
+    assert_eq!(tpl::order(3, &a, &b), Ordering::Less, "TX: b's is 147");
     b.cfg.mode = 2;
-    assert_eq!(list::order(4, &a, &b), Ordering::Less, "mode");
+    assert_eq!(tpl::order(4, &a, &b), Ordering::Less, "mode");
     a.cfg.tx_tone = 1000;
-    assert_eq!(list::order(5, &a, &b), Ordering::Greater, "tone");
+    assert_eq!(tpl::order(5, &a, &b), Ordering::Greater, "tone");
     b.cfg.power = 2;
-    assert_eq!(list::order(6, &a, &b), Ordering::Less, "power");
+    assert_eq!(tpl::order(6, &a, &b), Ordering::Less, "power");
     a.flags = crate::chan::FLAG_SKIP;
-    assert_eq!(list::order(7, &a, &b), Ordering::Greater, "flags");
-    assert_eq!(list::order(99, &a, &b), Ordering::Less, "no column: the number");
-    assert_eq!(list::order(2, &a, &a), Ordering::Equal);
+    assert_eq!(tpl::order(7, &a, &b), Ordering::Greater, "flags");
+    assert_eq!(tpl::order(99, &a, &b), Ordering::Less, "no column: the number");
+    assert_eq!(tpl::order(2, &a, &a), Ordering::Equal);
 }
 
 /// TERM-14: in a sorted list longer than a page, the arrows go through every channel in order and the page
@@ -166,13 +166,13 @@ fn esc_stops_a_bulk_change() {
     let mut r = Rig::list();
     let before = r.nums().len();
     r.send(b"ad");
-    r.term.feed(&mut r.app, b'y', r.now, &r.store);
-    assert!(r.term.bulk.is_some());
+    r.term.feed(&mut r.app, b'y', r.now, &r.store, &r.dev, &r.live);
+    assert!(r.term.bulk_on());
     r.poll(); // one write
-    r.term.feed(&mut r.app, 0x1b, r.now, &r.store);
+    r.term.feed(&mut r.app, 0x1b, r.now, &r.store, &r.dev, &r.live);
     r.now += 1000;
     r.poll(); // the lone ESC is Esc
-    assert!(r.term.bulk.is_none());
+    assert!(!r.term.bulk_on());
     assert!(r.bottom().contains("Stopped: what was done stays done"), "{}", r.bottom());
     let after = r.nums().len();
     assert!(after < before && after > 0, "{before} -> {after}");
@@ -200,7 +200,7 @@ fn a_full_radio() {
     for _ in 0..5 {
         r.poll();
     }
-    assert!(r.term.bulk.is_none());
+    assert!(!r.term.bulk_on());
     assert!(r.bottom().contains("No free numbers left: copied 0 of 1"), "{}", r.bottom());
 }
 

@@ -1,163 +1,484 @@
-# The terminal's full-screen pages (TERM-11, TERM-16; decision 342): static text, field positions and sources,
-# repeating list rows, and each page's keys. `build.rs` compiles this into the template pack (the byte format in
-# `term/tpl.rs`), which `term::tpl` draws with VT100 codes. The pack sits in MCU flash for now, in the form the
-# SPI flash would hold it.
+# The terminal's full-screen pages (TERM-11 to TERM-20, TERM-47; decision 346): a small stack language that
+# `build.rs` compiles into the template pack, the program `term::tpl` runs from the SPI part. Everything a page
+# shows and does is here: the text, layout, list rows, hints, help, what each key does, the channel list's tools.
+# The firmware keeps the interpreter and the natives listed below (a value, a channel's field, a setting by its
+# menu number, the radio's formatters, a write through the App). The byte format is described in `term/tpl.rs`.
 #
-# A line is a statement; `;` separates ops. Strings are "..." with \" \\ \n \xNN. Names after `src`, `if`,
-# `list`, `pickn`, `ctx` and the key actions are the firmware's (the lists below give their numbers, in order).
+# Words run left to right on a stack of 32-bit numbers. A string "..." prints itself (\" \\ \n \xNN; columns
+# counted, clipped at the row's width); `raw "..."` sends an escape sequence; `bold "..."` prints in bold;
+# `pick "a|b|c"` prints piece i (i on the stack). `@x` pushes variable x, `!x` stores into it: `vars` keep their
+# values (16 bits: a zone is -3 for every channel, -1 for none), `locals` last one run. `: name ... ;` defines a
+# word (in the lib before the first page, else in that page; `( ... )` is a comment). `if ... else ... then`,
+# `begin ... while ... repeat`, `begin ... until`, `exit`. Numbers (16-bit literals): 12, -1, 0x1F, 'c'; `const`
+# names one. `.` prints a number, `.r` / `.z` (n width) padded with spaces / zeros; `at` (col) moves right with
+# spaces. `\` alone starts a comment; a line starting with # is one.
 #
-# Rules (the first that matches a body row draws it; body row 0 is the line under the top line):
-#   row N         that row
-#   bot K         K rows above the hints line's row (body - K, body = rows - 2)
-#   list N COUNT  rows N.. for COUNT's count (i is the row in the list)
-#   tail K        K rows after the last list's end
-# Ops: s "text", bold "text", at COL, src NAME, bon, won, back (bold, warning, attributes back), sel, selfill
-# (reverse, or fill to the end, on the selected list row), fill, plain, digit (i + 1), pick "a|b" (i's piece),
-# pickn NAME "a|b" (NAME's piece), ctx NAME (the row's channel), if NAME / ifnot NAME / ifi N, else, fi, ret.
-# Keys: key KEY ACTION [ARG]; KEY up down left right pgup pgdn home end enter esc digit, or "c" (letters any case).
+# A page: `hints "Key=What|..."`, `help "line\nline"`, rules for its body rows (body row 0 is the line under
+# the top line; the first rule that takes a row draws it, run with `@i` the row in a list):
+#   row N CODE         that row
+#   bot K CODE         K rows above the hints line's row (body - K, body = rows - 2)
+#   list N COUNT CODE  rows N.. for COUNT's count
+#   tail K CODE        K rows after the last list's end
+#   pre CODE           runs before the rules (exit: a blank row)
+# and its keys: `key KEY CODE` (KEY up down left right pgup pgdn home end enter esc line lesc digit, or "c";
+# letters come lower case; a digit's CODE gets the key on the stack), `key pre CODE` first (the key on the stack),
+# `key else CODE` for any other. `: prep ... ;` runs before each redraw, `: poll ... ;` each poll while @busy
+# isn't 0. A page is read from the SPI flash with the lib (the two at most tpl::PACK_MAX bytes); a key or a poll
+# that sets `!chain` to another page runs that page's key or poll next (the channel list's tools are one).
+# The pages' order is term::Page's (a page only chained to comes after them).
 
-srcs version callsign count zones region cal slot status zone_name list_len marks_n ch_num ch_name ch_rx ch_offset ch_mode ch_tone ch_power ch_flags ask_text line ch_n1 ch_zone field_label field_value split_tx off_tx note zrow_name zrow_len group_name group_desc set_g group_name_g set_sub sub_name item_name item_value item_sel_name item_sel_help path_sel monitor
-conds marks ch list_empty asking typing ch_home sel note split offset item_sub has_item sub ssb txbuilt
-counts main slots page_rows fields zones groups items all
-pickns sort field_hint
-ctxs row selected edit
-acts prev next first last open back go digitopen left right default chnav zonenext cmd
-pages splash main channels edit zones settings_top settings_items monitor mail tnc about
+vars page help busy chain msel zone csel ctop fromz zsel g sub ssel field sort visn visok vislen srow first ask bop barg bsingle bat bphase bdone btotal bfree
 
-string keys_type "Enter=Save|Backspace=Delete|Esc=Cancel"
-string keys_help "Esc=Close help"
+locals b end i k n p q rv
+
+# The natives, by what they take from the stack and give back (`natives TAKE GIVE names...`).
+natives 0 1 rows cols colour bt pin pinn cmdon bnote warn noteon typing lnum hascall ssb txbuilt clock battmv gps gpsph gpss btdev bsave count zones cedit radioch homech nmarks active nev
+natives 0 0 cmdtail cmdopen note noteclr cap lname lstop line lfind find version callsign region cal eset eclr eload cmode ctone cput unmark
+natives 1 0 say lstart zname mhz freq3 citem cdel cren ftext flabel cname gname gdesc slotmode slottone rssi
+natives 1 1 capcmp evago zlen cget cf newch mark nextmark prevmark markbelow slotch aprs slotf slotoff sq scanning livef
+natives 2 0 cset markset ev
+natives 2 1 cat room isub nitems
+natives 3 0 iname ihelp ival
+natives 3 1 fchg sreset
+natives 4 1 seek schg
+
+# what the firmware's tests call
+export selch schange ago
+
+const ALL -3
+const NOZONE -1
+const MAXCH 4000
+const START -1
+const VIS 56
+const K_PF1 0x91
+const FLAG_SKIP 1
+const FLAG_APRS 2
+const FLAG_RX_ONLY 4
+const FLAG_HIDDEN 0x40
+const FLAG_PRIORITY 0x80
+
+# ---- the lib: every page's frame, and what pages share ----
+
+# Attributes (TERM-1: plain VT100, reverse video and bold only; with Terminal colour, TERM-18, 0 9 9 3, ANSI
+# colours in their place: the top line and the selection white on blue, headings cyan, warnings yellow). @rv: the
+# row is in reverse video, so "back" (VT100 has no "bold off": all off) puts it on again.
+: rev 1 !rv colour if raw "\x1b[0;97;44m" else raw "\x1b[7m" then ;
+: bon colour if @rv if raw "\x1b[1;97;44m" else raw "\x1b[1;36m" then else raw "\x1b[1m" then ;
+: won colour if @rv if raw "\x1b[1;93;44m" else raw "\x1b[1;33m" then else bon then ;
+: back @rv if colour if raw "\x1b[0;97;44m" else raw "\x1b[0m\x1b[7m" then else raw "\x1b[0m" then ;
+: plain 0 !rv raw "\x1b[0m" ;
+: fill cols at ;
+
+: frame ( r -- )
+  dup 0 = if drop top exit then
+  pin if pinrow exit then
+  dup rows 1 - = if drop hintsrow exit then
+  1 - @help if page_help else page_draw then ;
+
+# The top line (TERM-11): firmware, callsign and model; the link in the middle; the clock at the right.
+: top
+  rev " Ferrite " version hascall if "   " callsign then "   RT-950 Pro"
+  bt if cols 14 - 2 / 8 + at "bluetooth 9600" else cols 12 - 2 / 8 + at "cable 115200" then
+  cols 7 - at clock dup 0 < if drop "--:--" else dup 60 / 24 mod 2 .z ":" 60 mod 2 .z then fill ;
+
+# LINK-30: the PIN prompt, alone.
+: pinrow ( r -- )
+  dup 2 = if drop "  This radio has a PIN lock. Type its PIN, then Enter." exit then
+  dup 4 = if drop "  PIN: " pinn begin dup 0 > while "*" 1 - repeat drop exit then
+  dup 6 = noteon and if drop note exit then
+  rows 1 - = if " Enter Check   Ctrl-C Leave" then ;
+
+# The note: a warning in bold (yellow in colour).
+: snote warn if won note back else note then ;
+
+# The bottom line: the command line, a command's answer, or the keys (TERM-11).
+: hintsrow
+  cmdon if " :" cmdtail "_" exit then
+  bnote if rev " " snote fill exit then
+  rev " " typing if keys_type else @help if keys_help else page_hints then then fill ;
+hintsw keys_type "Enter=Save|Backspace=Delete|Esc=Cancel"
+hintsw keys_help "Esc=Close help"
+
+# A key (after the command line, Ctrl-C and Ctrl-L): help, the command line, then the page's own.
+: key ( code -- )
+  dup K_LESC = if drop 0 !ask exit then
+  dup K_LINE = if page_key exit then
+  @help if dup K_ESC = over '?' = or over K_PF1 = or swap K_ENTER = or if 0 !help then exit then
+  dup '?' = over K_PF1 = or if drop 1 !help exit then
+  dup ':' = if drop cmdopen exit then
+  page_key ;
+
+: prep page_prep ;
+: poll page_poll ;
+
+: go ( p -- ) !page 0 !help lstop noteclr ;
+: say0 0 say ;
+: warn1 1 say ;
+: tell 2 say ;
+: tellw 3 say ;
+
+# The channel list (TERM-14): rows a page shows, its length, the view starting over.
+: pg rows 8 - 1 max ;
+: listlen @zone zlen ;
+: listreset 0 !csel 0 !ctop 0 !srow START !first 0 !visok ;
+: inlist @zone ALL = 1 cf @zone = or ;
+# The selected channel into C: by number, or the sorted page's row.
+: selch ( -- f ) @sort if @srow @visn < if @srow aget cget else 0 then else @zone @csel cat then ;
+
+: kiv @csel @ctop < if @csel !ctop else @csel @ctop pg + < not if @csel 1 + pg - !ctop then then ;
+# The sorted list (TERM-14): no list in RAM; a page of channel numbers is filled by reading every channel for
+# each row (the next after the row above, in the sort order) and kept until the view moves or the list changes.
+: after ( num -- num ) @zone @sort 1 seek ;
+: before ( num -- num ) @zone @sort 0 seek ;
+: fill2 ( prev -- ) begin @k @n < while after dup 0 < if drop exit then dup @k aset @k 1 + !k repeat drop ;
+: refill
+  pg VIS min !n 0 !k
+  @first dup 0 < not if dup cget inlist and if dup 0 aset 1 !k else drop -1 then then
+  fill2 @k !visn @srow @visn 1 - 0 max min !srow 1 !visok listlen !vislen ;
+# What a change applies to: the marked channels, else the selected one.
+: targets ( -- n ) nmarks dup 0 = if drop selch then ;
+
+# ---- the pages, in the order of term::Page ----
 
 page splash
 hints "Enter=Menu|?=Help|Ctrl-C=Leave"
 help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 3; at 2; bon; s "FERRITE "; src version; back; s " - free firmware for the RT-950 Pro"
-row 4; at 2; src callsign; s " - cable 115200"
-row 6; at 2; bold "Press Enter"; s " for the menu, ? for help"
-key enter go main
+row 3 2 at bon "FERRITE " version back " - free firmware for the RT-950 Pro"
+row 4 2 at callsign " - cable 115200"
+row 6 2 at bold "Press Enter" " for the menu, ? for help"
+key enter P_MAIN go
 
 page main
 hints "Up/Dn=Move|Enter=Open|1-7=Jump|:=Command|?=Help|Ctrl-C=Leave"
 help "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\n: opens the command line; :help lists the commands.\nCtrl-L redraws, Ctrl-C leaves."
-row 1; s " "; bold "Ferrite terminal"; s "   type a number, or move and press Enter"
-list 3 main; sel; at 2; digit; at 5; pick "Channels|Zones|Settings|Monitor|Mail|TNC|About"; at 19; ifi 0; src count; s " used of 4000"; else; ifi 1; src zones; s " zones"; else; pick "||same numbers as MENU 0 on the radio|the event log and live activity|not built yet|not built yet|version, calibration, self-test"; fi; fi; selfill
-row 11; s " "; bold "Radio now"
-list 12 slots; src slot
-row 15; at 2; src status
-key up prev
-key down next
-key digit digitopen
+: sel? @msel = ;
+row 1 " " bold "Ferrite terminal" "   type a number, or move and press Enter"
+list 3 7 @i sel? if rev then 2 at @i 1 + . 5 at @i pick "Channels|Zones|Settings|Monitor|Mail|TNC|About" 19 at @i 0 = if count . " used of 4000" else @i 1 = if zones . " zones" else @i pick "||same numbers as MENU 0 on the radio|the event log and live activity|not built yet|not built yet|version, calibration, self-test" then then @i sel? if fill then
+row 11 " " bold "Radio now"
+list 12 3 slotline
+row 15 2 at status
+key up @msel 6 + 7 mod !msel
+key down @msel 1 + 7 mod !msel
+key digit '0' - dup 7 > if drop exit then 1 - !msel open
 key enter open
-key esc go splash
+key esc P_SPLASH go
+# What the menu's entries open: channels from the start (every channel), settings at their groups.
+: open
+  @msel 0 = if ALL !zone 0 !fromz listreset P_CHANNELS go exit then
+  @msel 2 = if 0 !g 0 !sub 0 !ssel then
+  @msel 3 + go ;
+# "A  VFO  146.52000  FM-N  T 100.0  RX S7  active"
+: slotline
+  2 at @i pick "A|B|C" 5 at
+  @i aprs if "APRS" else @i slotch if "CH " 0 cf 1 + 3 .z " " 14 cname else "VFO" then then
+  27 at @i slotf mhz
+  @i aprs not if 39 at @i slotmode 46 at @i slottone then
+  57 at @i slotoff if "off" else @i sq if "RX " @i rssi else @i scanning if "scanning" else "idle" then then then
+  @i active = if 68 at "active" then ;
+# Battery, GPS (with the power manager's state, GPS-26), Bluetooth, Battery Save.
+: status
+  "Battery " battmv 1000 / . "." battmv 1000 mod 100 / . " V   "
+  gps dup 0 = if "GPS off" then dup 1 = if "GPS searching" then 2 = if "GPS fix" then
+  gps if gpsph dup 1 = if ", standby " gpss . " s" then dup 2 = if ", waking" then 3 = if ", awake" then then
+  "   Bluetooth " btdev if "on" else "off" then "   Battery Save " bsave . ;
 
 page channels
 hints "Enter=Edit|N=New|D=Delete|M=Move|/=Find|Z=Zone|Esc=Back"
 help "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one.\nZ: the next zone, then no zone, then all. S sorts by the next column.\n/ finds a name or MHz (Enter alone: the same again).\nSpace marks a channel (*), A marks all, U clears the marks.\nD delete, M move to a zone, C copy, R renumber: the marked channels, else the selected one.\nDelete asks first; Esc stops a change part way."
-row 0; s " "; bold "Channels"; s "   zone "; bon; src zone_name; back; s " ("; src list_len; s ")   all "; src count; s "   sort: "; pickn sort "number|name|RX|TX|mode|tone|power|flags"; if marks; s "   "; src marks_n; s " marked"; fi
-row 2; bold " "; at 1; bold "No"; at 6; bold "Name"; at 23; bold "RX MHz"; at 35; bold "Offset"; at 47; bold "Mode"; at 54; bold "Tone"; at 65; bold "Pwr"; at 71; bold "Flags"
-list 3 page_rows; ctx row; ifnot ch; ifi 0; if list_empty; s "  No channels here."; fi; fi; ret; fi; sel; src ch_num; at 6; src ch_name; at 23; src ch_rx; at 35; src ch_offset; at 47; src ch_mode; at 54; src ch_tone; at 65; src ch_power; at 71; src ch_flags; selfill
-bot 2; if asking; s "  "; won; src ask_text; back; if typing; src line; s "_"; fi; else; ctx selected; if ch; s "  Channel "; src ch_n1; s " . "; src ch_zone; if ch_home; s " \xb7 home channel"; fi; fi; fi
-key up chnav
-key down chnav
-key pgup chnav
-key pgdn chnav
-key home chnav
-key end chnav
-key "z" zonenext
-key enter open
-key esc back
+row 0 " " bold "Channels" "   zone " bon @zone zname back " (" listlen . ")   all " count . "   sort: " @sort 8 mod pick "number|name|RX|TX|mode|tone|power|flags" nmarks if "   " nmarks . " marked" then
+row 2 bold " " 1 at bold "No" 6 at bold "Name" 23 at bold "RX MHz" 35 at bold "Offset" 47 at bold "Mode" 54 at bold "Tone" 65 at bold "Pwr" 71 at bold "Flags"
+list 3 pg @i rowch not if @i 0 = listlen 0 = and if "  No channels here." then exit then @i sel? if rev then 0 cf 1 + 4 .r 0 cf mark if "*" then 6 at 16 cname 23 at 2 cf mhz 35 at 0 citem 47 at cmode 54 at ctone 65 at 1 citem 71 at flags @i sel? if fill then
+bot 2 @ask if "  " won asktext back typing if line "_" then else selch if "  Channel " 0 cf 1 + . " . " 1 cf zname 0 cf homech = if " \xb7 home channel" then then then
+# Row i's channel into C, and whether it is the selected one.
+: rowch ( i -- f ) @sort if dup @visn < if aget cget else drop 0 then else @zone swap @ctop + cat then ;
+: sel? ( i -- f ) @sort if @srow = else @ctop + @csel = then ;
+: sp ( n -- n ) dup if " " then 1 + ;
+: flags 0 0 cf homech = if sp "home" then 6 cf FLAG_SKIP and if sp "skip" then 6 cf FLAG_APRS and if sp "APRS" then 6 cf FLAG_RX_ONLY and if sp "RX" then 6 cf FLAG_HIDDEN and if sp "hidden" then 6 cf FLAG_PRIORITY and if sp "prio" then drop ;
+: what nmarks dup 0 = if drop selch if "channel " 0 cf 1 + . else 0 . " marked channels" then else . " marked channels" then ;
+: asktext
+  @ask 1 = if "Find (name or MHz): " then
+  @ask 2 = if "Move " what " to zone (number, name, or none): " then
+  @ask 3 = if "Copy " what " to free numbers from (Enter: first free): " then
+  @ask 4 = if "Renumber " what " from number: " then
+  @ask 5 = if "Delete " what "? y deletes, any other key keeps" then ;
+key pre @ask 5 = if 0 !ask 'y' = if P_CHTOOLS !chain else cap "Nothing deleted" tell then exit then
+key pre @busy if K_ESC = if 0 !busy cap "Stopped: what was done stays done" tellw then exit then
+key up K_UP move
+key down K_DOWN move
+key pgup K_PGUP move
+key pgdn K_PGDN move
+key home K_HOME move
+key end K_END move
+key "s" @sort 1 + 8 mod !sort listreset
+key " " selch if 0 cf dup mark not markset @sort if K_DOWN smove else @csel 1 + listlen 1 - 0 max min !csel kiv then then
+key "a" 0 begin dup MAXCH < while dup cget if inlist if dup 1 markset then then 1 + repeat drop
+key "u" unmark
+key "/" 1 prompt
+key "m" 2 prompt
+key "c" 3 prompt
+key "r" 4 prompt
+key "d" targets 0 > if 5 !ask then
+key "n" P_CHTOOLS !chain
+key "z" zones !n @zone ALL = if @n 0 > if 0 else NOZONE then else @zone NOZONE = if ALL else @zone 1 + @n < if @zone 1 + else NOZONE then then then !zone listreset kiv
+key enter selch if eset 0 !field P_EDIT go then kiv
+key esc @fromz if P_ZONES else P_MAIN then go kiv
+key line P_CHTOOLS !chain
+key else kiv
+: prompt ( a -- ) !ask 16 lstart ;
+# Arrows, pages and the ends: number order here, a sorted list in smove.
+: move ( code -- ) @sort if smove exit then nav kiv ;
+: nav ( code -- )
+  listlen 1 - 0 max !n
+  dup K_UP = if @csel 1 - 0 max !csel then
+  dup K_DOWN = if @csel 1 + @n min !csel then
+  dup K_PGUP = if @csel pg - 0 max !csel then
+  dup K_PGDN = if @csel pg + @n min !csel then
+  dup K_HOME = if 0 !csel then
+  K_END = if @n !csel then ;
+: prep @sort if @visok not listlen @vislen = not or if refill then then ;
+: smove ( code -- )
+  @visok not if refill then
+  @visn !n
+  dup K_DOWN = if @srow 1 + @n < if @srow 1 + !srow else
+    @n 0 > if @n 1 - aget after 0 < not if 1 @n 1 - min aget !first @n 1 = if 0 aget after !first then 0 !visok then then then then
+  dup K_UP = if @srow 0 > if @srow 1 - !srow else 0 aget before dup 0 < if drop else !first 0 !visok then then then
+  dup K_PGDN = if @n 0 > if @n 1 - aget after else -1 then dup 0 < not @n 0 > and if !first 0 !visok else drop @n 1 - 0 max !srow then then
+  dup K_PGUP = if 0 aget 0 !q pg !k begin @k 0 > while dup before dup 0 < if drop 0 !k else swap drop 1 !q @k 1 - !k then repeat @q if !first 0 !visok else drop 0 !srow then then
+  dup K_HOME = if START !first 0 !srow 0 !visok then
+  K_END = if -1 before pg 1 - !k begin @k 0 > while dup before dup 0 < if drop 0 !k else swap drop @k 1 - !k then repeat !first pg VIS min !srow 0 !visok then
+  @visok not if refill then ;
+# The tools have a segment of their own: these keys and the poll chain to it.
+: poll P_CHTOOLS !chain ;
 
 page edit
 hints "Up/Dn=Field|<- ->=Change|Enter=Type|#=Default|Esc=Back"
 help "<- -> change a field; it saves at once.\nEnter types the name or a frequency (MHz). # resets a field."
-row 0; ctx edit; s " "; bon; s "Channels > "; src ch_n1; s " "; src ch_name; back; s "   zone "; src ch_zone
-list 2 fields; ctx edit; at 3; src field_label; at 21; sel; s " "; src field_value; s " "; if sel; plain; at 50; pickn field_hint "Enter types it|<- -> step, Enter types it|Enter types it (split)|<- -> change"; fi
-bot 2; ctx edit; s "  "; if note; src note; else; if split; s "Split: TX "; src split_tx; s " MHz, whatever RX is. Saved as you go."; else; if offset; s "TX "; src off_tx; s " MHz from the offset. Saved as you go."; else; s "Simplex. Saved as you go."; fi; fi; fi
-key up prev
-key down next
-key home first
-key end last
-key left left
-key right right
-key "#" default
-key enter open
-key esc back
+pre cedit not if exit then
+row 0 " " bon "Channels > " 0 cf 1 + . " " 16 cname back "   zone " 1 cf zname
+list 2 16 3 at @i flabel 21 at @i sel? if rev then " " @i sel? typing and if line "_" else @i fval then " " @i sel? if plain 50 at @field hintno pick "Enter types it|<- -> step, Enter types it|Enter types it (split)|<- -> change" then
+bot 2 "  " noteon bnote not and if snote else 4 cf if "Split: TX " 5 cf 0 max mhz " MHz, whatever RX is. Saved as you go." else 5 cf if "TX " 2 cf 5 cf + 0 max mhz " MHz from the offset. Saved as you go." else "Simplex. Saved as you go." then then then
+# The fields as the radio's editor has them (EDIT-2): 0 name, 1 zone, 2 RX, 7 TX; the rest by their own rules.
+: sel? @field = ;
+: fval ( i -- )
+  dup 1 = if drop 1 cf zname exit then
+  dup 2 = if drop 2 cf mhz " MHz" exit then
+  dup 7 = if drop 3 cf mhz 4 cf if " MHz, split" else " MHz" then exit then
+  ftext ;
+: hintno ( f -- k ) dup 0 = if drop 0 exit then dup 2 = if drop 1 exit then 7 = if 2 else 3 then ;
+# TERM-17: a channel open in the radio's editor shows the radio's copy.
+: prep cedit if radioch 0 cf = if eload then then ;
+key pre cedit not if drop P_CHANNELS go exit then
+key up @field 15 + 16 mod !field
+key down @field 1 + 16 mod !field
+key home 0 !field
+key end 15 !field
+key left -1 change
+key right 1 change
+key "#" @field 1 0 fchg fsay
+key enter eopen
+key esc eclr P_CHANNELS go
+key line @field 2 0 fchg fsay
+# <- -> on a field: the same steps and checks as the radio's channel editor (TERM-6, TERM-7).
+: change ( d -- )
+  @field 0 = if drop cap "Enter types the name (16 characters)" say0 exit then
+  @field 7 = 4 cf not and if drop cap "TX: Enter types a TX frequency (split)" say0 exit then
+  4 cf !k !n @field 0 @n fchg fsay
+  @field 6 = @k not and if cedit drop 4 cf if 7 !field 10 lstart cap "Split: type the TX frequency, then Enter" say0 then then ;
+: fsay ( code -- )
+  dup 1 = if cap "Home channel: hold 0 on home jumps here" say0 then
+  dup 2 = if cap "No longer the home channel" say0 then
+  dup 3 = if cap "Open in the radio's editor: change it there" warn1 then
+  4 = if cap "Saved" say0 then ;
+: eopen
+  @field 0 = if 16 lstart lname exit then
+  @field 2 = @field 7 = or if 10 lstart exit then
+  1 change ;
 
 page zones
 hints "Up/Dn=Move|Enter=Channels|Esc=Back"
 help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 0; s " "; bold "Zones"; s "   "; src zones; s " zones"
-list 2 zones; sel; at 3; src zrow_name; at 26; src zrow_len; s " channels"; selfill
-key up prev
-key down next
-key home first
-key end last
-key enter open
-key esc go main
+row 0 " " bold "Zones" "   " zones . " zones"
+list 2 zcount @zsel pg 1 + - 0 max @i + !i @i n < not if exit then @i @zsel = if rev then 3 at @i zof zname 26 at @i zof zlen . " channels" @i @zsel = if fill then
+# Every channel, each zone, then no zone; the list scrolls with its selection.
+: n zones 2 + ;
+: zcount n pg 2 + min ;
+: zof ( i -- z ) dup 0 = if drop ALL exit then dup zones > not if 1 - exit then drop NOZONE ;
+key up @zsel n + 1 - n 1 max mod !zsel
+key down @zsel 1 + n 1 max mod !zsel
+key home 0 !zsel
+key end n 1 - 0 max !zsel
+key enter @zsel zof !zone 1 !fromz listreset P_CHANNELS go
+key esc P_MAIN go
 
-page settings_top
+page settings
 hints "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back"
 help "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n* marks a value that isn't the default; # puts it back.\nPIN, region and Extend TX change only on the radio; Dry TX goes off only there."
-row 0; s " "; bold "Settings"; s "   as MENU 0 on the radio"
-list 2 groups; sel; at 3; digit; at 6; src group_name; s " >"; at 32; src group_desc; selfill
-key up prev
-key down next
-key home first
-key end last
-key digit digitopen
-key enter open
-key esc back
-
-page settings_items
-hints "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back"
-help "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n* marks a value that isn't the default; # puts it back.\nPIN, region and Extend TX change only on the radio; Dry TX goes off only there."
-row 0; s " "; bon; s "Settings > 0 "; src set_g; s " "; src group_name_g; if sub; s " > "; src set_sub; s " "; src sub_name; fi; back; s "      * = not the default"
-list 2 items; sel; at 3; digit; at 6; src item_name; if item_sub; s " >"; fi; at 32; src item_value; selfill
-tail 1; if has_item; s "  "; bon; src item_sel_name; back; s ": "; src item_sel_help; fi
-tail 2; s "  Path on the radio: MENU 0"; src path_sel
-tail 4; if note; s "  "; src note; fi
-key up prev
-key down next
-key home first
-key end last
-key digit digitopen
-key enter open
-key left left
-key right right
-key "#" default
-key esc back
+row 0 @g if " " bon "Settings > 0 " @g . " " @g 1 - gname @sub if " > " @sub . " " @g 0 @sub 1 - iname then back "      * = not the default" else " " bold "Settings" "   as MENU 0 on the radio" then
+list 2 n @i @ssel = if rev then 3 at @i 1 + 10 mod . 6 at @g if @g @sub @i iname @sub 0 = if @g @i 1 + isub if " >" then then 32 at @g @sub @i ival else @i gname " >" 32 at @i gdesc then @i @ssel = if fill then
+tail 1 @g if @ssel ni < if "  " bon @g @sub @ssel iname back ": " @g @sub @ssel ihelp then then
+tail 2 @g if "  Path on the radio: MENU 0 " @g . @sub if " " @sub . then " " @ssel 1 + . then
+tail 4 @g if noteon bnote not and if "  " snote then then
+# MENU 0's groups (@g 0), a group's items, or a third-level list (@sub): the radio's own numbers (TERM-6).
+: ni @g @sub nitems ;
+: n @g if ni else 9 then ;
+key pre @g if ni 0 = if drop sup exit then then
+key up @ssel n + 1 - n 1 max mod !ssel
+key down @ssel 1 + n 1 max mod !ssel
+key home 0 !ssel
+key end n 1 - 0 max !ssel
+key digit '0' - dup n > if drop exit then 1 - !ssel sopen
+key enter sopen
+key left @g if -1 schange then
+key right @g if 1 schange then
+key "#" @g if @g @sub @ssel sreset if cap "Back to the default" say0 then then
+key esc sup
+: sopen
+  noteclr
+  @g 0 = if @ssel 1 + !g 0 !ssel exit then
+  @sub 0 = @g @ssel 1 + isub and if @ssel 1 + !sub 0 !ssel exit then
+  1 schange ;
+# <- -> or Enter on an item: its change through the radio's menu (TERM-7), or why not.
+: schange ( d -- )
+  !k @g @sub @ssel @k schg
+  dup 0 = if cap "Changed" say0 then
+  dup 1 = if cap "Not settable yet" warn1 then
+  dup 2 = if cap "Open on the radio's menu: change it there" warn1 then
+  3 = if cap "Change this one on the radio" warn1 then ;
+: sup @sub if @sub 1 - !ssel 0 !sub else @g if @g 1 - !ssel 0 !g else P_MAIN go exit then then noteclr ;
 
 page monitor
 hints "Esc=Back"
 help "The event log (newest last), then the slots receiving now."
-row 0; s " "; bold "Monitor"; s "   the event log and the slots receiving now"
-bot 1; s " "; bold "-- live --"; s "   newest at the bottom"
-list 2 all; src monitor
-key esc go main
+row 0 " " bold "Monitor" "   the event log and the slots receiving now"
+bot 1 " " bold "-- live --" "   newest at the bottom"
+list 2 255 monline
+key esc P_MAIN go
+# "12 s ago", "3 min ago", "2 h ago" (-1: earlier, INBOX-6.1).
+: ago ( s -- ) dup 0 < if drop "earlier" exit then dup 60 < if . " s ago" exit then dup 3600 < if 60 / . " min ago" exit then 3600 / . " h ago" ;
+# Line i: the newest events, oldest first, then the slots receiving now.
+: monline
+  rows 6 - 0 max 0 sq 1 sq + 2 sq + - 0 max nev min !k
+  @i @k < if @k 1 - @i - !p 1 at @p evago ago 11 at @p 1 ev 20 at @p 2 ev 32 at @p 3 ev exit then
+  @i @k - !p 0 begin dup 3 < while dup sq if @p 0 = if !q 1 at "now" 11 at @q pick "A|B|C" " " @q livef freq3 20 at "RX" 32 at @q rssi exit then @p 1 - !p then 1 + repeat drop
+  @i 0 = if "  Nothing yet." then ;
 
 page mail
 hints "Esc=Back"
 help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 1; s " "; bold "Mail"
-row 3; s "  Not built yet (manual chapter 38)."
-key esc go main
+row 1 " " bold "Mail"
+row 3 "  Not built yet (manual chapter 38)."
+key esc P_MAIN go
 
 page tnc
 hints "Esc=Back"
 help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 1; s " "; bold "TNC"
-row 3; s "  Not built yet (manual chapter 38)."
-key esc go main
+row 1 " " bold "TNC"
+row 3 "  Not built yet (manual chapter 38)."
+key esc P_MAIN go
 
 page about
 hints "Esc=Back"
 help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
-row 1; s " "; bold "About"
-row 3; at 2; bon; s "FERRITE "; src version; back; s " - free firmware for the RT-950 Pro"
-row 4; at 2; src callsign; s " - cable 115200"
-row 6; at 2; bold "Press Enter"; s " for the menu, ? for help"
-row 9; at 2; s "Region        "; src region
-row 10; at 2; s "Calibration   "; src cal
-row 11; at 2; s "SSB patch     "; if ssb; s "Installed"; else; s "Not installed"; fi
-row 12; at 2; s "Transmit      "; if txbuilt; s "Built in"; else; s "Not in this build"; fi
-row 13; at 2; s "Channels      "; src count; s " of 4000, "; src zones; s " zones"
-key esc go main
+row 1 " " bold "About"
+row 3 2 at bon "FERRITE " version back " - free firmware for the RT-950 Pro"
+row 4 2 at callsign " - cable 115200"
+row 6 2 at bold "Press Enter" " for the menu, ? for help"
+row 9 2 at "Region        " region
+row 10 2 at "Calibration   " cal
+row 11 2 at "SSB patch     " ssb if "Installed" else "Not installed" then
+row 12 2 at "Transmit      " txbuilt if "Built in" else "Not in this build" then
+row 13 2 at "Channels      " count . " of 4000, " zones . " zones"
+key esc P_MAIN go
+
+# The channel list's tools (TERM-14), chained to from the channel list's keys and poll: find, a new channel, and
+# the changes to several channels.
+page chtools
+key "y" 1 0 bstart
+key "n" newchan
+key line @ask 0 !ask dup 1 = if drop lfind findnext exit then dup 2 = if drop tozone exit then 3 = if tocopy exit then torenum
+# Find: a name holding the text (any case), or a frequency starting with it; from the row after the selection, in
+# the list's order, wrapping.
+: match? ( -- f ) cap 16 cname 1 capcmp cap 2 cf mhz 2 capcmp or ;
+: nomatch cap "No channel here matches \"" find "\"" tellw ;
+: findnext
+  cap 1 capcmp if cap "Find what? Part of a name or MHz" tellw exit then
+  @sort if sfind exit then
+  listlen !n 1 begin dup @n > not while
+    @csel over + @n 1 max mod !k @zone @k cat if match? if drop @k !csel kiv exit then then
+  1 + repeat drop nomatch ;
+: sfind
+  selch if 0 cf else -1 then !p
+  @p after dup 0 < if drop -1 after then
+  0 !q
+  begin dup 0 < not while
+    dup cget drop match? if !first 0 !srow refill exit then
+    @q 1 + dup !q MAXCH > if drop nomatch exit then
+    after dup 0 < @p 0 < not and if drop -1 after then
+    dup @p = if drop @p 0 < not if @p cget drop match? if exit then then nomatch exit then
+  repeat drop nomatch ;
+# A number typed: 1-4000 as shown, back to 0-3999 (-1: not one).
+: num? ( -- n ) lnum dup 1 < over MAXCH > or if drop -1 else 1 - then ;
+: zfind ( -- z, or -2 )
+  cap "none" 0 capcmp cap "0" 0 capcmp or if NOZONE exit then
+  num? dup 0 < not over zones < and if exit then drop
+  0 begin dup zones < while cap dup zname 0 capcmp if exit then 1 + repeat drop -2 ;
+: tozone zfind dup -2 = if drop cap "No such zone: a number, a name, or none" tellw else 2 swap bstart then ;
+: tocopy cap 0 capcmp if 0 else num? then dup 0 < if drop cap "Copy to: a channel number from 1 to 4000" tellw else 3 swap bstart then ;
+: torenum num? dup 0 < if drop cap "Renumber from: a channel number from 1 to 4000" tellw else 4 swap bstart then ;
+# A new channel at the first free number, in this list's zone, on the active slot's frequency, and its editor.
+: newchan
+  @zone dup ALL = if drop NOZONE then newch
+  dup -1 = if drop cap "All 1000 channels are in use" tellw exit then
+  dup 0 < if drop exit then
+  0 !field 0 !visok P_EDIT go cap "New channel " 1 + . ": Enter types its name" say0 ;
+# A change to several channels (or the selected one): checked here, then one write per poll (bstep), after the
+# store has taken the last, as a load does (TERM-13). @busy is the change (1 delete, 2 move, 3 copy, 4 renumber).
+: bstart ( op arg -- )
+  !barg !bop
+  targets !btotal nmarks 0 = if selch if 0 cf else -1 then else -1 then !bsingle
+  @btotal 0 = if exit then
+  radioch dup 0 < not if dup moving? if cap "Channel " 1 + . " is open in the radio's editor" tellw exit then then drop
+  @bop 4 = if rncheck not if exit then then
+  @bop 4 = if MAXCH else 0 then !bat 0 !bphase 0 !bdone @bop 3 = if @barg else 0 then !bfree @bop !busy ;
+: moving? ( n -- f ) dup @bsingle = swap mark @bsingle 0 < and or ;
+# The number a channel gets when renumbering: the marked ones keep their order.
+: rnto ( num -- num ) @bsingle 0 < not if drop @barg else markbelow @barg + then ;
+# Every new number must be free, or held by a channel that moves too; and inside 1-4000.
+: rncheck ( -- ok )
+  @barg @btotal + MAXCH > if cap @btotal . " channels from " @barg 1 + . " would pass 4000" tellw 0 exit then
+  @bsingle 0 < not if @bsingle else 0 nextmark then
+  begin dup 0 < not while
+    dup rnto !k
+    @k over = not @k cget and @k moving? not and if drop cap "Number " @k 1 + . " is taken by a channel that isn't moving" tellw 0 exit then
+    @bsingle 0 < not if drop -1 else 1 + nextmark then
+  repeat drop 1 ;
+# Renumbering's next: those moving up highest first, then those moving down lowest first, so no channel lands
+# on one that hasn't moved yet.
+: rnnext ( -- num )
+  begin
+    @bphase if @bat nextmark else @bat prevmark then
+    dup 0 < if
+      drop @bphase if -1 exit then 1 !bphase 0 !bat
+    else
+      @bphase if dup 1 + else dup then !bat
+      dup rnto over -
+      dup @bphase if 0 < else 0 > then if drop exit then
+      0 = @bphase and if @bdone 1 + !bdone then drop
+    then
+  0 until ;
+: bnext ( -- num )
+  @bsingle 0 < not if @bdone if -1 else @bsingle then exit then
+  @busy 4 = if rnnext exit then
+  @bat nextmark dup 0 < not if dup 1 + !bat then ;
+: ffree ( from -- num ) begin dup MAXCH < while dup cget not if exit then 1 + repeat drop -1 ;
+: bdone @busy 0 !busy unmark 0 !visok cap @btotal . @btotal 1 = if " channel " else " channels " then pick "|deleted|moved|copied|renumbered" tell ;
+: bstep
+  bnext dup 0 < if drop bdone exit then
+  @busy 3 = if @bfree ffree dup 0 < if drop drop cap "No free numbers left: copied " @bdone . " of " @btotal . 0 !busy unmark 0 !visok tellw exit then swap then
+  dup cget not if drop exit then
+  @busy 1 = if dup cdel then
+  @busy 2 = if 1 cf @barg = not if @barg over room not if drop cap "Zone full (256 channels): moved " @bdone . " of " @btotal . 0 !busy 0 !visok tellw exit then @barg 1 cset cput then then
+  @busy 3 = if drop dup 0 cset cput 1 + dup then
+  @busy 3 = if !bfree else @busy 4 = if dup rnto cren then drop then
+  @bdone 1 + !bdone cap @bdone . " of " @btotal . "..." tell ;
+: poll bstep @busy not if @csel listlen 1 - 0 max min !csel then ;
