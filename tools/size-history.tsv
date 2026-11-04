@@ -47,3 +47,4 @@ date	commit	image	bytes	fast	slow
 2026-11-03		ferrite-txbench	848468	151128	697340
 2026-11-03		ferrite-tx-novt100	770460	127840	642620
 2026-11-03		ferrite-txbench-novt100	825796	150880	674916
+2026-11-03		ferrite-tx	793112	128128	664984
