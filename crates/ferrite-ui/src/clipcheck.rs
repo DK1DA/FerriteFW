@@ -172,12 +172,12 @@ mod tests {
         super::start();
         let mut fb = FrameBuffer::new();
         let s = b"A long line of text";
-        w::field(&mut fb, 8, 40, 0, 17, 13, Align::Left, s, &UI_12, 0xFFFF, 0);
+        w::field(&mut fb, 8, 40, 0, 17, 13, s, const { &w::st(&UI_12, 0xFFFF, 0, Align::Left) });
         let clips = super::take();
         assert_eq!(clips.len(), 1, "{clips:?}");
         assert_eq!((clips[0].kind, clips[0].text.as_str(), clips[0].room), ("cut", "A long line of text", 40));
         assert!(clips[0].at.is_some_and(|l| l.file().ends_with("clipcheck.rs")));
-        w::field(&mut fb, 8, 40, 0, 17, 13, Align::Left, w::fit(s, &UI_12, 40), &UI_12, 0xFFFF, 0);
+        w::field(&mut fb, 8, 40, 0, 17, 13, w::fit(s, &UI_12, 40), const { &w::st(&UI_12, 0xFFFF, 0, Align::Left) });
         assert!(super::take().is_empty());
         super::stop();
     }

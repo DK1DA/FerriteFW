@@ -226,19 +226,19 @@ impl View for Confirm {
         if app.dirty(R_TOP, Mix::new().any(&self.ask).h(&what).h(&title).get()) {
             lcd.fill(0, 21, 240, 279, BG);
             let col = if matches!(self.ask, Ask::ToneTx(_) | Ask::CopyToVfo) { TEXT } else { AMBER };
-            w::field(lcd, 12, 216, 36, 54, 50, Align::Left, title.as_bytes(), &UI_12B, col, BG);
+            w::field(lcd, 12, 216, 36, 54, 50, title.as_bytes(), &w::st(&UI_12B, col, BG, Align::Left));
             let mut y = 64;
             if !what.is_empty() {
                 lcd.fill_r(8, y, 224, 30, 2, SURFACE);
-                w::field(lcd, 16, 208, y + 6, y + 24, y + 20, Align::Left, what.as_bytes(), &UI_12B, TEXT, SURFACE);
+                w::field(lcd, 16, 208, y + 6, y + 24, y + 20, what.as_bytes(), const { &w::st(&UI_12B, TEXT, SURFACE, Align::Left) });
                 y += 40;
             }
             if !goes.is_empty() {
-                w::field(lcd, 12, 216, y, y + 17, y + 13, Align::Left, b"Goes", &UI_12B, SUB, BG);
+                w::field(lcd, 12, 216, y, y + 17, y + 13, b"Goes", const { &w::st(&UI_12B, SUB, BG, Align::Left) });
                 y += 18 + 17 * para(lcd, 12, y + 18, 216, 4, 17, goes.as_bytes(), &UI_12, TEXT, BG);
                 y += 8;
             }
-            w::field(lcd, 12, 216, y, y + 17, y + 13, Align::Left, b"Kept", &UI_12B, SUB, BG);
+            w::field(lcd, 12, 216, y, y + 17, y + 13, b"Kept", const { &w::st(&UI_12B, SUB, BG, Align::Left) });
             para(lcd, 12, y + 18, 216, 4, 17, kept.as_bytes(), &UI_12, TEXT, BG);
         }
     }

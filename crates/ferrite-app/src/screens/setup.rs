@@ -344,7 +344,7 @@ impl View for Setup {
         // Heading and text.
         let (head, text, _) = PAGES[page as usize];
         if app.dirty(R_TOP, Mix::new().h(&page).get()) {
-            w::field(lcd, 10, 220, 24, 50, 45, Align::Left, head.as_bytes(), &UI_15B, TEXT, BG);
+            w::field(lcd, 10, 220, 24, 50, 45, head.as_bytes(), const { &w::st(&UI_15B, TEXT, BG, Align::Left) });
             if !text.is_empty() {
                 w::wrap(lcd, 10, 220, 50, if ask == Ask::Nothing { 200 } else { 94 }, 63, 15, text.as_bytes(), &UI_12, SUB, BG);
             }
@@ -364,7 +364,7 @@ impl View for Setup {
                     } else {
                         "digits type \u{b7} * letters/digits".as_bytes()
                     };
-                    w::field(lcd, 10, 220, 170, 186, 182, Align::Left, tip, &UI_12, if long { AMBER } else { SUB }, BG);
+                    w::field(lcd, 10, 220, 170, 186, 182, tip, &w::st(&UI_12, if long { AMBER } else { SUB }, BG, Align::Left));
                     w::key_line(lcd, 10, 230, 200, "\x1b", "delete", BG);
                 }
             }
@@ -384,8 +384,8 @@ impl View for Setup {
                     let bg = if sel { FOCUS } else { BG };
                     ferrite_ui::canvas::banded(lcd, 0, 247, 240, 23, BG, |lcd| {
                         lcd.fill_r(4, 248, 232, 21, 1, bg);
-                        w::field(lcd, 10, 120, 249, 267, 262, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
-                        w::field(lcd, 130, 100, 249, 267, 262, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
+                        w::field(lcd, 10, 120, 249, 267, 262, b"Extend TX", &w::st(&UI_12, if sel { BLUE } else { TEXT }, bg, Align::Left));
+                        w::field(lcd, 130, 100, 249, 267, 262, ON_OFF[ext as usize].as_bytes(), &w::st(&UI_12, SUB, bg, Align::Right));
                     });
                     w::wrap(lcd, 10, 220, 270, 300, 283, 15, b"On: transmit outside the amateur bands too. Warns first.", &UI_12, SUB, BG);
                 }
@@ -403,7 +403,7 @@ impl View for Setup {
                     let m = ["ABC", "abc", "123"][(mode / 4) as usize];
                     let mut t = Buf::<48>::new();
                     let _ = uwrite!(t, "{} \u{b7} * changes", m);
-                    w::field(lcd, 10, 220, 240, 258, 254, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
+                    w::field(lcd, 10, 220, 240, 258, 254, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
                     w::key_line(lcd, 10, 230, 272, "\x1b", "delete", BG);
                 }
             }
@@ -428,7 +428,7 @@ impl View for Setup {
                     for i in 0..3 {
                         preview(lcd, 10 + 75 * i, 100, i as u8, layout == i as u8, row == 0);
                     }
-                    w::field(lcd, 10, 220, 196, 212, 208, Align::Center, LAYOUTS[layout as usize % 3].as_bytes(), &UI_12, TEXT, BG);
+                    w::field(lcd, 10, 220, 196, 212, 208, LAYOUTS[layout as usize % 3].as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Center) });
                 }
                 if app.dirty(R_ROW + 1, Mix::new().h(&theme).h(&(row == 1)).get()) {
                     choice(lcd, 222, 23, b"Theme", THEMES[theme as usize % THEMES.len()].as_bytes(), row == 1);
@@ -564,8 +564,8 @@ fn choice(lcd: &mut impl Panel, y: i32, h: i32, name: &[u8], note: &[u8], sel: b
         lcd.fill_r(10, y, 220, h, 1, bg);
         lcd.frame_r(10, y, 220, h, 1, edge);
         let base = y + h / 2 + 5;
-        w::field(lcd, 17, 120, y + 2, y + h - 2, base, Align::Left, name, &UI_12, TEXT, bg);
-        w::field(lcd, 137, 86, y + 2, y + h - 2, base, Align::Right, note, &UI_12, SUB, bg);
+        w::field(lcd, 17, 120, y + 2, y + h - 2, base, name, &w::st(&UI_12, TEXT, bg, Align::Left));
+        w::field(lcd, 137, 86, y + 2, y + h - 2, base, note, &w::st(&UI_12, SUB, bg, Align::Right));
     });
 }
 
@@ -646,7 +646,7 @@ impl View for ExtendTx {
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         if app.dirty(R_TOP, 1) {
             w::warn_icon(lcd, 10, 30, AMBER, BG);
-            w::field(lcd, 30, 200, 24, 48, 41, Align::Left, b"Extend TX", &UI_15B, AMBER, BG);
+            w::field(lcd, 30, 200, 24, 48, 41, b"Extend TX", const { &w::st(&UI_15B, AMBER, BG, Align::Left) });
             let mut y = 60;
             for (t, c) in WARNING {
                 let n = w::wrap(lcd, 10, 220, y, y + 60, y + 14, 15, t.as_bytes(), &UI_12, c, BG);

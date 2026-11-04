@@ -182,8 +182,8 @@ impl View for KeyTest {
             }
         }
         if app.dirty(R_TOP, Mix::new().h(&name).h(&line).get()) {
-            w::field(lcd, 10, 220, 28, 54, 48, Align::Center, name.as_bytes(), &UI_15B, TEXT, BG);
-            w::field(lcd, 10, 220, 58, 76, 72, Align::Center, line.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 10, 220, 28, 54, 48, name.as_bytes(), const { &w::st(&UI_15B, TEXT, BG, Align::Center) });
+            w::field(lcd, 10, 220, 58, 76, 72, line.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
         }
         let now = self.key.and_then(cell).or(matches!(self.got, Got::KnobUp | Got::KnobDown).then_some(KNOB));
         if app.dirty(R_ROW, Mix::new().h(&self.seen).h(&now).get()) {
@@ -195,7 +195,7 @@ impl View for KeyTest {
         if app.dirty(R_HELP, Mix::new().h(&count).get()) {
             let mut t = Buf::<40>::new();
             let _ = uwrite!(t, "{} of {} keys seen", count, MAP.len());
-            w::field(lcd, 10, 220, 222, 240, 236, Align::Center, t.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 10, 220, 222, 240, 236, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
             w::wrap(lcd, 16, 208, 248, 296, 262, 15, b"PTT is tested here, not transmitted. Codes without a name show as Unmapped.", &UI_12, DIM, BG);
         }
     }

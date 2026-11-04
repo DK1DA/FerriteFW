@@ -177,9 +177,9 @@ fn row_box(i: usize) -> (i32, i32) {
 fn row(lcd: &mut impl Panel, i: usize, (key, name, val, fg, _): &Line) {
     let (y, h) = row_box(i);
     let b = y + 15;
-    w::field(lcd, KEY_X, NAME_X - KEY_X, y, y + h, b, Align::Left, key.as_bytes(), &UI_12B, TEXT, TOAST);
-    w::field(lcd, NAME_X, VAL_R - VAL_W - NAME_X, y, y + h, b, Align::Left, name.as_bytes(), &UI_12, TEXT, TOAST);
-    w::field(lcd, VAL_R - VAL_W, VAL_W, y, y + h, b, Align::Right, val.as_bytes(), &UI_12B, *fg, TOAST);
+    w::field(lcd, KEY_X, NAME_X - KEY_X, y, y + h, b, key.as_bytes(), const { &w::st(&UI_12B, TEXT, TOAST, Align::Left) });
+    w::field(lcd, NAME_X, VAL_R - VAL_W - NAME_X, y, y + h, b, name.as_bytes(), const { &w::st(&UI_12, TEXT, TOAST, Align::Left) });
+    w::field(lcd, VAL_R - VAL_W, VAL_W, y, y + h, b, val.as_bytes(), &w::st(&UI_12B, *fg, TOAST, Align::Right));
 }
 
 /// The box over home: whole when it isn't on the screen yet (the rounded corners keep what is under them), then

@@ -183,7 +183,7 @@ impl View for DtmfPad {
                 lcd.frame_r(8, 60, 224, 60, 3, if t.is_empty() { LINE } else { BLUE });
                 let s: &[u8] = if t.is_empty() { b"type the digits" } else { t.as_bytes() };
                 let (f, c) = if t.is_empty() { (&UI_12, DIM) } else { (&UI_15B, TEXT) };
-                w::field(lcd, 12, 216, 70, 110, 96, Align::Center, s, f, c, BG);
+                w::field(lcd, 12, 216, 70, 110, 96, s, &w::st(f, c, BG, Align::Center));
             });
         }
         let a = app.active;
@@ -191,7 +191,7 @@ impl View for DtmfPad {
         let _ = uwrite!(slot, "Sends on slot {} \u{b7} ", ["A", "B", "C"][a as usize % 3]);
         slot.push(w::freq3(app.slot(a).freq()).as_bytes());
         if app.dirty(R_LINE, Mix::new().h(&slot).get()) {
-            w::field(lcd, 8, 224, 128, 146, 142, Align::Left, slot.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 224, 128, 146, 142, slot.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         }
         app.help_box(lcd, 300 - 52, 48, b"Hold 1-4 for A-D. Hold MENU keeps it as a memory.", b"MENU 0 8 5 1");
     }

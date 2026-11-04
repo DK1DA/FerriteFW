@@ -75,18 +75,18 @@ pub(crate) const MENU_NOS: [Row; 14] = [
 /// One key | action line at baseline `b`, or a section heading when the key is empty.
 fn row(lcd: &mut impl Panel, b: i32, (key, action): Row) {
     if key.is_empty() {
-        w::field(lcd, 8, 224, b - 13, b + 4, b, Align::Left, action.as_bytes(), &UI_12B, BLUE, BG);
+        w::field(lcd, 8, 224, b - 13, b + 4, b, action.as_bytes(), const { &w::st(&UI_12B, BLUE, BG, Align::Left) });
         return;
     }
     w::key_label(lcd, 8, b, key, "", BG, true);
-    w::field(lcd, ACTION_X, ACTION_W, b - 13, b + 4, b, Align::Left, action.as_bytes(), &UI_12, SUB, BG);
+    w::field(lcd, ACTION_X, ACTION_W, b - 13, b + 4, b, action.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
 }
 
 /// A page of rows from the top of the content area, with an optional heading line.
 fn rows(lcd: &mut impl Panel, head: &[u8], rows: impl Iterator<Item = Row>) {
     let mut b = 37;
     if !head.is_empty() {
-        w::field(lcd, 8, 224, 22, 40, 36, Align::Left, head, &UI_12B, TEXT, BG);
+        w::field(lcd, 8, 224, 22, 40, 36, head, const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
         lcd.fill(0, 41, 240, 1, LINE);
         b = 58;
     }
@@ -109,8 +109,8 @@ fn manual(lcd: &mut impl Panel) {
     let y = 30;
     w::manual_qr(lcd, (240 - side) / 2, y, SCALE);
     let t = y + side + 8;
-    w::field(lcd, 8, 224, t, t + 17, t + 13, Align::Center, "The full manual".as_bytes(), &UI_12B, TEXT, BG);
-    w::field(lcd, 8, 224, t + 18, t + 35, t + 31, Align::Center, MANUAL_URL.as_bytes(), &UI_12, SUB, BG);
+    w::field(lcd, 8, 224, t, t + 17, t + 13, "The full manual".as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Center) });
+    w::field(lcd, 8, 224, t + 18, t + 35, t + 31, MANUAL_URL.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
 }
 
 /// Which help page, drawn once per visit (the page is static).

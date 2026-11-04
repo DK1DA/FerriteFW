@@ -118,11 +118,11 @@ impl View for Advanced {
         let recent = app.recent;
         let sel = (row >= RECENT).then(|| (row - RECENT) as usize);
         if app.dirty(R_TOP, Mix::new().any(&recent).h(&sel).get()) {
-            w::field(lcd, 0, 54, 21, 40, 35, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 8, 46, 21, 40, 35, Align::Left, b"Recent", &UI_12, if sel.is_some() { BLUE } else { SUB }, BG);
+            w::field(lcd, 0, 54, 21, 40, 35, b"", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 8, 46, 21, 40, 35, b"Recent", &w::st(&UI_12, if sel.is_some() { BLUE } else { SUB }, BG, Align::Left));
             let names: [&[u8]; 3] = recent.map(|r| r.map_or(b"".as_slice(), |i| i.label().as_bytes()));
             if names[0].is_empty() {
-                w::field(lcd, 54, 178, 21, 40, 35, Align::Left, b"nothing yet", &UI_12, DIM, BG);
+                w::field(lcd, 54, 178, 21, 40, 35, b"nothing yet", const { &w::st(&UI_12, DIM, BG, Align::Left) });
             } else {
                 lcd.fill(54, 21, 178, 1, BG);
                 w::chips_sel(lcd, 54, 22, 178, &names, sel, BG);

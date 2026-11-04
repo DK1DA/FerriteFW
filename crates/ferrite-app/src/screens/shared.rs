@@ -397,8 +397,8 @@ impl App {
     pub(crate) fn message(&mut self, lcd: &mut impl Panel, head: &[u8], line: &[u8], text: &[u8], c: u16) {
         if self.dirty(R_TOP, Mix::new().h(&head).h(&line).h(&text).get()) {
             use ferrite_ui::assets::{UI_12, UI_15B};
-            w::field(lcd, 10, 220, 60, 86, 80, Align::Center, head, &UI_15B, c, BG);
-            w::field(lcd, 10, 220, 92, 116, 110, Align::Center, line, &UI_15B, TEXT, BG);
+            w::field(lcd, 10, 220, 60, 86, 80, head, &w::st(&UI_15B, c, BG, Align::Center));
+            w::field(lcd, 10, 220, 92, 116, 110, line, const { &w::st(&UI_15B, TEXT, BG, Align::Center) });
             w::wrap(lcd, 16, 208, 124, 290, 140, 15, text, &UI_12, SUB, BG);
         }
     }

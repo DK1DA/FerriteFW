@@ -418,7 +418,7 @@ impl View for Transmit {
         let mut t = Buf::<16>::new();
         mmss(secs, &mut t);
         if app.dirty(2, Mix::new().h(&t).get()) {
-            w::field(lcd, 160, 66, y + 2, y + 20, y + 15, Align::Right, t.as_bytes(), &UI_12B, WHITE, RED);
+            w::field(lcd, 160, 66, y + 2, y + 20, y + 15, t.as_bytes(), const { &w::st(&UI_12B, WHITE, RED, Align::Right) });
         }
         // Slot, VFO/channel and band; what it receives on.
         let f = tx_freq(app, s);
@@ -447,8 +447,8 @@ impl View for Transmit {
             } else {
                 w::badge(lcd, 15, y + 26, s, true, SURFACE);
             }
-            w::field(lcd, 35, 110, y + 24, y + 42, y + 38, Align::Left, w::fit(head.as_bytes(), &UI_12, 108), &UI_12, SUB, SURFACE);
-            w::field(lcd, 145, 80, y + 24, y + 42, y + 38, Align::Right, r.as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 35, 110, y + 24, y + 42, y + 38, w::fit(head.as_bytes(), &UI_12, 108), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
+            w::field(lcd, 145, 80, y + 24, y + 42, y + 38, r.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
         }
         if app.dirty(4, Mix::new().h(&f).get()) {
             w::freq(lcd, 15, 226, y + 77, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
@@ -478,20 +478,20 @@ impl View for Transmit {
         // readout: the radio cannot measure output, and drive only ever reads ~100%.
         let mic = if live.tx.keyed && live.tx.slot == s { live.tx.mic } else { 0 };
         if app.dirty(6, Mix::new().h(&mic).get()) {
-            w::field(lcd, 15, 40, y + 110, y + 127, y + 123, Align::Left, b"Mic", &UI_12, SUB, SURFACE);
+            w::field(lcd, 15, 40, y + 110, y + 127, y + 123, b"Mic", const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
             let lit = ((mic as u32 * 13 + 50) / 100) as u8;
             parts::segs(lcd, 56, y + 115, 13, lit, 8, 10, 8, if mic >= 90 { AMBER } else { GREEN }, SURFACE);
         }
         // Timeout: the bar fills to the limit; amber from the pre-alert (TX-30).
         if app.dirty(7, Mix::new().h(&secs).get()) {
-            w::field(lcd, 15, 40, y + 127, y + 144, y + 140, Align::Left, b"TOT", &UI_12, SUB, SURFACE);
+            w::field(lcd, 15, 40, y + 127, y + 144, y + 140, b"TOT", const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
             let limit = app.set.tx_timeout_s();
             let c = if secs + PREALERT_S >= limit { AMBER } else { SUB };
             parts::bar(lcd, 56, y + 132, 110, 6, secs, limit, c, SURFACE);
             let mut b = Buf::<16>::new();
             b.push(b"of ");
             mmss(limit, &mut b);
-            w::field(lcd, 168, 58, y + 127, y + 144, y + 140, Align::Right, b.as_bytes(), &UI_12, TEXT, SURFACE);
+            w::field(lcd, 168, 58, y + 127, y + 144, y + 140, b.as_bytes(), const { &w::st(&UI_12, TEXT, SURFACE, Align::Right) });
         }
         let mv = cx.dev.battery_mv as u32;
         // TX-48: with the PA drive held at 0 (Dry TX) the row says so first; the battery
@@ -502,11 +502,11 @@ impl View for Transmit {
             let c = if cx.dev.battery_low { AMBER } else { SUB };
             if dry {
                 let _ = uwrite!(b, "{}.{} V", mv / 1000, mv % 1000 / 100);
-                w::field(lcd, 15, 130, y + 144, y + 161, y + 157, Align::Left, DRY_NOTE, &UI_12B, AMBER, SURFACE);
-                w::field(lcd, 145, 81, y + 144, y + 161, y + 157, Align::Right, b.as_bytes(), &UI_12, c, SURFACE);
+                w::field(lcd, 15, 130, y + 144, y + 161, y + 157, DRY_NOTE, const { &w::st(&UI_12B, AMBER, SURFACE, Align::Left) });
+                w::field(lcd, 145, 81, y + 144, y + 161, y + 157, b.as_bytes(), &w::st(&UI_12, c, SURFACE, Align::Right));
             } else {
                 let _ = uwrite!(b, "Battery under load {}.{} V", mv / 1000, mv % 1000 / 100);
-                w::field(lcd, 15, 211, y + 144, y + 161, y + 157, Align::Left, b.as_bytes(), &UI_12, c, SURFACE);
+                w::field(lcd, 15, 211, y + 144, y + 161, y + 157, b.as_bytes(), &w::st(&UI_12, c, SURFACE, Align::Left));
             }
         }
         // The other slots, one row each in their fixed places: watched ones pause while transmitting (TX-34).
@@ -528,10 +528,10 @@ impl View for Transmit {
                         t.push(band_name(sl.freq()).as_bytes());
                     }
                     // a long channel name cut on purpose, to the room the state leaves
-                    w::field(lcd, 32, 152, ry, ry + 17, ry + 13, Align::Left, w::fit(t.as_bytes(), &UI_12, 152), &UI_12, DIM, BG);
+                    w::field(lcd, 32, 152, ry, ry + 17, ry + 13, w::fit(t.as_bytes(), &UI_12, 152), const { &w::st(&UI_12, DIM, BG, Align::Left) });
                     let watched = app.watch_mask() & 1 << o != 0;
                     let st: &[u8] = if watched { b"paused" } else { b"off" };
-                    w::field(lcd, 184, 44, ry, ry + 17, ry + 13, Align::Right, st, &UI_12, DIM, BG);
+                    w::field(lcd, 184, 44, ry, ry + 17, ry + 13, st, const { &w::st(&UI_12, DIM, BG, Align::Right) });
                 });
             }
         }
@@ -768,7 +768,7 @@ impl View for Emergency {
                 let _ = uwrite!(a, "{} MHz is kept for distress and rescue.", txt(w::freq3(f).as_bytes()));
             }
             wrap(lcd, 19, 204, y + 45, 17, 2, a.as_bytes(), &UI_12, TEXT, SURFACE);
-            w::field(lcd, 19, 204, y + 70, y + 92, y + 86, Align::Left, b"PTT again to transmit", &UI_12B, AMBER, SURFACE);
+            w::field(lcd, 19, 204, y + 70, y + 92, y + 86, b"PTT again to transmit", const { &w::st(&UI_12B, AMBER, SURFACE, Align::Left) });
         }
         let left = app.radio.t0.wrapping_sub(app.now).min(EMERGENCY_MS);
         let s = left.div_ceil(1000);
@@ -776,7 +776,7 @@ impl View for Emergency {
             parts::bar(lcd, 19, y + 100, 170, 6, left, EMERGENCY_MS, AMBER, SURFACE);
             let mut b = Buf::<8>::new();
             let _ = uwrite!(b, "{} s", s);
-            w::field(lcd, 192, 30, y + 95, y + 111, y + 107, Align::Right, b.as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 192, 30, y + 95, y + 111, y + 107, b.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
         }
     }
 

@@ -716,7 +716,7 @@ impl View for Hf {
                 let mut t = Buf::<8>::new();
                 let _ = uwrite!(t, "{} %", pct);
                 w::progress(lcd, 30, 230, 180, 6, pct, BLUE);
-                w::field(lcd, 10, 220, 242, 260, 256, Align::Center, t.as_bytes(), &UI_12B, TEXT, BG);
+                w::field(lcd, 10, 220, 242, 260, 256, t.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Center) });
             }
             return;
         }
@@ -737,7 +737,7 @@ impl View for Hf {
         let band = h.band().map_or("", |b| BANDS[b].0);
         let chip1 = h.chip1();
         if app.dirty(R_HEAD, Mix::new().h(&band).h(&chip1).get()) {
-            w::field(lcd, 10, 120, 24, 42, 38, Align::Left, band.as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, 10, 120, 24, 42, 38, band.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
             ferrite_ui::canvas::banded(lcd, 130, 24, 102, 18, BG, |lcd| {
                 w::tag(lcd, 230, 25, if chip1 { b"CHIP 1".as_slice() } else { b"SI4732" }, SUB, BG);
             });
@@ -766,13 +766,13 @@ impl View for Hf {
         if app.dirty(R_SUB, Mix::new().h(&rssi).h(&snr).h(&chip1).get()) {
             let t = signal_text(chip1, rssi, snr);
             w::meter(lcd, 12, 140, None, lit, GREEN, BG);
-            w::field(lcd, 214, 18, 132, 150, 146, Align::Right, b"", &UI_12, TEXT, BG);
-            w::field(lcd, 12, 220, 152, 170, 166, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 214, 18, 132, 150, 146, b"", const { &w::st(&UI_12, TEXT, BG, Align::Right) });
+            w::field(lcd, 12, 220, 152, 170, 166, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         }
         // Typing a frequency.
         let ent = self.entry_text(app);
         if app.dirty(R_NOTE, Mix::new().h(&ent).get()) {
-            w::field(lcd, 12, 220, 178, 196, 192, Align::Left, ent.as_bytes(), &UI_12B, AMBER, BG);
+            w::field(lcd, 12, 220, 178, 196, 192, ent.as_bytes(), const { &w::st(&UI_12B, AMBER, BG, Align::Left) });
         }
         // What is paused (HF-6), and whether PTT can transmit here.
         let tx = h.can_tx();

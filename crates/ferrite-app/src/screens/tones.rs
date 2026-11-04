@@ -278,10 +278,10 @@ impl View for Tones {
                     lcd.fill_r(6, y, 228, 33, 2, bg);
                     let mut b = Buf::<16>::new();
                     text(t, &mut b);
-                    w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
+                    w::field(lcd, 14, 70, y + 2, y + 30, y + 21, label.as_bytes(), &w::st(&UI_12, if f { BLUE } else { SUB }, bg, Align::Left));
                     // the value is 49 px at most ("T 123.4"); the kind takes the rest: "CTCSS custom" is 84 px
-                    w::field(lcd, 84, 54, y + 2, y + 30, y + 21, Align::Left, b.as_bytes(), &UI_12B, TEXT, bg);
-                    w::field(lcd, 138, 88, y + 2, y + 30, y + 21, Align::Right, kind(t).as_bytes(), &UI_12, SUB, bg);
+                    w::field(lcd, 84, 54, y + 2, y + 30, y + 21, b.as_bytes(), &w::st(&UI_12B, TEXT, bg, Align::Left));
+                    w::field(lcd, 138, 88, y + 2, y + 30, y + 21, kind(t).as_bytes(), &w::st(&UI_12, SUB, bg, Align::Right));
                     if f {
                         w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
                     }
@@ -300,7 +300,7 @@ impl View for Tones {
         if app.dirty(R_SUB, Mix::new().h(&page).h(&t).get()) {
             ferrite_ui::canvas::banded(lcd, 40, 140, 160, 72, BG, |lcd| {
                 if m == 0 {
-                    w::field(lcd, 40, 160, 146, 200, 177, Align::Center, b"No tone", &UI_12, DIM, BG);
+                    w::field(lcd, 40, 160, 146, 200, 177, b"No tone", const { &w::st(&UI_12, DIM, BG, Align::Center) });
                 } else {
                     let (lo, n) = mode_range(m);
                     picker(lcd, 40, 146, 160, 3, 18, tone_index(t) - lo, n, |i, b| text(tone_at(lo + i), b), BG);
@@ -313,7 +313,7 @@ impl View for Tones {
         }
         if app.dirty(R_NOTE, Mix::new().h(&typed).get()) {
             let s: &[u8] = if typed.is_empty() { b"885 is 88.5 Hz; any 60-260 Hz" } else { typed.as_bytes() };
-            w::field(lcd, 8, 224, 216, 233, 229, Align::Center, s, &UI_12, if typed.is_empty() { DIM } else { TEXT }, BG);
+            w::field(lcd, 8, 224, 216, 233, 229, s, &w::st(&UI_12, if typed.is_empty() { DIM } else { TEXT }, BG, Align::Center));
         }
         let help: &[u8] = if rows(app) == 4 { b"RX and TX apart; further down, end tone and tail." } else { b"RX and TX are set apart: any cross mode is a pair." };
         app.help_box(lcd, 250, 46, help, b"MENU 4");
@@ -345,8 +345,8 @@ impl Tones {
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
                 ferrite_ui::canvas::banded(lcd, 6, y, 228, 33, BG, |lcd| {
                     lcd.fill_r(6, y, 228, 33, 2, bg);
-                    w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
-                    w::field(lcd, 84, 150, y + 2, y + 30, y + 21, Align::Left, name.as_bytes(), &UI_12B, TEXT, bg);
+                    w::field(lcd, 14, 70, y + 2, y + 30, y + 21, label.as_bytes(), &w::st(&UI_12, if f { BLUE } else { SUB }, bg, Align::Left));
+                    w::field(lcd, 84, 150, y + 2, y + 30, y + 21, name.as_bytes(), &w::st(&UI_12B, TEXT, bg, Align::Left));
                     if f {
                         w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
                     }
@@ -360,7 +360,7 @@ impl Tones {
             picker(lcd, 40, 122, 160, 5, 18, v as i32, n as i32, |i, b| b.set(if end { END_TONES[i as usize] } else { TAILS[i as usize] }.as_bytes()), BG);
         }
         if app.dirty(R_NOTE, Mix::new().h(&1u8).get()) {
-            w::field(lcd, 8, 224, 216, 233, 229, Align::Center, b"Global: the radio's, MENU 0 8 8", &UI_12, DIM, BG);
+            w::field(lcd, 8, 224, 216, 233, 229, b"Global: the radio's, MENU 0 8 8", const { &w::st(&UI_12, DIM, BG, Align::Center) });
         }
         app.help_box(lcd, 250, 46, b"This channel's end tone and tail elimination.", b"MENU 4");
     }

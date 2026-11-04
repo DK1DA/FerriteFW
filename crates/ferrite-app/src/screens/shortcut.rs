@@ -74,7 +74,7 @@ impl View for Shortcut {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         if app.dirty(R_TOP, 1) {
-            w::field(lcd, 8, 224, 22, 40, 36, Align::Left, b"Hold a digit on home", &UI_12B, TEXT, BG);
+            w::field(lcd, 8, 224, 22, 40, 36, b"Hold a digit on home", const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
             lcd.fill(0, 41, 240, 1, LINE);
         }
         for (d, name) in SHORTCUTS.iter().enumerate() {

@@ -323,8 +323,8 @@ impl App {
     }
 
     pub(crate) fn empty_now(lcd: &mut impl Panel, line1: &[u8], line2: &[u8]) {
-        w::field(lcd, 8, 224, 130, 147, 143, Align::Center, line1, &UI_12B, SUB, BG);
-        w::field(lcd, 8, 224, 152, 169, 165, Align::Center, line2, &UI_12, DIM, BG);
+        w::field(lcd, 8, 224, 130, 147, 143, line1, const { &w::st(&UI_12B, SUB, BG, Align::Center) });
+        w::field(lcd, 8, 224, 152, 169, 165, line2, const { &w::st(&UI_12, DIM, BG, Align::Center) });
     }
 
     /// The box asking before a destructive action (MENU-23): what goes, and the keys.
@@ -333,9 +333,9 @@ impl App {
             let (y, h) = (104, 92);
             lcd.fill_r(16, y, 208, h, 3, SURFACE);
             lcd.frame_r(16, y, 208, h, 3, RED);
-            w::field(lcd, 24, 192, y + 12, y + 30, y + 26, Align::Center, what, &UI_12B, TEXT, SURFACE);
-            w::field(lcd, 24, 192, y + 34, y + 52, y + 48, Align::Center, name, &UI_12, TEXT, SURFACE);
-            w::field(lcd, 24, 192, y + 62, y + 80, y + 76, Align::Center, "OK confirms \u{b7} BACK keeps it".as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 24, 192, y + 12, y + 30, y + 26, what, const { &w::st(&UI_12B, TEXT, SURFACE, Align::Center) });
+            w::field(lcd, 24, 192, y + 34, y + 52, y + 48, name, const { &w::st(&UI_12, TEXT, SURFACE, Align::Center) });
+            w::field(lcd, 24, 192, y + 62, y + 80, y + 76, "OK confirms \u{b7} BACK keeps it".as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Center) });
         }
     }
 }
@@ -345,7 +345,7 @@ pub(crate) fn head(lcd: &mut impl Panel, left: &[u8], right: &[u8]) {
     // in bands: the old line goes straight to the new (DISP-25)
     ferrite_ui::canvas::banded(lcd, 0, HEAD_Y, 240, 21, BG, |lcd| {
         lcd.text4_rows(8, HEAD_Y + 14, w::fit(left, &UI_12, 224 - rw - 12), &UI_12, SUB, BG, HEAD_Y, HEAD_Y + 20);
-        w::field(lcd, 232 - rw, rw + 8, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Left, right, &UI_12, SUB, BG);
+        w::field(lcd, 232 - rw, rw + 8, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, right, const { &w::st(&UI_12, SUB, BG, Align::Left) });
         lcd.fill(0, HEAD_Y + 20, 240, 1, LINE);
     });
 }

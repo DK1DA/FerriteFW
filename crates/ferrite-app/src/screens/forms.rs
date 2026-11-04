@@ -60,12 +60,12 @@ impl App {
         let f = sl.freq();
         if self.dirty(R_TOP, Mix::new().h(&a).h(&head).h(&m).h(&f).get()) {
             w::badge(lcd, 8, 23, a, true, BG);
-            w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 26, 66, 21, 39, 35, Align::Left, head.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 22, 4, 21, 39, 35, b"", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 26, 66, 21, 39, 35, head.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
             let mut fb = [0u8; 16];
             let n = ferrite_core::freq::format(f, &mut fb);
-            w::field(lcd, 92, 108, 21, 39, 35, Align::Left, &fb[..n], &UI_12B, TEXT, BG);
-            w::field(lcd, 200, 32, 21, 39, 35, Align::Right, m.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 92, 108, 21, 39, 35, &fb[..n], const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
+            w::field(lcd, 200, 32, 21, 39, 35, m.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
             lcd.fill(0, 40, 240, 1, LINE);
         }
     }
@@ -115,11 +115,11 @@ pub(crate) fn picker(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, rows: i32, r
         if k == 0 {
             ferrite_ui::canvas::banded(lcd, x, ry, w_, rh, bg, |lcd| {
                 lcd.fill_r(x, ry, w_, rh, 1, BLUE);
-                w::field(lcd, x + 8, w_ - 16, ry + 1, ry + rh - 1, base, Align::Center, b.as_bytes(), &UI_12B, BLUE_FG, BLUE);
+                w::field(lcd, x + 8, w_ - 16, ry + 1, ry + rh - 1, base, b.as_bytes(), const { &w::st(&UI_12B, BLUE_FG, BLUE, Align::Center) });
             });
         } else {
             let c = if k.abs() == 1 { TEXT } else { DIM };
-            w::field(lcd, x, w_, ry, ry + rh, base, Align::Center, b.as_bytes(), &UI_12, c, bg);
+            w::field(lcd, x, w_, ry, ry + rh, base, b.as_bytes(), &w::st(&UI_12, c, bg, Align::Center));
         }
     }
 }

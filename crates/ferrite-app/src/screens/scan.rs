@@ -237,13 +237,13 @@ impl View for Scan {
         head.push(band_name(lv.freq).as_bytes());
         if app.dirty(2, Mix::new().h(&head).h(&state).get()) {
             w::badge(lcd, 14, y + 8, s, true, SURFACE);
-            w::field(lcd, 34, 120, y + 7, y + 24, y + 20, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 34, 120, y + 7, y + 24, y + 20, head.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
             if state == "RX" {
                 ferrite_ui::canvas::banded(lcd, 154, y + 6, 74, 18, SURFACE, |lcd| {
                     w::tag(lcd, 226, y + 7, b"RX", GREEN, SURFACE);
                 });
             } else {
-                w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
+                w::field(lcd, 154, 72, y + 7, y + 24, y + 20, state.as_bytes(), &w::st(&UI_12, sc, SURFACE, Align::Right));
             }
         }
         if app.dirty(3, Mix::new().h(&lv.freq).get()) {
@@ -260,8 +260,8 @@ impl View for Scan {
         }
         let st = if lv.squelch_open { w::s_text(lv.rssi) } else { Buf::new() };
         if app.dirty(4, Mix::new().h(&name).h(&st).get()) {
-            w::field(lcd, 15, 170, y + 70, y + 88, y + 84, Align::Left, name.as_bytes(), &UI_12, TEXT, SURFACE);
-            w::field(lcd, 185, 41, y + 70, y + 88, y + 84, Align::Right, st.as_bytes(), &UI_12B, GREEN, SURFACE);
+            w::field(lcd, 15, 170, y + 70, y + 88, y + 84, name.as_bytes(), const { &w::st(&UI_12, TEXT, SURFACE, Align::Left) });
+            w::field(lcd, 185, 41, y + 70, y + 88, y + 84, st.as_bytes(), const { &w::st(&UI_12B, GREEN, SURFACE, Align::Right) });
         }
         // SCAN-7: target, resume, position, hits, skips.
         let mut target = Buf::<28>::new();
@@ -309,7 +309,7 @@ impl View for Scan {
         }
         // The last hits: how long ago, what (a channel scan's by name), how long it lasted (SCAN-23.1), how strong.
         if app.dirty(10, 1) {
-            w::field(lcd, 8, 224, 214, 230, 226, Align::Left, b"Last hits", &UI_12B, SUB, BG);
+            w::field(lcd, 8, 224, 214, 230, 226, b"Last hits", const { &w::st(&UI_12B, SUB, BG, Align::Left) });
         }
         for i in 0..super::activity::HITS {
             let hit = app.radio.hits[i];
@@ -332,10 +332,10 @@ impl View for Scan {
             }
             let y = 232 + 18 * i as i32;
             if app.dirty(11 + i, Mix::new().h(&a).h(&what).h(&len).h(&sig).get()) {
-                w::field(lcd, 8, 46, y, y + 18, y + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
-                w::field(lcd, 54, 104, y, y + 18, y + 13, Align::Left, w::fit(what.as_bytes(), &UI_12, 104), &UI_12, TEXT, BG);
-                w::field(lcd, 158, 40, y, y + 18, y + 13, Align::Right, len.as_bytes(), &UI_12, SUB, BG);
-                w::field(lcd, 200, 32, y, y + 18, y + 13, Align::Right, sig.as_bytes(), &UI_12B, GREEN, BG);
+                w::field(lcd, 8, 46, y, y + 18, y + 13, a.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+                w::field(lcd, 54, 104, y, y + 18, y + 13, w::fit(what.as_bytes(), &UI_12, 104), const { &w::st(&UI_12, TEXT, BG, Align::Left) });
+                w::field(lcd, 158, 40, y, y + 18, y + 13, len.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
+                w::field(lcd, 200, 32, y, y + 18, y + 13, sig.as_bytes(), const { &w::st(&UI_12B, GREEN, BG, Align::Right) });
             }
         }
     }

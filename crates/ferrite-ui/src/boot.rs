@@ -224,9 +224,9 @@ fn paint_at(lcd: &mut impl Panel, b: &BootInfo, full: bool, t: Option<u32>) {
         (b.note.unwrap_or(b""), SUB)
     };
     // Each line paints its own full width (no blank first).
-    crate::widgets::field(lcd, 0, 240, 276, 298, 290, Align::Center, text, &UI_12, col, BG);
+    crate::widgets::field(lcd, 0, 240, 276, 298, 290, text, &crate::widgets::st(&UI_12, col, BG, Align::Center));
     let more: &[u8] = if failed.is_some() { b"Any key: continue" } else { b"" };
-    crate::widgets::field(lcd, 0, 240, 298, 320, 308, Align::Center, more, &UI_12, SUB, BG);
+    crate::widgets::field(lcd, 0, 240, 298, 320, 308, more, const { &crate::widgets::st(&UI_12, SUB, BG, Align::Center) });
 }
 
 /// The owner card (D13, BootC mock-up): who owns the radio and how to reach them, with the logo, version and
@@ -241,8 +241,8 @@ fn card(lcd: &mut impl Panel, b: &BootInfo, o: &Owner, done: i32, n: i32, full: 
     let _ = (done, n);
     let status: &[u8] = b.note.unwrap_or(b"");
     let right = 228 - crate::gfx::text4_width(status, &UI_12);
-    crate::widgets::field(lcd, x + 6, 222 - x, 265, 281, 277, Align::Left, fit(b.version.as_bytes(), &UI_12, right - x - 8), &UI_12, SUB, BG);
-    crate::widgets::field(lcd, right, 228 - right, 265, 281, 277, Align::Left, status, &UI_12, SUB, BG);
+    crate::widgets::field(lcd, x + 6, 222 - x, 265, 281, 277, fit(b.version.as_bytes(), &UI_12, right - x - 8), const { &crate::widgets::st(&UI_12, SUB, BG, Align::Left) });
+    crate::widgets::field(lcd, right, 228 - right, 265, 281, 277, status, const { &crate::widgets::st(&UI_12, SUB, BG, Align::Left) });
 }
 
 /// The card's fixed part: drawn once.

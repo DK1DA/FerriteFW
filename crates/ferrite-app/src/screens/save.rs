@@ -207,7 +207,7 @@ impl View for Save {
                     Kind::Hf => b"Save this HF frequency",
                     Kind::Vfo => b"Save this VFO as a channel",
                 };
-                w::field(lcd, 8, 224, 24, 41, 37, Align::Left, head, &UI_12B, TEXT, BG);
+                w::field(lcd, 8, 224, 24, 41, 37, head, const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
                 w::freq(lcd, 8, 232, 84, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
                 lcd.fill(0, 92, 240, 1, LINE);
             });

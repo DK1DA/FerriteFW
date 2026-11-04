@@ -55,26 +55,37 @@ fn cut<'a>(s: &'a [u8], f: &Font4, w: i32) -> &'a [u8] {
     r
 }
 
+/// How [`field`] draws its text: font, colours and alignment. A call with constant ones passes
+/// `const { &st(..) }`, one address in place of four arguments (the flash audit's #7, Nov 1).
+pub struct Style {
+    pub f: &'static Font4,
+    pub fg: u16,
+    pub bg: u16,
+    pub align: Align,
+}
+
+/// A [`Style`].
+pub const fn st(f: &'static Font4, fg: u16, bg: u16, align: Align) -> Style {
+    Style { f, fg, bg, align }
+}
+
 /// Text in the box x..x+w, y0..y1: aligned, cut to fit, the rest of the box painted bg. The workhorse for
-/// redrawing a value in place without clearing it first (no flicker).
+/// redrawing a value in place without clearing it first (no flicker). A thin shim: one body for every panel.
+#[inline]
 #[cfg_attr(feature = "clipcheck", track_caller)]
-pub fn field(
-    lcd: &mut impl Panel,
-    x: i32,
-    w: i32,
-    y0: i32,
-    y1: i32,
-    baseline: i32,
-    align: Align,
-    s: &[u8],
-    f: &'static Font4,
-    fg: u16,
-    bg: u16,
-) -> i32 {
+pub fn field(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i32, s: &[u8], st: &Style) -> i32 {
+    field_at(lcd, x, w, y0, y1, baseline, s, st)
+}
+
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "clipcheck", track_caller)]
+fn field_at(lcd: &mut dyn Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i32, s: &[u8], st: &Style) -> i32 {
+    let (f, fg, bg) = (st.f, st.fg, st.bg);
     clip_site!();
     let s = cut(s, f, w);
     let tw = text4_width(s, f);
-    let tx = match align {
+    let tx = match st.align {
         Align::Left => x,
         Align::Right => x + w - tw,
         // the ink in the middle (an odd leftover pixel goes on the left, where the glyphs' anti-aliasing is
@@ -124,7 +135,7 @@ pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16
     let night = crate::theme::get() == crate::theme::NIGHT_RED;
     crate::canvas::banded(lcd, x, y, w, 16, bg, |b| {
         let back = if night { c } else { bg };
-        field(b, x, w, y, y + 15, y + 12, Align::Center, s, &UI_12B, c, back);
+        field(b, x, w, y, y + 15, y + 12, s, &st(&UI_12B, c, back, Align::Center));
         b.frame_r(x, y, w, 15, 1, c);
     });
     w
@@ -146,7 +157,7 @@ pub fn card_border(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, c: u16,
 pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) -> i32 {
     clip_site!();
     let w = text4_width(s, &UI_12) + 10;
-    field(lcd, x, w, y, y + 17, y + 13, Align::Center, s, &UI_12, fg, bg);
+    field(lcd, x, w, y, y + 17, y + 13, s, &st(&UI_12, fg, bg, Align::Center));
     lcd.frame_r(x, y, w, 17, 1, LINE);
     w
 }
@@ -172,7 +183,7 @@ fn chip_slot_now(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u
     let (x, w) = slot;
     lcd.fill(x, y, w, 17, bg);
     if !s.is_empty() {
-        field(lcd, x + 1, w - 2, y + 1, y + 16, y + 13, Align::Center, cut(s, &UI_12, w - 4), &UI_12, fg, bg);
+        field(lcd, x + 1, w - 2, y + 1, y + 16, y + 13, cut(s, &UI_12, w - 4), &st(&UI_12, fg, bg, Align::Center));
         lcd.frame_r(x, y, w, 17, 1, frame);
     }
 }
@@ -503,7 +514,7 @@ pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i3
         }
         let line = &rest[..cut];
         let bottom = (base - f.ascent as i32 + step).min(y1);
-        field(lcd, x, w, y, bottom, base, Align::Left, line, f, fg, bg);
+        field(lcd, x, w, y, bottom, base, line, &st(f, fg, bg, Align::Left));
         if !line.is_empty() {
             n += 1;
         }
@@ -620,7 +631,7 @@ fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
     let (fg, sub) = if r.selected { (BLUE_FG, BLUE_FG) } else { (if r.grey { DIM } else { TEXT }, SUB) };
     let base = y + h / 2 + 5;
     let x = if let Some(n) = r.num {
-        field(lcd, 0, 25, y, y + h, base, Align::Center, &[b'0' + n % 10], &UI_12, sub, bg);
+        field(lcd, 0, 25, y, y + h, base, &[b'0' + n % 10], &st(&UI_12, sub, bg, Align::Center));
         25
     } else {
         lcd.fill(0, y, 8, h, bg);
@@ -628,7 +639,7 @@ fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
     };
     // The name keeps its room; the value gets the rest.
     let name = cut(r.name, &UI_12, 232 - x - 40);
-    let nw = field(lcd, x, text4_width(name, &UI_12), y, y + h, base, Align::Left, name, &UI_12, fg, bg);
+    let nw = field(lcd, x, text4_width(name, &UI_12), y, y + h, base, name, &st(&UI_12, fg, bg, Align::Left));
     let x = x + nw;
     let value = cut(r.value, &UI_12, 232 - x - if r.dot { 18 } else { 8 });
     let vw = text4_width(value, &UI_12);
@@ -637,7 +648,7 @@ fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
     if r.dot {
         lcd.fill_r(x + 4, base - 7, 6, 6, 3, if r.selected { BLUE_FG } else { AMBER });
     }
-    field(lcd, vx, vw, y, y + h, base, Align::Right, value, &UI_12, sub, bg);
+    field(lcd, vx, vw, y, y + h, base, value, &st(&UI_12, sub, bg, Align::Right));
     lcd.fill(232, y, 8, h, bg);
 }
 
@@ -927,7 +938,7 @@ impl StatusBar {
                 None => self.call.as_bytes(),
             };
             // 98..142: wide enough for `14:32Z` (41 px) or a 6-character callsign, still centred on 120 (SBAR-2).
-            field(lcd, 98, 44, 0, SBAR_H - 1, 14, Align::Center, t, &UI_12B, KEYS, BG);
+            field(lcd, 98, 44, 0, SBAR_H - 1, 14, t, const { &st(&UI_12B, KEYS, BG, Align::Center) });
         }
         if old.is_none_or(|o| !self.right_eq(o)) {
             crate::canvas::banded(lcd, 142, 0, 98, SBAR_H - 1, BG, |b| self.draw_right(b));
@@ -948,7 +959,7 @@ impl StatusBar {
         lcd.fill(0, y0, 8, y1, BG);
         if !self.name.is_empty() {
             let name = fit(self.name.as_bytes(), &UI_12, 90 - icons);
-            x += field(lcd, x, text4_width(name, &UI_12), y0, y1, base, Align::Left, name, &UI_12, SUB, BG);
+            x += field(lcd, x, text4_width(name, &UI_12), y0, y1, base, name, const { &st(&UI_12, SUB, BG, Align::Left) });
             lcd.fill(x, y0, gap, y1, BG);
             x += gap;
         }
@@ -961,7 +972,7 @@ impl StatusBar {
         for (on, t) in [(self.scan, b"SCN".as_slice()), (self.watch >= 2, if self.watch >= 3 { b"TW" } else { b"DW" })] {
             if on {
                 let w = text4_width(t, &UI_12);
-                field(lcd, x, w + gap, y0, y1, base, Align::Left, t, &UI_12, SUB, BG);
+                field(lcd, x, w + gap, y0, y1, base, t, const { &st(&UI_12, SUB, BG, Align::Left) });
                 x += w + gap;
             }
         }
@@ -971,7 +982,7 @@ impl StatusBar {
             envelope(lcd, x, 5, c);
             x += 14;
             let w = text4_width(count.as_bytes(), &UI_12B);
-            field(lcd, x, w, y0, y1, base, Align::Left, count.as_bytes(), &UI_12B, if self.alert { RED } else { TEXT }, BG);
+            field(lcd, x, w, y0, y1, base, count.as_bytes(), &st(&UI_12B, if self.alert { RED } else { TEXT }, BG, Align::Left));
             x += w;
         }
         if self.alerts_paused {
@@ -1024,14 +1035,14 @@ impl StatusBar {
         if self.dry {
             let w = text4_width(b"DRY", &UI_12B);
             x -= w + 4;
-            field(lcd, x, w, 0, SBAR_H - 1, 14, Align::Left, b"DRY", &UI_12B, AMBER, BG);
+            field(lcd, x, w, 0, SBAR_H - 1, 14, b"DRY", const { &st(&UI_12B, AMBER, BG, Align::Left) });
         }
         // SBAR-24: Low Power Mode in the battery's fill colour (a saving, not a warning). GPS and Bluetooth are off
         // in it, so with DRY too it ends at 155 or so, inside the right half.
         if self.lpm {
             let w = text4_width(b"LOW", &UI_12B);
             x -= w + 4;
-            field(lcd, x, w, 0, SBAR_H - 1, 14, Align::Left, b"LOW", &UI_12B, BATT, BG);
+            field(lcd, x, w, 0, SBAR_H - 1, 14, b"LOW", const { &st(&UI_12B, BATT, BG, Align::Left) });
         }
         // SAT-20: the pass alarm: a satellite riding a dashed arc, every other 2 s the time to the rise ("12",
         // "3H") or UP; white over an hour away, amber within it, green overhead. 16 px, left of the others.
@@ -1048,7 +1059,7 @@ impl StatusBar {
                 } else {
                     let _ = ufmt::uwrite!(b, "{}H", (m / 60).min(9));
                 }
-                field(lcd, x, 18, 0, SBAR_H - 1, 14, Align::Center, b.as_bytes(), &UI_12B, c, BG);
+                field(lcd, x, 18, 0, SBAR_H - 1, 14, b.as_bytes(), &st(&UI_12B, c, BG, Align::Center));
             } else {
                 sat_icon(lcd, x + 2, 3, c);
             }
@@ -1110,7 +1121,7 @@ mod tests {
     fn field_paints_its_box_only() {
         let mut fb = FrameBuffer::new();
         fb.px.fill(0x1234);
-        field(&mut fb, 20, 100, 30, 47, 43, Align::Right, b"Narrow", &UI_12, TEXT, BG);
+        field(&mut fb, 20, 100, 30, 47, 43, b"Narrow", const { &st(&UI_12, TEXT, BG, Align::Right) });
         assert_eq!(fb.at(19, 35), 0x1234);
         assert_eq!(fb.at(120, 35), 0x1234);
         assert_eq!(fb.at(20, 29), 0x1234);

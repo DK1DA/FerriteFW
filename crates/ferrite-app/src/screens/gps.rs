@@ -213,7 +213,7 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
         // neither clears part of the other ("±5 m" lost its m)
         let aw = text4_width(age.as_bytes(), &UI_12);
         head(lcd, w::fit(l.as_bytes(), &UI_12, 232 - aw - 16 - 8), b"");
-        w::field(lcd, 232 - aw, aw, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Right, age.as_bytes(), &UI_12, if stale { AMBER } else { SUB }, BG);
+        w::field(lcd, 232 - aw, aw, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, age.as_bytes(), &w::st(&UI_12, if stale { AMBER } else { SUB }, BG, Align::Right));
     }
     // Between a fix and none, the page's layout changes: clear it and redraw every part.
     let none: (&[u8], &[u8]) = if gps == GpsState::Off { (b"GPS is off", b"MENU 0 6 1 turns it on") } else { (b"No fix yet", b"Left or right: the satellites") };
@@ -464,11 +464,11 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
             });
             let mut p = Buf::<4>::new();
             let _ = uwrite!(p, "{}", s.prn);
-            w::field(lcd, x, bw, base + 3, base + 20, base + 16, Align::Center, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
+            w::field(lcd, x, bw, base + 3, base + 20, base + 16, p.as_bytes(), &w::st(&UI_12, if s.used { TEXT } else { SUB }, BG, Align::Center));
         });
     }
     if app.dirty(R_NOTE, 1) {
-        w::field(lcd, 8, 224, 278, 296, 291, Align::Left, b"Used: blue GPS, violet BeiDou", &UI_12, DIM, BG);
+        w::field(lcd, 8, 224, 278, 296, 291, b"Used: blue GPS, violet BeiDou", const { &w::st(&UI_12, DIM, BG, Align::Left) });
     }
 }
 
@@ -565,7 +565,7 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
             }
             None => t.set(b"North up"),
         }
-        w::field(lcd, 8, 224, 204, 221, 217, Align::Center, t.as_bytes(), &UI_12, SUB, BG);
+        w::field(lcd, 8, 224, 204, 221, 217, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
     }
     if app.dirty(R_HELP, Mix::new().h(&where_).h(&course).h(&units).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 222, 240, 76, BG, |lcd| {
@@ -585,10 +585,10 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
                         let s = m as u64 * 36 / (kmh as u64 * 10).max(1);
                         let _ = if s < 3600 { uwrite!(b, " \u{b7} ETA {} min", (s / 60).max(1) as u32) } else { uwrite!(b, " \u{b7} ETA {} h {}", (s / 3600) as u32, (s / 60 % 60) as u32) };
                     }
-                    w::field(lcd, 8, 224, 277, 296, 292, Align::Center, b.as_bytes(), &UI_12B, TEXT, BG);
+                    w::field(lcd, 8, 224, 277, 296, 292, b.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Center) });
                 }
                 None => {
-                    w::field(lcd, 8, 224, 240, 260, 255, Align::Center, b"No GPS fix: no distance", &UI_12, SUB, BG);
+                    w::field(lcd, 8, 224, 240, 260, 255, b"No GPS fix: no distance", const { &w::st(&UI_12, SUB, BG, Align::Center) });
                 }
             }
         });

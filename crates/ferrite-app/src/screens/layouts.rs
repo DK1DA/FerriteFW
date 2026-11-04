@@ -50,18 +50,18 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let ww = (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W);
         // HOME-4.3: the header takes what the state leaves (a 16-character zone name fits), at least 140 px
         let hw = if ht.is_empty() { (232 - 6 - super::home::head_right_w(true, state, &Buf::new()) - 26).max(140) } else { 232 - ww - 26 };
-        w::field(lcd, 26, hw, 22, 40, 36, Align::Left, w::fit(h.as_bytes(), &UI_12, hw), &UI_12, SUB, BG);
+        w::field(lcd, 26, hw, 22, 40, 36, w::fit(h.as_bytes(), &UI_12, hw), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
             if !ht.is_empty() {
-                w::field(lcd, 232 - ww, ww, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
+                w::field(lcd, 232 - ww, ww, 22, 40, 36, ht.as_bytes(), &w::st(&UI_12, sc, BG, Align::Right));
             } else if state == "RX muted" {
                 // HOME-15.3: the RX tag, "Muted" left of it
                 w::tag(lcd, 232, 24, b"RX", GREEN, BG);
-                w::field(lcd, 26 + hw, 200 - 26 - hw, 22, 40, 36, Align::Right, b"Muted", &UI_12, sc, BG);
+                w::field(lcd, 26 + hw, 200 - 26 - hw, 22, 40, 36, b"Muted", &w::st(&UI_12, sc, BG, Align::Right));
             } else if matches!(state, "RX" | "TX" | "MON" | "FM") {
                 w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
             } else if state != "idle" {
-                w::field(lcd, 26 + hw, 206 - hw, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
+                w::field(lcd, 26 + hw, 206 - hw, 22, 40, 36, state.as_bytes(), &w::st(&UI_12, sc, BG, Align::Right));
             }
         });
     }
@@ -75,7 +75,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
                 // 26 px when the whole name fits, else 22 px (HOME-4.3).
                 let nb = name.as_bytes();
                 let (font, base) = if text4_width(nb, &NAME_26) <= 224 { (&NAME_26, 70) } else { (&NAME_22, 68) };
-                w::field(lcd, 8, 224, 43, 76, base, Align::Left, w::fit(nb, font, 224), font, TEXT, BG);
+                w::field(lcd, 8, 224, 43, 76, base, w::fit(nb, font, 224), &w::st(font, TEXT, BG, Align::Left));
                 w::freq(lcd, 8, 232, 92, f, &DIG_17, &DIG_17, SUB, SUB, BG);
             }
         });
@@ -120,7 +120,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         }
         if app.dirty(4, Mix::new().h(&sig).h(&stereo).h(&2u8).get()) {
             canvas::banded(lcd, 8, 96, 224, 18, BG, |lcd| {
-                w::field(lcd, 8, 160, 96, 114, 110, Align::Left, sig.as_bytes(), &UI_12, SUB, BG);
+                w::field(lcd, 8, 160, 96, 114, 110, sig.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
                 if stereo {
                     w::tag(lcd, 232, 97, b"STEREO", SUB, BG);
                 }
@@ -143,8 +143,8 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     for (i, l) in LABELS.iter().enumerate() {
         let (x, y) = (8 + (i as i32 % 3) * 76, 96 + (i as i32 / 3) * 36);
         if !bcast && app.dirty(3 + i, Mix::new().h(&v[i]).get()) {
-            w::field(lcd, x, 74, y, y + 16, y + 12, Align::Left, l.as_bytes(), &UI_12, SUB, BG);
-            w::field(lcd, x, 74, y + 16, y + 34, y + 30, Align::Left, v[i].as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, x, 74, y, y + 16, y + 12, l.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, x, 74, y + 16, y + 34, y + 30, v[i].as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
         }
     }
     // S-meter with its scale. A broadcast slot's is the SI4732's signal on the FM screen's scale (0-70 dBuV, as
@@ -165,7 +165,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.drawn.meter[a as usize] = None; // the bars come back whole
         let t = w::dbm_text(lv.rssi);
         if app.dirty(9, Mix::new().h(&t).h(&on).h(&true).get()) {
-            w::field(lcd, 8, 226, 166, 196, 188, Align::Left, t.as_bytes(), &UI_15B, if on { GREEN } else { TEXT }, BG);
+            w::field(lcd, 8, 226, 166, 196, 188, t.as_bytes(), &w::st(&UI_15B, if on { GREEN } else { TEXT }, BG, Align::Left));
         }
     }
     if !dbm {
@@ -189,7 +189,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
                         let x = 8 + [0, 20, 40, 60, 80, 120, 160][i];
                         lcd.text4_rows(x, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196);
                     }
-                    w::field(lcd, 208, 26, 178, 196, 192, Align::Right, s.as_bytes(), &UI_12B, TEXT, BG);
+                    w::field(lcd, 208, 26, 178, 196, 192, s.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Right) });
                 }
             });
         }
@@ -223,8 +223,8 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         if !app.held(11 + i) && app.dirty(11 + i, Mix::new().h(&o).h(&t).h(&st).get()) {
             w::badge(lcd, 8, y + 2, o, false, BG);
             // a long channel name cut on purpose, to the room the state leaves
-            w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, w::fit(t.as_bytes(), &UI_12, 140), &UI_12, TEXT, BG);
-            w::field(lcd, 168, 64, y, y + 18, y + 14, Align::Right, st.as_bytes(), &UI_12, c, BG); // "scanning" whole
+            w::field(lcd, 28, 140, y, y + 18, y + 14, w::fit(t.as_bytes(), &UI_12, 140), const { &w::st(&UI_12, TEXT, BG, Align::Left) });
+            w::field(lcd, 168, 64, y, y + 18, y + 14, st.as_bytes(), &w::st(&UI_12, c, BG, Align::Right)); // "scanning" whole
         }
     }
 }
@@ -274,8 +274,8 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
             // HOME-4.3: the state's own width (at least 40 px), so a zone name in the header has the rest
             let sw = if state == "heard" || state == "DTMF" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { (text4_width(stt.as_bytes(), f) + 6).clamp(40, 72) };
-            w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
-            w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
+            w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, w::fit(head.as_bytes(), &UI_12, 192 - sw), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
+            w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, stt.as_bytes(), &w::st(f, sc, SURFACE, Align::Right));
         }
         let f = app.shown_freq(s, live);
         // Channel mode: the name at the left, the frequency small at the right (HOME-4).
@@ -297,12 +297,12 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
                 } else {
                     let nb = name.as_bytes();
                     let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
-                    w::field(b, 15, 150, y + 22, y + 46, y + 42, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
+                    w::field(b, 15, 150, y + 22, y + 46, y + 42, w::fit(nb, font, 150), &w::st(font, TEXT, SURFACE, Align::Left));
                 }
-                w::field(b, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), fo, c, SURFACE);
+                w::field(b, x, 226 - x, y + 26, y + 44, y + 42, right.as_bytes(), &w::st(fo, c, SURFACE, Align::Right));
             });
         } else if info {
-            w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), fo, c, SURFACE);
+            w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, right.as_bytes(), &w::st(fo, c, SURFACE, Align::Right));
         }
         let cfg = *sl.cfg();
         // The value line in fixed columns (HOME-4): mode, tone, power pinned right; a scan's mode and last hit.
@@ -334,9 +334,9 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         if app.dirty(R_SUB + p, Mix::new().h(&cols).get()) {
             canvas::banded(lcd, 15, y + 46, 211, 15, SURFACE, |b| {
-                w::field(b, 15, 36, y + 46, y + 61, y + 58, Align::Left, cols[0].as_bytes(), &UI_12, SUB, SURFACE);
-                w::field(b, 51, 120, y + 46, y + 61, y + 58, Align::Left, cols[1].as_bytes(), &UI_12, SUB, SURFACE);
-                w::field(b, 156, 70, y + 46, y + 61, y + 58, Align::Right, cols[2].as_bytes(), &UI_12, SUB, SURFACE);
+                w::field(b, 15, 36, y + 46, y + 61, y + 58, cols[0].as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
+                w::field(b, 51, 120, y + 46, y + 61, y + 58, cols[1].as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
+                w::field(b, 156, 70, y + 46, y + 61, y + 58, cols[2].as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
             });
         }
         // The last minute: a bar per 1.2 s bucket heard, newest at the right, on a dotted baseline.

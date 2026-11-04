@@ -170,7 +170,7 @@ impl View for Fm {
         // BCR-27: the slot playing it, when one does.
         let title = title_text(app);
         if app.dirty(R_FREQ, Mix::new().h(&f).h(&stereo).h(&title).get()) {
-            w::field(lcd, 10, 150, 24, 42, 38, Align::Left, title.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 10, 150, 24, 42, 38, title.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
             ferrite_ui::canvas::banded(lcd, 160, 24, 72, 18, BG, |lcd| {
                 if stereo {
                     w::tag(lcd, 230, 25, b"STEREO", SUB, BG);
@@ -192,13 +192,13 @@ impl View for Fm {
         if app.dirty(R_INFO, Mix::new().h(&text).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 108, 240, 80, BG, |lcd| {
                 if text.is_empty() {
-                    w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
+                    w::field(lcd, 16, 208, 138, 156, 152, b"No RDS", const { &w::st(&UI_12, DIM, BG, Align::Center) });
                 } else {
                     lcd.fill_r(8, 110, 224, 74, 2, SURFACE);
                     if is_rt {
                         w::wrap(lcd, 16, 208, 113, 166, 126, 15, text, &UI_12, TEXT, SURFACE);
                     } else {
-                        w::field(lcd, 16, 208, 114, 136, 132, Align::Left, text, &UI_15B, TEXT, SURFACE);
+                        w::field(lcd, 16, 208, 114, 136, 132, text, const { &w::st(&UI_15B, TEXT, SURFACE, Align::Left) });
                     }
                 }
             });
@@ -206,17 +206,17 @@ impl View for Fm {
         // Signal and SNR.
         let lit = (rssi as u32 * w::METER_SEGS as u32 / 70).min(w::METER_SEGS as u32) as u8;
         if app.dirty(R_SUB, Mix::new().h(&rssi).h(&snr).get()) {
-            w::field(lcd, 14, 120, 194, 210, 206, Align::Left, b"Signal", &UI_12, SUB, BG);
+            w::field(lcd, 14, 120, 194, 210, 206, b"Signal", const { &w::st(&UI_12, SUB, BG, Align::Left) });
             let mut t = Buf::<24>::new();
             let _ = uwrite!(t, "{} dBuV \u{b7} SNR {} dB", rssi, snr);
-            w::field(lcd, 90, 142, 194, 210, 206, Align::Right, t.as_bytes(), &UI_12, TEXT, BG);
+            w::field(lcd, 90, 142, 194, 210, 206, t.as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Right) });
             w::meter(lcd, 20, 216, None, lit, GREEN, BG);
         }
         // Radio monitor (BCR-4): which slots still watch, and whether one is interrupting now.
         let (m, paused) = monitor_text(app);
         let c = if paused { AMBER } else { SUB };
         if app.dirty(R_NOTE, Mix::new().h(&m).h(&c).get()) {
-            w::field(lcd, 10, 220, 238, 256, 252, Align::Center, m.as_bytes(), &UI_12, c, BG);
+            w::field(lcd, 10, 220, 238, 256, 252, m.as_bytes(), &w::st(&UI_12, c, BG, Align::Center));
         }
     }
 

@@ -108,7 +108,7 @@ impl View for Alert {
             lcd.text4(34, 45, KINDS[a.kind as usize % 3].as_bytes(), &UI_12B, RED, ALERT_BG);
             let ev: &[u8] = if a.event.is_empty() { b"Alert" } else { a.event.as_bytes() };
             w::wrap(lcd, 15, 210, 52, 96, 70, 21, ev, &UI_15B, TEXT, ALERT_BG);
-            w::field(lcd, 15, 210, 98, 116, 112, Align::Left, a.areas.as_bytes(), &UI_12B, TEXT, ALERT_BG);
+            w::field(lcd, 15, 210, 98, 116, 112, a.areas.as_bytes(), const { &w::st(&UI_12B, TEXT, ALERT_BG, Align::Left) });
         }
         // Issued, until (minutes left), from, heard (WX-5).
         let now = cx.dev.clock_min;
@@ -131,14 +131,14 @@ impl View for Alert {
         for (i, (label, v)) in ["Issued", "Until", "From", "Heard"].iter().zip(&rows).enumerate() {
             let y = 122 + 16 * i as i32;
             if app.dirty(R_ROW + i, Mix::new().h(&v).get()) {
-                w::field(lcd, 15, 52, y, y + 16, y + 12, Align::Left, label.as_bytes(), &UI_12, SUB, ALERT_BG);
-                w::field(lcd, 70, 160, y, y + 16, y + 12, Align::Left, v.as_bytes(), &UI_12, TEXT, ALERT_BG);
+                w::field(lcd, 15, 52, y, y + 16, y + 12, label.as_bytes(), const { &w::st(&UI_12, SUB, ALERT_BG, Align::Left) });
+                w::field(lcd, 70, 160, y, y + 16, y + 12, v.as_bytes(), const { &w::st(&UI_12, TEXT, ALERT_BG, Align::Left) });
             }
         }
         if app.dirty(R_HELP, Mix::new().h(&self.silenced).get()) {
             let (c, t): (u16, &[u8]) = if self.silenced { (SUB, "Tone off \u{b7} in the event log".as_bytes()) } else { (rgb565(0xF2, 0x8B, 0x8E), b"Tone sounding") };
             w::bell(lcd, 16, 272, c, ALERT_BG, self.silenced);
-            w::field(lcd, 32, 196, 268, 286, 282, Align::Left, t, &UI_12, c, ALERT_BG);
+            w::field(lcd, 32, 196, 268, 286, 282, t, &w::st(&UI_12, c, ALERT_BG, Align::Left));
         }
     }
 

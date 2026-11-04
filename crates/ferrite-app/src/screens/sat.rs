@@ -586,8 +586,8 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
             let _ = uwrite!(r, "Elements {} d", age);
         }
         let c = [GREEN, AMBER, RED][lvl as usize % 3];
-        let rw = w::field(lcd, 120, 112, 22, 40, 34, Align::Right, r.as_bytes(), &UI_12, c, BG);
-        w::field(lcd, 8, 224 - rw - 6, 22, 40, 34, Align::Left, l.as_bytes(), &UI_12, SUB, BG);
+        let rw = w::field(lcd, 120, 112, 22, 40, 34, r.as_bytes(), &w::st(&UI_12, c, BG, Align::Right));
+        w::field(lcd, 8, 224 - rw - 6, 22, 40, 34, l.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
     }
     let msg: Option<(&[u8], &[u8])> = match state {
         State::NoSats => Some((b"No satellites", b"Load them from Ferrite Console")),
@@ -657,7 +657,7 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
                 lcd.fill(0, y, 3, ROW_H - 1, if up { GREEN } else { BLUE });
             }
             let b = y + 15;
-            w::field(lcd, 8, 88, y, y + ROW_H - 1, b, Align::Left, nm.as_bytes(), &UI_12B, fg, bg);
+            w::field(lcd, 8, 88, y, y + ROW_H - 1, b, nm.as_bytes(), &w::st(&UI_12B, fg, bg, Align::Left));
             if marked {
                 bell(lcd, 100, y + 5, AMBER);
                 let mut lt = Buf::<4>::new();
@@ -666,7 +666,7 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
             }
             lcd.text4(124, b, t.as_bytes(), &UI_12B, if up { GREEN } else { fg }, bg);
             lcd.text4(172, b, el.as_bytes(), &UI_12B, fg, bg);
-            w::field(lcd, 208, rw - 208, y, y + ROW_H - 1, b, Align::Left, m.as_bytes(), &UI_12B, fg, bg);
+            w::field(lcd, 208, rw - 208, y, y + ROW_H - 1, b, m.as_bytes(), &w::st(&UI_12B, fg, bg, Align::Left));
         });
     }
     app.scroll_cue(lcd, (2, ROWS), ROW_Y, ROWS as i32 * ROW_H, n > ROWS, top as u32, ROWS as u32, n as u32);
@@ -901,7 +901,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
             let x = lcd.text4(14 + wd, 232, if pr.hd { b"* HD" } else { b"* FD" }, &UI_12B, TEXT, BG) + 14 + wd;
             let mut a = Buf::<8>::new();
             let _ = uwrite!(a, "{} d", age);
-            w::field(lcd, x + 6, 226 - x, 219, 237, 232, Align::Right, a.as_bytes(), &UI_12, [DIM, AMBER, RED][lvl as usize % 3], BG);
+            w::field(lcd, x + 6, 226 - x, 219, 237, 232, a.as_bytes(), &w::st(&UI_12, [DIM, AMBER, RED][lvl as usize % 3], BG, Align::Right));
         });
     }
     timeline(app, lcd, &p, now, 244);
@@ -949,8 +949,8 @@ fn timeline(app: &mut App, lcd: &mut impl Panel, p: &Pass, now: u32, y: i32) {
         lcd.fill(mx, y + 2, 2, 13, SUB);
         lcd.fill_r(fx - 6, y + 2, 13, 13, 6, c);
         lcd.text4(8, y + 30, a.as_bytes(), &UI_12, SUB, BG);
-        w::field(lcd, 70, 100, y + 18, y + 34, y + 30, Align::Center, mid.as_bytes(), &UI_12, SUB, BG);
-        w::field(lcd, 170, 62, y + 18, y + 34, y + 30, Align::Right, z.as_bytes(), &UI_12, SUB, BG);
+        w::field(lcd, 70, 100, y + 18, y + 34, y + 30, mid.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
+        w::field(lcd, 170, 62, y + 18, y + 34, y + 30, z.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
         lcd.text4(8, y + 48, nl.as_bytes(), &UI_12, c, BG);
     });
 }
@@ -968,9 +968,9 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
             let mut n = Buf::<20>::new();
             n.set(b"TX \xc2\xb7 ");
             n.push(sat.name());
-            w::field(lcd, 8, 100, 0, 20, 15, Align::Left, n.as_bytes(), &UI_12B, BLACK, RED);
-            w::field(lcd, 108, 44, 0, 20, 15, Align::Center, tt.as_bytes(), &UI_12B, BLACK, RED);
-            w::field(lcd, 152, 80, 0, 20, 15, Align::Right, crate::sat::POWER_NAMES[pr.power.min(2) as usize].as_bytes(), &UI_12B, BLACK, RED);
+            w::field(lcd, 8, 100, 0, 20, 15, n.as_bytes(), const { &w::st(&UI_12B, BLACK, RED, Align::Left) });
+            w::field(lcd, 108, 44, 0, 20, 15, tt.as_bytes(), const { &w::st(&UI_12B, BLACK, RED, Align::Center) });
+            w::field(lcd, 152, 80, 0, 20, 15, crate::sat::POWER_NAMES[pr.power.min(2) as usize].as_bytes(), const { &w::st(&UI_12B, BLACK, RED, Align::Right) });
         });
         lcd.fill(0, w::SBAR_H, 2, w::HINT_Y - w::SBAR_H, RED);
         lcd.fill(238, w::SBAR_H, 2, w::HINT_Y - w::SBAR_H, RED);
@@ -1039,7 +1039,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     b.set("Doppler on \u{b7} timeout ".as_bytes());
     mmss_after(&mut b, to);
     if app.dirty(10, Mix::new().b(b.as_bytes()).get()) {
-        w::field(lcd, 8, 224, 278, 296, 291, Align::Left, b.as_bytes(), &UI_12, SUB, BG);
+        w::field(lcd, 8, 224, 278, 296, 291, b.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
     }
 }
 
@@ -1146,7 +1146,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
                 lcd.frame_r(x, 202, 110, 56, 4, LINE);
                 lcd.text4(x + 6, 217, h, &UI_12, SUB, BG);
                 lcd.text4(x + 6, 237, a.as_bytes(), &UI_15B, c, BG);
-                w::field(lcd, x + 6, 100, 241, 255, 252, Align::Left, b.as_bytes(), &UI_12, SUB, BG);
+                w::field(lcd, x + 6, 100, 241, 255, 252, b.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
             }
         });
     }
@@ -1168,7 +1168,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
             lcd.fill(0, 266, 240, 2, LINE);
             arrow(lcd, 14, 276, false, GREEN);
             lcd.text4(30, 289, f.as_bytes(), &UI_15B, TEXT, BG);
-            w::field(lcd, 140, 88, 272, 296, 289, Align::Right, r.as_bytes(), &UI_15B, if p.up(now) { GREEN } else { AMBER }, BG);
+            w::field(lcd, 140, 88, 272, 296, 289, r.as_bytes(), &w::st(&UI_15B, if p.up(now) { GREEN } else { AMBER }, BG, Align::Right));
         });
     }
 }

@@ -232,8 +232,8 @@ impl View for ChEdit {
             w::badge(lcd, 7, 26, a, true, BG);
             let mut l = Buf::<32>::new();
             chan_label(ch.num, &mut l);
-            w::field(lcd, 21, 48, 24, 41, 38, Align::Left, b"", &UI_12, TEXT, BG);
-            w::field(lcd, 27, 42, 24, 41, 38, Align::Left, l.as_bytes(), &UI_12, TEXT, BG);
+            w::field(lcd, 21, 48, 24, 41, 38, b"", const { &w::st(&UI_12, TEXT, BG, Align::Left) });
+            w::field(lcd, 27, 42, 24, 41, 38, l.as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Left) });
             field_box(lcd, 68, 23, 122, 20, b"Zone", zone, cell == ZONE, false);
             lcd.fill(190, 23, 2, 20, BG);
             w::tag(lcd, 232, 25, b"EDIT", BLUE, BG);
@@ -282,7 +282,7 @@ impl View for ChEdit {
             _ => {}
         }
         if app.dirty(R_HELP, Mix::new().h(&note).h(&col).get()) {
-            w::field(lcd, 7, 226, 242, 259, 255, Align::Left, note.as_bytes(), &UI_12, col, BG);
+            w::field(lcd, 7, 226, 242, 259, 255, note.as_bytes(), &w::st(&UI_12, col, BG, Align::Left));
         }
         other_slots(app, lcd, cx.live);
     }

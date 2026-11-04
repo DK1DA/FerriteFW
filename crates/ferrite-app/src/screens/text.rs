@@ -283,7 +283,7 @@ impl View for Text {
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         let t = app.text;
         if app.dirty(R_TOP, Mix::new().any(&self.to).h(&t).h(&self.mode).h(&self.tail).get()) {
-            w::field(lcd, 8, 224, 24, 41, 37, Align::Left, self.to.label().as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, 8, 224, 24, 41, 37, self.to.label().as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
             field_box(lcd, 8, 44, 224, 30, b"", t.as_bytes(), true, self.tail == 0);
             if self.tail > 0 {
                 // TEXT-12: the cursor inside the text, where field_box draws it (8 px in, baseline 64)
@@ -293,7 +293,7 @@ impl View for Text {
             }
             let mut c = Buf::<16>::new();
             let _ = uwrite!(c, "{}/{}", t.len(), self.to.max());
-            w::field(lcd, 8, 100, 78, 95, 91, Align::Left, c.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 100, 78, 95, 91, c.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
             ferrite_ui::canvas::banded(lcd, 108, 78, 132, 17, BG, |lcd| {
                 w::tag(lcd, 232, 78, MODES[self.mode as usize % 4].as_bytes(), BLUE, BG);
             });

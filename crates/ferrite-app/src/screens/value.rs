@@ -145,8 +145,8 @@ impl View for Value {
                     let _ = uwrite!(h, "{} ", (i + 1) % 10);
                 }
                 h.push(item.name().as_bytes());
-                let hw = w::field(b, 14, 120, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, Align::Left, h.as_bytes(), &UI_12B, TEXT, BG);
-                w::field(b, 22 + hw, 204 - hw, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, Align::Right, def.as_bytes(), &UI_12, SUB, BG);
+                let hw = w::field(b, 14, 120, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, h.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
+                w::field(b, 22 + hw, 204 - hw, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, def.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
             });
             for r in [R_FREQ, R_SUB, R_INFO] {
                 app.drawn.hash[r] = 0; // inside the box just cleared
@@ -165,7 +165,7 @@ impl View for Value {
                     b.text4_rows(120 - tw / 2, y1 - 4, vt.as_bytes(), &DIG_46, col, BG, y0, y1);
                     tw
                 } else {
-                    w::field(b, 40, 160, y0 + 10, y0 + 30, y0 + 25, Align::Center, vt.as_bytes(), &UI_12B, col, BG);
+                    w::field(b, 40, 160, y0 + 10, y0 + 30, y0 + 25, vt.as_bytes(), &w::st(&UI_12B, col, BG, Align::Center));
                     text4_width(vt.as_bytes(), &UI_12B)
                 };
                 let ax = (tw / 2 + 22).min(96);
@@ -181,7 +181,7 @@ impl View for Value {
             match grey {
                 Some(why) => {
                     ferrite_ui::canvas::banded(lcd, 12, y, 216, 82, BG, |b| {
-                        w::field(b, 14, 212, y + 4, y + 21, y + 17, Align::Center, why.as_bytes(), &UI_12, AMBER, BG);
+                        w::field(b, 14, 212, y + 4, y + 21, y + 17, why.as_bytes(), const { &w::st(&UI_12, AMBER, BG, Align::Center) });
                     });
                 }
                 None => picker(lcd, 40, y, 160, 5, 16, v, n, |i, b| text_of(app, item, i, b), BG),
@@ -225,9 +225,9 @@ impl Value {
                 for i in 0..10 {
                     let x = 15 + i * 22;
                     b.fill_r(x, y, 14, 5, 1, if i <= v { BLUE } else { LINE });
-                    w::field(b, x - 4, 22, y + 7, y + 22, y + 19, Align::Center, &[b'0' + i as u8], &UI_12, SUB, BG);
+                    w::field(b, x - 4, 22, y + 7, y + 22, y + 19, &[b'0' + i as u8], const { &w::st(&UI_12, SUB, BG, Align::Center) });
                 }
-                w::field(b, 15, 200, y + 23, y + 40, y + 36, Align::Left, b"Signal now", &UI_12, SUB, BG);
+                w::field(b, 15, 200, y + 23, y + 40, y + 36, b"Signal now", const { &w::st(&UI_12, SUB, BG, Align::Left) });
             });
         }
         let rssi = cx.live.slots[app.active as usize].rssi;

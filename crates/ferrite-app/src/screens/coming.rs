@@ -82,13 +82,13 @@ impl View for Coming {
             let mut t = Buf::<40>::new();
             t.push(h.as_bytes());
             t.push(b": coming");
-            w::field(lcd, 8, 224, 130, 147, 143, Align::Center, t.as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, 8, 224, 130, 147, 143, t.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Center) });
             let (_, ch, id) = self.dest.info();
             let mut m = Buf::<40>::new();
             let _ = uwrite!(m, "Manual chapter {} \u{b7} {}", ch, id);
-            w::field(lcd, 8, 224, 152, 169, 165, Align::Center, m.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 224, 152, 169, 165, m.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
             if self.dest.menu_path(&mut [0; 3]).is_some() {
-                w::field(lcd, 8, 224, 174, 191, 187, Align::Center, b"Digits follow the menu path", &UI_12, DIM, BG);
+                w::field(lcd, 8, 224, 174, 191, 187, b"Digits follow the menu path", const { &w::st(&UI_12, DIM, BG, Align::Center) });
             }
         }
     }

@@ -129,7 +129,7 @@ impl View for Link {
                     let mut t = Buf::<8>::new();
                     let _ = uwrite!(t, "{} %", pct);
                     w::progress(lcd, 30, 210, 180, 6, pct, BLUE);
-                    w::field(lcd, 10, 220, 222, 240, 236, Align::Center, t.as_bytes(), &ferrite_ui::assets::UI_12B, TEXT, BG);
+                    w::field(lcd, 10, 220, 222, 240, 236, t.as_bytes(), &w::st(&ferrite_ui::assets::UI_12B, TEXT, BG, Align::Center));
                 }
             }
         }

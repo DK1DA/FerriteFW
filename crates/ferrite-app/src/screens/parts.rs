@@ -47,7 +47,7 @@ pub fn wrap(lcd: &mut impl Panel, x: i32, wd: i32, y: i32, lh: i32, max: i32, s:
             }
         }
         let base = y + n * lh;
-        w::field(lcd, x, wd, base - lh + 4, base + 4, base, Align::Left, &rest[..cut], f, fg, bg);
+        w::field(lcd, x, wd, base - lh + 4, base + 4, base, &rest[..cut], &w::st(f, fg, bg, Align::Left));
         rest = rest[cut..].strip_prefix(b" ").unwrap_or(&rest[cut..]);
         n += 1;
     }
@@ -99,7 +99,7 @@ pub fn path_chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], bg: u16) -> i32
     // 17 px tall like the chips, so the 9 px capitals centre (DISP-19)
     let wd = text4_width(s, &UI_12B) + 12;
     ferrite_ui::canvas::banded(lcd, x, y, wd, 18, bg, |lcd| {
-        w::field(lcd, x, wd, y, y + 17, y + 13, Align::Center, s, &UI_12B, BLUE, bg);
+        w::field(lcd, x, wd, y, y + 17, y + 13, s, &w::st(&UI_12B, BLUE, bg, Align::Center));
         lcd.frame_r(x, y, wd, 17, 1, BLUE);
     });
     wd

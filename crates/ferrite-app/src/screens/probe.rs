@@ -43,9 +43,9 @@ fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, store: &impl C
     }
     if app.dirty(2, Mix::new().h(&head).h(&st).h(&lv.squelch_open).get()) {
         w::badge(lcd, 14, y + 8, s, true, SURFACE);
-        w::field(lcd, 34, 140, y + 7, y + 24, y + 20, Align::Left, w::fit(head.as_bytes(), &UI_12, 140), &UI_12, SUB, SURFACE);
+        w::field(lcd, 34, 140, y + 7, y + 24, y + 20, w::fit(head.as_bytes(), &UI_12, 140), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
         let c = if lv.squelch_open { GREEN } else { DIM };
-        w::field(lcd, 174, 52, y + 7, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, c, SURFACE);
+        w::field(lcd, 174, 52, y + 7, y + 24, y + 20, st.as_bytes(), &w::st(&UI_12B, c, SURFACE, Align::Right));
     }
     let f = app.slot(s).freq();
     if app.dirty(3, Mix::new().h(&f).get()) {
@@ -69,7 +69,7 @@ fn tone_parts(t: u16, d: &mut Buf<16>, kind: &mut Buf<16>) {
 /// The last-hits list at y: when, what (by `what`), level.
 fn hit_rows(app: &mut App, lcd: &mut impl Panel, y: i32, region: usize, what: impl Fn(&Hit, &mut Buf<32>)) {
     if app.dirty(region, 1) {
-        w::field(lcd, 8, 224, y, y + 16, y + 12, Align::Left, b"Last hits", &UI_12B, SUB, BG);
+        w::field(lcd, 8, 224, y, y + 16, y + 12, b"Last hits", const { &w::st(&UI_12B, SUB, BG, Align::Left) });
     }
     for i in 0..HITS {
         let hit = app.radio.hits[i];
@@ -83,9 +83,9 @@ fn hit_rows(app: &mut App, lcd: &mut impl Panel, y: i32, region: usize, what: im
         }
         let ry = y + 18 + 18 * i as i32;
         if app.dirty(region + 1 + i, Mix::new().h(&a).h(&t).h(&sig).get()) {
-            w::field(lcd, 8, 52, ry, ry + 18, ry + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
-            w::field(lcd, 60, 140, ry, ry + 18, ry + 13, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
-            w::field(lcd, 200, 32, ry, ry + 18, ry + 13, Align::Right, sig.as_bytes(), &UI_12B, GREEN, BG);
+            w::field(lcd, 8, 52, ry, ry + 18, ry + 13, a.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 60, 140, ry, ry + 18, ry + 13, t.as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Left) });
+            w::field(lcd, 200, 32, ry, ry + 18, ry + 13, sig.as_bytes(), const { &w::st(&UI_12B, GREEN, BG, Align::Right) });
         }
     }
 }
@@ -194,13 +194,13 @@ impl View for ToneSearch {
         if app.dirty(4, Mix::new().h(&d).h(&kind).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 100, 240, 60, BG, |lcd| {
                 if t != 0 {
-                    w::field(lcd, 8, 224, 102, 118, 114, Align::Left, b"Found", &UI_12, SUB, BG);
+                    w::field(lcd, 8, 224, 102, 118, 114, b"Found", const { &w::st(&UI_12, SUB, BG, Align::Left) });
                     lcd.text4_rows(8, 152, d.as_bytes(), &DIG_46, GREEN, BG, 118, 154);
                     let x = 8 + text4_width(d.as_bytes(), &DIG_46) + 8;
-                    w::field(lcd, x, 232 - x, 138, 155, 151, Align::Left, kind.as_bytes(), &UI_12, SUB, BG);
+                    w::field(lcd, x, 232 - x, 138, 155, 151, kind.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
                 } else {
-                    w::field(lcd, 8, 224, 120, 140, 134, Align::Left, kind.as_bytes(), &UI_12B, AMBER, BG);
-                    w::field(lcd, 8, 224, 140, 156, 152, Align::Left, b"Listening for CTCSS and DCS", &UI_12, SUB, BG);
+                    w::field(lcd, 8, 224, 120, 140, 134, kind.as_bytes(), const { &w::st(&UI_12B, AMBER, BG, Align::Left) });
+                    w::field(lcd, 8, 224, 140, 156, 152, b"Listening for CTCSS and DCS", const { &w::st(&UI_12, SUB, BG, Align::Left) });
                 }
             });
         }
@@ -217,7 +217,7 @@ impl View for ToneSearch {
         }
         if app.dirty(5, Mix::new().h(&now).get()) {
             let c = if self.ask_tx { AMBER } else { SUB };
-            w::field(lcd, 8, 224, 162, 180, 175, Align::Left, now.as_bytes(), &UI_12, c, BG);
+            w::field(lcd, 8, 224, 162, 180, 175, now.as_bytes(), &w::st(&UI_12, c, BG, Align::Left));
             lcd.fill(0, 184, 240, 1, LINE);
         }
         // Last hits only once two different tones were heard: one would repeat the result above.
@@ -229,7 +229,7 @@ impl View for ToneSearch {
             });
         }
         if app.slot(self.slot).on_channel() && app.dirty(11, 1) {
-            w::field(lcd, 8, 224, 266, 284, 279, Align::Left, b"On a channel: OK loads, # saves", &UI_12, DIM, BG);
+            w::field(lcd, 8, 224, 266, 284, 279, b"On a channel: OK loads, # saves", const { &w::st(&UI_12, DIM, BG, Align::Left) });
         }
     }
 
@@ -348,7 +348,7 @@ impl View for Counter {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let (f, rssi, live) = self.shown(app, cx.live);
         if app.dirty(1, Mix::new().h(&self.hold).get()) {
-            w::field(lcd, 8, 170, 22, 40, 35, Align::Left, b"Strongest nearby signal", &UI_12, SUB, BG);
+            w::field(lcd, 8, 170, 22, 40, 35, b"Strongest nearby signal", const { &w::st(&UI_12, SUB, BG, Align::Left) });
             ferrite_ui::canvas::banded(lcd, 178, 22, 62, 18, BG, |lcd| {
                 if self.hold {
                     w::tag(lcd, 232, 23, b"HOLD", AMBER, BG);
@@ -358,7 +358,7 @@ impl View for Counter {
         if app.dirty(2, Mix::new().h(&f).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 42, 240, 52, BG, |lcd| {
                 if f == 0 {
-                    w::field(lcd, 8, 224, 56, 76, 70, Align::Left, b"Listening...", &UI_12B, AMBER, BG);
+                    w::field(lcd, 8, 224, 56, 76, 70, b"Listening...", const { &w::st(&UI_12B, AMBER, BG, Align::Left) });
                 } else {
                     w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, if live || self.hold { TEXT } else { SUB }, SUB, BG);
                 }
@@ -368,11 +368,11 @@ impl View for Counter {
         if app.dirty(3, Mix::new().h(&lit).get()) {
             w::meter(lcd, 8, 104, None, lit, if live { GREEN } else { DIM }, BG);
             let st = if f == 0 { Buf::new() } else { w::s_text(rssi) };
-            w::field(lcd, 208, 24, 98, 116, 112, Align::Right, st.as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, 208, 24, 98, 116, 112, st.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Right) });
         }
         if app.dirty(4, 1) {
-            w::field(lcd, 8, 224, 122, 140, 135, Align::Left, b"Key the other radio close by.", &UI_12, SUB, BG);
-            w::field(lcd, 8, 224, 140, 158, 153, Align::Left, b"Receive only: never transmits.", &UI_12, DIM, BG);
+            w::field(lcd, 8, 224, 122, 140, 135, b"Key the other radio close by.", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 8, 224, 140, 158, 153, b"Receive only: never transmits.", const { &w::st(&UI_12, DIM, BG, Align::Left) });
             lcd.fill(0, 164, 240, 1, LINE);
         }
         hit_rows(app, lcd, 170, 5, |h, b| b.set(w::freq3(h.what).as_bytes()));

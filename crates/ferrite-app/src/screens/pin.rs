@@ -343,8 +343,8 @@ impl View for Pin {
             _ => (b"Enter PIN", b"This radio has a PIN."),
         };
         if app.dirty(R_TOP, Mix::new().h(&head).get()) {
-            w::field(lcd, 10, 220, 40, 66, 60, Align::Center, head, &UI_15B, TEXT, BG);
-            w::field(lcd, 10, 220, 70, 88, 84, Align::Center, t, &UI_12, SUB, BG);
+            w::field(lcd, 10, 220, 40, 66, 60, head, const { &w::st(&UI_15B, TEXT, BG, Align::Center) });
+            w::field(lcd, 10, 220, 70, 88, 84, t, const { &w::st(&UI_12, SUB, BG, Align::Center) });
         }
         // Six boxes: a dot per digit typed (PIN-2), the digit itself when setting.
         let n = self.n;
@@ -368,7 +368,7 @@ impl View for Pin {
         let (line, amber) = self.note(app);
         let c = if amber { AMBER } else { SUB };
         if app.dirty(R_NOTE, Mix::new().h(&line).h(&c).get()) {
-            w::field(lcd, 10, 220, 156, 174, 170, Align::Center, line.as_bytes(), &UI_12, c, BG);
+            w::field(lcd, 10, 220, 156, 174, 170, line.as_bytes(), &w::st(&UI_12, c, BG, Align::Center));
         }
         // No "forgot it" hint on the screen (Alex, Oct 15, 2026): the way out (hold MENU at power on, PIN-6) is in the
         // manual only.

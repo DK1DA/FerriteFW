@@ -102,18 +102,18 @@ fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32
                 if stereo {
                     w::tag(lcd, 226, y + 28, b"STEREO", SUB, SURFACE);
                 }
-                w::field(lcd, 140, 86, y + 44, y + 61, y + 57, Align::Right, snr_t.as_bytes(), &UI_12, SUB, SURFACE);
+                w::field(lcd, 140, 86, y + 44, y + 61, y + 57, snr_t.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
             });
         }
         // Three lines of RDS: 64 characters wrap into them.
         if app.dirty(R_INFO + p, Mix::new().b(text).n(is_rt as u32 | (tc as u32) << 1).get()) {
             canvas::banded(lcd, 14, y + 62, 212, 45, SURFACE, |lcd| {
                 if text.is_empty() {
-                    w::field(lcd, 15, 211, y + 62, y + 80, y + 76, Align::Left, b"No RDS", &UI_12, DIM, SURFACE);
+                    w::field(lcd, 15, 211, y + 62, y + 80, y + 76, b"No RDS", const { &w::st(&UI_12, DIM, SURFACE, Align::Left) });
                 } else if is_rt {
                     w::wrap(lcd, 15, 211, y + 62, y + 107, y + 75, 15, text, &UI_12, tc, SURFACE);
                 } else {
-                    w::field(lcd, 15, 211, y + 62, y + 84, y + 80, Align::Left, text, &UI_15B, TEXT, SURFACE);
+                    w::field(lcd, 15, 211, y + 62, y + 84, y + 80, text, const { &w::st(&UI_15B, TEXT, SURFACE, Align::Left) });
                 }
             });
         }
@@ -138,7 +138,7 @@ fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32
         // One line: as much of the text as fits.
         if app.dirty(R_SUB + p, Mix::new().b(text).n(tc as u32).get()) {
             canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
-                w::field(lcd, 15, 211, y + 51, y + 65, y + 61, Align::Left, w::fit(text, &UI_12, 211), &UI_12, tc, SURFACE);
+                w::field(lcd, 15, 211, y + 51, y + 65, y + 61, w::fit(text, &UI_12, 211), &w::st(&UI_12, tc, SURFACE, Align::Left));
             });
         }
     }
@@ -176,8 +176,8 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
         if app.dirty(R_FREQ + p, Mix::new().h(&f).h(&cnt).h(&hr).get()) {
             canvas::banded(lcd, 14, y + 26, 212, 25, SURFACE, |lcd| {
                 lcd.text4_rows(15, y + 47, fb.as_bytes(), &DIG_26, TEXT, SURFACE, y + 26, y + 51);
-                w::field(lcd, 226 - hw - cw, cw, y + 34, y + 51, y + 47, Align::Left, cnt.as_bytes(), &UI_12B, TEXT, SURFACE);
-                w::field(lcd, 226 - hw, hw, y + 34, y + 51, y + 47, Align::Left, hr.as_bytes(), &UI_12, SUB, SURFACE);
+                w::field(lcd, 226 - hw - cw, cw, y + 34, y + 51, y + 47, cnt.as_bytes(), const { &w::st(&UI_12B, TEXT, SURFACE, Align::Left) });
+                w::field(lcd, 226 - hw, hw, y + 34, y + 51, y + 47, hr.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
             });
         }
         // APRS-17.2.2 – 17.2.4: the newest station, then unread messages or the next station; KISS its frames.
@@ -191,14 +191,14 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
         if app.dirty(R_INFO + p, Mix::new().any(&k.rows[..2]).h(&k.rows_n.min(2)).h(&mt).h(&first).get()) {
             canvas::banded(lcd, 14, y + 52, 212, 34, SURFACE, |lcd| {
                 if k.rows_n == 0 || kiss {
-                    w::field(lcd, 15, 211, y + 52, y + 69, y + 65, Align::Left, first, &UI_12, SUB, SURFACE);
+                    w::field(lcd, 15, 211, y + 52, y + 69, y + 65, first, const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
                 } else {
                     station_row(lcd, y + 52, &k.rows[0], true);
                 }
                 if msg {
-                    w::field(lcd, 15, 18, y + 69, y + 86, y + 82, Align::Left, b"", &UI_12, SUB, SURFACE);
+                    w::field(lcd, 15, 18, y + 69, y + 86, y + 82, b"", const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
                     w::envelope(lcd, 15, y + 73, VIOLET);
-                    w::field(lcd, 33, 193, y + 69, y + 86, y + 82, Align::Left, w::fit(mt.as_bytes(), &UI_12, 193), &UI_12, VIOLET, SURFACE);
+                    w::field(lcd, 33, 193, y + 69, y + 86, y + 82, w::fit(mt.as_bytes(), &UI_12, 193), const { &w::st(&UI_12, VIOLET, SURFACE, Align::Left) });
                 } else if k.rows_n > 1 && !kiss {
                     station_row(lcd, y + 69, &k.rows[1], false);
                 }
@@ -222,7 +222,7 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
                 match &row3 {
                     Some(r) => station_row(lcd, y + 86, r, false),
                     None => {
-                        w::field(lcd, 15, 211, y + 86, y + 103, y + 99, Align::Left, w::fit(ft, &UI_12, 211), &UI_12, fc, SURFACE);
+                        w::field(lcd, 15, 211, y + 86, y + 103, y + 99, w::fit(ft, &UI_12, 211), &w::st(&UI_12, fc, SURFACE, Align::Left));
                     }
                 }
                 bottom_row(lcd, y + 103, k.bottom.as_bytes(), bc, k.fix_note, k.power);
@@ -251,10 +251,10 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
                 w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
                 if k.countdown {
                     // Two lines: a small "Beacon in" over the countdown, bold, in C's colour.
-                    w::field(lcd, 150, 76, y + 24, y + 34, y + 33, Align::Right, b"Beacon in", &UI_12, SUB, SURFACE);
-                    w::field(lcd, 150, 76, y + 34, y + 50, y + 48, Align::Right, k.right.as_bytes(), &UI_15B, rc, SURFACE);
+                    w::field(lcd, 150, 76, y + 24, y + 34, y + 33, b"Beacon in", const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
+                    w::field(lcd, 150, 76, y + 34, y + 50, y + 48, k.right.as_bytes(), &w::st(&UI_15B, rc, SURFACE, Align::Right));
                 } else {
-                    w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, k.right.as_bytes(), &UI_12B, rc, SURFACE);
+                    w::field(lcd, 130, 96, y + 29, y + 47, y + 45, k.right.as_bytes(), &w::st(&UI_12B, rc, SURFACE, Align::Right));
                 }
             });
         }
@@ -266,8 +266,8 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
                 if text4_width(l, &UI_12) > lw {
                     l = l.strip_prefix(b"Last ").unwrap_or(l);
                 }
-                w::field(lcd, 15, lw, y + 51, y + 65, y + 61, Align::Left, w::fit(l, &UI_12, lw), &UI_12, lc, SURFACE);
-                w::field(lcd, 226 - pw_w, pw_w, y + 51, y + 65, y + 61, Align::Right, pw, &UI_12, pc, SURFACE);
+                w::field(lcd, 15, lw, y + 51, y + 65, y + 61, w::fit(l, &UI_12, lw), &w::st(&UI_12, lc, SURFACE, Align::Left));
+                w::field(lcd, 226 - pw_w, pw_w, y + 51, y + 65, y + 61, pw, &w::st(&UI_12, pc, SURFACE, Align::Right));
             });
         }
     }
@@ -278,9 +278,9 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
 fn station_row(lcd: &mut impl Panel, y0: i32, r: &crate::aprs_card::Row, newest: bool) {
     let (f, c) = if newest { (&UI_12B, TEXT) } else { (&UI_12, SUB) };
     let b = y0 + 13;
-    w::field(lcd, 15, 85, y0, y0 + 17, b, Align::Left, w::fit(r.call.as_bytes(), f, 80), f, c, SURFACE);
-    w::field(lcd, 100, 52, y0, y0 + 17, b, Align::Left, r.age.as_bytes(), &UI_12, SUB, SURFACE);
-    w::field(lcd, 152, 74, y0, y0 + 17, b, Align::Right, w::fit(r.right.as_bytes(), &UI_12, 74), &UI_12, SUB, SURFACE);
+    w::field(lcd, 15, 85, y0, y0 + 17, b, w::fit(r.call.as_bytes(), f, 80), &w::st(f, c, SURFACE, Align::Left));
+    w::field(lcd, 100, 52, y0, y0 + 17, b, r.age.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
+    w::field(lcd, 152, 74, y0, y0 + 17, b, w::fit(r.right.as_bytes(), &UI_12, 74), const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
 }
 
 /// APRS-17.2.1, APRS-17.2.5: the large APRS card's beacon row: the beacon's state, "no fix" (amber) without a
@@ -292,9 +292,9 @@ fn bottom_row(lcd: &mut impl Panel, y0: i32, t: &[u8], c: u16, fix_note: bool, p
     let nb: &[u8] = if fix_note { b"no fix" } else { b"" };
     let nw = text4_width(nb, &UI_12);
     let lw = 211 - pw_w - nw - 16;
-    w::field(lcd, 15, lw, y0, y0 + 17, b, Align::Left, w::fit(t, &UI_12, lw), &UI_12, c, SURFACE);
-    w::field(lcd, 15 + lw, 211 - lw - pw_w - 8, y0, y0 + 17, b, Align::Right, nb, &UI_12, AMBER, SURFACE);
-    w::field(lcd, 226 - pw_w, pw_w, y0, y0 + 17, b, Align::Right, pw, &UI_12, SUB, SURFACE);
+    w::field(lcd, 15, lw, y0, y0 + 17, b, w::fit(t, &UI_12, lw), &w::st(&UI_12, c, SURFACE, Align::Left));
+    w::field(lcd, 15 + lw, 211 - lw - pw_w - 8, y0, y0 + 17, b, nb, const { &w::st(&UI_12, AMBER, SURFACE, Align::Right) });
+    w::field(lcd, 226 - pw_w, pw_w, y0, y0 + 17, b, pw, const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
 }
 
 impl View for Home {
@@ -607,8 +607,8 @@ fn off_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, s
         }
         let (font, base, hint) = if big { (&NAME_26, y + 70, y + 96) } else { (&NAME_22, y + 45, y + 60) };
         let top = base - font.ascent as i32;
-        w::field(lcd, 14, 212, top, top + font.line_h as i32, base, Align::Center, b"OFF", font, DIM, BG);
-        w::field(lcd, 14, 212, hint - 13, hint + 4, hint, Align::Center, b"* turns it back on", &UI_12, SUB, BG);
+        w::field(lcd, 14, 212, top, top + font.line_h as i32, base, b"OFF", &w::st(font, DIM, BG, Align::Center));
+        w::field(lcd, 14, 212, hint - 13, hint + 4, hint, b"* turns it back on", const { &w::st(&UI_12, SUB, BG, Align::Center) });
         app.drawn.hash[R_HEAD + p] = 0;
         app.drawn.meter[p] = None;
     }
@@ -636,8 +636,8 @@ fn off_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, s
         let ow = text4_width(b"Off", &UI_12);
         let hw = 226 - ow - 8 - 34;
         lcd.fill(28, hy, 6, 17, BG);
-        w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, DIM, BG);
-        w::field(lcd, 34 + hw, ow + 8, hy, hy + 17, hb, Align::Right, b"Off", &UI_12, SUB, BG);
+        w::field(lcd, 34, hw, hy, hy + 17, hb, w::fit(head.as_bytes(), &UI_12, hw), const { &w::st(&UI_12, DIM, BG, Align::Left) });
+        w::field(lcd, 34 + hw, ow + 8, hy, hy + 17, hb, b"Off", const { &w::st(&UI_12, SUB, BG, Align::Right) });
     }
 }
 
@@ -741,15 +741,15 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
             let rest = if clr.is_empty() { rest } else { b"" };
             let ww0 = text4_width(word, &UI_12B).min(hw);
             lcd.fill(34, hy, hw, 17, SURFACE);
-            w::field(lcd, 34, ww0, hy, hy + 17, hb, Align::Left, w::fit(word, &UI_12B, ww0), &UI_12B, VIOLET, SURFACE);
-            w::field(lcd, 34 + ww0, hw - ww0, hy, hy + 17, hb, Align::Left, w::fit(rest, &UI_12, hw - ww0), &UI_12, SUB, SURFACE);
+            w::field(lcd, 34, ww0, hy, hy + 17, hb, w::fit(word, &UI_12B, ww0), const { &w::st(&UI_12B, VIOLET, SURFACE, Align::Left) });
+            w::field(lcd, 34 + ww0, hw - ww0, hy, hy + 17, hb, w::fit(rest, &UI_12, hw - ww0), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
         } else {
-            w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
+            w::field(lcd, 34, hw, hy, hy + 17, hb, w::fit(head.as_bytes(), &UI_12, hw), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
         }
         if wide {
             let top = if big { y + 6 } else { hy };
             ferrite_ui::canvas::banded(lcd, 226 - ww, top, ww + 2, 18, SURFACE, |lcd| {
-                w::field(lcd, 226 - ww, ww, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
+                w::field(lcd, 226 - ww, ww, hy, hy + 17, hb, ht.as_bytes(), &w::st(&UI_12, sc, SURFACE, Align::Right));
             });
         } else if big {
             ferrite_ui::canvas::banded(lcd, sx, y + 6, 228 - sx, 18, SURFACE, |lcd| {
@@ -758,36 +758,36 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
                     // HOME-15.3: the RX tag at the right, "Muted" left of it
                     w::tag(lcd, 226, y + 7, b"RX", GREEN, SURFACE);
                     let mw = text4_width(MUTED, &UI_12);
-                    w::field(lcd, 194 - mw, mw, y + 7, y + 24, y + 20, Align::Right, MUTED, &UI_12, AMBER, SURFACE);
+                    w::field(lcd, 194 - mw, mw, y + 7, y + 24, y + 20, MUTED, const { &w::st(&UI_12, AMBER, SURFACE, Align::Right) });
                     194 - mw - 8
                 } else if tagged {
                     w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                     194
                 } else if state != "idle" {
-                    w::field(lcd, sx, 226 - sx, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
+                    w::field(lcd, sx, 226 - sx, y + 7, y + 24, y + 20, state.as_bytes(), &w::st(&UI_12, sc, SURFACE, Align::Right));
                     226 - text4_width(state.as_bytes(), &UI_12) - 8
                 } else {
                     226
                 };
                 if !clr.is_empty() {
-                    w::field(lcd, sx, right - sx, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, clr_c, SURFACE);
+                    w::field(lcd, sx, right - sx, y + 7, y + 24, y + 20, clr.as_bytes(), &w::st(&UI_12, clr_c, SURFACE, Align::Right));
                 }
             });
         } else {
             let (t, c, f) = compact_state(state, &clr, sc, clr_c);
             let tw = text4_width(t, f);
-            w::field(lcd, 226 - tw, tw, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
+            w::field(lcd, 226 - tw, tw, hy, hy + 17, hb, t, &w::st(f, c, SURFACE, Align::Right));
             // HOME-15.3: "Muted" left of the bold RX
             let mut sx_ = 226 - tw;
             if rxm {
                 let mw = text4_width(MUTED, &UI_12) + 8;
                 sx_ -= mw;
-                w::field(lcd, sx_, mw, hy, hy + 17, hb, Align::Left, MUTED, &UI_12, AMBER, SURFACE);
+                w::field(lcd, sx_, mw, hy, hy + 17, hb, MUTED, const { &w::st(&UI_12, AMBER, SURFACE, Align::Left) });
             }
             // APRS-21: the priority left of a state that isn't idle (an idle compact card shows it in idle's place)
             let note: &[u8] = if state != "idle" { clr.as_bytes() } else { b"" };
             let gx = (sx_ - 8).max(sx);
-            w::field(lcd, sx, gx - sx, hy, hy + 17, hb, Align::Right, note, &UI_12, clr_c, SURFACE);
+            w::field(lcd, sx, gx - sx, hy, hy + 17, hb, note, &w::st(&UI_12, clr_c, SURFACE, Align::Right));
             lcd.fill(gx, hy, sx_ - gx, 17, SURFACE);
         }
     }
@@ -812,7 +812,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
                     // 26 px when the whole name fits (13 characters), else 22 px (16 always fit).
                     let nb = name.as_bytes();
                     let (font, base) = if text4_width(nb, &NAME_26) <= 211 { (&NAME_26, y + 54) } else { (&NAME_22, y + 52) };
-                    w::field(lcd, 15, 211, y + 29, y + 60, base, Align::Left, w::fit(nb, font, 211), font, TEXT, SURFACE);
+                    w::field(lcd, 15, 211, y + 29, y + 60, base, w::fit(nb, font, 211), &w::st(font, TEXT, SURFACE, Align::Left));
                     w::freq(lcd, 15, 226, y + 75, f, &DIG_17, &DIG_17, SUB, SUB, SURFACE);
                 }
             });
@@ -838,13 +838,13 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         if app.dirty(R_SUB + p, Mix::new().h(&st).h(&dbm).h(&(dbm && lv.squelch_open)).get()) {
             if dbm {
                 let c = if lv.squelch_open { GREEN } else { TEXT };
-                w::field(lcd, 14, 219, y + 103, y + 120, y + 117, Align::Left, st.as_bytes(), &UI_12B, c, SURFACE);
+                w::field(lcd, 14, 219, y + 103, y + 120, y + 117, st.as_bytes(), &w::st(&UI_12B, c, SURFACE, Align::Left));
                 app.drawn.meter[p] = None; // the bars come back whole
             } else {
                 if app.drawn.meter[p].is_none() {
-                    w::field(lcd, 14, 219, y + 103, y + 120, y + 117, Align::Left, b"", &UI_12B, TEXT, SURFACE);
+                    w::field(lcd, 14, 219, y + 103, y + 120, y + 117, b"", const { &w::st(&UI_12B, TEXT, SURFACE, Align::Left) });
                 }
-                w::field(lcd, 212, 21, y + 103, y + 120, y + 117, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
+                w::field(lcd, 212, 21, y + 103, y + 120, y + 117, st.as_bytes(), const { &w::st(&UI_12B, TEXT, SURFACE, Align::Right) });
             }
         }
         // S-meter: only the segments that changed (HOME-6, HOME-7).
@@ -877,15 +877,15 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
                     // The 22 px name when it fits beside the frequency, else 15 px bold.
                     let nb = name.as_bytes();
                     let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
-                    w::field(lcd, 15, 150, y + 25, y + 49, y + 44, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
+                    w::field(lcd, 15, 150, y + 25, y + 49, y + 44, w::fit(nb, font, 150), &w::st(font, TEXT, SURFACE, Align::Left));
                 }
                 if clear {
-                    w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
+                    w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, right.as_bytes(), &w::st(&UI_12, c, SURFACE, Align::Right));
                 }
             });
         }
         if info && freq != Some(true) {
-            w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
+            w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, right.as_bytes(), &w::st(&UI_12, c, SURFACE, Align::Right));
         }
         // The value line: the scan's mode and last hit, or mode, tone and shift in fixed columns (HOME-4), so a
         // value coming or going never moves the others.
@@ -915,7 +915,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
                 let xs: [(i32, i32); 3] = if lv.scanning { [(15, 36), (51, 175), (226, 0)] } else { [(15, 36), (51, 56), (107, 119)] };
                 for (c, (x, wd)) in cols.iter().zip(xs) {
                     if wd > 0 && !c.is_empty() {
-                        w::field(b, x, wd, y + 51, y + 65, y + 61, Align::Left, c.as_bytes(), &UI_12, SUB, SURFACE);
+                        w::field(b, x, wd, y + 51, y + 65, y + 61, c.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
                     }
                 }
             });

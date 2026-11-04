@@ -316,19 +316,19 @@ impl View for Scope {
         let line = app.set.scope_line;
         // Header: band, centre; the MHz labels under the graph (SCOPE-2).
         if app.dirty(1, Mix::new().h(&centre).h(&n).h(&step).get()) {
-            w::field(lcd, 8, 80, 21, 39, 34, Align::Left, band_name(centre).as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 80, 21, 39, 34, band_name(centre).as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
             let fq = w::freq3(centre);
             let fw = text4_width(fq.as_bytes(), &UI_12B);
-            w::field(lcd, 88, 144 - fw - 4, 21, 39, 34, Align::Right, b"centre", &UI_12, SUB, BG);
-            w::field(lcd, 232 - fw, fw, 21, 39, 34, Align::Left, fq.as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, 88, 144 - fw - 4, 21, 39, 34, b"centre", const { &w::st(&UI_12, SUB, BG, Align::Right) });
+            w::field(lcd, 232 - fw, fw, 21, 39, 34, fq.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
             lcd.fill(0, 40, 240, 1, LINE);
             let lo = w::freq3(bar_freq(centre, step, n, 0));
             let hi = w::freq3(bar_freq(centre, step, n, n as i32 - 1));
             lcd.fill(0, BASE, 240, 1, LINE);
             // Inside the 8 px side margins (DISP-2).
-            w::field(lcd, 8, 74, BASE + 2, BASE + 18, BASE + 14, Align::Left, lo.as_bytes(), &UI_12, SUB, BG);
-            w::field(lcd, 82, 76, BASE + 2, BASE + 18, BASE + 14, Align::Center, fq.as_bytes(), &UI_12, BLUE, BG);
-            w::field(lcd, 158, 74, BASE + 2, BASE + 18, BASE + 14, Align::Right, hi.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 74, BASE + 2, BASE + 18, BASE + 14, lo.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 82, 76, BASE + 2, BASE + 18, BASE + 14, fq.as_bytes(), const { &w::st(&UI_12, BLUE, BG, Align::Center) });
+            w::field(lcd, 158, 74, BASE + 2, BASE + 18, BASE + 14, hi.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
         }
         // Bars, 40 px at a time (SCOPE-7): blank bars grey, the centre line blue, the marker amber, the bar being
         // listened to green, bars over the trigger red (SCOPE-8), the trigger line dashed red.
@@ -434,11 +434,11 @@ impl View for Scope {
                 lcd.frame_r(6, y, 228, 44, 3, lab_c);
                 lcd.text4_rows(15, y + 20, label, &UI_12, lab_c, SURFACE, y + 4, y + 24);
                 w::freq(lcd, 66, 180, y + 21, f, &DIG_17, &DIG_17, TEXT, SUB, SURFACE);
-                w::field(lcd, 180, 46, y + 4, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
-                w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
+                w::field(lcd, 180, 46, y + 4, y + 24, y + 20, st.as_bytes(), const { &w::st(&UI_12B, TEXT, SURFACE, Align::Right) });
+                w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, p.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
             });
         } else if line {
-            w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, p.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Left) });
         }
         // Bars, step, speed, trigger (SCOPE-2).
         let mut t = Buf::<40>::new();
@@ -452,7 +452,7 @@ impl View for Scope {
             t.push(match app.set.scope_trig % 3 { 1 => "Mon", i => SCOPE_TRIGGERS[i as usize] }.as_bytes());
         }
         if app.dirty(13, Mix::new().h(&t).get()) {
-            w::field(lcd, 8, 224, INFO_Y, INFO_Y + 17, INFO_Y + 13, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 224, INFO_Y, INFO_Y + 17, INFO_Y + 13, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         }
     }
 
@@ -528,9 +528,9 @@ pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32,
     let mut b = Buf::<40>::new();
     b.push(b"+");
     khz(half, &mut b);
-    w::field(lcd, 8, 60, y + h + 2, y + h + 18, y + h + 14, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
-    w::field(lcd, 80, 80, y + h + 2, y + h + 18, y + h + 14, Align::Center, w::freq3(centre).as_bytes(), &UI_12, SUB, BG);
-    w::field(lcd, 172, 60, y + h + 2, y + h + 18, y + h + 14, Align::Right, b.as_bytes(), &UI_12, SUB, BG);
+    w::field(lcd, 8, 60, y + h + 2, y + h + 18, y + h + 14, a.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+    w::field(lcd, 80, 80, y + h + 2, y + h + 18, y + h + 14, w::freq3(centre).as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
+    w::field(lcd, 172, 60, y + h + 2, y + h + 18, y + h + 14, b.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
 }
 
 /// HOME-14: the strip while it can't run (FM broadcast has the receiver: BCR-29): its area blanked once, then only a

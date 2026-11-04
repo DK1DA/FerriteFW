@@ -112,14 +112,14 @@ impl View for Quick {
         if app.dirty(R_TOP, Mix::new().h(&a).h(&head).h(&m).h(&f).get()) {
             // MENU-13: whose settings these are.
             w::badge(lcd, 8, 23, a, true, BG);
-            w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
+            w::field(lcd, 22, 4, 21, 39, 35, b"", const { &w::st(&UI_12, SUB, BG, Align::Left) });
             // a longer head ("VFO · 1.25 m") moves the frequency right: it has room to spare
             let hw = ferrite_ui::gfx::text4_width(head.as_bytes(), &UI_12).max(66);
-            w::field(lcd, 26, hw, 21, 39, 35, Align::Left, head.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 26, hw, 21, 39, 35, head.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
             let mut fb = [0u8; 16];
             let n = ferrite_core::freq::format(f, &mut fb);
-            w::field(lcd, 26 + hw, 174 - hw, 21, 39, 35, Align::Left, &fb[..n], &UI_12B, TEXT, BG);
-            w::field(lcd, 200, 32, 21, 39, 35, Align::Right, m.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 26 + hw, 174 - hw, 21, 39, 35, &fb[..n], const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
+            w::field(lcd, 200, 32, 21, 39, 35, m.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
             lcd.fill(0, 40, 240, 1, LINE);
         }
         for (i, item) in QUICK.into_iter().enumerate() {
@@ -200,9 +200,9 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
     fb.push(b" MHz");
     if app.dirty(R_TOP, Mix::new().h(&a).h(&fb).h(&2u8).get()) {
         w::badge(lcd, 8, 23, a, true, BG);
-        w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
-        w::field(lcd, 26, 66, 21, 39, 35, Align::Left, fb.as_bytes(), &UI_12B, TEXT, BG);
-        w::field(lcd, 92, 140, 21, 39, 35, Align::Right, "Broadcast FM".as_bytes(), &UI_12, SUB, BG);
+        w::field(lcd, 22, 4, 21, 39, 35, b"", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+        w::field(lcd, 26, 66, 21, 39, 35, fb.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
+        w::field(lcd, 92, 140, 21, 39, 35, "Broadcast FM".as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Right) });
         lcd.fill(0, 40, 240, 1, LINE);
     }
     for i in 0..=FM_ROWS {

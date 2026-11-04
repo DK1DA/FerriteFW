@@ -434,7 +434,7 @@ impl View for Entry {
             ferrite_ui::canvas::banded(lcd, 0, 21, 240, 92, BG, |lcd| {
                 w::badge(lcd, 8, 26, a, true, BG);
                 let what = self.what();
-                w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
+                w::field(lcd, 28, 204, 24, 41, 37, what, const { &w::st(&UI_12, SUB, BG, Align::Left) });
                 // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
                 // changes while typing (a digit lands in the size it will have on the card).
                 let t = self.typed();

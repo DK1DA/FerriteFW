@@ -48,12 +48,37 @@ impl Of {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Simple {
+    ReadAll,
+    ClearLog,
+    MessagesReadAll,
+    ClearMessages,
+    MarkHere,
+    BeaconNow,
+    ClearHeard,
+}
+
+impl Simple {
+    fn op(self) -> Op {
+        match self {
+            Simple::ReadAll => Op::ReadAll,
+            Simple::ClearLog => Op::ClearLog,
+            Simple::MessagesReadAll => Op::MessagesReadAll,
+            Simple::ClearMessages => Op::ClearMessages,
+            Simple::MarkHere => Op::MarkHere,
+            Simple::BeaconNow => Op::BeaconNow,
+            Simple::ClearHeard => Op::ClearHeard,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Act {
-    /// A reference, not the `Op` itself: `Op` is about 96 bytes (it carries drafts and buffers) and every row would
-    /// be that size.
-    Do(&'static Op),
+    /// A small kind, not the `Op` itself: `Op` is about 96 bytes (it carries drafts and buffers), and each one
+    /// in a table was that size in flash (the flash audit's #10, Nov 1).
+    Do(Simple),
     /// Asks first (MENU-23).
-    Confirm(&'static Op),
+    Confirm(Simple),
     Open(Dest),
     /// Show hidden channels in the lists, or not (a setting, kept).
     ShowHidden,
@@ -76,16 +101,16 @@ pub(crate) type Opt = (&'static str, Act, &'static str);
 
 /// The rows: label, action, help line.
 const LOG: [Opt; 3] = [
-    ("Mark all read", Act::Do(&Op::ReadAll), "Clears the log's new count"),
-    ("Clear the log", Act::Confirm(&Op::ClearLog), "All events, unread ones too"),
+    ("Mark all read", Act::Do(Simple::ReadAll), "Clears the log's new count"),
+    ("Clear the log", Act::Confirm(Simple::ClearLog), "All events, unread ones too"),
     ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DTMF, popups, weather"),
 ];
 const MESSAGES: [Opt; 6] = [
     ("Write a message", Act::Open(Dest::Compose), "Recipient, then the text"),
     ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
     ("Contacts", Act::Open(Dest::Contacts), "Saved stations and their names"),
-    ("Mark all read", Act::Do(&Op::MessagesReadAll), "Clears the unread count"), // APRS-46
-    ("Delete all messages", Act::Confirm(&Op::ClearMessages), "Inbox and sent, unread too"), // APRS-46
+    ("Mark all read", Act::Do(Simple::MessagesReadAll), "Clears the unread count"), // APRS-46
+    ("Delete all messages", Act::Confirm(Simple::ClearMessages), "Inbox and sent, unread too"), // APRS-46
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
 /// APRS-46.1: deletes the message under the page.
@@ -114,7 +139,7 @@ const MSG_ENDED: [Opt; 8] = [
 ];
 const MSG: [Opt; 7] = [MSG_DELETE, MESSAGES[0], MESSAGES[1], MESSAGES[2], MESSAGES[3], MESSAGES[4], MESSAGES[5]];
 const GPS: [Opt; 3] = [
-    ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
+    ("Mark here", Act::Do(Simple::MarkHere), "A waypoint at this fix"),
     ("Waypoints", Act::Open(Dest::Waypoints), "Distance and bearing to each"),
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
@@ -128,15 +153,15 @@ const APRS: [Opt; 8] = [
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
     ("Heard", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
     ("Sent", Act::Open(Dest::AprsSent), "Your beacons and who repeated them"),
-    ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
+    ("Beacon now", Act::Do(Simple::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
     ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"),
-    ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations return when heard"),
+    ("Clear the heard list", Act::Confirm(Simple::ClearHeard), "Stations return when heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
 const WAYPOINTS: [Opt; 5] = [
-    ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
+    ("Mark here", Act::Do(Simple::MarkHere), "A waypoint at this fix"),
     ("Add a grid square", Act::Grid, "A waypoint at a square's centre: FN31pr"),
     ("Arrival alarm", Act::Arrival, "Off, 50 m to 1 km from the one you go to"),
     ("Use as fixed position", Act::Sel(Sel::Fixed, false), "This waypoint, used when there's no fix"),
@@ -225,7 +250,7 @@ impl View for Options {
                     app.back();
                     super::contacts::sel(app, s, store);
                 }
-                Act::Do(&Op::BeaconNow) => {
+                Act::Do(Simple::BeaconNow) => {
                     app.back();
                     beacon_now(app, store);
                 }
@@ -237,7 +262,8 @@ impl View for Options {
                     app.back();
                     super::msgs::delete(app, store);
                 }
-                Act::Do(&op) | Act::Confirm(&op) => {
+                Act::Do(k) | Act::Confirm(k) => {
+                    let op = k.op();
                     if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {
                         return; // LINK-19: a beacon or message now is a transmission
                     }

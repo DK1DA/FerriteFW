@@ -70,15 +70,15 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     let (clock, pct) = (cx.dev.clock_min, cx.dev.battery_pct);
     if app.dirty(R_TOP, Mix::new().h(&clock).h(&pct).get()) {
         lcd.fill(0, 0, 240, TOP_H, LP_AMBER);
-        w::field(lcd, 8, 90, 0, TOP_H, 18, Align::Left, b"LOW POWER", &UI_12B, LP_BLACK, LP_AMBER);
+        w::field(lcd, 8, 90, 0, TOP_H, 18, b"LOW POWER", const { &w::st(&UI_12B, LP_BLACK, LP_AMBER, Align::Left) });
         if let Some(m) = clock {
             let mut t = Buf::<8>::new();
             let _ = ufmt::uwrite!(t, "{}:{}", ferrite_ui::text::Zero((m / 60) as u32, 2), ferrite_ui::text::Zero((m % 60) as u32, 2));
-            w::field(lcd, 98, 44, 0, TOP_H, 18, Align::Center, t.as_bytes(), &UI_12B, LP_BLACK, LP_AMBER);
+            w::field(lcd, 98, 44, 0, TOP_H, 18, t.as_bytes(), const { &w::st(&UI_12B, LP_BLACK, LP_AMBER, Align::Center) });
         }
         let mut p = Buf::<6>::new();
         let _ = ufmt::uwrite!(p, "{}%", pct);
-        w::field(lcd, 172, 60, 0, TOP_H, 18, Align::Right, p.as_bytes(), &UI_12B, LP_BLACK, LP_AMBER);
+        w::field(lcd, 172, 60, 0, TOP_H, 18, p.as_bytes(), const { &w::st(&UI_12B, LP_BLACK, LP_AMBER, Align::Right) });
     }
     // The head line, and RX or TX on its right.
     let keyed = app.radio.keyed.is_some();
@@ -89,7 +89,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         lcd.fill(SIDE_W, HEAD.0, 240 - 2 * SIDE_W, HEAD.1 - HEAD.0, LP_BLACK);
         let tag_w = if keyed || rx { 44 } else { 0 };
         let name = w::fit(h.as_bytes(), &UI_15B, W - tag_w);
-        w::field(lcd, X, W - tag_w, HEAD.0, HEAD.1, HEAD.2, Align::Left, name, &UI_15B, LP_SUB, LP_BLACK);
+        w::field(lcd, X, W - tag_w, HEAD.0, HEAD.1, HEAD.2, name, const { &w::st(&UI_15B, LP_SUB, LP_BLACK, Align::Left) });
         if keyed {
             filled_tag(lcd, X + W, HEAD.2, b"TX", LP_RED);
         } else if rx {
@@ -126,7 +126,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         // the strips either side of the text column too: the leaving box reaches into them
         lcd.fill(SIDE_W, INFO.0, X - SIDE_W, INFO.1 - INFO.0, LP_BLACK);
         lcd.fill(X + W, INFO.0, 240 - SIDE_W - X - W, INFO.1 - INFO.0, LP_BLACK);
-        w::field(lcd, X, W, INFO.0, INFO.1, INFO.2, Align::Left, line.as_bytes(), &UI_15B, LP_SUB, LP_BLACK);
+        w::field(lcd, X, W, INFO.0, INFO.1, INFO.2, line.as_bytes(), const { &w::st(&UI_15B, LP_SUB, LP_BLACK, Align::Left) });
         drew = true;
     }
     // RX: the S-meter's text and 8 blocks; TX: the time keyed; else Quiet and empty blocks.
@@ -145,7 +145,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         } else {
             (b"Quiet".as_slice(), LP_DIM)
         };
-        w::field(lcd, X, W, SUB.0, METER_Y - 4, SUB_BASE, Align::Left, text, &UI_15B, c, LP_BLACK);
+        w::field(lcd, X, W, SUB.0, METER_Y - 4, SUB_BASE, text, &w::st(&UI_15B, c, LP_BLACK, Align::Left));
         if !keyed {
             let (bw, bh, pitch) = BLOCK;
             for i in 0..BLOCKS {
@@ -179,7 +179,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     }
     if app.dirty(R_NOTE, Mix::new().h(&heard).get()) || drew {
         lcd.fill(SIDE_W, SUB.1, 240 - 2 * SIDE_W, BOTTOM_Y - SUB.1, LP_BLACK);
-        w::field(lcd, X, W, SUB.1, BOTTOM_Y - 4, HEARD_BASE, Align::Left, w::fit(heard.as_bytes(), &UI_15B, W), &UI_15B, LP_SUB, LP_BLACK);
+        w::field(lcd, X, W, SUB.1, BOTTOM_Y - 4, HEARD_BASE, w::fit(heard.as_bytes(), &UI_15B, W), const { &w::st(&UI_15B, LP_SUB, LP_BLACK, Align::Left) });
     }
     // No standing note of what is off or how to leave: both are said on entering and whenever something the mode
     // refuses is tried (PWR-24.6); the room went to bigger text (Alex, Oct 21, 2026).
@@ -214,8 +214,8 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
                 let (x, y, bw, bh) = BOX;
                 lcd.fill(x, y, bw, bh, LP_AMBER);
                 lcd.fill(x + 2, y + 2, bw - 4, bh - 4, LP_BLACK);
-                w::field(lcd, x + 12, bw - 24, y + 10, y + 36, y + 32, Align::Left, b"Leaving", &UI_15B, LP_AMBER, LP_BLACK);
-                w::field(lcd, x + 12, bw - 24, y + 36, y + 62, y + 58, Align::Left, b"Keep both held.", &UI_15B, LP_TEXT, LP_BLACK);
+                w::field(lcd, x + 12, bw - 24, y + 10, y + 36, y + 32, b"Leaving", const { &w::st(&UI_15B, LP_AMBER, LP_BLACK, Align::Left) });
+                w::field(lcd, x + 12, bw - 24, y + 36, y + 62, y + 58, b"Keep both held.", const { &w::st(&UI_15B, LP_TEXT, LP_BLACK, Align::Left) });
                 lcd.fill(x + 12, y + 72, bw - 24, 10, LP_EMPTY);
                 lcd.fill(x + 12, y + 72, fill, 10, LP_AMBER);
             }
@@ -235,7 +235,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
 fn filled_tag(lcd: &mut impl Panel, x_right: i32, baseline: i32, s: &[u8], c: u16) {
     let wd = ferrite_ui::gfx::text4_width(s, &UI_15B) + 12;
     let y = baseline - 16;
-    w::field(lcd, x_right - wd, wd, y, y + 20, baseline, Align::Center, s, &UI_15B, LP_BLACK, c);
+    w::field(lcd, x_right - wd, wd, y, y + 20, baseline, s, &w::st(&UI_15B, LP_BLACK, c, Align::Center));
 }
 
 fn push_num(b: &mut Buf<32>, n: u32) {

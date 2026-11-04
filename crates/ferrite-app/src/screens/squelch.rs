@@ -81,7 +81,7 @@ impl View for Squelch {
         let lv = cx.live.slots[a as usize];
         if app.dirty(1, Mix::new().h(&a).h(&sq).get()) {
             w::badge(lcd, 8, 30, a, true, BG);
-            w::field(lcd, 28, 200, 28, 46, 41, Align::Left, b"Squelch, active slot", &UI_12, SUB, BG);
+            w::field(lcd, 28, 200, 28, 46, 41, b"Squelch, active slot", const { &w::st(&UI_12, SUB, BG, Align::Left) });
             ferrite_ui::canvas::banded(lcd, 0, 52, 240, 60, BG, |lcd| {
                 lcd.text4_rows(100, 104, &[b'0' + sq], &DIG_46, TEXT, BG, 60, 106);
                 // 0-9: the level's segments.
@@ -89,8 +89,8 @@ impl View for Squelch {
                     let c = if i < sq { BLUE } else { LINE };
                     lcd.fill_r(20 + i as i32 * 20, 122, 16, 10, 1, c);
                 }
-                w::field(lcd, 8, 30, 136, 152, 148, Align::Left, b"open", &UI_12, SUB, BG);
-                w::field(lcd, 172, 60, 136, 152, 148, Align::Right, b"tight", &UI_12, SUB, BG);
+                w::field(lcd, 8, 30, 136, 152, 148, b"open", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+                w::field(lcd, 172, 60, 136, 152, 148, b"tight", const { &w::st(&UI_12, SUB, BG, Align::Right) });
             });
         }
         // The live signal: what the level lets through (SQL-7).
@@ -98,14 +98,14 @@ impl View for Squelch {
         if app.dirty(2, Mix::new().h(&lit).h(&lv.squelch_open).get()) {
             lcd.fill(0, 170, 240, 1, LINE);
             let (t, c): (&[u8], u16) = if lv.squelch_open { (b"Open: you hear it", GREEN) } else { (b"Closed", SUB) };
-            w::field(lcd, 8, 160, 178, 196, 191, Align::Left, t, &UI_12B, c, BG);
-            w::field(lcd, 168, 64, 178, 196, 191, Align::Right, w::s_text(lv.rssi).as_bytes(), &UI_12B, TEXT, BG);
+            w::field(lcd, 8, 160, 178, 196, 191, t, &w::st(&UI_12B, c, BG, Align::Left));
+            w::field(lcd, 168, 64, 178, 196, 191, w::s_text(lv.rssi).as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Right) });
             w::meter(lcd, 20, 204, None, lit, if lv.squelch_open { GREEN } else { DIM }, BG);
         }
         // SQL-12: the floor and how far the signal is above it
         let fl = self.floor_text(lv.rssi, lv.squelch_open);
         if app.dirty(4, Mix::new().h(&fl).get()) {
-            w::field(lcd, 8, 224, 216, 234, 229, Align::Left, fl.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 8, 224, 216, 234, 229, fl.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         }
         if app.dirty(3, 1) {
             let mut b = Buf::<40>::new();

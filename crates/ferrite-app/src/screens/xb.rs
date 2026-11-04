@@ -401,24 +401,24 @@ fn side_card(app: &App, lcd: &mut impl Panel, x: i32, y: i32, slot: u8, side: u8
         w::badge(lcd, x + 6, y + 7, slot, true, fill);
         lcd.text4_rows(x + 24, y + 18, band_name(f).as_bytes(), &UI_12, SUB, fill, y + 4, y + 22);
         let _ = side;
-        w::field(lcd, x + 50, 48, y + 4, y + 22, y + 18, Align::Right, tag.0, &UI_12B, tag.1, fill);
+        w::field(lcd, x + 50, 48, y + 4, y + 22, y + 18, tag.0, &w::st(&UI_12B, tag.1, fill, Align::Right));
         let fq = w::freq3(f);
-        w::field(lcd, x + 6, wd - 10, y + 20, y + 42, y + 40, Align::Left, fq.as_bytes(), &DIG_26, TEXT, fill);
+        w::field(lcd, x + 6, wd - 10, y + 20, y + 42, y + 40, fq.as_bytes(), &w::st(&DIG_26, TEXT, fill, Align::Left));
         let mut t = Buf::<16>::new();
         tone_text(app.slot(slot).cfg().tx_tone, &mut t);
         if t.is_empty() {
             t.set(b"no tone");
         }
-        w::field(lcd, x + 6, wd - 10, y + 42, y + 55, y + 53, Align::Left, t.as_bytes(), &UI_12, TEXT, fill);
-        w::field(lcd, x + 6, wd - 10, y + 55, y + 68, y + 66, Align::Left, last, &UI_12, SUB, fill);
+        w::field(lcd, x + 6, wd - 10, y + 42, y + 55, y + 53, t.as_bytes(), &w::st(&UI_12, TEXT, fill, Align::Left));
+        w::field(lcd, x + 6, wd - 10, y + 55, y + 68, y + 66, last, &w::st(&UI_12, SUB, fill, Align::Left));
     });
 }
 
 fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
     let c = app.set.xb;
     if app.dirty(1, 1) {
-        w::field(lcd, 8, 160, 21, 39, 34, Align::Left, b"Crossband repeater", &UI_12B, TEXT, BG);
-        w::field(lcd, 168, 64, 21, 39, 34, Align::Right, b"Transmit", &UI_12, SUB, BG);
+        w::field(lcd, 8, 160, 21, 39, 34, b"Crossband repeater", const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
+        w::field(lcd, 168, 64, 21, 39, 34, b"Transmit", const { &w::st(&UI_12, SUB, BG, Align::Right) });
         lcd.fill(0, 40, 240, 1, LINE);
         parts::arrow2(lcd, 111, 81, 18, SUB);
     }
@@ -466,13 +466,13 @@ fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
                     }
                 }
                 let col = if *k == Check::Fail { RED } else { TEXT };
-                w::field(lcd, 26, 206, y, y + 17, y + 13, Align::Left, t.as_bytes(), &UI_12, col, SURFACE);
+                w::field(lcd, 26, 206, y, y + 17, y + 13, t.as_bytes(), &w::st(&UI_12, col, SURFACE, Align::Left));
             }
         });
         let (bg, fg, t): (u16, u16, &[u8]) = if fail.is_some() { (LINE, SUB, b"Can't start yet") } else { (GREEN, BLUE_FG, b"# Start") };
         ferrite_ui::canvas::banded(lcd, 6, 266, 228, 24, BG, |lcd| {
             lcd.fill_r(6, 266, 228, 24, 2, bg);
-            w::field(lcd, 16, 208, 268, 288, 283, Align::Center, t, &UI_12B, fg, bg);
+            w::field(lcd, 16, 208, 268, 288, 283, t, &w::st(&UI_12B, fg, bg, Align::Center));
         });
     }
 }
@@ -507,7 +507,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
                 };
                 lcd.text4_rows(26 + wd, 41, state, &UI_12, SUB, fill, 27, 46);
             }
-            w::field(lcd, 180, 48, 27, 45, 41, Align::Right, t.as_bytes(), &UI_12, TEXT, fill);
+            w::field(lcd, 180, 48, 27, 45, 41, t.as_bytes(), &w::st(&UI_12, TEXT, fill, Align::Right));
         });
     }
     // The sides: IN (S-meter) and OUT (its power level, or "Power reduced") while passing; what opens each
@@ -594,9 +594,9 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     if app.dirty(5, Mix::new().h(&line).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 127, 240, 17, BG, |lcd| {
             if passing {
-                w::field(lcd, 8, 50, 127, 144, 140, Align::Left, b"Timeout", &UI_12, SUB, BG);
+                w::field(lcd, 8, 50, 127, 144, 140, b"Timeout", const { &w::st(&UI_12, SUB, BG, Align::Left) });
                 parts::bar(lcd, 60, 132, 88, 6, x.pass_s as u32, c.timeout_10s as u32 * 10, SUB, BG);
-                w::field(lcd, 150, 82, 127, 144, 140, Align::Right, line.as_bytes(), &UI_12, TEXT, BG);
+                w::field(lcd, 150, 82, 127, 144, 140, line.as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Right) });
             } else if x.last_dir != 0 {
                 let wd = lcd.text4_rows(8, 140, b"Last ", &UI_12, SUB, BG, 127, 144);
                 let (a, b) = if x.last_dir == 2 { (c.side2, c.side1) } else { (c.side1, c.side2) };
@@ -684,9 +684,9 @@ fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, x: &XbLive, s1: u8,
     ferrite_ui::canvas::banded(lcd, 6, y, 228, h, BG, |lcd| {
         lcd.fill_r(6, y, 228, h, 3, SURFACE);
         dir_label(lcd, 12, y + 13, s1, s2, SUB, SURFACE);
-        w::field(lcd, 150, 78, y + 2, y + 16, y + 13, Align::Right, b"Last 30 min", &UI_12, SUB, SURFACE);
+        w::field(lcd, 150, 78, y + 2, y + 16, y + 13, b"Last 30 min", const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
         dir_label(lcd, 12, y + h - 4, s2, s1, SUB, SURFACE);
-        w::field(lcd, 150, 78, y + h - 16, y + h - 1, y + h - 4, Align::Right, b"now", &UI_12, SUB, SURFACE);
+        w::field(lcd, 150, 78, y + h - 16, y + h - 1, y + h - 4, b"now", const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
         let mid = y + h / 2;
         lcd.fill(12, mid, 216, 1, LINE);
         for (i, &v) in x.strip.iter().enumerate() {

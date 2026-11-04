@@ -76,8 +76,8 @@ impl View for Edit {
         app.head_text(a, live, cx.store, &mut head);
         if app.dirty(R_TOP, Mix::new().h(&a).h(&head).get()) {
             w::badge(lcd, 7, 26, a, true, BG);
-            w::field(lcd, 21, 6, 25, 42, 38, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 27, 160, 25, 42, 38, Align::Left, w::fit(head.as_bytes(), &UI_12, 160), &UI_12, SUB, BG); // HOME-4.3
+            w::field(lcd, 21, 6, 25, 42, 38, b"", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 27, 160, 25, 42, 38, w::fit(head.as_bytes(), &UI_12, 160), const { &w::st(&UI_12, SUB, BG, Align::Left) }); // HOME-4.3
             w::tag(lcd, 232, 25, b"EDIT", BLUE, BG); // EDIT-1
         }
         let f = app.shown_freq(a, live);
@@ -104,7 +104,7 @@ impl View for Edit {
                     b.push(GRID[cell as usize].label().as_bytes());
                     b.push(b": ");
                     b.push(t.as_bytes());
-                    w::field(lcd, 7, 226, 190, 207, 202, Align::Left, b.as_bytes(), &UI_12, AMBER, BG);
+                    w::field(lcd, 7, 226, 190, 207, 202, b.as_bytes(), const { &w::st(&UI_12, AMBER, BG, Align::Left) });
                 }
                 None if vfo => w::key_line(lcd, 7, 233, 202, "Hold 9", "save as a channel", BG),
                 None => w::key_line(lcd, 7, 233, 202, "Hold 0", "jumps to the home channel", BG),
@@ -147,8 +147,8 @@ pub(crate) fn other_slots(app: &mut App, lcd: &mut impl Panel, live: &ferrite_co
         if app.dirty(R_LINE + k, Mix::new().h(&s).h(&t).get()) {
             let y = 268 + k as i32 * 17;
             w::badge(lcd, 7, y, s, false, BG);
-            w::field(lcd, 21, 4, y - 1, y + 16, y + 11, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 25, 211, y - 1, y + 16, y + 11, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 21, 4, y - 1, y + 16, y + 11, b"", const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 25, 211, y - 1, y + 16, y + 11, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         }
     }
 }
