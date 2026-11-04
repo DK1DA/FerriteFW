@@ -947,6 +947,9 @@ pub struct Device {
     pub ram_statics: u32,
     /// SELF-9.1: the share of the last 10 s the MCU was awake, %; None until the first 10 s.
     pub cpu_pct: Option<u8>,
+    /// SELF-9.3: over the same 10 s, the share awake at 24 MHz and at the build's speed (None when it spent under
+    /// 0.1 s there), and the share of the time at 24 MHz, %.
+    pub cpu_speeds: [Option<u8>; 3],
     /// LINK-13.4: receive audio's blocks since power-on: made by the DSP task, dropped there (the queue full), and
     /// the times one waited for room at the cable; then PA2's counts at a rail since power-on, the last second's
     /// peak (0-32767) and the stream's gain (Q8) (TERM-32.1, LINK-13.8): the readback's `audio` line, for the bench.

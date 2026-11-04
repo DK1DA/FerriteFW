@@ -125,6 +125,21 @@ fn state_and_bar_words() {
     }
 }
 
+/// SELF-9.3: the bar's CPU words, overall and per speed with the share of time at 24 MHz; a speed it didn't stay at
+/// (None) is left out, and nothing before the first 10 s.
+#[test]
+fn bar_cpu_per_speed() {
+    let t = T::new();
+    let v = ui_dev(&t, &Device { cpu_pct: Some(31), cpu_speeds: [Some(28), Some(55), Some(90)], ..Default::default() });
+    let bar = find(&v, "bar");
+    assert!(bar.contains(" cpu=31 cpu24=28 cpu120=55 at24=90"), "{bar}");
+    let v = ui_dev(&t, &Device { cpu_pct: Some(12), cpu_speeds: [Some(12), None, Some(100)], ..Default::default() });
+    let bar = find(&v, "bar");
+    assert!(bar.contains(" cpu=12 cpu24=12 at24=100") && !bar.contains("cpu120"), "{bar}");
+    let v = ui_dev(&t, &Device::default());
+    assert!(!find(&v, "bar").contains("cpu"));
+}
+
 /// LINK-19 (`UI` what=2, TERM-37's `ui status`): the compact status names the screen, the active slot, each slot's
 /// state and meter, and the repeater off.
 #[test]

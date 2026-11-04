@@ -454,6 +454,9 @@ pub async fn task() {
     dev.ram_statics = crate::hal::sys::statics(); // SELF-9.2
     // SELF-9.1: the idle time counted by the thread executor's sleep, and when it was last read.
     let mut idle_mark = (crate::IDLE_US.load(Relaxed), Instant::now());
+    // SELF-9.3: the same at 24 MHz: its sleep's mark, the time at 24 MHz this window, and when the speed last changed
+    let mut idle_low_mark = crate::IDLE_LOW_US.load(Relaxed);
+    let (mut low_us, mut speed_at) = (0u64, Instant::now());
     let mut bat_logged = 0u32;
     let mut battery = ferrite_core::battery::Battery::default();
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
@@ -570,6 +573,17 @@ pub async fn task() {
                 let asleep = idle.wrapping_sub(idle_mark.0).min(us);
                 dev.cpu_pct = Some((100 - asleep as u64 * 100 / us as u64) as u8);
                 idle_mark = (idle, Instant::now());
+                // SELF-9.3: awake at each speed, and the share of the window at 24 MHz
+                if crate::hal::clock::is_low() {
+                    low_us += speed_at.elapsed().as_micros();
+                    speed_at = Instant::now();
+                }
+                let low = (low_us as u32).min(us);
+                let idle_low = crate::IDLE_LOW_US.load(Relaxed);
+                let asleep_low = idle_low.wrapping_sub(idle_low_mark).min(low).min(asleep);
+                let pct = |slept: u32, of: u32| (of >= 100_000).then(|| (100 - slept as u64 * 100 / of as u64) as u8);
+                dev.cpu_speeds = [pct(asleep_low, low), pct(asleep - asleep_low, us - low), Some((low as u64 * 100 / us as u64) as u8)];
+                (idle_low_mark, low_us) = (idle_low, 0);
                 bringup::linef(|b| {
                     let _ = ufmt::uwrite!(b, "stack free {} B, cpu {}%", dev.stack_free, dev.cpu_pct.unwrap_or(0));
                 });
@@ -878,7 +892,15 @@ pub async fn task() {
         let top = ferrite_core::clocktree::top_wanted(fixed, lpm_wait, why, audio);
         if let Some(low) = target {
             use crate::hal::clock::{LOW, NORMAL, TOP};
-            if crate::hal::clock::set_tree(if low { LOW } else if top { TOP } else { NORMAL }) && bringup::ON.load(Relaxed) {
+            let switched = crate::hal::clock::set_tree(if low { LOW } else if top { TOP } else { NORMAL });
+            if switched {
+                // SELF-9.3: a stay at 24 MHz ended (or began)
+                if !crate::hal::clock::is_low() {
+                    low_us += speed_at.elapsed().as_micros();
+                }
+                speed_at = Instant::now();
+            }
+            if switched && bringup::ON.load(Relaxed) {
                 let (mhz, us) = (crate::hal::clock::mhz(), crate::hal::clock::LAST_SWITCH_US.load(Relaxed));
                 bringup::linef(|b| {
                     let _ = ufmt::uwrite!(b, "clock: {} MHz (interrupts held {} us", mhz, us);

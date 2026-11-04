@@ -180,6 +180,8 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 /// Microseconds the core spent asleep: the CPU-load figure.
 pub static IDLE_US: AtomicU32 = AtomicU32::new(0);
+/// SELF-9.3: the part of [`IDLE_US`] asleep at Low Power Mode's speed (24 MHz).
+pub static IDLE_LOW_US: AtomicU32 = AtomicU32::new(0);
 
 #[entry]
 fn main() -> ! {
@@ -225,6 +227,10 @@ fn run_thread_executor(init: impl FnOnce(Spawner)) -> ! {
         let t1 = hal::time::us16();
         // SAFETY: re-enables what the line above masked; no critical section is open here.
         unsafe { cortex_m::interrupt::enable() };
-        IDLE_US.fetch_add(t1.wrapping_sub(t0) as u32, Relaxed);
+        let slept = t1.wrapping_sub(t0) as u32;
+        IDLE_US.fetch_add(slept, Relaxed);
+        if hal::clock::is_low() {
+            IDLE_LOW_US.fetch_add(slept, Relaxed); // SELF-9.3
+        }
     }
 }

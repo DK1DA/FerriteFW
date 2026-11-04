@@ -454,6 +454,12 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "switches", m.switches);
         kn(l, "held_us", m.held_us);
         kn(l, "why", m.why as u32);
+        // SELF-9.1, SELF-9.3: the CPU over the last 10 s, awake at 24 MHz and at the build's speed, the time at 24
+        for (k, v) in [("cpu", cx.dev.cpu_pct), ("cpu24", cx.dev.cpu_speeds[0]), ("cpu120", cx.dev.cpu_speeds[1]), ("at24", cx.dev.cpu_speeds[2])] {
+            if let Some(v) = v {
+                kn(l, k, v as u32);
+            }
+        }
         match b.clock {
             Some(m) => {
                 let _ = uwrite!(l, " clock={}:{}{}", m / 60, (m % 60) / 10, m % 10);
