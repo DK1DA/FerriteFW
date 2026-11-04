@@ -297,7 +297,13 @@ pub enum DspCmd {
     /// TERM-44 (decision 315, a bench test): the receive level meter on (zeroed) or off; the capture runs for it too.
     /// Only a bench build sends it.
     Meter(bool),
+    /// PWR-26.9: the APRS slot's squelch (SQL-19) opened or closed: the AFSK decoder captures only while it is
+    /// open and for [`SQ_TAIL_MS`] after, so the core rests at 24 MHz between packets.
+    Squelch(bool),
 }
+
+/// PWR-26.9: how long the AFSK capture runs on after the APRS slot's squelch closes (the frame's last flags).
+pub const SQ_TAIL_MS: u32 = 300;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecoderKind {

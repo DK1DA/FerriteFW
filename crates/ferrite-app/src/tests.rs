@@ -156,8 +156,9 @@ fn ram_is_small() {
     // frame's time for the LED's flash (DISP-30: 4 bytes), 8 with padding, to 1752; the channel version a running
     // channel scan's list was sent for and the slots whose list goes again (SCAN-25: 5 bytes), 8 with padding, to 1760;
     // satellite mode (chapter 28a: the source's pointer, 16 on the PC and 8 on the radio, and the App's own clock,
-    // observer, alarm, open pass and what the Radio task was sent, 72), 96 with padding, to 1856
-    assert!(n <= 1856, "App is {n} bytes");
+    // observer, alarm, open pass and what the Radio task was sent, 72), 96 with padding, to 1856; the Radio task's
+    // queue 16 to 32 commands (MODE-6.5: the power-on burst with APRS mode and C muted is 17), 128, to 1984
+    assert!(n <= 1984, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

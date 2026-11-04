@@ -224,7 +224,9 @@ impl App {
         // Radio task arms the BK4829's FSK receiver only then. Two compares, not a range: a range literal here was
         // merged with the Radio task's WX into a slow-flash constant (slowcheck).
         let wx = live.slots.iter().any(|s| s.freq >= 16_240_000 && s.freq <= 16_255_000);
-        if self.aprs_on() || self.kiss_on() || self.aprs_flag_decode() || self.pager_wanted(live) || self.same_wanted() && wx {
+        // PWR-26.9: APRS (mode, KISS, a flagged channel) isn't a reason by itself: its capture runs only while the
+        // APRS slot's squelch is open, and a running capture is (AUDIO)
+        if self.pager_wanted(live) || self.same_wanted() && wx {
             r |= why::DECODE;
         }
         if live.slots.iter().any(|s| s.scanning) {

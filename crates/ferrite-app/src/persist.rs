@@ -429,6 +429,30 @@ mod tests {
         got
     }
 
+    /// MODE-6.5: the same with APRS mode on and C muted (black, Nov 3, 2026: A stayed active underneath, its
+    /// squelch held the watch hop on it and the speaker played it while the cards said C).
+    #[test]
+    fn app_state_round_trip_aprs_muted() {
+        let store = Sample::new();
+        let leak = |aprs| -> &'static mut Settings {
+            let mut s = Settings::DEFAULT;
+            s.aprs_mode = aprs;
+            std::boxed::Box::leak(std::boxed::Box::new(s))
+        };
+        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
+        let mut a = App::new(leak(true), alert());
+        a.set_watch(0);
+        a.active = 2;
+        a.mute = 0b100;
+        let mut v = Vec2(std::vec::Vec::new());
+        a.save_state(&mut v);
+        let mut b = App::new(leak(true), alert());
+        b.restore_state(&mut SliceSource(&v.0), &store);
+        assert_eq!(b.active, 2);
+        assert!(b.out.q.len() <= 24, "{} waiting: the queue (32) keeps room past the burst", b.out.q.len());
+        assert_eq!(boot_cmds(&mut b)[0], Some(2), "MODE-6.5: the saved active slot reaches the Radio task");
+    }
+
     /// MODE-6.5: the power-on burst, App::new and then the saved state, fits the UI's queue: the Radio task gets the
     /// saved active slot and watch set (until Oct 22, 2026 both were pushed out, and A stayed active underneath).
     #[test]

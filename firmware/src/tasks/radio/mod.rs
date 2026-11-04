@@ -208,6 +208,8 @@ struct Radio {
     soft_sq: [ferrite_core::softsq::SoftSq; 2],
     /// SQL-19: the APRS slot's squelch over the chip's, per chip.
     aprs_sq: [ferrite_core::aprssq::AprsSq; 2],
+    /// PWR-26.9: the APRS slot's squelch as the DSP task last heard it ([`DspCmd::Squelch`]).
+    aprs_open_sent: bool,
     sq_key: [Option<(u8, Freq10)>; 2],
     /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:
     /// stock's 7); None after a sleep or a scope start, so the next look or tick writes it.
@@ -731,6 +733,7 @@ pub async fn task() {
         sq_regs: [None; 2],
         soft_sq: [ferrite_core::softsq::SoftSq::DEFAULT; 2],
         aprs_sq: [ferrite_core::aprssq::AprsSq::NEW; 2],
+        aprs_open_sent: false,
         sq_key: [None; 2],
         open_fast: [None; 2],
         data_rx: [None; 2],

@@ -211,7 +211,7 @@ struct ChUndo {
 /// slot's frequency and nine settings are ten commands; sending a slot again before it has gone out costs nothing,
 /// so start-up (three slots) and fast channel stepping never overflow the queue.
 struct Outbox {
-    q: ferrite_core::cmdq::CmdRing<16>,
+    q: ferrite_core::cmdq::CmdRing<32>,
     /// Slots whose full state is still to send, a bit each.
     sync: u8,
     /// The slot being sent and its next item (0 the frequency, then [`slot::params`], then the end tone and tail).

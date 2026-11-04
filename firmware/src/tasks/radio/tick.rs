@@ -235,6 +235,18 @@ impl Radio {
                 }
             }
         }
+        // PWR-26.9: the APRS slot's squelch to the DSP task, whose AFSK capture (and so the build's speed) runs only
+        // while it is open: the chip read above, or the one APRS mode keeps awake beside the hop (APRS-16).
+        let mut aprs_open = false;
+        for n in 0..2u8 {
+            let Some((s, _)) = self.tuned[n as usize] else { continue };
+            if self.aprs_slots & 1 << s != 0 {
+                aprs_open |= if listening == Some(n) { sq[n as usize] } else { self.kept() & 1 << s != 0 && self.chip(n).status().squelch_open };
+            }
+        }
+        if aprs_open != self.aprs_open_sent && crate::chan::DSP.try_send(ferrite_core::msg::DspCmd::Squelch(aprs_open)).is_ok() {
+            self.aprs_open_sent = aprs_open;
+        }
         // SAME on a weather channel's chip (DEC-19), then DTMF on the others (DEC-6).
         self.same_tick(now);
         self.dtmf_tick(now, &sq);

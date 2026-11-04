@@ -2431,7 +2431,7 @@ fn system_and_about_rows() {
     assert_eq!(show(Page::About, "ID", 0, &id), "R28JM FRR1S 27V4T WPTH0", "one row");
 }
 
-/// PWR-26.1: the App's reasons for the build's speed: a key (3 s), APRS mode, KISS, the pager and SAME decoders
+/// PWR-26.1, PWR-26.9: the App's reasons for the build's speed: a key (3 s), the pager and SAME decoders (not APRS: PWR-26.9)
 /// (SAME only on a weather channel), a scan, an exclusive mode, transmit and the Transmit screen; none at rest.
 #[test]
 fn clock_reasons() {
@@ -2445,7 +2445,7 @@ fn clock_reasons() {
     t.wait(3_100);
     assert_eq!(r(&t) & why::INPUT, 0, "3 s after it");
     t.app.set.aprs_mode = true;
-    assert_eq!(r(&t), why::DECODE, "APRS mode");
+    assert_eq!(r(&t), 0, "PWR-26.9: APRS mode alone (its capture, while the squelch is open, is the reason)");
     t.app.set.aprs_mode = false;
     t.app.set.pocsag_on = true;
     t.live.slots[1].freq = t.app.set.pocsag_freq;

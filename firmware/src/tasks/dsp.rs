@@ -62,6 +62,8 @@ pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 /// seamlessly) or to stop (None, at the release), and the equaliser its samples go through (TERM-33.16).
 #[cfg(all(feature = "tx", feature = "bench"))]
 pub static TXTEST: Signal<M, Option<(ferrite_core::txtest::Gen, ferrite_core::txeq::Eq)>> = Signal::new();
+/// One capture half, ms (the 2 ms blocks [`audio::ADC_HALF`] marks).
+const HALF_MS: u32 = 2;
 /// PWR-26.4: how often (in 2 ms capture halves) a capture running at 24 MHz asks again for the build's speed.
 const RECHECK_HALVES: u32 = 5_000;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
@@ -302,6 +304,8 @@ pub async fn task() {
     let mut meter_on = false;
     #[cfg(feature = "bench")]
     let mut meter: Option<ferrite_core::rxmeter::Meter> = None;
+    // PWR-26.9: the APRS slot's squelch (the Radio task's), and the halves left of the capture's tail once it shut
+    let (mut sq, mut tail) = (false, 0u32);
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
         #[cfg(all(feature = "tx", feature = "bench"))]
@@ -309,7 +313,7 @@ pub async fn task() {
         #[cfg(not(all(feature = "tx", feature = "bench")))]
         let test = core::future::pending::<Option<core::convert::Infallible>>();
         match select4(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait(), test).await {
-            Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_) | DspCmd::Audio(_) | DspCmd::Meter(_))) => {
+            Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_) | DspCmd::Audio(_) | DspCmd::Meter(_) | DspCmd::Squelch(_))) => {
                 match cmd {
                     DspCmd::Decoder(k) => aprs = k,
                     DspCmd::Pager(on) => pager = on,
@@ -327,6 +331,12 @@ pub async fn task() {
                             meter = on.then_some(ferrite_core::rxmeter::FRESH);
                         }
                     }
+                    DspCmd::Squelch(open) => {
+                        if sq && !open {
+                            tail = ferrite_core::msg::SQ_TAIL_MS / HALF_MS;
+                        }
+                        sq = open;
+                    }
                     _ => {}
                 }
                 let kind = match (aprs, pager) {
@@ -342,7 +352,8 @@ pub async fn task() {
                         DecoderKind::Dsc => Decoder::dsc(),
                     };
                 }
-                let want = kind != DecoderKind::Off || listen != 0 || meter_on;
+                // PWR-26.9: AFSK only while the APRS slot's squelch is open, and its tail; the pager decoder always
+                let want = kind != DecoderKind::Off && (kind != DecoderKind::Afsk || sq || tail != 0) || listen != 0 || meter_on;
                 if want && !capturing {
                     clock::for_audio().await; // PWR-26.4: the speed first, never under a running capture
                     adc::init();
@@ -358,6 +369,15 @@ pub async fn task() {
                 // PWR-26.4: a capture that started at 24 MHz (the governor didn't answer in time) gets the build's
                 // speed: stopped, the speed asked for, started again; looked at every 10 s.
                 halves = halves.wrapping_add(1);
+                // PWR-26.9: the squelch shut and its tail done: AFSK's capture stops (the build's speed may go)
+                if tail != 0 {
+                    tail -= 1;
+                    if tail == 0 && !sq && running == DecoderKind::Afsk && listen == 0 && !meter_on {
+                        audio::capture_stop();
+                        capturing = false;
+                        continue;
+                    }
+                }
                 if halves.is_multiple_of(RECHECK_HALVES) && clock::is_low() && clock::AUDIO_RAISES.load(Relaxed) {
                     audio::capture_stop();
                     clock::for_audio().await;
