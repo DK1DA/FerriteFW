@@ -598,7 +598,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         Screen::Link(l) if l.page == link::LinkPage::Status => table(app, cx, &link::STATUS, None, d),
         Screen::Info(i) => {
             let mut b = Buf::<40>::new();
-            if let Some((head, text, _)) = info::message(i.page, cx.dev, &mut b) {
+            if let Some((head, text, _)) = info::message(i.page, cx.dev, app.transferring(), &mut b) {
                 if let Some(l) = d.ln() {
                     l.push(b"message ");
                     q(l, head.as_bytes());

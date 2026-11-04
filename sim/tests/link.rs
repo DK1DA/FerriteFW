@@ -85,7 +85,7 @@ fn reboot_restarts_the_simulator() {
 /// UPD-16, LINK-59 – LINK-62 (decision 333): a chip with layout 2's data (its header at 0x02C000) is left alone and
 /// says so (D25, and `HELLO` ending with the layouts 3 and 2); Console reads it raw, never calibration or the update
 /// area; erases and programs the new layout over the cable (not over Bluetooth); stamps the header last, and the
-/// radio restarts on layout 3 with what was written.
+/// radio restarts on layout 3 with what was written. UPD-16.1: the page says "Updating..." while the writes come.
 #[test]
 fn a_layout_2_chip_waits_for_console() {
     use ferrite_core::link::data::{CRC, ERASE, PROGRAM, READ, STAMP};
@@ -135,6 +135,9 @@ fn a_layout_2_chip_waits_for_console() {
     p.extend_from_slice(&0x1_0000u32.to_le_bytes());
     p.extend_from_slice(&rec);
     assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 8, &p)[0], 0);
+    // UPD-16.1: while the writes come, the page says the update is being written (a moving bar under it)
+    sim.step(t + 40);
+    assert!(sim.screen_text().contains("Updating..."), "{}", sim.screen_text());
     let mut across = vec![PROGRAM];
     across.extend_from_slice(&0x1_00F0u32.to_le_bytes());
     across.extend_from_slice(&[0; 32]);

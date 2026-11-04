@@ -396,7 +396,8 @@ pub(crate) fn note_text(p: Page, n: Note) -> crate::text::Text {
 }
 
 /// Pages that are a message, not rows: heading, text lines, colour.
-pub(crate) fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'static str, u16)> {
+/// `busy`: raw SPI writes are coming over the link (DISP-30's transfer), the update being written (UPD-16.1).
+pub(crate) fn message(p: Page, dev: &Device, busy: bool, b: &mut Buf<40>) -> Option<(&'static str, &'static str, u16)> {
     Some(match p {
         Page::SsbConfirm => (
             "Unknown SSB patch",
@@ -404,6 +405,12 @@ pub(crate) fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'stati
             AMBER,
         ),
         Page::PowerOff => ("Saving...", "Finishing writes, then off.", TEXT),
+        // UPD-16.1: while Console (or flash.py) writes the radio's flash, say so, with a moving bar
+        Page::FinishUpdate if busy => (
+            "Updating...",
+            "Writing the update to the radio's flash. Keep the cable in; the radio restarts when it's done.",
+            BLUE,
+        ),
         // UPD-16: nothing is lost; the radio works, but saves nothing until Console has moved the data
         Page::FinishUpdate => (
             "Finish the update",
@@ -464,14 +471,17 @@ impl View for Info {
             return help::render(app, lcd, h);
         }
         let mut b = Buf::<40>::new();
-        if let Some((head, text, c)) = message(self.page, cx.dev, &mut b) {
+        let busy = app.transferring();
+        if let Some((head, text, c)) = message(self.page, cx.dev, busy, &mut b) {
             app.message(lcd, head.as_bytes(), b.as_bytes(), text.as_bytes(), c);
-            if self.page == Page::PowerOff {
-                // A bar that moves while writes finish (PWR-17).
+            if self.page == Page::PowerOff || self.page == Page::FinishUpdate && busy {
+                // A bar that moves while writes finish (PWR-17) or the update is written (UPD-16.1).
                 let pct = ((app.now / 40) % 100) as u8;
                 if app.dirty(R_NOTE, Mix::new().h(&pct).get()) {
                     w::progress(lcd, 60, 240, 120, 4, pct, BLUE);
                 }
+            } else if app.dirty(R_NOTE, 1) {
+                lcd.fill(60, 240, 120, 4, BG); // the writes stopped: no bar left behind
             }
             return;
         }
