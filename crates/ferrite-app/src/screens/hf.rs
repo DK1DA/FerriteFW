@@ -869,11 +869,13 @@ impl View for Hf {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let pct = loading(cx.live);
-        let loading = app.radio.ssb_patch && pct < 100;
-        app.new_page(lcd, Mix::new().h(&(self.loaded || !loading)).h(&self.menu).get());
-        if !self.loaded && loading {
+        // HF-3, HF-19: at entry until the first report, and whenever the Radio task reports the patch streaming
+        // (the first USB, LSB or CW after entering in AM)
+        let loading = app.radio.ssb_patch && pct < 100 && (!self.loaded || matches!(cx.live.mode, ModeLive::Hf { .. }));
+        app.new_page(lcd, Mix::new().h(&loading).h(&self.menu).get());
+        if loading {
             // B13: the patch streams in behind a bar (HF-3, HF-19).
-            app.message(lcd, b"HF mode", b"Loading SSB patch", b"Streaming the patch into the SI4732 for USB, LSB and CW. It takes a while. BACK cancels.", TEXT);
+            app.message(lcd, b"HF mode", b"Loading SSB patch", b"Streaming the patch into the SI4732 for USB, LSB and CW. A few seconds.", TEXT);
             if app.dirty(R_NOTE, Mix::new().h(&pct).get()) {
                 let mut t = Buf::<8>::new();
                 let _ = uwrite!(t, "{} %", pct);

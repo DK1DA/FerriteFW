@@ -187,6 +187,10 @@ impl SlotRx {
 }
 
 /// HF mode (manual chapter 20a): the frequency, its mode (as [`Param::Mode`]) and which receiver has it.
+/// HF-19: the SI4732's SSB tune (kHz, USB) as last set, so a step within it only moves the BFO; None after a
+/// power-up or in AM.
+type SsbAt = Option<(u16, bool)>;
+
 #[derive(Clone, Copy, PartialEq)]
 struct HfOn {
     freq: Freq10,
@@ -210,6 +214,7 @@ struct Radio {
     aprs_sq: [ferrite_core::aprssq::AprsSq; 2],
     /// PWR-26.9: the APRS slot's squelch as the DSP task last heard it ([`DspCmd::Squelch`]).
     aprs_open_sent: bool,
+    ssb_at: SsbAt,
     sq_key: [Option<(u8, Freq10)>; 2],
     /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:
     /// stock's 7); None after a sleep or a scope start, so the next look or tick writes it.
@@ -683,6 +688,14 @@ fn si_apply(si: &mut Si4732<SiBus>, o: SiOpts) -> Result<(), si4732::Error> {
             si.set_property(prop::FM_SEEK_FREQ_SPACING, o.fm_space(), d)?;
             si.agc(SiOpts::agc_index(o.fm_agc, 26), d)
         }
+        // HF-19: SSB's bandwidth from the same filter setting; then the AM settings stock also gives SSB
+        Some(SiMode::Ssb) => {
+            let cfg = si4732::SsbConfig { audio_bw: ferrite_core::ssb::audio_bw(o.am_filter), sideband_cutoff: 1, avc_divider: 0, avc: true, soft_mute_snr: false, afc_off: true };
+            si.set_property(prop::SSB_MODE, cfg.bits(), d)?;
+            si.set_property(prop::AM_AVC_MAX_GAIN, 0x7800, d)?;
+            si.set_property(prop::AM_SOFT_MUTE_MAX_ATTENUATION, 0, d)?;
+            si.agc(SiOpts::agc_index(o.am_agc, 37), d)
+        }
         Some(_) => {
             si.set_property(prop::AM_CHANNEL_FILTER, o.am_filter.min(3) as u16, d)?;
             si.set_property(prop::AM_AVC_MAX_GAIN, 0x7800, d)?;
@@ -734,6 +747,7 @@ pub async fn task() {
         soft_sq: [ferrite_core::softsq::SoftSq::DEFAULT; 2],
         aprs_sq: [ferrite_core::aprssq::AprsSq::NEW; 2],
         aprs_open_sent: false,
+        ssb_at: None,
         sq_key: [None; 2],
         open_fast: [None; 2],
         data_rx: [None; 2],

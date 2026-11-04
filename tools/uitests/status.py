@@ -4,6 +4,7 @@ import re
 from .core import test
 
 BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt_on", "bt", "battery", "low", "cutoff", "dry", "lpm", "clock", "utc", "call", "mcu", "switches", "held_us", "why"}  # dry: SBAR-22; bt_on: SBAR-8; lpm: SBAR-24; mcu ... why: PWR-26.6
+CPU_KEYS = {"cpu", "cpu24", "cpu120", "at24"}  # SELF-9.1, SELF-9.3: once measured, and each speed only if it stayed there
 
 
 @test("SBAR-14", "PWR-8", "SBAR-10", pages=("Status",))
@@ -23,7 +24,7 @@ def status_page_lists_states(t):
     t.set("0 7 7 1", "Level 2")
     u = t.ui()
     t.eq(u.row("Battery Save")["value"], "Level 2", "Level 2: the row follows")
-    t.eq(set(u.bar) - {"args"}, BAR_KEYS, "the status bar carries nothing for it")
+    t.eq(set(u.bar) - {"args"} - CPU_KEYS, BAR_KEYS, "the status bar carries nothing for it")
     if t.sim:
         t.note("GPS off: the simulator's GPS ignores 0 6 1 (radio only)")
         return

@@ -70,9 +70,42 @@ pub fn hasher() -> Sha256 {
     Sha256::new()
 }
 
+/// HF-19: CW is received as USB this far below the frequency shown, so a carrier on it is heard as a tone of
+/// this pitch (Hz).
+pub const CW_PITCH_HZ: u32 = 700;
+
+/// HF-19: how the SI4732 tunes a frequency (10 Hz units) in SSB: the whole kHz for its tune command, the
+/// sideband (true = USB; CW is USB), and the rest as the BFO offset in Hz, so a step under 1 kHz only moves the
+/// BFO. CW tunes [`CW_PITCH_HZ`] below. The BFO's sign (the chip hearing tune + BFO) is unverified on air.
+pub fn tune(freq: crate::freq::Freq10, mode_usb: bool, cw: bool) -> (u16, bool, i16) {
+    let f = if cw { freq.saturating_sub(CW_PITCH_HZ / 10) } else { freq };
+    ((f / 100) as u16, mode_usb || cw, (f % 100 * 10) as i16)
+}
+
+/// HF-19: SSB_MODE's audio bandwidth code for the HF screen's SSB filter (its order: 3, 2.2, 1.2, 0.5 kHz; the
+/// chip's codes 0 = 1.2, 1 = 2.2, 2 = 3.0, 3 = 4.0, 4 = 0.5, 5 = 1.0 kHz).
+pub fn audio_bw(filter: u8) -> u8 {
+    [2, 1, 0, 4][filter as usize % 4]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// HF-19.1: the kHz, the sideband and the BFO rest; CW 700 Hz below on USB.
+    #[test]
+    fn tune_splits_khz_and_bfo() {
+        assert_eq!(tune(707_400, true, false), (7074, true, 0));
+        assert_eq!(tune(707_453, false, false), (7074, false, 530));
+        assert_eq!(tune(1_405_000, false, true), (14049, true, 300), "CW: 14.050 heard 700 Hz low, on USB");
+        assert_eq!(tune(14, true, true), (0, true, 0), "never below 0");
+    }
+
+    /// HF-19.1: the screen's SSB filters to the chip's codes.
+    #[test]
+    fn audio_bw_codes() {
+        assert_eq!([0, 1, 2, 3].map(audio_bw), [2, 1, 0, 4]);
+    }
 
     fn fake(n: usize) -> std::vec::Vec<u8> {
         (0..n * 8).map(|i| if i % 8 == 0 { if i % 64 == 0 { 0x15 } else { 0x16 } } else { (i * 7) as u8 }).collect()

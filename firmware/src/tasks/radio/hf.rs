@@ -7,6 +7,22 @@ const HF_SEEK_KHZ: (u16, u16) = (150, 18_000);
 /// HF-15.1: the board's front end (an LNA before the SI4732's AM input) gain, estimated at 20 dB: the chip reads
 /// 13-33 dBuV of indoor noise on the whip, which a receiver measured at the antenna shows as about S2-S5.
 const SI_FRONT_DB: i16 = 20;
+/// HF mode's modes as the UI sends them (`screens::hf`): USB, LSB, CW.
+const MODE_USB: u8 = 3;
+const MODE_LSB: u8 = 4;
+const MODE_CW: u8 = 5;
+
+/// A read of the SPI parts' range (`store::part_read`), tried again while the Storage task has the chip, for up
+/// to half a second.
+async fn part_read_wait(addr: u32, buf: &mut [u8]) -> Result<(), si4732::Error> {
+    for _ in 0..500 {
+        if crate::store::part_read(addr, buf) {
+            return Ok(());
+        }
+        Timer::after_millis(1).await;
+    }
+    Err(si4732::Error::Timeout)
+}
 
 impl Radio {
     /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz, chip 1 through the
@@ -38,8 +54,13 @@ impl Radio {
         let rx = if si { Rx::Si } else { Rx::Bk(Sel::rx(freq)) };
         let _ = self.path.rx(rx, Cause::HfReceiver, now_ms() as u32, &mut s);
         self.run(&s).await;
-        if si {
-            // AM only until the SSB patch is imported (HF-24; the UI asks for AM without it).
+        if si && matches!(mode, MODE_USB | MODE_LSB | MODE_CW) {
+            // HF-19: SSB and CW with the patch (the UI offers them only with one stored, HF-20)
+            let ok = self.si_ssb(freq, mode).await;
+            log(if ok.is_ok() { b"hf si ssb ok, khz " } else { b"hf si ssb FAILED, khz " }, freq / 100);
+            speaker(ok.is_ok() && !self.muted);
+        } else if si {
+            self.ssb_at = None;
             let khz = (freq / 100) as u16;
             let ok = broadcast(&mut self.si, BroadcastCmd::Am(khz), self.si_opts).await.is_ok();
             log(if ok { b"hf si am ok, khz " } else { b"hf si FAILED, khz " }, khz as u32);
@@ -54,6 +75,79 @@ impl Radio {
         }
         log(b"hf khz ", freq / 100);
         self.hf_poll();
+    }
+
+    /// HF-19: the SI4732 in SSB (USB, LSB; CW as USB [`ferrite_core::ssb::CW_PITCH_HZ`] low): powered up with the
+    /// patch and the patch streamed in when it isn't in SSB yet (HF-3's progress), then tuned to the whole kHz
+    /// with the rest on the BFO; a move within the same kHz and sideband only sets the BFO.
+    async fn si_ssb(&mut self, freq: Freq10, mode: u8) -> Result<(), si4732::Error> {
+        let d = &mut BusyDelay;
+        let (khz, usb, bfo) = ferrite_core::ssb::tune(freq, mode == MODE_USB, mode == MODE_CW);
+        if self.si.mode() != Some(SiMode::Ssb) {
+            self.ssb_at = None;
+            if self.si.mode().is_some() {
+                self.si.power_down(d)?;
+            }
+            si_input(SiMode::Ssb);
+            SI_RST.write(false);
+            Timer::after_millis(10).await;
+            SI_RST.write(true);
+            Timer::after_millis(10).await;
+            self.si.power_up_start(SiMode::Ssb)?;
+            let t0 = now_ms();
+            while !self.si.ready()? {
+                if now_ms() - t0 > SI_TUNE_MAX_MS {
+                    return Err(si4732::Error::Timeout);
+                }
+                Timer::after_millis(5).await;
+            }
+            Timer::after_millis(550).await; // the crystal, as stock waits before the patch
+            self.ssb_patch(freq).await?;
+            self.si.volume(SI_VOLUME, d)?;
+            si_apply(&mut self.si, self.si_opts)?;
+        }
+        if self.ssb_at != Some((khz, usb)) {
+            self.si.tune_start(khz, if usb { Sideband::Usb } else { Sideband::Lsb }, d)?;
+            let t0 = now_ms();
+            while self.si.tune_poll(d)?.is_none() {
+                if now_ms() - t0 > SI_TUNE_MAX_MS {
+                    return Err(si4732::Error::Timeout);
+                }
+                Timer::after_millis(10).await;
+            }
+            self.ssb_at = Some((khz, usb));
+        }
+        self.si.bfo(bfo, d)
+    }
+
+    /// HF-3, HF-19: the stored patch (SPI, `layout::SSB_PATCH`, checked at boot) to the chip, 8 bytes a record,
+    /// read in 64-byte pieces; the progress goes to the screen as it goes ([`ModeLive::Hf`]'s `loading`).
+    async fn ssb_patch(&mut self, freq: Freq10) -> Result<(), si4732::Error> {
+        use ferrite_core::{layout::SSB_PATCH, ssb};
+        let mut h = [0u8; ssb::HEADER];
+        part_read_wait(SSB_PATCH.start, &mut h).await?;
+        let p = ssb::stored(&h).ok_or(si4732::Error::Rejected)?;
+        let at = SSB_PATCH.start + ssb::HEADER as u32;
+        let mut buf = [0u8; 64];
+        let live = LIVE.sender();
+        for off in (0..p.len).step_by(buf.len()) {
+            let n = (p.len - off).min(buf.len() as u32) as usize;
+            part_read_wait(at + off, &mut buf[..n]).await?;
+            if off == 0 && buf[0] != 0x15 {
+                return Err(si4732::Error::Rejected); // not a patch's first record (ssb::records_ok)
+            }
+            for r in buf[..n].as_chunks::<8>().0 {
+                self.si.patch_record(r, &mut BusyDelay)?;
+            }
+            if off % 1024 == 0 {
+                let loading = (off as u64 * 100 / p.len as u64) as u8;
+                self.live.mode = ModeLive::Hf { freq, rssi: -127, snr: 0, si4732: true, loading };
+                live.send(self.live);
+                Timer::after_millis(1).await; // the other tasks a turn
+            }
+        }
+        log(b"hf ssb patch records ", p.len / 8);
+        Ok(())
     }
 
     pub(super) fn hf_poll(&mut self) {
