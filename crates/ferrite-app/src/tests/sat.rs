@@ -387,6 +387,9 @@ fn arrows_filter_to_the_selected_satellite() {
         }
         sc => panic!("{sc:?}"),
     }
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Sat(s) if s.filter == 0xFF && (s.sat, s.aos) == (sat, aos)), "BACK: all the passes again, the selection kept");
+    t.tap(Key::Right);
     t.tap(Key::Left);
     assert!(matches!(t.app.screen(), Screen::Sat(s) if s.filter != sat), "◀ steps to another satellite (or all)");
 }

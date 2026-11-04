@@ -270,6 +270,8 @@ impl View for SatScr {
                         return;
                     }
                 }
+                // BACK on one satellite's passes: all of them again, the selection kept (Alex, Nov 3); then home
+                Key::Exit if s.filter != ALL => s.filter = ALL,
                 Key::Exit => return app.back(),
                 _ => {}
             }
@@ -390,7 +392,11 @@ impl View for SatScr {
         } else if self.picker != 0 {
             Hints::new(&[("OK", "Set"), (ARROWS_UD, "Choose"), ("BACK", "Cancel")])
         } else if self.page() == LIST {
-            Hints::new(&[("OK", "Open"), ("#", "Alarm"), (ARROWS_LR, "Satellite")])
+            if self.filter != ALL {
+                Hints::new(&[("OK", "Open"), (ARROWS_LR, "Satellite"), ("BACK", "All")])
+            } else {
+                Hints::new(&[("OK", "Open"), ("#", "Alarm"), (ARROWS_LR, "Satellite")])
+            }
         } else if keyed {
             Hints::new(&[("PTT", "Release"), ("*", if app.sat_data().prefs(self.sat).hd { "HD" } else { "FD" }), (ARROWS_LR, "Trim")])
         } else if self.page() == POINT {
