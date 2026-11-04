@@ -23,7 +23,7 @@
 # and its keys: `key KEY CODE` (KEY up down left right pgup pgdn home end enter esc line lesc digit, or "c";
 # letters come lower case; a digit's CODE gets the key on the stack), `key pre CODE` first (the key on the stack),
 # `key else CODE` for any other. `: prep ... ;` runs before each redraw, `: poll ... ;` each poll while @busy
-# isn't 0. A page is read from the SPI flash with the lib (the two at most tpl::PACK_MAX bytes); a key or a poll
+# isn't 0. A page is read from the SPI flash with the lib, through a small window each (tpl::Code); a key or a poll
 # that sets `!chain` to another page runs that page's key or poll next (the channel list's tools are one).
 # The pages' order is term::Page's (a page only chained to comes after them).
 

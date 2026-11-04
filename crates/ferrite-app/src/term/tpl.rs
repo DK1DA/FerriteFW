@@ -7,7 +7,7 @@
 //! menu number through the menu's own tables (`groups`), the radio's own formatters (MHz, tones, a field's text), and
 //! the writes the App already has (a channel saved, deleted, renumbered; a setting changed).
 //!
-//! The pack (format 2), read from the part for each redraw, key or poll step (never kept):
+//! The pack (format 2), read from the part through two small windows for each redraw, key or poll step (never kept):
 //!
 //! ```text
 //! pack     "FVT" 2 | u8 segments | u8 0 | u16 lib length | (u16 offset, u16 length)[segments] | lib | segment...
@@ -16,11 +16,12 @@
 //! ```
 //!
 //! The segments are the pages in `pages.vt`'s order (`term::Page`'s, then any a page chains to: the channel
-//! list's tools), then each page's help (`NPAGES` on: read in place of the page while its help shows). The lib and
-//! one segment are read one after the other into one buffer: a segment's code is placed at the lib's length, so it
-//! calls the lib's words directly and the lib calls the segment's through its table (PCALL k). A run that sets
+//! list's tools), then each page's help (`NPAGES` on: read in place of the page while its help shows). A run sees the
+//! lib and one segment as one code space, read through a small window each ([`Code`]: a miss reads the next 128
+//! bytes from the part): a segment's code is placed at the lib's length, so it calls the lib's words directly and the lib calls the segment's through its table (PCALL k). A run that sets
 //! `chain` is followed by the same entry in that segment. Numbers are little-endian. Code is bytes: an opcode,
-//! then its inline argument; a segment ends with two zeros, so an opcode's two bytes after it are always there.
+//! then its inline argument (a string's length, then its bytes); a read past the code is
+//! zeros, RET.
 //!
 //! ```text
 //! 00 RET  01 LIT8 i8  02 LIT16 i16  03 JMP a16  04 JZ a16 (pops)  05 CALL a16
@@ -53,9 +54,10 @@ mod pack {
 }
 pub(super) use pack::*;
 
-/// The most the lib and one page take together: the stack buffer they are read into.
-pub(super) const PACK_MAX: usize = 4096;
-const _: () = assert!(CODE_MOST <= PACK_MAX, "the lib and a page must fit tpl::PACK_MAX");
+/// The code is read through a small cache: `LINES` lines of `LINE` bytes, the least recently used refilled on a
+/// miss. A run's buffer is these, never the whole page.
+const LINE: usize = 32;
+pub(super) const LINES: usize = 32;
 /// Steps a run may take (a sorted page's fill or a mark-all is a few tens of thousands).
 const FUEL: u32 = 2_000_000;
 /// Rows a sorted page holds at most: the tallest terminal less the list's other rows.
@@ -125,19 +127,108 @@ fn u16_at(b: &[u8], i: usize) -> usize {
     b[i] as usize | (b[i + 1] as usize) << 8
 }
 
-/// The lib and page `pg` read into `buf` (about 3 KB at SPI speed, 2 ms; once a redraw, key or poll step), and
-/// the lib's length; None when the part isn't there or is bad.
-#[inline(never)]
-pub(super) fn load(buf: &mut [u8; PACK_MAX], pg: i16) -> Option<(&[u8], usize)> {
-    let mut h = [0u8; 8];
-    if !read(0, &mut h) || h[..4] != *b"FVT\x02" || pg as u32 >= h[4] as u32 {
-        return None;
+/// The lib and one segment of the pack, read from the part through a small cache of lines (the least recently
+/// used refilled on a miss), so a run needs no buffer the size of its code. Addresses are the code's: the lib's
+/// from 0, the segment's from the lib's length. A read past the code, or one that fails, is zeros (RET).
+pub(super) struct Code {
+    /// The lib's length and its place in the part.
+    lib: (usize, usize),
+    /// The segment's place in the part and its length.
+    seg: (usize, usize),
+    /// Each line's address / LINE (`EMPTY`: none), when it was last used, and its bytes.
+    tag: [u16; LINES],
+    used: [u16; LINES],
+    buf: [[u8; LINE]; LINES],
+    /// The line used last (most reads are the next byte), and the clock `used` counts in.
+    last: usize,
+    clock: u16,
+}
+
+const EMPTY: u16 = u16::MAX;
+/// Where the lib starts in the part: after the header and the segment table.
+const LIB_AT: usize = 8;
+
+// The tests' counts: lines read from the part, and the most lines one run used (its working set: the cache must
+// hold it, or the run reads the same lines over and over).
+#[cfg(test)]
+struct Peak;
+#[cfg(test)]
+impl Drop for Peak {
+    fn drop(&mut self) {
+        let n = TOUCH.with(|x| x.borrow().iter().map(|w| w.count_ones()).sum::<u32>());
+        PEAK.with(|p| p.set(p.get().max(n)));
     }
-    let lib = u16_at(&h, 6);
-    let mut e = [0u8; 4];
-    let ok = read(8 + 4 * pg as usize, &mut e);
-    let (off, len) = (u16_at(&e, 0), u16_at(&e, 2));
-    (ok && lib + len <= PACK_MAX && read(8 + 4 * h[4] as usize, &mut buf[..lib]) && read(off, &mut buf[lib..lib + len])).then_some((&buf[..lib + len], lib))
+}
+#[cfg(test)]
+std::thread_local! { pub(super) static PEAK: core::cell::Cell<u32> = const { core::cell::Cell::new(0) }; }
+#[cfg(test)]
+std::thread_local! { static TOUCH: core::cell::RefCell<[u64; 32]> = const { core::cell::RefCell::new([0; 32]) }; }
+#[cfg(test)]
+std::thread_local! { pub(super) static FILLS: core::cell::Cell<u32> = const { core::cell::Cell::new(0) }; }
+
+impl Code {
+    /// The lib and segment `pg` of the part; None when the part isn't there or is bad.
+    #[inline(never)]
+    pub(super) fn open(pg: i16) -> Option<Code> {
+        let mut h = [0u8; 8];
+        if !read(0, &mut h) || h[..4] != *b"FVT\x02" || pg as u32 >= h[4] as u32 {
+            return None;
+        }
+        let mut e = [0u8; 4];
+        read(LIB_AT + 4 * pg as usize, &mut e).then(|| Code {
+            lib: (u16_at(&h, 6), LIB_AT + 4 * h[4] as usize),
+            seg: (u16_at(&e, 0), u16_at(&e, 2)),
+            tag: [EMPTY; LINES],
+            used: [0; LINES],
+            buf: [[0; LINE]; LINES],
+            last: 0,
+            clock: 0,
+        })
+    }
+
+    /// The bytes from address `a` to the end of its line (at least one).
+    #[inline(never)]
+    fn at(&mut self, a: usize) -> &[u8] {
+        let t = (a / LINE).min(EMPTY as usize - 1) as u16;
+        #[cfg(test)]
+        TOUCH.with(|x| x.borrow_mut()[t as usize / 64 % 32] |= 1 << (t % 64));
+        let mut i = self.last;
+        if self.tag[i] != t {
+            i = match self.tag.iter().position(|&x| x == t) {
+                Some(i) => i,
+                None => self.fill(t),
+            };
+            self.last = i;
+            self.clock = self.clock.wrapping_add(1);
+            self.used[i] = self.clock;
+        }
+        &self.buf[i][a % LINE..]
+    }
+
+    /// Line `t` read into the least recently used place: the lib's bytes, then the segment's.
+    #[inline(never)]
+    fn fill(&mut self, t: u16) -> usize {
+        let i = (0..LINES).max_by_key(|&j| self.clock.wrapping_sub(self.used[j])).unwrap_or(0);
+        #[cfg(test)]
+        FILLS.with(|f| f.set(f.get() + 1));
+        let ((lib, lib_at), (so, sl)) = (self.lib, self.seg);
+        let a = t as usize * LINE;
+        let b = &mut self.buf[i];
+        b.fill(0);
+        // the lib's part of the line, then the segment's (each clipped to its end)
+        let l = lib.saturating_sub(a).min(LINE);
+        let s0 = (a + l).saturating_sub(lib);
+        let n = sl.saturating_sub(s0).min(LINE - l);
+        if !(read(lib_at + a, &mut b[..l]) && read(so + s0, &mut b[l..l + n])) {
+            b.fill(0);
+        }
+        self.tag[i] = t;
+        i
+    }
+
+    fn byte(&mut self, a: usize) -> u8 {
+        self.at(a)[0]
+    }
 }
 
 /// The number stack: it wraps, so a bad program can't index past it.
@@ -226,7 +317,11 @@ impl Term {
 
     /// Runs the code from `pc` with `arg` on the stack, until its last return.
     #[inline(never)]
-    pub(super) fn vm<S: ChannelStore>(&mut self, code: &[u8], lib: usize, mut pc: usize, arg: i32, cx: &mut Cx<S>, w: &mut W) {
+    pub(super) fn vm<S: ChannelStore>(&mut self, code: &mut Code, mut pc: usize, arg: i32, cx: &mut Cx<S>, w: &mut W) {
+        #[cfg(test)]
+        TOUCH.with(|x| *x.borrow_mut() = [0; 32]);
+        #[cfg(test)]
+        let _g = Peak;
         let mut k = Stk { s: [0; 16], p: 0 };
         let (mut rs, mut rp) = ([0u16; 16], 0usize);
         let mut c = BLANK;
@@ -234,10 +329,7 @@ impl Term {
         k.push(arg);
         for _ in 0..FUEL {
             // an opcode and up to two bytes after it (a page's code ends with two zeros, so this reads no further)
-            let [op, a, b] = match code.get(pc..pc + 3) {
-                Some(&[x, y, z]) => [x, y, z],
-                _ => [OP_RET; 3],
-            };
+            let [op, a, b] = [code.byte(pc), code.byte(pc + 1), code.byte(pc + 2)];
             let a16 = a as usize | (b as usize) << 8;
             pc += 1;
             match op {
@@ -261,7 +353,7 @@ impl Term {
                 OP_CALL | OP_PCALL => {
                     rs[rp & 15] = (pc + if op == OP_CALL { 2 } else { 1 }) as u16;
                     rp += 1;
-                    pc = if op == OP_CALL { a16 } else { lib + 3 * a as usize };
+                    pc = if op == OP_CALL { a16 } else { code.lib.0 + 3 * a as usize };
                 }
                 OP_DUP | OP_DROP | OP_NOT | OP_AGET | OP_AT | OP_NUM => {
                     let x = k.pop();
@@ -326,13 +418,24 @@ impl Term {
                     pc += 1;
                 }
                 OP_STR | OP_RAW => {
-                    let s = code.get(pc + 1..pc + 1 + a as usize).unwrap_or_default();
-                    pc += 1 + a as usize;
-                    if op == OP_RAW {
-                        w.put(s);
-                    } else {
-                        w.s(s);
+                    // text in pieces, a line at a time (the packer writes a middle dot as one byte, so no
+                    // character's bytes are cut apart); an escape sequence whole
+                    let (mut p, end) = (pc + 1, pc + 1 + a as usize);
+                    let mut esc = Buf::<24>::new();
+                    while p < end {
+                        let s = code.at(p);
+                        let s = &s[..s.len().min(end - p)];
+                        p += s.len();
+                        if op == OP_RAW {
+                            esc.push(s);
+                        } else {
+                            w.s(s);
+                        }
                     }
+                    if op == OP_RAW {
+                        w.put(esc.as_bytes());
+                    }
+                    pc = end;
                 }
                 OP_NUMW => {
                     let wd = k.u();

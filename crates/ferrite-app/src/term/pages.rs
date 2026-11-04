@@ -32,7 +32,7 @@ pub(super) const FIELDS: [F; 16] = [
 /// The channel list's "every channel" filter.
 pub(super) const ALL: ZoneId = 0xFFFD;
 /// The program's pages, by number (`pages.vt` lists them in this order).
-const PAGES: [Page; 10] = [Page::Splash, Page::Main, Page::Channels, Page::Edit, Page::Zones, Page::Settings, Page::Monitor, Page::Mail, Page::Tnc, Page::About];
+pub(super) const PAGES: [Page; 10] = [Page::Splash, Page::Main, Page::Channels, Page::Edit, Page::Zones, Page::Settings, Page::Monitor, Page::Mail, Page::Tnc, Page::About];
 
 pub(super) fn zone_name<S: ChannelStore>(z: ZoneId, st: &S) -> Buf<16> {
     if z == ALL {
@@ -208,12 +208,11 @@ impl Term {
     /// another segment (`!chain`: the channel list's tools), the same entry there.
     #[inline(never)]
     fn run<S: ChannelStore>(&mut self, entry: usize, arg: i32, cx: &mut Cx<S>) {
-        let mut buf = [0u8; tpl::PACK_MAX];
         let mut seg = self.pg.v[V_PAGE];
         for _ in 0..2 {
             self.pg.v[V_CHAIN] = -1;
-            let Some((code, lib)) = tpl::load(&mut buf, seg) else { return };
-            self.vm(code, lib, entry, arg, cx, &mut W::new(&mut Null, self.cols));
+            let Some(mut code) = tpl::Code::open(seg) else { return };
+            self.vm(&mut code, entry, arg, cx, &mut W::new(&mut Null, self.cols));
             seg = self.pg.v[V_CHAIN];
             if seg < 0 {
                 return;
@@ -255,19 +254,18 @@ impl Term {
         if self.dirty == 0 {
             return;
         }
-        // the lib and the page once a redraw (about once a second, and per key), never kept
-        let mut buf = [0u8; tpl::PACK_MAX];
+        // the lib and the page through their windows, once a redraw (about once a second, and per key)
         // while the help shows, the page's help segment instead of the page
         let seg = self.pg.v[V_PAGE] + if self.pg.v[V_HELP] != 0 { NPAGES } else { 0 };
-        let Some((code, lib)) = tpl::load(&mut buf, seg) else { return };
+        let Some(mut code) = tpl::Code::open(seg) else { return };
         let cx = &mut Cx { app, store, dev, live };
-        self.vm(code, lib, tpl::E_PREP, 0, cx, &mut W::new(&mut Null, self.cols));
+        self.vm(&mut code, tpl::E_PREP, 0, cx, &mut W::new(&mut Null, self.cols));
         for r in 0..self.rows {
             if self.dirty & (1 << r) == 0 {
                 continue;
             }
             let mut h = Hash(0x811C_9DC5);
-            self.vm(code, lib, tpl::E_FRAME, r as i32, cx, &mut W::new(&mut h, self.cols));
+            self.vm(&mut code, tpl::E_FRAME, r as i32, cx, &mut W::new(&mut h, self.cols));
             let h = h.0 | 1;
             if h != self.hash[r as usize] {
                 if out.room() < ROW_MAX {
@@ -276,7 +274,7 @@ impl Term {
                 let mut p = Buf::<12>::new();
                 put!(p, "\x1b[{};1H", r as u16 + 1);
                 out.put(p.as_bytes());
-                self.vm(code, lib, tpl::E_FRAME, r as i32, cx, &mut W::new(&mut SinkOut(out), self.cols));
+                self.vm(&mut code, tpl::E_FRAME, r as i32, cx, &mut W::new(&mut SinkOut(out), self.cols));
                 out.put(b"\x1b[0m\x1b[K");
                 self.hash[r as usize] = h;
             }
@@ -377,10 +375,9 @@ impl Term {
                 self.0.extend_from_slice(b);
             }
         }
-        let mut buf = [0u8; tpl::PACK_MAX];
-        let (code, lib) = tpl::load(&mut buf, self.pg.v[V_PAGE]).unwrap();
+        let mut code = tpl::Code::open(self.pg.v[V_PAGE]).unwrap();
         let mut v = V(std::vec::Vec::new());
-        self.vm(code, lib, word, arg, &mut Cx { app, store, dev, live }, &mut W::new(&mut v, self.cols));
+        self.vm(&mut code, word, arg, &mut Cx { app, store, dev, live }, &mut W::new(&mut v, self.cols));
         v.0
     }
 }

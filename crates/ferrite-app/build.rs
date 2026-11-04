@@ -170,10 +170,23 @@ impl Seg {
         Ok(())
     }
 
+    /// A string, a middle dot (U+00B7) as the one byte 0xB7 (the terminal prints it as a dot either way): a run
+    /// reads a string a cache line at a time, so no character's bytes may be cut apart.
     fn str(&mut self, o: &str, s: &[u8]) -> Result<(), String> {
+        let mut v = Vec::new();
+        let mut i = 0;
+        while i < s.len() {
+            if s[i..].starts_with(&[0xC2, 0xB7]) {
+                v.push(0xB7);
+                i += 2;
+            } else {
+                v.push(s[i]);
+                i += 1;
+            }
+        }
         self.op(o);
-        self.code.push(u8::try_from(s.len()).map_err(|_| "a string over 255 bytes")?);
-        self.code.extend(s);
+        self.code.push(u8::try_from(v.len()).map_err(|_| "a string over 255 bytes")?);
+        self.code.extend(v);
         Ok(())
     }
 
@@ -369,7 +382,9 @@ fn help_code(h: &[u8]) -> Vec<T> {
 }
 
 /// A page's `draw`: its rules in order, the first that takes body row `b` draws it (`@i` the row in a list).
-fn draw_code(p: &PageSrc) -> Vec<T> {
+/// Each rule's body is a word of its own after it (`out`), so the tests run through a few cache lines and only the
+/// row's body is read (TERM-47: the code is read from the part through a small cache).
+fn draw_code(p: &PageSrc, out: &mut Vec<(String, Vec<T>)>) -> Vec<T> {
     let mut v = vec![w("!b"), w("0"), w("!end")];
     v.extend(p.pre.iter().cloned());
     for (kind, x, count, body) in &p.rules {
@@ -385,14 +400,21 @@ fn draw_code(p: &PageSrc) -> Vec<T> {
         };
         v.extend(test);
         v.push(w("if"));
-        v.extend(body.iter().cloned());
+        v.push(out_of_line(body, "r", out));
         v.extend([w("exit"), w("then")]);
     }
     v
 }
 
+/// `body` as a word of its own in `out` (a call to it; a short one stays in place).
+fn out_of_line(body: &[T], tag: &str, out: &mut Vec<(String, Vec<T>)>) -> T {
+    let name = format!("_{tag}{}", out.len());
+    out.push((name.clone(), body.to_vec()));
+    w(&name)
+}
+
 /// A page's `key`: the code on the stack; each `key` line in order (a digit's line keeps the code for its words).
-fn key_code(p: &PageSrc) -> Result<Vec<T>, String> {
+fn key_code(p: &PageSrc, out: &mut Vec<(String, Vec<T>)>) -> Result<Vec<T>, String> {
     let mut v = p.keypre.clone();
     let mut other = Vec::new();
     for (k, body) in &p.keys {
@@ -410,7 +432,7 @@ fn key_code(p: &PageSrc) -> Result<Vec<T>, String> {
             };
             v.extend([w("dup"), w(&c.to_string()), w("="), w("if"), w("drop")]);
         }
-        v.extend(body.iter().cloned());
+        v.push(out_of_line(body, "k", out));
         v.extend([w("exit"), w("then")]);
     }
     v.push(w("drop"));
@@ -575,11 +597,12 @@ fn compile(src: &str) -> Result<Compiled, String> {
     for p in &pages {
         let mut defs = p.defs.clone();
         let have = |d: &Vec<(String, Vec<T>)>, e: &str| d.iter().any(|(x, _)| x == e);
+        let mut bodies = Vec::new();
         if !have(&defs, "draw") {
-            defs.push(("draw".into(), draw_code(p)));
+            defs.push(("draw".into(), draw_code(p, &mut bodies)));
         }
         if !have(&defs, "key") {
-            defs.push(("key".into(), key_code(p).map_err(|e| format!("page {}: {e}", p.name))?));
+            defs.push(("key".into(), key_code(p, &mut bodies).map_err(|e| format!("page {}: {e}", p.name))?));
         }
         defs.push(("hints".into(), hints_code(&p.hints)));
         for e in ["help", "prep", "poll"] {
@@ -587,6 +610,7 @@ fn compile(src: &str) -> Result<Compiled, String> {
                 defs.push((e.into(), Vec::new()));
             }
         }
+        defs.extend(bodies);
         let mut s = Seg { code: Vec::new(), base: lib_code.len(), calls: Vec::new(), ctl: Vec::new() };
         let pw = assemble(&n, &mut s, &PAGE_ENTRIES, &defs, &libw).map_err(|e| format!("page {}: {e}", p.name))?;
         for x in &exports {
@@ -624,7 +648,9 @@ fn compile(src: &str) -> Result<Compiled, String> {
         o.extend(sg);
     }
     let most = segs.iter().map(|s| s.len()).max().unwrap_or(0) + lib_code.len();
-    ids.push(("CODE_MOST".into(), "usize", most.to_string()));
+    if most > 0xFFFF {
+        return Err(format!("the lib and a page take {most} bytes: code addresses are 16-bit"));
+    }
     ids.push(("NPAGES".into(), "i16", pages.len().to_string()));
     for (k, o) in OPS.iter().enumerate() {
         ids.push((format!("OP_{o}"), "u8", k.to_string()));

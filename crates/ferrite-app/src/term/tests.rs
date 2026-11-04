@@ -346,6 +346,30 @@ fn only_changed_rows_are_sent() {
     assert!(r.vt.raw.len() - before > 1000, "Ctrl-L redraws everything");
 }
 
+/// TERM-47: a run reads its code through a small cache of lines, not the whole page. Every page's run uses at
+/// most three quarters of the cache (so a redraw reads each line about once, not again and again), and a full
+/// redraw (Ctrl-L) reads few lines from the SPI flash (each about 30 us at 15 MHz).
+#[test]
+fn code_read_through_a_cache() {
+    let mut r = Rig::main();
+    let fills = || tpl::FILLS.with(|f| f.get());
+    for p in super::pages::PAGES {
+        for help in [false, true] {
+            r.term.go(p);
+            if help {
+                r.send(b"?");
+            }
+            tpl::PEAK.with(|p| p.set(0));
+            let n = fills();
+            r.send(b"\x0c");
+            let (draw, peak) = (fills() - n, tpl::PEAK.with(|p| p.get()) as usize);
+            std::println!("{p:?}{}: a full redraw read {draw} lines; a run used at most {peak}", if help { " help" } else { "" });
+            assert!(peak <= tpl::LINES * 3 / 4, "{p:?}: a run uses {peak} lines of {}", tpl::LINES);
+            assert!(draw <= 100, "{p:?}: {draw} lines read");
+        }
+    }
+}
+
 /// TERM-4.1: a full sink holds rows back; later polls finish the page.
 #[test]
 fn never_overfills_the_sink() {
