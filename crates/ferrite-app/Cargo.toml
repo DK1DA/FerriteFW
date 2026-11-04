@@ -8,6 +8,11 @@ publish.workspace = true
 description = "Ferrite's UI state machine: keys and the radio's snapshot in, radio commands and screen redraws out; shared by the firmware's UI task and the simulator"
 
 [features]
+default = ["vt100"]
+# The terminal's full-screen VT100 pages (decision 342): templates in a pack (`src/term/pages.vt`, compiled by
+# build.rs) and their interpreter. Without it the cable terminal is a plain command line; the line commands
+# (TERM-12), dump and load stay either way (Console and the tools use them).
+vt100 = []
 # The terminal's bench commands (decision 151): `txtest`, `bk`, `si`, `mem`, `gpio`, `rx`, `mic`, `bt` and the raw
 # `gps` sends. Without it they are known by name only and refused ("not in this build").
 bench = ["ferrite-core/bench"]

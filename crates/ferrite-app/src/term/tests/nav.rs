@@ -289,7 +289,7 @@ fn command_line_editing() {
 /// TERM-16: each page's help (`?`) is its own; Esc closes it.
 #[test]
 fn help_per_page() {
-    for (key, page, want) in [(b'1', Page::Channels, HELP_CHANNELS), (b'3', Page::Settings, HELP_SETTINGS), (b'4', Page::Monitor, HELP_MONITOR), (b'7', Page::About, HELP_OTHER)] {
+    for (key, page, want) in [(b'1', Page::Channels, "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one."), (b'3', Page::Settings, "MENU 0's settings and numbers. <- -> change, Enter opens a list."), (b'4', Page::Monitor, "The event log (newest last), then the slots receiving now."), (b'7', Page::About, "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves.")] {
         let mut r = Rig::main();
         r.send(&[key]);
         assert_eq!(r.term.page(), page);
@@ -303,7 +303,7 @@ fn help_per_page() {
     }
     let mut r = Rig::main();
     r.send(b"1\r?");
-    assert!(r.vt.has(HELP_EDIT.lines().next().unwrap().trim_end()), "{}", r.vt.text());
+    assert!(r.vt.has("<- -> change a field; it saves at once."), "{}", r.vt.text());
 }
 
 /// Mail and TNC (manual chapter 38) are placeholders that say so; Esc goes back.

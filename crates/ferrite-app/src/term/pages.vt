@@ -1,0 +1,163 @@
+# The terminal's full-screen pages (TERM-11, TERM-16; decision 342): static text, field positions and sources,
+# repeating list rows, and each page's keys. `build.rs` compiles this into the template pack (the byte format in
+# `term/tpl.rs`), which `term::tpl` draws with VT100 codes. The pack sits in MCU flash for now, in the form the
+# SPI flash would hold it.
+#
+# A line is a statement; `;` separates ops. Strings are "..." with \" \\ \n \xNN. Names after `src`, `if`,
+# `list`, `pickn`, `ctx` and the key actions are the firmware's (the lists below give their numbers, in order).
+#
+# Rules (the first that matches a body row draws it; body row 0 is the line under the top line):
+#   row N         that row
+#   bot K         K rows above the hints line's row (body - K, body = rows - 2)
+#   list N COUNT  rows N.. for COUNT's count (i is the row in the list)
+#   tail K        K rows after the last list's end
+# Ops: s "text", bold "text", at COL, src NAME, bon, won, back (bold, warning, attributes back), sel, selfill
+# (reverse, or fill to the end, on the selected list row), fill, plain, digit (i + 1), pick "a|b" (i's piece),
+# pickn NAME "a|b" (NAME's piece), ctx NAME (the row's channel), if NAME / ifnot NAME / ifi N, else, fi, ret.
+# Keys: key KEY ACTION [ARG]; KEY up down left right pgup pgdn home end enter esc digit, or "c" (letters any case).
+
+srcs version callsign count zones region cal slot status zone_name list_len marks_n ch_num ch_name ch_rx ch_offset ch_mode ch_tone ch_power ch_flags ask_text line ch_n1 ch_zone field_label field_value split_tx off_tx note zrow_name zrow_len group_name group_desc set_g group_name_g set_sub sub_name item_name item_value item_sel_name item_sel_help path_sel monitor
+conds marks ch list_empty asking typing ch_home sel note split offset item_sub has_item sub ssb txbuilt
+counts main slots page_rows fields zones groups items all
+pickns sort field_hint
+ctxs row selected edit
+acts prev next first last open back go digitopen left right default chnav zonenext cmd
+pages splash main channels edit zones settings_top settings_items monitor mail tnc about
+
+string keys_type "Enter=Save|Backspace=Delete|Esc=Cancel"
+string keys_help "Esc=Close help"
+
+page splash
+hints "Enter=Menu|?=Help|Ctrl-C=Leave"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 3; at 2; bon; s "FERRITE "; src version; back; s " - free firmware for the RT-950 Pro"
+row 4; at 2; src callsign; s " - cable 115200"
+row 6; at 2; bold "Press Enter"; s " for the menu, ? for help"
+key enter go main
+
+page main
+hints "Up/Dn=Move|Enter=Open|1-7=Jump|:=Command|?=Help|Ctrl-C=Leave"
+help "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\n: opens the command line; :help lists the commands.\nCtrl-L redraws, Ctrl-C leaves."
+row 1; s " "; bold "Ferrite terminal"; s "   type a number, or move and press Enter"
+list 3 main; sel; at 2; digit; at 5; pick "Channels|Zones|Settings|Monitor|Mail|TNC|About"; at 19; ifi 0; src count; s " used of 4000"; else; ifi 1; src zones; s " zones"; else; pick "||same numbers as MENU 0 on the radio|the event log and live activity|not built yet|not built yet|version, calibration, self-test"; fi; fi; selfill
+row 11; s " "; bold "Radio now"
+list 12 slots; src slot
+row 15; at 2; src status
+key up prev
+key down next
+key digit digitopen
+key enter open
+key esc go splash
+
+page channels
+hints "Enter=Edit|N=New|D=Delete|M=Move|/=Find|Z=Zone|Esc=Back"
+help "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one.\nZ: the next zone, then no zone, then all. S sorts by the next column.\n/ finds a name or MHz (Enter alone: the same again).\nSpace marks a channel (*), A marks all, U clears the marks.\nD delete, M move to a zone, C copy, R renumber: the marked channels, else the selected one.\nDelete asks first; Esc stops a change part way."
+row 0; s " "; bold "Channels"; s "   zone "; bon; src zone_name; back; s " ("; src list_len; s ")   all "; src count; s "   sort: "; pickn sort "number|name|RX|TX|mode|tone|power|flags"; if marks; s "   "; src marks_n; s " marked"; fi
+row 2; bold " "; at 1; bold "No"; at 6; bold "Name"; at 23; bold "RX MHz"; at 35; bold "Offset"; at 47; bold "Mode"; at 54; bold "Tone"; at 65; bold "Pwr"; at 71; bold "Flags"
+list 3 page_rows; ctx row; ifnot ch; ifi 0; if list_empty; s "  No channels here."; fi; fi; ret; fi; sel; src ch_num; at 6; src ch_name; at 23; src ch_rx; at 35; src ch_offset; at 47; src ch_mode; at 54; src ch_tone; at 65; src ch_power; at 71; src ch_flags; selfill
+bot 2; if asking; s "  "; won; src ask_text; back; if typing; src line; s "_"; fi; else; ctx selected; if ch; s "  Channel "; src ch_n1; s " . "; src ch_zone; if ch_home; s " \xb7 home channel"; fi; fi; fi
+key up chnav
+key down chnav
+key pgup chnav
+key pgdn chnav
+key home chnav
+key end chnav
+key "z" zonenext
+key enter open
+key esc back
+
+page edit
+hints "Up/Dn=Field|<- ->=Change|Enter=Type|#=Default|Esc=Back"
+help "<- -> change a field; it saves at once.\nEnter types the name or a frequency (MHz). # resets a field."
+row 0; ctx edit; s " "; bon; s "Channels > "; src ch_n1; s " "; src ch_name; back; s "   zone "; src ch_zone
+list 2 fields; ctx edit; at 3; src field_label; at 21; sel; s " "; src field_value; s " "; if sel; plain; at 50; pickn field_hint "Enter types it|<- -> step, Enter types it|Enter types it (split)|<- -> change"; fi
+bot 2; ctx edit; s "  "; if note; src note; else; if split; s "Split: TX "; src split_tx; s " MHz, whatever RX is. Saved as you go."; else; if offset; s "TX "; src off_tx; s " MHz from the offset. Saved as you go."; else; s "Simplex. Saved as you go."; fi; fi; fi
+key up prev
+key down next
+key home first
+key end last
+key left left
+key right right
+key "#" default
+key enter open
+key esc back
+
+page zones
+hints "Up/Dn=Move|Enter=Channels|Esc=Back"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 0; s " "; bold "Zones"; s "   "; src zones; s " zones"
+list 2 zones; sel; at 3; src zrow_name; at 26; src zrow_len; s " channels"; selfill
+key up prev
+key down next
+key home first
+key end last
+key enter open
+key esc go main
+
+page settings_top
+hints "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back"
+help "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n* marks a value that isn't the default; # puts it back.\nPIN, region and Extend TX change only on the radio; Dry TX goes off only there."
+row 0; s " "; bold "Settings"; s "   as MENU 0 on the radio"
+list 2 groups; sel; at 3; digit; at 6; src group_name; s " >"; at 32; src group_desc; selfill
+key up prev
+key down next
+key home first
+key end last
+key digit digitopen
+key enter open
+key esc back
+
+page settings_items
+hints "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back"
+help "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n* marks a value that isn't the default; # puts it back.\nPIN, region and Extend TX change only on the radio; Dry TX goes off only there."
+row 0; s " "; bon; s "Settings > 0 "; src set_g; s " "; src group_name_g; if sub; s " > "; src set_sub; s " "; src sub_name; fi; back; s "      * = not the default"
+list 2 items; sel; at 3; digit; at 6; src item_name; if item_sub; s " >"; fi; at 32; src item_value; selfill
+tail 1; if has_item; s "  "; bon; src item_sel_name; back; s ": "; src item_sel_help; fi
+tail 2; s "  Path on the radio: MENU 0"; src path_sel
+tail 4; if note; s "  "; src note; fi
+key up prev
+key down next
+key home first
+key end last
+key digit digitopen
+key enter open
+key left left
+key right right
+key "#" default
+key esc back
+
+page monitor
+hints "Esc=Back"
+help "The event log (newest last), then the slots receiving now."
+row 0; s " "; bold "Monitor"; s "   the event log and the slots receiving now"
+bot 1; s " "; bold "-- live --"; s "   newest at the bottom"
+list 2 all; src monitor
+key esc go main
+
+page mail
+hints "Esc=Back"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 1; s " "; bold "Mail"
+row 3; s "  Not built yet (manual chapter 38)."
+key esc go main
+
+page tnc
+hints "Esc=Back"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 1; s " "; bold "TNC"
+row 3; s "  Not built yet (manual chapter 38)."
+key esc go main
+
+page about
+hints "Esc=Back"
+help "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."
+row 1; s " "; bold "About"
+row 3; at 2; bon; s "FERRITE "; src version; back; s " - free firmware for the RT-950 Pro"
+row 4; at 2; src callsign; s " - cable 115200"
+row 6; at 2; bold "Press Enter"; s " for the menu, ? for help"
+row 9; at 2; s "Region        "; src region
+row 10; at 2; s "Calibration   "; src cal
+row 11; at 2; s "SSB patch     "; if ssb; s "Installed"; else; s "Not installed"; fi
+row 12; at 2; s "Transmit      "; if txbuilt; s "Built in"; else; s "Not in this build"; fi
+row 13; at 2; s "Channels      "; src count; s " of 4000, "; src zones; s " zones"
+key esc go main

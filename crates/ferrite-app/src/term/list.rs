@@ -352,7 +352,7 @@ impl Term {
         true
     }
 
-    fn keep_in_view(&mut self) {
+    pub(super) fn keep_in_view(&mut self) {
         let pg = self.page_rows();
         if self.chan_sel < self.chan_top {
             self.chan_top = self.chan_sel;

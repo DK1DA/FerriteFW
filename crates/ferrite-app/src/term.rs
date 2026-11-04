@@ -13,20 +13,17 @@
 //! [`cmd`]; a command that answers in several lines (a dump, a load's report, help) uses the console, which
 //! streams lines and then waits for Enter. Not yet: marking or colour (TERM-14, 18).
 
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE, ZoneId};
+use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_RX_ONLY, NO_ZONE, ZoneId};
 pub(crate) use crate::chfield::parse_mhz;
 use crate::chfield::{ChField as F, Ctx, Op};
-use crate::screens::advanced::GROUPS;
 use crate::screens::groups::{self, SUBS};
 use crate::settings::CABLE_PORTS;
-use crate::slot::{mode_chip, tone_text, Item};
+use crate::slot::Item;
 use crate::App;
 use ferrite_core::freq::Freq10;
-use ferrite_core::gpspower::GpsPhase;
-use ferrite_core::msg::{Device, GpsState, LiveAll, SLOTS};
+use ferrite_core::msg::{Device, LiveAll};
 use ferrite_core::VERSION;
 use ferrite_ui::text::{Buf, Zero};
-use ferrite_ui::widgets as w;
 
 /// Text from a template (in slow flash) and its arguments into a buffer, through the terminal's one formatter
 /// ([`cmd::fmt_into`]): no `uwrite!` expansion per call site.
@@ -44,6 +41,7 @@ macro_rules! put {
 pub mod cmd;
 pub mod debug;
 pub(crate) mod list;
+mod tpl;
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {
@@ -161,52 +159,8 @@ const FIELDS: [F; 16] = [
 
 /// The channel list's "every channel" filter.
 const ALL: ZoneId = 0xFFFD;
-/// The main menu (TERM screens), with what each opens.
-const MAIN: [(&str, Page); 7] = [
-    ("Channels", Page::Channels),
-    ("Zones", Page::Zones),
-    ("Settings", Page::Settings),
-    ("Monitor", Page::Monitor),
-    ("Mail", Page::Mail),
-    ("TNC", Page::Tnc),
-    ("About", Page::About),
-];
-
-// The bottom line's keys per page (TERM-11), each "key=what" and |-separated, and each page's help (TERM-16),
-// one line per \n: single strings in the slow flash, no tables of pointers.
-const H_TYPE: &str = "Enter=Save|Backspace=Delete|Esc=Cancel";
-const H_HELP: &str = "Esc=Close help";
-const H_SPLASH: &str = "Enter=Menu|?=Help|Ctrl-C=Leave";
-const H_MAIN: &str = "Up/Dn=Move|Enter=Open|1-7=Jump|:=Command|?=Help|Ctrl-C=Leave";
-const H_CHANNELS: &str = "Enter=Edit|N=New|D=Delete|M=Move|/=Find|Z=Zone|Esc=Back";
-const H_EDIT: &str = "Up/Dn=Field|<- ->=Change|Enter=Type|#=Default|Esc=Back";
-const H_ZONES: &str = "Up/Dn=Move|Enter=Channels|Esc=Back";
-const H_SETTINGS: &str = "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back";
-const H_BACK: &str = "Esc=Back";
-const HELP_MAIN: &str = concat!(
-    "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\n",
-    ": opens the command line; :help lists the commands.\n",
-    "Ctrl-L redraws, Ctrl-C leaves.",
-);
-const HELP_CHANNELS: &str = concat!(
-    "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one.\n",
-    "Z: the next zone, then no zone, then all. S sorts by the next column.\n",
-    "/ finds a name or MHz (Enter alone: the same again).\n",
-    "Space marks a channel (*), A marks all, U clears the marks.\n",
-    "D delete, M move to a zone, C copy, R renumber: the marked channels, else the selected one.\n",
-    "Delete asks first; Esc stops a change part way.",
-);
-const HELP_EDIT: &str = concat!(
-    "<- -> change a field; it saves at once.\n",
-    "Enter types the name or a frequency (MHz). # resets a field.",
-);
-const HELP_SETTINGS: &str = concat!(
-    "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n",
-    "* marks a value that isn't the default; # puts it back.\n",
-    "PIN, region and Extend TX change only on the radio; Dry TX goes off only there.",
-);
-const HELP_MONITOR: &str = "The event log (newest last), then the slots receiving now.";
-const HELP_OTHER: &str = "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves.";
+/// What the main menu's entries open (their names are the template's).
+const MAIN: [Page; 7] = [Page::Channels, Page::Zones, Page::Settings, Page::Monitor, Page::Mail, Page::Tnc, Page::About];
 
 pub struct Term {
     page: Page,
@@ -697,52 +651,22 @@ impl Term {
         }
         match self.page {
             Page::Off => {}
-            Page::Splash => {
-                if k == K::Enter {
-                    self.go(Page::Main);
+            Page::Channels => {
+                if !self.list_key(app, k, store) {
+                    self.tpl_key(app, k, store);
+                    self.keep_in_view();
                 }
             }
-            Page::Main => match k {
-                K::Up => self.main_sel = (self.main_sel + MAIN.len() as u8 - 1) % MAIN.len() as u8,
-                K::Down => self.main_sel = (self.main_sel + 1) % MAIN.len() as u8,
-                K::Ch(c @ b'1'..=b'7') => {
-                    self.main_sel = c - b'1';
-                    self.open_main();
-                }
-                K::Enter => self.open_main(),
-                K::Esc => self.go(Page::Splash),
-                _ => {}
-            },
-            Page::Channels => self.channels_key(app, k, store),
-            Page::Edit => self.edit_key(app, k, store),
-            Page::Zones => {
-                let n = store.zones() + 2;
-                match k {
-                    K::Up => self.zone_sel = (self.zone_sel + n - 1) % n,
-                    K::Down => self.zone_sel = (self.zone_sel + 1) % n,
-                    K::Home => self.zone_sel = 0,
-                    K::End => self.zone_sel = n - 1,
-                    K::Enter => {
-                        self.zone = zone_of(self.zone_sel, store);
-                        self.from_zones = true;
-                        self.list_reset();
-                        self.go(Page::Channels);
-                    }
-                    K::Esc => self.go(Page::Main),
-                    _ => {}
-                }
-            }
-            Page::Settings => self.settings_key(app, k),
-            Page::Monitor | Page::Mail | Page::Tnc | Page::About => {
-                if k == K::Esc {
-                    self.go(Page::Main);
-                }
+            Page::Edit if self.edit.is_none() => self.go(Page::Channels),
+            Page::Settings if self.g != 0 && groups::items(self.g, self.sub).is_empty() => self.settings_up(),
+            _ => {
+                self.tpl_key(app, k, store);
             }
         }
     }
 
     fn open_main(&mut self) {
-        let p = MAIN[self.main_sel as usize % MAIN.len()].1;
+        let p = MAIN[self.main_sel as usize % MAIN.len()];
         match p {
             Page::Channels => {
                 (self.zone, self.from_zones) = (ALL, false);
@@ -759,49 +683,6 @@ impl Term {
         (self.rows as u16).saturating_sub(8).max(1)
     }
 
-    fn channels_key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S) {
-        if self.list_key(app, k, store) {
-            return;
-        }
-        let n = list_len(self.zone, store);
-        let pg = self.page_rows();
-        let last = n.saturating_sub(1);
-        match k {
-            K::Up => self.chan_sel = self.chan_sel.saturating_sub(1),
-            K::Down => self.chan_sel = (self.chan_sel + 1).min(last),
-            K::PgUp => self.chan_sel = self.chan_sel.saturating_sub(pg),
-            K::PgDn => self.chan_sel = (self.chan_sel + pg).min(last),
-            K::Home => self.chan_sel = 0,
-            K::End => self.chan_sel = last,
-            K::Ch(b'z' | b'Z') => {
-                // The next zone, then no zone, then every channel.
-                let z = store.zones();
-                self.zone = match self.zone {
-                    ALL if z > 0 => 0,
-                    ALL => NO_ZONE,
-                    NO_ZONE => ALL,
-                    x if x + 1 < z => x + 1,
-                    _ => NO_ZONE,
-                };
-                self.list_reset();
-            }
-            K::Enter => {
-                if let Some(c) = self.selected(store) {
-                    (self.edit, self.field) = (Some(c), 0);
-                    self.go(Page::Edit);
-                }
-            }
-            K::Esc => self.go(if self.from_zones { Page::Zones } else { Page::Main }),
-            _ => {}
-        }
-        // Keep the selection in view.
-        if self.chan_sel < self.chan_top {
-            self.chan_top = self.chan_sel;
-        } else if self.chan_sel >= self.chan_top + pg {
-            self.chan_top = self.chan_sel + 1 - pg;
-        }
-    }
-
     fn line_max(&self) -> usize {
         if self.ask != list::Ask::None {
             return 16;
@@ -809,30 +690,6 @@ impl Term {
         match FIELDS[self.field as usize % FIELDS.len()] {
             F::Name => 16,
             _ => 10,
-        }
-    }
-
-    fn edit_key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S) {
-        let Some(c) = self.edit else { return self.go(Page::Channels) };
-        let n = FIELDS.len() as u8;
-        let f = FIELDS[self.field as usize % FIELDS.len()];
-        match k {
-            K::Up => self.field = (self.field + n - 1) % n,
-            K::Down => self.field = (self.field + 1) % n,
-            K::Home => self.field = 0,
-            K::End => self.field = n - 1,
-            K::Left | K::Right => self.change(app, c, f, if k == K::Right { 1 } else { -1 }, store),
-            K::Ch(b'#') => self.default(app, c, f),
-            K::Enter => match f {
-                F::Name => self.line = Some(Buf::from(c.name())),
-                F::Rx | F::Tx => self.line = Some(Buf::new()),
-                _ => self.change(app, c, f, 1, store),
-            },
-            K::Esc => {
-                self.edit = None;
-                self.go(Page::Channels);
-            }
-            _ => {}
         }
     }
 
@@ -889,34 +746,6 @@ impl Term {
             app.put_channel(n);
             self.edit = Some(n);
             self.say(b"Saved", false);
-        }
-    }
-
-    fn settings_key(&mut self, app: &mut App, k: K) {
-        let n = if self.g == 0 { GROUPS.len() as u8 } else { groups::items(self.g, self.sub).len() as u8 };
-        if n == 0 {
-            return self.settings_up();
-        }
-        match k {
-            K::Up => self.set_sel = (self.set_sel + n - 1) % n,
-            K::Down => self.set_sel = (self.set_sel + 1) % n,
-            K::Home => self.set_sel = 0,
-            K::End => self.set_sel = n - 1,
-            K::Ch(c @ b'1'..=b'9') if c - b'0' <= n => {
-                self.set_sel = c - b'1';
-                self.settings_open(app);
-            }
-            K::Enter => self.settings_open(app),
-            K::Left | K::Right if self.g != 0 => self.settings_change(app, if k == K::Right { 1 } else { -1 }),
-            K::Ch(b'#') if self.g != 0 => {
-                let (p, pl) = self.path(self.set_sel);
-                if !blocked(&p[..pl]) {
-                    groups::reset(app, &p[..pl]);
-                    self.say("Back to the default".as_bytes(), false);
-                }
-            }
-            K::Esc => self.settings_up(),
-            _ => {}
         }
     }
 
@@ -1217,25 +1046,7 @@ impl Term {
         if self.help {
             return self.help_row(b, w);
         }
-        match self.page {
-            Page::Off => {}
-            Page::Splash => splash(b, cx, w),
-            Page::Main => self.main_row(b, cx, w),
-            Page::Channels => self.chan_row(b, cx, w),
-            Page::Edit => self.edit_row(b, cx, w),
-            Page::Zones => self.zones_row(b, cx, w),
-            Page::Settings => self.set_row(b, cx, w),
-            Page::Monitor => self.monitor_row(b, cx, w),
-            Page::Mail | Page::Tnc => {
-                if b == 1 {
-                    w.s(b" ");
-                    w.bold(if self.page == Page::Mail { b"Mail" } else { b"TNC" });
-                } else if b == 3 {
-                    w.s("  Not built yet (manual chapter 38).".as_bytes());
-                }
-            }
-            Page::About => about(b, cx, w),
-        }
+        self.tpl_row(b, cx, w);
     }
 
     /// The top line (TERM-11): firmware, callsign and model; the link in the middle; the clock at the right.
@@ -1286,24 +1097,16 @@ impl Term {
             return;
         }
         let keys = if self.line.is_some() {
-            H_TYPE
+            tpl::global(tpl::KEYS_TYPE)
         } else if self.help {
-            H_HELP
+            tpl::global(tpl::KEYS_HELP)
         } else {
-            match self.page {
-                Page::Off | Page::Splash => H_SPLASH,
-                Page::Main => H_MAIN,
-                Page::Channels => H_CHANNELS,
-                Page::Edit => H_EDIT,
-                Page::Zones => H_ZONES,
-                Page::Settings => H_SETTINGS,
-                Page::Monitor | Page::Mail | Page::Tnc | Page::About => H_BACK,
-            }
+            tpl::hints(self.tpl_page())
         };
         w.rev();
         w.s(b" ");
         let mut i = 0;
-        while let Some(kl) = piece(keys.as_bytes(), b'|', i) {
+        while let Some(kl) = piece(keys, b'|', i) {
             w.bold(piece(kl, b'=', 0).unwrap_or_default());
             w.s(b" ");
             w.s(piece(kl, b'=', 1).unwrap_or_default());
@@ -1314,623 +1117,22 @@ impl Term {
     }
 
     fn help_row(&self, b: u8, w: &mut W) {
-        let lines = match self.page {
-            Page::Main => HELP_MAIN,
-            Page::Channels => HELP_CHANNELS,
-            Page::Edit => HELP_EDIT,
-            Page::Settings => HELP_SETTINGS,
-            Page::Monitor => HELP_MONITOR,
-            _ => HELP_OTHER,
-        };
+        let lines = tpl::help(self.tpl_page());
         if b == 1 {
             w.s(b" ");
             w.bold(b"Help");
-        } else if let Some(l) = (b as usize).checked_sub(3).and_then(|i| piece(lines.as_bytes(), b'\n', i)) {
+        } else if let Some(l) = (b as usize).checked_sub(3).and_then(|i| piece(lines, b'\n', i)) {
             w.s(b"  ");
             w.s(l);
         }
     }
 
-    fn main_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        match b {
-            1 => {
-                w.s(b" ");
-                w.bold(b"Ferrite terminal");
-                w.s("   type a number, or move and press Enter".as_bytes());
-            }
-            3..=9 => {
-                let i = b - 3;
-                let sel = i == self.main_sel;
-                if sel {
-                    w.rev();
-                }
-                w.at(2);
-                w.digit(i + 1);
-                w.at(5);
-                w.s(MAIN[i as usize].0.as_bytes());
-                w.at(19);
-                let mut v = Buf::<48>::new();
-                match i {
-                    0 => {
-                        v.push(digits(cx.store.count() as u32, &mut [0; 10]));
-                        v.push(b" used of 4000");
-                    }
-                    1 => {
-                        v.push(digits(cx.store.zones() as u32, &mut [0; 10]));
-                        v.push(b" zones");
-                    }
-                    2 => v.set("same numbers as MENU 0 on the radio".as_bytes()),
-                    3 => v.set("the event log and live activity".as_bytes()),
-                    4 | 5 => v.set("not built yet".as_bytes()),
-                    _ => v.set("version, calibration, self-test".as_bytes()),
-                }
-                w.s(v.as_bytes());
-                if sel {
-                    w.fill();
-                }
-            }
-            11 => {
-                w.s(b" ");
-                w.bold(b"Radio now");
-            }
-            12..=14 => slot_line(b - 12, cx, w),
-            15 => {
-                let d = cx.dev;
-                let mut v = Buf::<80>::new();
-                let gps = match d.gps {
-                    GpsState::Off => "GPS off",
-                    GpsState::Searching => "GPS searching",
-                    GpsState::Fix => "GPS fix",
-                };
-                put!(v, "Battery {}.{} V   {}", d.battery_mv / 1000, d.battery_mv % 1000 / 100, gps);
-                // GPS-26: the power manager's state, to check over the cable.
-                match d.gps_phase {
-                    GpsPhase::Standby(s) if d.gps != GpsState::Off => put!(v, ", standby {} s", s),
-                    GpsPhase::Waking if d.gps != GpsState::Off => put!(v, ", waking"),
-                    GpsPhase::Running | GpsPhase::Searching if d.gps != GpsState::Off => put!(v, ", awake"),
-                    _ => {}
-                }
-                put!(v, "   Bluetooth {}   Battery Save ", if d.bt { "on" } else { "off" });
-                put!(v, "{}", cx.app.bsave);
-                w.at(2);
-                w.s(v.as_bytes());
-            }
-            _ => {}
-        }
-    }
-
-    fn chan_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        let st = cx.store;
-        let body = self.rows - 2;
-        match b {
-            0 => {
-                w.s(b" ");
-                w.bold(b"Channels");
-                w.s(b"   zone ");
-                let name = zone_name(self.zone, st);
-                w.bold(name.as_bytes());
-                w.s(b" (");
-                w.n(list_len(self.zone, st) as u32);
-                w.s(b")   all ");
-                w.n(st.count() as u32);
-                w.s(b"   sort: ");
-                w.s(list::SORTS[self.sort as usize % list::SORTS.len()].as_bytes());
-                let m = self.marks_n();
-                if m > 0 {
-                    w.s(b"   ");
-                    w.n(m as u32);
-                    w.s(b" marked");
-                }
-            }
-            2 => {
-                w.bold(b" ");
-                for (c, t) in [(1u16, "No"), (6, "Name"), (23, "RX MHz"), (35, "Offset"), (47, "Mode"), (54, "Tone"), (65, "Pwr"), (71, "Flags")] {
-                    w.at(c);
-                    w.bold(t.as_bytes());
-                }
-            }
-            _ if b >= 3 && (b as u16) < 3 + self.page_rows() => {
-                let i = b as u16 - 3;
-                let Some(c) = self.row_chan(i, st) else {
-                    if i == 0 && list_len(self.zone, st) == 0 {
-                        w.s("  No channels here.".as_bytes());
-                    }
-                    return;
-                };
-                let sel = self.row_selected(i);
-                if sel {
-                    w.rev();
-                }
-                let mut d = [0; 10];
-                let num = digits(c.num as u32 + 1, &mut d);
-                w.at(4u16.saturating_sub(num.len() as u16));
-                w.s(num);
-                if self.marked(c.num) {
-                    w.s(b"*"); // TERM-14: marked
-                }
-                let mut v = Buf::<16>::new();
-                w.at(6);
-                w.s(c.name());
-                w.at(23);
-                w.s(mhz5(c.rx).as_bytes());
-                w.at(35);
-                item(Item::Offset, &c, w);
-                w.at(47);
-                v.clear();
-                mode_chip(&c.cfg, &mut v);
-                w.s(v.as_bytes());
-                w.at(54);
-                v.clear();
-                tone_text(c.cfg.tx_tone, &mut v);
-                w.s(if v.is_empty() { b"-" } else { v.as_bytes() });
-                w.at(65);
-                item(Item::Power, &c, w);
-                w.at(71);
-                flags(&c, cx.app, w);
-                if sel {
-                    w.fill();
-                }
-            }
-            _ if b == body - 2 && (self.ask != list::Ask::None) => {
-                // The question being asked, and what is typed (TERM-14).
-                let mut q = cmd::Msg::new();
-                self.ask_text(st, &mut q);
-                w.s(b"  ");
-                w.warn(q.as_bytes());
-                if let Some(l) = self.line {
-                    w.s(l.as_bytes());
-                    w.s(b"_");
-                }
-            }
-            _ if b == body - 2 => {
-                if let Some(c) = self.selected(st) {
-                    w.s(b"  Channel ");
-                    w.n(c.num as u32 + 1);
-                    w.s(b" . ");
-                    w.s(zone_name(c.zone, st).as_bytes());
-                    if cx.app.set.home_ch == Some(c.num) {
-                        w.s(b" \xb7 home channel");
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn edit_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        let Some(c) = self.edit else { return };
-        let body = self.rows - 2;
-        match b {
-            0 => {
-                w.s(b" ");
-                let mut v = Buf::<40>::new();
-                v.push(b"Channels > ");
-                v.push(digits(c.num as u32 + 1, &mut [0; 10]));
-                v.push(b" ");
-                v.push(c.name());
-                w.bold(v.as_bytes());
-                w.s(b"   zone ");
-                w.s(zone_name(c.zone, cx.store).as_bytes());
-            }
-            _ if b >= 2 && ((b - 2) as usize) < FIELDS.len() => {
-                let i = b - 2;
-                let f = FIELDS[i as usize];
-                let sel = i == self.field;
-                w.at(3);
-                w.s(f.label(true).as_bytes());
-                w.at(21);
-                if sel {
-                    w.rev();
-                }
-                w.s(b" ");
-                match (f, self.line.filter(|_| sel)) {
-                    (_, Some(l)) => {
-                        w.s(l.as_bytes());
-                        w.s(b"_");
-                    }
-                    (F::Zone, _) => w.s(zone_name(c.zone, cx.store).as_bytes()),
-                    (F::Rx, _) => {
-                        w.s(mhz5(c.rx).as_bytes());
-                        w.s(b" MHz");
-                    }
-                    (F::Tx, _) => {
-                        w.s(mhz5(c.cfg.tx_of(c.rx)).as_bytes());
-                        w.s(if c.cfg.split { b" MHz, split" } else { b" MHz" });
-                    }
-                    (_, _) => {
-                        let mut v = Buf::<16>::new();
-                        f.text(&c, cx.app.set.home_ch, true, &mut v);
-                        w.s(v.as_bytes());
-                    }
-                }
-                w.s(b" ");
-                if sel {
-                    w.plain();
-                    w.at(50);
-                    w.s(match f {
-                        F::Name => "Enter types it",
-                        F::Rx => "<- -> step, Enter types it",
-                        F::Tx => "Enter types it (split)",
-                        _ => "<- -> change",
-                    }
-                    .as_bytes());
-                }
-            }
-            _ if b == body - 2 => {
-                w.s(b"  ");
-                if !self.note.is_empty() && !self.bnote {
-                    if self.warn {
-                        w.warn(self.note.as_bytes());
-                    } else {
-                        w.s(self.note.as_bytes());
-                    }
-                } else if c.cfg.split {
-                    w.s(b"Split: TX ");
-                    w.s(mhz5(c.cfg.offset.max(0) as Freq10).as_bytes());
-                    w.s(" MHz, whatever RX is. Saved as you go.".as_bytes());
-                } else if c.cfg.offset != 0 {
-                    let tx = (c.rx as i64 + c.cfg.offset as i64).max(0) as Freq10;
-                    w.s(b"TX ");
-                    w.s(mhz5(tx).as_bytes());
-                    w.s(" MHz from the offset. Saved as you go.".as_bytes());
-                } else {
-                    w.s("Simplex. Saved as you go.".as_bytes());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn zones_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        let st = cx.store;
-        let n = st.zones() + 2;
-        match b {
-            0 => {
-                w.s(b" ");
-                w.bold(b"Zones");
-                w.s(b"   ");
-                w.n(st.zones() as u32);
-                w.s(b" zones");
-            }
-            _ if b >= 2 && ((b - 2) as u16) < n.min(self.page_rows() + 2) => {
-                let i = (b - 2) as u16 + self.zone_sel.saturating_sub(self.page_rows() + 1);
-                if i >= n {
-                    return;
-                }
-                let z = zone_of(i, st);
-                let sel = i == self.zone_sel;
-                if sel {
-                    w.rev();
-                }
-                w.at(3);
-                w.s(zone_name(z, st).as_bytes());
-                w.at(26);
-                w.n(list_len(z, st) as u32);
-                w.s(b" channels");
-                if sel {
-                    w.fill();
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn set_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        let app = cx.app;
-        if self.g == 0 {
-            match b {
-                0 => {
-                    w.s(b" ");
-                    w.bold(b"Settings");
-                    w.s("   as MENU 0 on the radio".as_bytes());
-                }
-                2..=10 => {
-                    let i = b - 2;
-                    let sel = i == self.set_sel;
-                    if sel {
-                        w.rev();
-                    }
-                    w.at(3);
-                    w.digit(i + 1);
-                    w.at(6);
-                    w.s(GROUPS[i as usize].0.as_bytes());
-                    w.s(b" >");
-                    w.at(32);
-                    w.s(GROUPS[i as usize].1.as_bytes());
-                    if sel {
-                        w.fill();
-                    }
-                }
-                _ => {}
-            }
-            return;
-        }
-        let list = groups::items(self.g, self.sub);
-        let n = list.len() as u8;
-        match b {
-            0 => {
-                w.s(b" ");
-                let mut t = Buf::<64>::new();
-                put!(t, "Settings > 0 {} ", self.g);
-                t.push(GROUPS[(self.g as usize).clamp(1, 9) - 1].0.as_bytes());
-                if self.sub != 0 {
-                    put!(t, " > {} ", self.sub);
-                    t.push(groups::items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.name()).as_bytes());
-                }
-                w.bold(t.as_bytes());
-                w.s("      * = not the default".as_bytes());
-            }
-            _ if b >= 2 && b - 2 < n => {
-                let i = b - 2;
-                let (p, pl) = self.path(i);
-                let e = list[i as usize];
-                let sel = i == self.set_sel;
-                if sel {
-                    w.rev();
-                }
-                w.at(3);
-                w.digit(i + 1);
-                w.at(6);
-                w.s(e.name().as_bytes());
-                if self.sub == 0 && SUBS.iter().any(|(q, _)| *q == (self.g, i + 1)) {
-                    w.s(b" >");
-                }
-                let mut v = Buf::<24>::new();
-                let dot = match groups::wired(app, cx.dev, &p[..pl], &mut v) {
-                    Some(d) => d,
-                    None => {
-                        match &p[..pl] {
-                            [2, 1] => {
-                                v.push(digits(cx.store.count() as u32, &mut [0; 10]));
-                                v.push(b" channels");
-                            }
-                            _ => v.set(e.value().as_bytes()),
-                        }
-                        false
-                    }
-                };
-                if let Some(why) = groups::greyed(app, &p[..pl]) {
-                    v.set(why.as_bytes());
-                }
-                w.at(32);
-                w.s(if dot { b"* " } else { b"  " });
-                w.s(v.as_bytes());
-                if sel {
-                    w.fill();
-                }
-            }
-            _ if b == n + 3 => {
-                if let Some(e) = list.get(self.set_sel as usize) {
-                    w.s(b"  ");
-                    w.bold(e.name().as_bytes());
-                    w.s(b": ");
-                    w.s(e.help().as_bytes());
-                }
-            }
-            _ if b == n + 4 => {
-                let (p, pl) = self.path(self.set_sel);
-                let mut t = Buf::<40>::new();
-                t.push(b"  Path on the radio: MENU 0");
-                for x in &p[..pl] {
-                    t.push(b" ");
-                    t.push(digits(*x as u32, &mut [0; 10]));
-                }
-                w.s(t.as_bytes());
-            }
-            _ if b == n + 6 && !self.note.is_empty() && !self.bnote => {
-                w.s(b"  ");
-                if self.warn {
-                    w.warn(self.note.as_bytes());
-                } else {
-                    w.s(self.note.as_bytes());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn monitor_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
-        let body = self.rows - 2;
-        if b == 0 {
-            w.s(b" ");
-            w.bold(b"Monitor");
-            w.s("   the event log and the slots receiving now".as_bytes());
-            return;
-        }
-        if b == body - 1 {
-            w.s(b" ");
-            w.bold(b"-- live --");
-            w.s("   newest at the bottom".as_bytes());
-            return;
-        }
-        // Lines from row 2 to body - 3: the newest events, oldest first, then the slots receiving now.
-        let space = body.saturating_sub(4) as u16;
-        let open: [bool; SLOTS] = core::array::from_fn(|i| cx.live.slots[i].squelch_open);
-        let nopen = open.iter().filter(|&&o| o).count() as u16;
-        let d = cx.store.data();
-        let nev = d.events().min(space.saturating_sub(nopen));
-        let Some(k) = (b as u16).checked_sub(2) else { return };
-        if k < nev {
-            // Newest at the bottom: line k shows event nev - 1 - k (event 0 is the newest).
-            let Some(e) = d.event(nev - 1 - k) else { return };
-            let mut v = Buf::<16>::new();
-            ago(e.ago_s, &mut v);
-            w.at(1);
-            w.s(v.as_bytes());
-            w.at(11);
-            w.s(e.src.name().as_bytes());
-            w.at(20);
-            w.s(e.name.as_bytes());
-            w.at(32);
-            w.s(e.text.as_bytes());
-        } else if let Some(s) = (0..SLOTS).filter(|&i| open[i]).nth((k - nev) as usize) {
-            let l = cx.live.slots[s];
-            w.at(1);
-            w.s(b"now");
-            w.at(11);
-            w.s(&[w::LETTERS[s]]);
-            w.s(b" ");
-            w.s(w::freq3(l.freq).as_bytes());
-            w.at(20);
-            w.s(b"RX");
-            w.at(32);
-            w.s(w::s_text(l.rssi).as_bytes());
-        } else if k == 0 {
-            w.s("  Nothing yet.".as_bytes());
-        }
-    }
-}
-
-// ---- Rows shared by pages ----
-
-/// The banner (TERM-20): firmware and version, callsign and link, how to start. No ASCII art.
-fn splash<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
-    match b {
-        3 => {
-            w.at(2);
-            let mut v = Buf::<24>::new();
-            v.push(b"FERRITE ");
-            v.push(version());
-            w.bold(v.as_bytes());
-            w.s(" - free firmware for the RT-950 Pro".as_bytes());
-        }
-        4 => {
-            w.at(2);
-            w.s(cx.app.set.boot_callsign().unwrap_or(b"No callsign set"));
-            w.s(b" - cable 115200");
-        }
-        6 => {
-            w.at(2);
-            w.bold(b"Press Enter");
-            w.s(" for the menu, ? for help".as_bytes());
-        }
-        _ => {}
-    }
-}
-
-fn about<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
-    let d = cx.dev;
-    match b {
-        1 => {
-            w.s(b" ");
-            w.bold(b"About");
-        }
-        3..=7 => splash(b, cx, w),
-        9 => {
-            w.at(2);
-            w.s(b"Region        ");
-            w.s(cx.app.set.region_name().as_bytes());
-        }
-        10 => {
-            w.at(2);
-            w.s(b"Calibration   ");
-            w.s(groups::cal_text(d.selftest.cal).as_bytes());
-        }
-        11 => {
-            w.at(2);
-            w.s(b"SSB patch     ");
-            w.s(if d.selftest.ssb_patch { b"Installed".as_slice() } else { b"Not installed" });
-        }
-        12 => {
-            w.at(2);
-            w.s(b"Transmit      ");
-            w.s(if d.tx_built { b"Built in".as_slice() } else { b"Not in this build" });
-        }
-        13 => {
-            w.at(2);
-            w.s(b"Channels      ");
-            w.n(cx.store.count() as u32);
-            w.s(b" of 4000, ");
-            w.n(cx.store.zones() as u32);
-            w.s(b" zones");
-        }
-        _ => {}
-    }
-}
-
-/// "A  VFO  146.520 00  FM-N  T 100.0   RX S7   active".
-fn slot_line<S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W) {
-    let s = cx.app.slot(i);
-    let l = cx.live.slots[i as usize];
-    w.at(2);
-    w.s(&[w::LETTERS[i as usize]]);
-    w.at(5);
-    // The APRS slot shows what it's on, the APRS frequency, not the channel or VFO it keeps underneath (APRS-21).
-    let aprs = cx.app.aprs_slot(i);
-    match s.ch.filter(|_| s.on_channel() && !aprs) {
-        _ if aprs => w.s(b"APRS"),
-        Some(c) => {
-            let mut v = Buf::<32>::new();
-            put!(v, "CH {} ", Zero(c.num as u32 + 1, 3));
-            let n = c.name();
-            v.push(&n[..n.len().min(14)]); // "CH 012 " + 14 leaves a space before column 27
-            w.s(v.as_bytes());
-        }
-        None => w.s(b"VFO"),
-    }
-    w.at(27);
-    let f = if l.scanning { l.freq } else { cx.app.tuned_freq(i) };
-    w.s(mhz5(f).as_bytes());
-    if !aprs {
-        w.at(39);
-        let mut v = Buf::<16>::new();
-        mode_chip(s.cfg(), &mut v);
-        w.s(v.as_bytes());
-        w.at(46);
-        v.clear();
-        tone_text(s.cfg().tx_tone, &mut v);
-        w.s(v.as_bytes());
-    }
-    w.at(57);
-    if cx.app.slot_off(i) {
-        w.s(b"off");
-    } else if l.squelch_open {
-        w.s(b"RX ");
-        w.s(w::s_text(l.rssi).as_bytes());
-    } else if l.scanning {
-        w.s(b"scanning");
-    } else {
-        w.s(b"idle");
-    }
-    if i == cx.app.active() {
-        w.at(68);
-        w.s(b"active");
-    }
 }
 
 fn item(it: Item, c: &Channel, w: &mut W) {
     let mut v = Buf::<16>::new();
     it.text(&c.cfg, false, &mut v);
     w.s(v.as_bytes());
-}
-
-fn flags(c: &Channel, app: &App, w: &mut W) {
-    let mut first = true;
-    let mut f = |w: &mut W, s: &[u8]| {
-        if !first {
-            w.s(b" ");
-        }
-        first = false;
-        w.s(s);
-    };
-    if app.set.home_ch == Some(c.num) {
-        f(w, b"home");
-    }
-    if c.flags & FLAG_SKIP != 0 {
-        f(w, b"skip");
-    }
-    if c.flags & FLAG_APRS != 0 {
-        f(w, b"APRS");
-    }
-    if c.flags & FLAG_RX_ONLY != 0 {
-        f(w, b"RX");
-    }
-    if c.flags & FLAG_HIDDEN != 0 {
-        f(w, b"hidden");
-    }
-    if c.flags & FLAG_PRIORITY != 0 {
-        f(w, b"prio");
-    }
 }
 
 // ---- Helpers ----
@@ -2116,12 +1318,26 @@ impl W<'_> {
 
     /// A warning: bold, or yellow in colour.
     fn warn(&mut self, b: &[u8]) {
-        if !self.colour {
-            return self.bold(b);
-        }
-        self.o.out(if self.rev { b"\x1b[1;93;44m" } else { b"\x1b[1;33m" });
+        self.won();
         self.s(b);
         self.back();
+    }
+
+    /// A warning's attributes on.
+    fn won(&mut self) {
+        if !self.colour {
+            return self.bon();
+        }
+        self.o.out(if self.rev { b"\x1b[1;93;44m" } else { b"\x1b[1;33m" });
+    }
+
+    /// Bold on (cyan in colour, heading colours on the selection).
+    fn bon(&mut self) {
+        self.o.out(match (self.rev, self.colour) {
+            (true, true) => b"\x1b[1;97;44m",
+            (false, true) => b"\x1b[1;36m",
+            _ => b"\x1b[1m",
+        });
     }
 
     fn plain(&mut self) {
@@ -2130,11 +1346,7 @@ impl W<'_> {
     }
 
     fn bold(&mut self, b: &[u8]) {
-        self.o.out(match (self.rev, self.colour) {
-            (true, true) => b"\x1b[1;97;44m",
-            (false, true) => b"\x1b[1;36m",
-            _ => b"\x1b[1m",
-        });
+        self.bon();
         self.s(b);
         // VT100 has no "bold off": all off, then reverse (or the colours) again if it was on.
         self.back();

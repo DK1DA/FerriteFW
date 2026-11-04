@@ -3,6 +3,9 @@
 use ufmt::uwrite;
 use super::*;
 use crate::sample::Sample;
+use crate::chan::FLAG_PRIORITY;
+use crate::screens::advanced::GROUPS;
+use ferrite_core::msg::GpsState;
 use ferrite_core::freq::mhz;
 use std::string::String;
 use std::vec;
@@ -2644,6 +2647,8 @@ mod nav;
 mod list_more;
 /// The command line's refusals and rare answers (TERM-12).
 mod cmd_more;
+/// Every page's bytes for a key script (TERM-11, TERM-16; decision 342).
+mod pages_golden;
 
 /// TERM-8: every command's usage text fits the answer it goes out in ([`super::cmd::Msg`], 96 characters), so a
 /// refusal is never cut off in the line-mode answer (`gps` lost its "35 s)" once, Oct 28, 2026).
