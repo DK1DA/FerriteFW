@@ -4,7 +4,7 @@
 //! screen as text with its keys (the remote head). Each is a thin call into what the radio already has.
 
 use super::tpl::*;
-use super::{cmd, cmd_trim, Cx, Term, W};
+use super::{cmd_trim, Cx, Term, W};
 use crate::chan::ChannelStore;
 use crate::data::{Draft, MsgState, Op};
 use crate::slot::QUICK;
@@ -222,36 +222,13 @@ impl Term {
             }
             // a device value: 0 battery %, 1 the MCU's temperature (-999 unknown), 2 CPU % (-1 unknown), 3 the MCU
             // clock (MHz), 4 the stack never used (bytes)
-            N_DEVV => {
+            _ => {
                 return match a {
                     0 => dev.battery_pct as i32,
                     1 => dev.mcu_temp.map_or(-999, i32::from),
                     2 => dev.cpu_pct.map_or(-1, i32::from),
                     3 => dev.mcu.mhz as i32,
                     _ => dev.stack_free as i32,
-                }
-            }
-            // line a of the radio's screen as text (the UI readback, LINK-19); 0 past the last
-            N_UILINE => {
-                let mut l = cmd::Line::new();
-                let ok = crate::uistate::line(app, st, dev, cx.live, a as u16, &mut l);
-                w.s(l.as_bytes());
-                return ok as i32;
-            }
-            // a radio key from the terminal (LINK-19's remote keys): key code a, x[1] 0 short, 1 long; 2 the knob
-            // a steps; 3 home
-            _ => {
-                let now = app.now;
-                let r = match x[1] {
-                    2 => app.remote_knob(a as i8, now, st),
-                    3 => {
-                        app.go_home();
-                        Ok(())
-                    }
-                    h => app.remote_press(a as u8, if h == 1 { crate::remote::Press::Long } else { crate::remote::Press::Short }, crate::remote::BY_TERM, now, st),
-                };
-                if let Err(e) = r {
-                    return self.no(e.text().as_bytes());
                 }
             }
         }

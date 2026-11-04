@@ -94,8 +94,6 @@ pub enum Page {
     /// The GPS position (TERM-50).
     Gps,
     Monitor,
-    /// The radio's screen and keys (TERM-51).
-    Remote,
     About,
     Edit,
 }

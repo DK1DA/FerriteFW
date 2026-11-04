@@ -296,8 +296,7 @@ fn help_per_page() {
         (b'5', Page::Aprs, "APRS heard and messages, newest first (MENU 0 5 1 and 0 5 2 on the radio)."),
         (b'6', Page::Gps, "The GPS as the radio's position page (MENU 0 6 2): the fix and position"),
         (b'7', Page::Monitor, "The event log (newest last), then the slots receiving now."),
-        (b'8', Page::Remote, "The radio's screen as text (its UI readback); keys go to it as its keypad."),
-        (b'9', Page::About, "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."),
+        (b'8', Page::About, "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."),
     ] {
         let mut r = Rig::main();
         r.send(&[key]);

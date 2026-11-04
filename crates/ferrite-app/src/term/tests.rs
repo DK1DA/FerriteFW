@@ -307,7 +307,7 @@ fn main_menu_and_leaving() {
     assert!(r.vt.has("Ferrite terminal"));
     let n = r.store.count();
     assert!(r.vt.has(&std::format!("2  Channels      {n} used of 4000")), "{}", r.vt.text());
-    assert!(r.vt.has("9  About"));
+    assert!(r.vt.has("8  About"));
     assert!(r.vt.has("Radio now"));
     assert!(r.vt.has("Battery 7.9 V"));
     let sel = r.vt.row_of("1  Radio").unwrap();
@@ -316,6 +316,8 @@ fn main_menu_and_leaving() {
     let z = r.vt.row_of("2  Channels").unwrap();
     assert!(r.vt.rev[z][2] && !r.vt.rev[sel][2]);
     r.send(b"9");
+    assert_eq!(r.term.page(), Page::Main, "9: no ninth entry since Remote went");
+    r.send(b"8");
     assert_eq!(r.term.page(), Page::About);
     r.send(b"\x1b");
     r.now += 100; // a lone ESC is Esc after a moment

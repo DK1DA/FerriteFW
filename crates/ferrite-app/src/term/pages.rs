@@ -32,7 +32,7 @@ pub(super) const FIELDS: [F; 16] = [
 /// The channel list's "every channel" filter.
 pub(super) const ALL: ZoneId = 0xFFFD;
 /// The program's pages, by number (`pages.vt` lists them in this order).
-pub(super) const PAGES: [Page; 12] = [
+pub(super) const PAGES: [Page; 11] = [
     Page::Splash,
     Page::Main,
     Page::Radio,
@@ -42,7 +42,6 @@ pub(super) const PAGES: [Page; 12] = [
     Page::Aprs,
     Page::Gps,
     Page::Monitor,
-    Page::Remote,
     Page::About,
     Page::Edit,
 ];
@@ -298,7 +297,7 @@ impl Term {
 
 /// What the main menu's entries open (tests).
 #[cfg(test)]
-pub(super) const MAIN: [Page; 9] = [Page::Radio, Page::Channels, Page::Zones, Page::Settings, Page::Aprs, Page::Gps, Page::Monitor, Page::Remote, Page::About];
+pub(super) const MAIN: [Page; 8] = [Page::Radio, Page::Channels, Page::Zones, Page::Settings, Page::Aprs, Page::Gps, Page::Monitor, Page::About];
 #[cfg(test)]
 pub(super) use crate::chan::NO_ZONE;
 

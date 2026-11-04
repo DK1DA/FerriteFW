@@ -102,27 +102,8 @@ fn gps_page() {
     assert_ne!(r.app.set.gps, g);
 }
 
-/// TERM-51: the Remote page shows the radio's screen as text; its keys are the radio's (Enter is MENU, Esc BACK);
-/// H goes home; Q leaves.
-#[test]
-fn remote_page() {
-    let mut r = Rig::main();
-    r.send(b"8");
-    assert_eq!(r.term.page(), Page::Remote);
-    r.send(b"h");
-    assert!(r.vt.has("screen Home"), "{}", r.vt.text());
-    r.send(b"\r");
-    assert!(matches!(r.app.screen, Screen::Quick(_)), "{:?}", r.app.screen);
-    r.send(b"\x1b");
-    r.now += 100;
-    r.poll();
-    assert!(matches!(r.app.screen, Screen::Home), "{:?}", r.app.screen);
-    assert_eq!(r.term.page(), Page::Remote);
-    r.send(b"q");
-    assert_eq!(r.term.page(), Page::Main);
-}
-
-/// TERM-52: a settings row that is a page opens the terminal's own (Heard, Position), or the radio's in Remote.
+/// TERM-52: a settings row that is a page opens the terminal's own (Heard, Position); any other says to open it on
+/// the radio (Remote was dropped, Alex Nov 3).
 #[test]
 fn settings_rows_open_pages() {
     let mut r = Rig::main();
@@ -133,7 +114,6 @@ fn settings_rows_open_pages() {
     assert_eq!(r.term.page(), Page::Gps);
     let mut r = Rig::main();
     r.send(b"433"); // 0 3 3: the frequency counter, a page on the radio
-    assert_eq!(r.term.page(), Page::Remote);
-    assert!(!matches!(r.app.screen, Screen::Home | Screen::Group(_)), "{:?}", r.app.screen);
-    assert!(r.vt.has("screen "), "{}", r.vt.text());
+    assert_eq!(r.term.page(), Page::Settings);
+    assert!(r.vt.has("open it there"), "{}", r.vt.text());
 }

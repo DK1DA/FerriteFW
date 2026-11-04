@@ -43,8 +43,8 @@ natives 3 1 fchg sreset
 natives 4 1 seek schg
 natives 0 1 lmhz
 natives 0 0 scan
-natives 1 1 nlist gpsl devv uiline
-natives 2 1 quick aprsdo rkey
+natives 1 1 nlist gpsl devv
+natives 2 1 quick aprsdo
 natives 3 1 sapply litem
 
 # what the firmware's tests call
@@ -165,10 +165,6 @@ hintsw keys_help "Esc=Close help"
   @i active = if 68 at "active" then ;
 # "12 s ago", "3 min ago", "2 h ago" (-1: earlier, INBOX-6.1).
 : ago ( s -- ) dup 0 < if drop "earlier" exit then dup 60 < if . " s ago" exit then dup 3600 < if 60 / . " min ago" exit then 3600 / . " h ago" ;
-# A radio key from the terminal (the remote keys, LINK-19): code, held long when L came first.
-: press ( code -- ) @long 0 !long rkey drop ;
-# A digit's radio key code (the keypad's stock codes).
-: dcode ( d -- code ) dup 0 = if drop 17 exit then dup 1 - 3 / + 9 + ;
 
 # ---- the pages, in the order of term::Page ----
 
@@ -181,17 +177,17 @@ row 6 2 at bold "Press Enter" " for the menu, ? for help"
 key enter P_MAIN go
 
 page main
-hints "Up/Dn=Move|Enter=Open|1-9=Jump|?=Help|Ctrl-C=Leave"
+hints "Up/Dn=Move|Enter=Open|1-8=Jump|?=Help|Ctrl-C=Leave"
 help "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\nCtrl-L redraws, Ctrl-C leaves."
 : sel? @msel = ;
 row 1 " " bold "Ferrite terminal" "   type a number, or move and press Enter"
-list 3 9 @i sel? if rev then 2 at @i 1 + . 5 at @i pick "Radio|Channels|Zones|Settings|APRS|GPS|Monitor|Remote|About" 19 at mdesc @i sel? if fill then
-row 13 " " bold "Radio now"
-list 14 3 slotline
-row 17 2 at status
-key up @msel 8 + 9 mod !msel
-key down @msel 1 + 9 mod !msel
-key digit '1' - !msel open
+list 3 8 @i sel? if rev then 2 at @i 1 + . 5 at @i pick "Radio|Channels|Zones|Settings|APRS|GPS|Monitor|About" 19 at mdesc @i sel? if fill then
+row 12 " " bold "Radio now"
+list 13 3 slotline
+row 16 2 at status
+key up @msel 7 + 8 mod !msel
+key down @msel 1 + 8 mod !msel
+key digit '1' - dup 0 < over 7 > or if drop else !msel open then
 key enter open
 key esc P_SPLASH go
 : mdesc
@@ -199,7 +195,7 @@ key esc P_SPLASH go
   @i 2 = if zones . " zones" exit then
   @i 4 = if 0 nlist . " heard, " 1 nlist . " messages" exit then
   @i 5 = if 0 gpsl drop exit then
-  @i pick "the slots, tuning and quick settings (MENU)|||same numbers as MENU 0 on the radio|||the event log and live activity|the radio's screen and keys|version, calibration, self-test" ;
+  @i pick "the slots, tuning and quick settings (MENU)|||same numbers as MENU 0 on the radio|||the event log and live activity|version, calibration, self-test" ;
 # What the menu's entries open (the pages after the main menu, in its order): channels from the start (every
 # channel), settings at their groups.
 : open
@@ -356,9 +352,9 @@ key esc sup
   @g 0 = if @ssel 1 + !g 0 !ssel exit then
   @sub 0 = @g @ssel 1 + isub and if @ssel 1 + !sub 0 !ssel exit then
   sjump if exit then
-  @g @sub @ssel 1 schg dup 1 = if drop ropen exit then said ;
-# TERM-52: a row that is a page on the radio opens the terminal's own page for it, or the radio's in Remote
-# (the radio goes home, then MENU 0 and the row's numbers, as typed on its keypad).
+  @g @sub @ssel 1 schg dup 1 = if drop cap "A screen on the radio: open it there" warn1 exit then said ;
+# TERM-52: a row that is a page on the radio opens the terminal's own page for it; any other says to open it on
+# the radio (Remote was dropped, Alex Nov 3).
 : sjump ( -- f )
   @sub if 0 exit then
   @g 2 = @ssel 0 = and if ALL !zone 0 !fromz listreset P_CHANNELS go 1 exit then
@@ -367,7 +363,6 @@ key esc sup
   @g 5 = @ssel 2 < and if @ssel !av 0 !asel 0 !atop P_APRS go 1 exit then
   @g 6 = @ssel 1 = and if P_GPS go 1 exit then
   0 ;
-: ropen 0 3 rkey drop 6 0 rkey drop 17 0 rkey drop @g dcode 0 rkey drop @sub if @sub dcode 0 rkey drop then @ssel 1 + dcode 0 rkey drop P_REMOTE go ;
 # <- -> or Enter on an item: its change through the radio's menu (TERM-7), or why not.
 : schange ( d -- ) !k @g @sub @ssel @k schg said ;
 : said ( r -- )
@@ -442,35 +437,6 @@ key esc P_MAIN go
   @i @k < if @k 1 - @i - !p 1 at @p evago ago 11 at @p 1 ev 20 at @p 2 ev 32 at @p 3 ev exit then
   @i @k - !p 0 begin dup 3 < while dup sq if @p 0 = if !q 1 at "now" 11 at @q pick "A|B|C" " " @q livef freq3 20 at "RX" 32 at @q rssi exit then @p 1 - !p then 1 + repeat drop
   @i 0 = if "  Nothing yet." then ;
-
-page remote
-hints "0-9*#=Keys|Enter=OK|Esc=BACK|S=SLOT|V=V/M|-+=Knob|[]=Side|L=Long|Q=Leave"
-help "The radio's screen as text (its UI readback); keys go to it as its keypad.\nDigits, * #, arrows, Enter (MENU, OK), Esc (BACK), S (SLOT), V (V/M).\n[ and ] are SIDE1 and SIDE2; - and + turn the knob. L, then a key: held long.\nH goes home. Q leaves this page.\nNothing transmits from here: PTT stays on the radio."
-row 0 " " bold "Remote" "   the radio's screen; the keys go to the radio" @long if "   " won "LONG" back then
-list 2 nui @i uiline drop
-bot 1 "  " noteon if snote then
-: nui rows 5 - ;
-# TERM-51: each key as the radio's own (LINK-19's remote keys, the terminal's).
-key digit '0' - dcode press
-key "0" 17 press
-key "*" 13 press
-key "#" 21 press
-key up 7 press
-key down 8 press
-key left 4 press
-key right 5 press
-key enter 6 press
-key esc 9 press
-key "s" 3 press
-key "v" 2 press
-key "[" 0 press
-key "]" 1 press
-key "-" -1 2 rkey drop
-key "+" 1 2 rkey drop
-key "=" 1 2 rkey drop
-key "l" 1 !long
-key "h" 0 3 rkey drop
-key "q" 0 !long P_MAIN go
 
 page about
 hints "Esc=Back"
