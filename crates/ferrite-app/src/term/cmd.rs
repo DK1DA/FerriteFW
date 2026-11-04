@@ -36,6 +36,20 @@ macro_rules! msg {
     };
 }
 
+/// A refusal: its text is in the line's [`Toks`] (`t.e`), so a `Result` that carries one is a register, not a
+/// 100-byte message copied at every `?` (TERM-12's one refusal path).
+pub(crate) struct No;
+
+/// A refusal from its template and arguments, into `t`'s message: `Err(no!(t, "zone {}: ...", n))`.
+macro_rules! no {
+    ($t:expr, $f:literal) => {
+        $t.no($f, &[])
+    };
+    ($t:expr, $f:literal, $($a:expr),+ $(,)?) => {
+        $t.no($f, &[$(Arg::from($a)),+])
+    };
+}
+
 /// A message's argument: a number, text as written, or bytes from the user (non-printing ones shown as `?`).
 #[derive(Clone, Copy)]
 pub(crate) enum Arg<'a> {
@@ -191,15 +205,45 @@ enum Tok<'a> {
 }
 
 /// A line's words: separated by spaces, `"..."` quoted (with `\"` and `\\`), `#` outside quotes starting a note.
-#[derive(Clone, Copy)]
+/// It also holds the line's refusal ([`No`]).
 struct Toks<'a> {
     s: &'a [u8],
     i: usize,
+    e: Msg,
 }
 
 impl<'a> Toks<'a> {
     fn new(s: &'a [u8]) -> Self {
-        Toks { s, i: 0 }
+        Toks { s, i: 0, e: Msg::new() }
+    }
+
+    /// The refusal from a template ([`no!`]).
+    #[inline(never)]
+    fn no(&mut self, f: &str, args: &[Arg]) -> No {
+        self.e.clear();
+        fmt_into(&mut self.e, f, args);
+        No
+    }
+
+    /// The refusal as written (a usage line).
+    #[inline(never)]
+    fn say(&mut self, m: &str) -> No {
+        self.e.set(m.as_bytes());
+        No
+    }
+
+    /// A refusal made elsewhere.
+    fn said(&mut self, m: Msg) -> No {
+        self.e = m;
+        No
+    }
+
+    /// The next word without taking it.
+    fn peek(&mut self) -> Result<Option<Tok<'a>>, No> {
+        let i = self.i;
+        let r = self.next();
+        self.i = i;
+        r
     }
 
     fn skip(&mut self) {
@@ -208,7 +252,7 @@ impl<'a> Toks<'a> {
         }
     }
 
-    fn next(&mut self) -> Result<Option<Tok<'a>>, Msg> {
+    fn next(&mut self) -> Result<Option<Tok<'a>>, No> {
         self.skip();
         let s = self.s;
         if self.i >= s.len() || s[self.i] == b'#' {
@@ -221,7 +265,7 @@ impl<'a> Toks<'a> {
                 j += if s[j] == b'\\' { 2 } else { 1 };
             }
             if j >= s.len() {
-                return Err(msg!("a name has no closing quote"));
+                return Err(self.say("a name has no closing quote"));
             }
             self.i = j + 1;
             return Ok(Some(Tok::Quoted(&s[start..j])));
@@ -234,10 +278,10 @@ impl<'a> Toks<'a> {
     }
 
     /// The next word, or what it says is missing.
-    fn word(&mut self, what: &str) -> Result<&'a [u8], Msg> {
+    fn word(&mut self, what: &str) -> Result<&'a [u8], No> {
         match self.next()? {
             Some(Tok::Word(w)) => Ok(w),
-            _ => Err(msg!("{}", what)),
+            _ => Err(self.say(what)),
         }
     }
 
@@ -280,18 +324,18 @@ fn number(w: &[u8]) -> Option<u32> {
     Some(w.iter().fold(0, |n, &c| n * 10 + (c - b'0') as u32))
 }
 
-fn on_off(v: &[u8], what: &str) -> Result<bool, Msg> {
+fn on_off(v: &[u8], what: &str, t: &mut Toks) -> Result<bool, No> {
     if same(v, b"on") || same(v, b"yes") {
         Ok(true)
     } else if same(v, b"off") || same(v, b"no") {
         Ok(false)
     } else {
-        Err(msg!("{}: on or off", what))
+        Err(no!(t, "{}: on or off", what))
     }
 }
 
 /// A quoted name, unescaped, up to `N` characters of printable ASCII.
-fn unquote<const N: usize>(q: &[u8], what: &str) -> Result<Buf<N>, Msg> {
+fn unquote<const N: usize>(q: &[u8], what: &str, t: &mut Toks) -> Result<Buf<N>, No> {
     let mut b = Buf::<N>::new();
     let mut i = 0;
     while i < q.len() {
@@ -302,10 +346,10 @@ fn unquote<const N: usize>(q: &[u8], what: &str) -> Result<Buf<N>, Msg> {
             q[i]
         };
         if !(0x20..0x7F).contains(&c) {
-            return Err(msg!("{}: letters, digits and punctuation only", what));
+            return Err(no!(t, "{}: letters, digits and punctuation only", what));
         }
         if b.len() == N {
-            return Err(msg!("{}: {} characters at most", what, N));
+            return Err(no!(t, "{}: {} characters at most", what, N));
         }
         b.push(&[c]);
         i += 1;
@@ -334,18 +378,18 @@ fn head(what: &[u8], n: u16, name: &[u8], out: &mut Line) {
 }
 
 /// A channel or zone number as written, 1-based, to the radio's 0-based one.
-fn index(w: &[u8], max: u32, what: &str) -> Result<u32, Msg> {
+fn index(w: &[u8], max: u32, what: &str, t: &mut Toks) -> Result<u32, No> {
     match number(w) {
         Some(n) if (1..=max).contains(&n) => Ok(n - 1),
-        _ => Err(msg!("{}: a number from 1 to {}", what, max)),
+        _ => Err(no!(t, "{}: a number from 1 to {}", what, max)),
     }
 }
 
 /// "146.52", "146.520 00" (one word here): MHz from 0.15 MHz (HF channels, CHAN-26) up to 1300 MHz.
-fn freq(w: &[u8], what: &str) -> Result<Freq10, Msg> {
+fn freq(w: &[u8], what: &str, t: &mut Toks) -> Result<Freq10, No> {
     match parse_mhz(w) {
         Some(f) if w.iter().all(|c| c.is_ascii_digit() || *c == b'.') && (crate::chan::CH_LO..=mhz(1300)).contains(&f) => Ok(f),
-        _ => Err(msg!("{}: MHz from 0.15 to 1300, e.g. 146.52", what)),
+        _ => Err(no!(t, "{}: MHz from 0.15 to 1300, e.g. 146.52", what)),
     }
 }
 
@@ -396,17 +440,17 @@ fn deg_val(w: &[u8], max: u32) -> Option<i32> {
 
 /// A position typed for `ch N pos=` or `set 0 6 9`: "45.4215,-75.6972" (degrees, north and east positive), a grid
 /// square ("FN25dk", its centre: GPS-21), or "none" (Ok(None)).
-fn pos_val(v: &[u8], what: &str) -> Result<Option<Pos>, Msg> {
+fn pos_val(v: &[u8], what: &str, t: &mut Toks) -> Result<Option<Pos>, No> {
     if same(v, b"none") {
         return Ok(None);
     }
-    let bad = || msg!("{}: lat,lon in degrees (45.42,-75.69), a grid square, or none", what);
+    let bad = |t: &mut Toks| no!(t, "{}: lat,lon in degrees (45.42,-75.69), a grid square, or none", what);
     if let Some(i) = v.iter().position(|&c| c == b',') {
-        let lat = deg_val(&v[..i], 90).ok_or_else(bad)?;
-        let lon = deg_val(&v[i + 1..], 180).ok_or_else(bad)?;
+        let lat = deg_val(&v[..i], 90).ok_or_else(|| bad(t))?;
+        let lon = deg_val(&v[i + 1..], 180).ok_or_else(|| bad(t))?;
         return Ok(Some(Pos { lat, lon }));
     }
-    crate::screens::lists::grid_pos(v).map(Some).ok_or_else(bad)
+    crate::screens::lists::grid_pos(v).map(Some).ok_or_else(|| bad(t))
 }
 
 // ---- Values in a line ----
@@ -451,11 +495,11 @@ fn power_word(p: u8, out: &mut Line) {
     out.push(POWERS[p as usize % 3].as_bytes());
 }
 
-fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
+fn tone(w: &[u8], what: &str, t: &mut Toks) -> Result<u16, No> {
     if same(w, b"off") || same(w, b"none") {
         return Ok(0);
     }
-    let bad = || msg!("{}: off, a CTCSS tone (100.0) or a DCS code (D023N, D023I)", what);
+    let bad = |t: &mut Toks| no!(t, "{}: off, a CTCSS tone (100.0) or a DCS code (D023N, D023I)", what);
     if let Some(d) = w.strip_prefix(b"D").or_else(|| w.strip_prefix(b"d")) {
         let (code, inv) = match d.last() {
             Some(b'N' | b'n') => (&d[..d.len() - 1], false),
@@ -463,47 +507,46 @@ fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
             _ => (d, false),
         };
         if code.len() != 3 || !code.iter().all(|c| (b'0'..=b'7').contains(c)) {
-            return Err(bad());
+            return Err(bad(t));
         }
         // TONE-15: any code D000-D777, standard or not.
         let c = code.iter().fold(0u16, |n, &k| n * 8 + (k - b'0') as u16);
         return Ok(DCS_FLAG | if inv { DCS_INV } else { 0 } | c);
     }
-    let t = match parse_mhz(w.strip_prefix(b"T").unwrap_or(w)) {
+    let v = match parse_mhz(w.strip_prefix(b"T").unwrap_or(w)) {
         // parse_mhz reads "100.0" as 100.0 MHz in 10 Hz: tenths of a hertz are its 10 kHz digit.
         Some(f) if f % 10_000 == 0 => f / 10_000,
-        _ => return Err(bad()),
+        _ => return Err(bad(t)),
     };
     // TONE-15: any tone from 60.0 to 260.0 Hz, standard or not.
-    match u16::try_from(t).ok().filter(|t| (CTCSS_MIN..=CTCSS_MAX).contains(t)) {
+    match u16::try_from(v).ok().filter(|t| (CTCSS_MIN..=CTCSS_MAX).contains(t)) {
         Some(c) => Ok(c),
-        None => Err(msg!("{}: {}.{} Hz is outside 60.0 to 260.0 Hz", what, t / 10, t % 10)),
+        None => Err(no!(t, "{}: {}.{} Hz is outside 60.0 to 260.0 Hz", what, v / 10, v % 10)),
     }
 }
 
 /// `slot`'s tone argument (TONE-2.1): one word as [`tone`] reads it ("off", "100.0", "D023N"), or a mode and a
 /// value: "ctcss 100.0", "dcs-n 023", "dcs-i 023" ("off" alone is the Off mode).
-fn tone_arg(t: &mut Toks, what: &str) -> Result<u16, Msg> {
+fn tone_arg(t: &mut Toks, what: &str) -> Result<u16, No> {
     use crate::screens::tones::MODE_NAMES;
     const HELP: &str = ": off, 100.0, D023N, or a mode and value (ctcss 100.0, dcs-n 023, dcs-i 023)";
-    let missing = || msg!("{}{}", what, HELP);
-    let w = t.word(what).map_err(|_| missing())?;
-    let Some(m) = MODE_NAMES.iter().skip(1).position(|n| same(w, n.as_bytes())) else { return tone(w, what) };
-    let v = t.word(what).map_err(|_| missing())?;
-    let bad = || msg!("{}: {} takes {}", what, MODE_NAMES[m + 1], if m == 0 { "a tone, e.g. 100.0" } else { "an octal code, e.g. 023" });
+    let w = t.word(what).map_err(|_| no!(t, "{}{}", what, HELP))?;
+    let Some(m) = MODE_NAMES.iter().skip(1).position(|n| same(w, n.as_bytes())) else { return tone(w, what, t) };
+    let v = t.word(what).map_err(|_| no!(t, "{}{}", what, HELP))?;
+    let bad = |t: &mut Toks| no!(t, "{}: {} takes {}", what, MODE_NAMES[m + 1], if m == 0 { "a tone, e.g. 100.0" } else { "an octal code, e.g. 023" });
     if m == 0 {
         if v.first().is_some_and(|c| c.eq_ignore_ascii_case(&b'D')) {
-            return Err(bad());
+            return Err(bad(t));
         }
-        return tone(v, what);
+        return tone(v, what, t);
     }
     let code = v.strip_prefix(b"D").or_else(|| v.strip_prefix(b"d")).unwrap_or(v);
     if code.len() != 3 {
-        return Err(bad());
+        return Err(bad(t));
     }
     let mut d = [b'D', 0, 0, 0, if m == 1 { b'N' } else { b'I' }];
     d[1..4].copy_from_slice(code);
-    tone(&d, what).map_err(|_| bad())
+    tone(&d, what, t).map_err(|_| bad(t))
 }
 
 /// " tx=146.52000" (split), or " offset=+0.60000".
@@ -528,7 +571,7 @@ fn offset_word(o: i32, out: &mut Line) {
     }
 }
 
-fn offset(w: &[u8]) -> Result<i32, Msg> {
+fn offset(w: &[u8], t: &mut Toks) -> Result<i32, No> {
     if same(w, b"simplex") || w == b"0" {
         return Ok(0);
     }
@@ -539,7 +582,7 @@ fn offset(w: &[u8]) -> Result<i32, Msg> {
     };
     match parse_mhz(m) {
         Some(f) if m.iter().all(|c| c.is_ascii_digit() || *c == b'.') && f < mhz(100) => Ok(if neg { -(f as i32) } else { f as i32 }),
-        _ => Err(msg!("offset: simplex, or MHz with a sign, e.g. +5 or -0.6")),
+        _ => Err(no!(t, "offset: simplex, or MHz with a sign, e.g. +5 or -0.6")),
     }
 }
 
@@ -550,11 +593,11 @@ fn step_word(s: u8, out: &mut Line) {
     }
 }
 
-fn step(w: &[u8]) -> Result<u8, Msg> {
-    STEPS.iter().position(|s| same(w, s.1.as_bytes())).map(|i| i as u8).ok_or_else(|| msg!("step: one of the radio's steps, e.g. 12.5kHz or 25kHz"))
+fn step(w: &[u8], t: &mut Toks) -> Result<u8, No> {
+    STEPS.iter().position(|s| same(w, s.1.as_bytes())).map(|i| i as u8).ok_or_else(|| no!(t, "step: one of the radio's steps, e.g. 12.5kHz or 25kHz"))
 }
 
-fn pick(w: &[u8], list: &[&str], what: &str) -> Result<u8, Msg> {
+fn pick(w: &[u8], list: &[&str], what: &str, t: &mut Toks) -> Result<u8, No> {
     match list.iter().position(|l| same(w, l.as_bytes())) {
         Some(i) => Ok(i as u8),
         None => {
@@ -565,7 +608,7 @@ fn pick(w: &[u8], list: &[&str], what: &str) -> Result<u8, Msg> {
                 }
                 m.push(l.as_bytes());
             }
-            Err(m)
+            Err(t.said(m))
         }
     }
 }
@@ -643,13 +686,13 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
 }
 
 /// One field of a channel from `key` and its value (a bare flag word is "on").
-fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -> Result<(), Msg> {
-    let k = FIELDS.iter().position(|f| same(key, f.as_bytes())).ok_or_else(|| msg!("{}: no such field; help lists them", Bytes(key)))?;
-    let flag = |c: &mut Channel, bit: u8, v: Option<Tok>, what: &str| -> Result<(), Msg> {
+fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S, t: &mut Toks) -> Result<(), No> {
+    let k = FIELDS.iter().position(|f| same(key, f.as_bytes())).ok_or_else(|| no!(t, "{}: no such field; help lists them", Bytes(key)))?;
+    let mut flag = |c: &mut Channel, bit: u8, v: Option<Tok>, what: &str| -> Result<(), No> {
         let on = match v {
             None => true,
-            Some(Tok::Word(w)) => on_off(w, what)?,
-            Some(Tok::Quoted(_)) => return Err(msg!("{}: on or off", what)),
+            Some(Tok::Word(w)) => on_off(w, what, t)?,
+            Some(Tok::Quoted(_)) => return Err(no!(t, "{}: on or off", what)),
         };
         // Skip and Priority exclude each other (decision 63): one on puts the channel there, off only leaves it
         let s = [FLAG_SKIP, FLAG_PRIORITY].iter().position(|&b| b == bit).map(|i| i as u8 + 1);
@@ -665,8 +708,8 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
         13 => {
             c.cfg.reverse = match v {
                 None => true,
-                Some(Tok::Word(w)) => on_off(w, "reverse")?,
-                _ => return Err(msg!("reverse: on or off")),
+                Some(Tok::Word(w)) => on_off(w, "reverse", t)?,
+                _ => return Err(no!(t, "reverse: on or off")),
             };
             return Ok(());
         }
@@ -679,67 +722,67 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
     }
     let v = match v {
         Some(Tok::Quoted(q)) if k == 0 => {
-            let n: Buf<16> = unquote(q, "name")?;
+            let n: Buf<16> = unquote(q, "name", t)?;
             c.set_name(n.as_bytes());
             return Ok(());
         }
         Some(Tok::Word(w)) => w,
-        _ => return Err(msg!("{}: needs a value, e.g. {}=...", FIELDS[k], FIELDS[k])),
+        _ => return Err(no!(t, "{}: needs a value, e.g. {}=...", FIELDS[k], FIELDS[k])),
     };
     let g = &mut c.cfg;
     match k {
         0 => {
-            let n: Buf<16> = unquote(v, "name")?;
+            let n: Buf<16> = unquote(v, "name", t)?;
             c.set_name(n.as_bytes());
         }
-        1 => c.rx = freq(v, "rx")?,
+        1 => c.rx = freq(v, "rx", t)?,
         // "split" keeps the TX frequency a tx= field gives (before or after it on the line)
         2 if same(v, b"split") => {
             if !g.split {
                 (g.split, g.offset) = (true, 0); // the TX comes from tx=, before or after it on the line
             }
         }
-        2 => (g.offset, g.split) = (offset(v)?, false),
-        17 => (g.split, g.offset) = (true, freq(v, "tx")? as i32),
+        2 => (g.offset, g.split) = (offset(v, t)?, false),
+        17 => (g.split, g.offset) = (true, freq(v, "tx", t)? as i32),
         3 => {
-            g.mode = pick(v, &MODES, "mode")?; // USB, LSB and CW: HF channels only (check)
+            g.mode = pick(v, &MODES, "mode", t)?; // USB, LSB and CW: HF channels only (check)
             g.narrow = g.mode == 1; // VFO-20
         }
         // bw= from older dumps: FM and NFM follow it; AM stays AM (VFO-20)
         4 => {
-            let narrow = pick(v, &BW, "bw")? == 1;
+            let narrow = pick(v, &BW, "bw", t)? == 1;
             if g.mode < 2 {
                 g.mode = narrow as u8;
             }
             g.narrow = g.mode == 1;
         }
         5 => (g.tx_tone, g.rx_tone) = {
-            let t = tone(v, "tone")?;
+            let t = tone(v, "tone", t)?;
             (t, t)
         },
-        6 => g.rx_tone = tone(v, "rxtone")?,
-        7 => g.tx_tone = tone(v, "txtone")?,
-        8 => g.power = pick(v, &POWERS, "power")?,
+        6 => g.rx_tone = tone(v, "rxtone", t)?,
+        7 => g.tx_tone = tone(v, "txtone", t)?,
+        8 => g.power = pick(v, &POWERS, "power", t)?,
         9 => {
             c.zone = if same(v, b"none") {
                 NO_ZONE
             } else {
-                let z = index(v, crate::chan::MAX_ZONES as u32, "zone")? as ZoneId;
+                let z = index(v, crate::chan::MAX_ZONES as u32, "zone", t)? as ZoneId;
                 if z >= st.zones() {
-                    return Err(msg!("zone: zone {} doesn't exist; the radio has {}", z as u32 + 1, st.zones()));
+                    return Err(no!(t, "zone: zone {} doesn't exist; the radio has {}", z as u32 + 1, st.zones()));
                 }
                 z
             }
         }
-        10 => g.step = step(v)?,
+        10 => g.step = step(v, t)?,
         11 if same(v, b"global") => g.squelch = SQ_GLOBAL,
         11 => match number(v) {
             Some(n) if n <= 9 => g.squelch = n as u8,
-            _ => return Err(msg!("squelch: global, or 0 to 9")),
+            _ => return Err(no!(t, "squelch: global, or 0 to 9")),
         },
-        20 => c.set_end_tone(pick(v, &END_WORDS, "endtone")?),
-        21 => c.set_tail(pick(v, &TAIL_WORDS, "tail")?),
-        _ => g.busy = pick(v, &BUSY, "busy")?,
+        20 => c.set_end_tone(pick(v, &END_WORDS, "endtone", t)?),
+        21 => c.set_tail(pick(v, &TAIL_WORDS, "tail", t)?),
+        _ => g.busy = pick(v, &BUSY, "busy", t)?,
     }
     Ok(())
 }
@@ -769,9 +812,9 @@ fn refusal(r: Refusal) -> Msg {
 pub(crate) const ZONE_FULL: &str = "zone: full (256 channels at most)";
 
 /// Saves a channel (TERM-9) unless the store already holds it exactly: a load of the same dump writes nothing.
-fn save<S: ChannelStore>(app: &mut App, st: &S, c: Channel) -> Result<Msg, Msg> {
+fn save<S: ChannelStore>(app: &mut App, st: &S, c: Channel, t: &mut Toks) -> Result<Msg, No> {
     if !st.zone_room(c.zone, c.num) {
-        return Err(msg!("{}", ZONE_FULL));
+        return Err(t.say(ZONE_FULL));
     }
     if st.get(c.num) != Some(c) {
         app.put_channel(c);
@@ -784,9 +827,9 @@ fn save<S: ChannelStore>(app: &mut App, st: &S, c: Channel) -> Result<Msg, Msg> 
 }
 
 /// [`save`] with the channel's position set or cleared (CHAN-2: `pos=`); nothing written when both are as stored.
-fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>) -> Result<Msg, Msg> {
+fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>, t: &mut Toks) -> Result<Msg, No> {
     if !st.zone_room(c.zone, c.num) {
-        return Err(msg!("{}", ZONE_FULL));
+        return Err(t.say(ZONE_FULL));
     }
     if st.get(c.num) != Some(c) || st.position(c.num) != pos {
         app.put_channel_pos(c, pos);
@@ -798,64 +841,64 @@ fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>
     Ok(m)
 }
 
-fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
-    let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch")? as u16;
+fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
+    let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch", t)? as u16;
     let old = st.get(num);
-    let missing = || msg!("ch {}: no such channel", num as u32 + 1);
-    if t.clone().next()?.is_some() && super::list::radio_channel(app) == Some(num) {
-        return Err(msg!("Channel {} is open in the radio's editor", num as u32 + 1)); // TERM-17
+    let missing = |t: &mut Toks| no!(t, "ch {}: no such channel", num as u32 + 1);
+    if t.peek()?.is_some() && super::list::radio_channel(app) == Some(num) {
+        return Err(no!(t, "Channel {} is open in the radio's editor", num as u32 + 1)); // TERM-17
     }
     match t.next()? {
-        None => old.map(|_| Done::List(List::Show(num))).ok_or_else(missing),
+        None => old.map(|_| Done::List(List::Show(num))).ok_or_else(|| missing(t)),
         // A whole channel: name, RX, then fields; the rest at their defaults.
         Some(Tok::Quoted(q)) => {
-            let name: Buf<16> = unquote(q, "name")?;
-            let rx = freq(t.word("ch: the RX MHz after the name")?, "rx")?;
+            let name: Buf<16> = unquote(q, "name", t)?;
+            let rx = freq(t.word("ch: the RX MHz after the name")?, "rx", t)?;
             let mut c = Channel { num, zone: NO_ZONE, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
             c.set_name(name.as_bytes());
             let mut pos = None;
             while let Some(tok) = t.next()? {
-                let Tok::Word(w) = tok else { return Err(msg!("ch: a name in quotes goes right after the number")) };
+                let Tok::Word(w) = tok else { return Err(no!(t, "ch: a name in quotes goes right after the number")) };
                 match w.iter().position(|&b| b == b'=') {
-                    Some(e) if same(&w[..e], b"pos") => pos = Some(pos_val(&w[e + 1..], "pos")?),
-                    Some(e) => field(&mut c, &w[..e], Some(Tok::Word(&w[e + 1..])), st)?,
-                    None => field(&mut c, w, None, st)?,
+                    Some(e) if same(&w[..e], b"pos") => pos = Some(pos_val(&w[e + 1..], "pos", t)?),
+                    Some(e) => field(&mut c, &w[..e], Some(Tok::Word(&w[e + 1..])), st, t)?,
+                    None => field(&mut c, w, None, st, t)?,
                 }
             }
-            check(&c)?;
+            check(&c).map_err(|m| t.said(m))?;
             // A line without pos= keeps the position the channel has (the link sets it too: LINK-53).
             Ok(Done::Said(match pos {
-                Some(p) => save_pos(app, st, c, p)?,
-                None => save(app, st, c)?,
+                Some(p) => save_pos(app, st, c, p, t)?,
+                None => save(app, st, c, t)?,
             }))
         }
         Some(Tok::Word(w)) if same(w, b"delete") => {
-            old.ok_or_else(missing)?;
+            old.ok_or_else(|| missing(t))?;
             app.delete_channel(num, st);
             Ok(Done::Said(msg!("Channel {} deleted", num as u32 + 1)))
         }
         // One field: ch 12 power high, ch 12 name "Club".
         Some(Tok::Word(w)) => {
-            let mut c = old.ok_or_else(missing)?;
+            let mut c = old.ok_or_else(|| missing(t))?;
             let (key, v) = match w.iter().position(|&b| b == b'=') {
                 Some(e) => (&w[..e], Some(Tok::Word(&w[e + 1..]))),
                 None => (w, t.next()?),
             };
             if same(key, b"pos") {
-                let Some(Tok::Word(v)) = v else { return Err(msg!("pos: latitude,longitude, a grid square, or none")) };
-                let p = pos_val(v, "pos")?;
+                let Some(Tok::Word(v)) = v else { return Err(no!(t, "pos: latitude,longitude, a grid square, or none")) };
+                let p = pos_val(v, "pos", t)?;
                 if t.next()?.is_some() {
-                    return Err(msg!("ch: one field at a time"));
+                    return Err(no!(t, "ch: one field at a time"));
                 }
-                return Ok(Done::Said(save_pos(app, st, c, p)?));
+                return Ok(Done::Said(save_pos(app, st, c, p, t)?));
             }
             let was = c;
-            field(&mut c, key, v, st)?;
+            field(&mut c, key, v, st, t)?;
             if t.next()?.is_some() {
-                return Err(msg!("ch: one field at a time"));
+                return Err(no!(t, "ch: one field at a time"));
             }
-            chfield::check_change(&was, &c).map_err(refusal)?; // as the editors change a field
-            Ok(Done::Said(save(app, st, c)?))
+            chfield::check_change(&was, &c).map_err(|r| t.said(refusal(r)))?; // as the editors change a field
+            Ok(Done::Said(save(app, st, c, t)?))
         }
     }
 }
@@ -876,19 +919,19 @@ fn resume_word(r: u8, out: &mut Line) {
 }
 
 /// The other way: "radio" (or "global") is 0.
-fn resume_val(v: &[u8]) -> Result<u8, Msg> {
+fn resume_val(v: &[u8], t: &mut Toks) -> Result<u8, No> {
     Ok(match v {
         _ if same(v, b"radio") || same(v, b"global") => 0,
         _ if same(v, b"carrier") => 11,
         _ if same(v, b"stop") => 12,
-        _ => secs(v, 10, "resume").map_err(|_| msg!("resume: radio, 1s to 10s, carrier or stop"))?,
+        _ => secs(v, 10, "resume", t).map_err(|_| no!(t, "resume: radio, 1s to 10s, carrier or stop"))?,
     })
 }
 
-fn secs(w: &[u8], max: u32, what: &str) -> Result<u8, Msg> {
+fn secs(w: &[u8], max: u32, what: &str, t: &mut Toks) -> Result<u8, No> {
     match number(w.strip_suffix(b"s").unwrap_or(w)) {
         Some(n) if (1..=max).contains(&n) => Ok(n as u8),
-        _ => Err(msg!("{}: radio, or 1s to {}s", what, max)),
+        _ => Err(no!(t, "{}: radio, or 1s to {}s", what, max)),
     }
 }
 
@@ -921,61 +964,61 @@ fn zone_line<S: ChannelStore>(z: ZoneId, st: &S, out: &mut Line) {
 type Kv<'a> = (&'a [u8], &'a [u8]);
 
 /// The next `key=value` after a zone's or preset's name; `what` names the line ("zone"), `eg` an example field.
-fn kv<'a>(t: &mut Toks<'a>, what: &str, eg: &str) -> Result<Option<Kv<'a>>, Msg> {
+fn kv<'a>(t: &mut Toks<'a>, what: &str, eg: &str) -> Result<Option<Kv<'a>>, No> {
     match t.next()? {
         None => Ok(None),
-        Some(Tok::Quoted(_)) => Err(msg!("{}: one name per {}", what, what)),
+        Some(Tok::Quoted(_)) => Err(no!(t, "{}: one name per {}", what, what)),
         Some(Tok::Word(w)) => {
-            let e = w.iter().position(|&b| b == b'=').ok_or_else(|| msg!("{}: fields are key=value, e.g. {}", what, eg))?;
+            let e = w.iter().position(|&b| b == b'=').ok_or_else(|| no!(t, "{}: fields are key=value, e.g. {}", what, eg))?;
             Ok(Some((&w[..e], &w[e + 1..])))
         }
     }
 }
 
 /// Zones and presets are numbered in order: `n` (0-based) may replace one up to `have`, or add the next.
-fn in_order(what: &str, n: u16, have: u16) -> Result<(), Msg> {
+fn in_order(what: &str, n: u16, have: u16, t: &mut Toks) -> Result<(), No> {
     if n > have {
-        return Err(msg!("{} {}: {}s are made in order; the radio has {}, so the next is {} {}", what, n as u32 + 1, what, have, what, have as u32 + 1));
+        return Err(no!(t, "{} {}: {}s are made in order; the radio has {}, so the next is {} {}", what, n as u32 + 1, what, have, what, have as u32 + 1));
     }
     Ok(())
 }
 
 /// Hands a zone or preset to the store, unless it is already what the store holds.
-fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u16, same_as_stored: bool, op: Op) -> Result<Done, Msg> {
+fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u16, same_as_stored: bool, op: Op, t: &mut Toks) -> Result<Done, No> {
     if same_as_stored {
         return Ok(Done::Said(msg!("{} {} unchanged", cap, n as u32 + 1)));
     }
     if !st.data().request(op) {
-        return Err(msg!("{} {}: the radio is full or busy; try again", what, n as u32 + 1));
+        return Err(no!(t, "{} {}: the radio is full or busy; try again", what, n as u32 + 1));
     }
     Ok(Done::Said(msg!("{} {} saved", cap, n as u32 + 1)))
 }
 
 const ZONE_KEYS: [&str; 7] = ["scan", "shown", "distance", "resume", "dwell", "pri1", "pri2"];
 
-fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
-    let z = index(t.word("zone: which zone, e.g. zone 2 \"Repeaters\"")?, crate::chan::MAX_ZONES as u32, "zone")? as ZoneId;
+fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, No> {
+    let z = index(t.word("zone: which zone, e.g. zone 2 \"Repeaters\"")?, crate::chan::MAX_ZONES as u32, "zone", t)? as ZoneId;
     let have = st.zones();
-    in_order("zone", z, have)?;
+    in_order("zone", z, have, t)?;
     let Some(Tok::Quoted(q)) = t.next()? else {
-        return Err(msg!("zone {}: its name in quotes, e.g. zone {} \"Repeaters\"", z as u32 + 1, z as u32 + 1));
+        return Err(no!(t, "zone {}: its name in quotes, e.g. zone {} \"Repeaters\"", z as u32 + 1, z as u32 + 1));
     };
-    let name: Name = unquote(q, "name")?;
+    let name: Name = unquote(q, "name", t)?;
     let mut c = if z < have { st.data().zone_cfg(z) } else { ZoneCfg { shown: true, dwell: 255, ..ZoneCfg::default() } };
     while let Some((k, v)) = kv(t, "zone", "scan=on")? {
         let i = ZONE_KEYS.iter().position(|f| same(k, f.as_bytes()));
-        let i = i.ok_or_else(|| msg!("zone: no field {}; they are scan, shown, distance, resume, dwell, pri1, pri2", Bytes(k)))?;
+        let i = i.ok_or_else(|| no!(t, "zone: no field {}; they are scan, shown, distance, resume, dwell, pri1, pri2", Bytes(k)))?;
         match i {
-            0..=2 => *[&mut c.scan_all, &mut c.shown, &mut c.by_distance][i] = on_off(v, ZONE_KEYS[i])?,
+            0..=2 => *[&mut c.scan_all, &mut c.shown, &mut c.by_distance][i] = on_off(v, ZONE_KEYS[i], t)?,
             3 => {
-                c.resume = resume_val(v)?;
+                c.resume = resume_val(v, t)?;
             }
-            4 => c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell")? },
-            _ => c.pri[i - 5] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri")? as u16) },
+            4 => c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell", t)? },
+            _ => c.pri[i - 5] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri", t)? as u16) },
         }
     }
     let stored = z < have && st.zone_name(z) == Some(name) && st.data().zone_cfg(z) == c;
-    put(st, "Zone", "zone", z, stored, Op::PutZone(z, name, c))
+    put(st, "Zone", "zone", z, stored, Op::PutZone(z, name, c), t)
 }
 
 fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
@@ -993,46 +1036,46 @@ fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
     }
 }
 
-fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
+fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, No> {
     let d = st.data();
-    let i = index(t.word("preset: which one, e.g. preset 1 \"2 m\" 144 148")?, 16, "preset")? as u8;
-    in_order("preset", i as u16, d.presets() as u16)?;
-    let Some(Tok::Quoted(q)) = t.next()? else { return Err(msg!("preset: its name in quotes, then start and end in MHz")) };
-    let name: Buf<12> = unquote(q, "name")?;
-    let start = freq(t.word("preset: the start in MHz after the name")?, "start")?;
-    let end = freq(t.word("preset: the end in MHz after the start")?, "end")?;
+    let i = index(t.word("preset: which one, e.g. preset 1 \"2 m\" 144 148")?, 16, "preset", t)? as u8;
+    in_order("preset", i as u16, d.presets() as u16, t)?;
+    let Some(Tok::Quoted(q)) = t.next()? else { return Err(no!(t, "preset: its name in quotes, then start and end in MHz")) };
+    let name: Buf<12> = unquote(q, "name", t)?;
+    let start = freq(t.word("preset: the start in MHz after the name")?, "start", t)?;
+    let end = freq(t.word("preset: the end in MHz after the start")?, "end", t)?;
     if end <= start {
-        return Err(msg!("preset: the end must be above the start"));
+        return Err(no!(t, "preset: the end must be above the start"));
     }
     let mut p = RangePreset { name, start, end, step: STEP_12K5, mode: 1, narrow: true, skips: 0, resume: 0 };
     while let Some((k, v)) = kv(t, "preset", "step=25kHz")? {
         if same(k, b"step") {
-            p.step = step(v)?;
+            p.step = step(v, t)?;
         } else if same(k, b"mode") {
-            p.mode = pick(v, &MODES[..SLOT_MODES], "mode")?;
+            p.mode = pick(v, &MODES[..SLOT_MODES], "mode", t)?;
             p.narrow = p.mode == 1; // VFO-20
         } else if same(k, b"bw") {
             // older dumps: FM and NFM follow it
-            let narrow = pick(v, &BW, "bw")? == 1;
+            let narrow = pick(v, &BW, "bw", t)? == 1;
             if p.mode < 2 {
                 p.mode = narrow as u8;
             }
             p.narrow = p.mode == 1;
         } else if same(k, b"resume") {
-            p.resume = resume_val(v)?;
+            p.resume = resume_val(v, t)?;
         } else {
-            return Err(msg!("preset: no field {}; they are step, mode, bw, resume", Bytes(k)));
+            return Err(no!(t, "preset: no field {}; they are step, mode, bw, resume", Bytes(k)));
         }
     }
     let stored = d.preset(i).is_some_and(|o| RangePreset { skips: o.skips, ..p } == o);
-    put(st, "Preset", "preset", i as u16, stored, Op::PutPreset(i, p))
+    put(st, "Preset", "preset", i as u16, stored, Op::PutPreset(i, p), t)
 }
 
 /// TEXT-7: `quick N` shows quick message N (1-9, "factory" after the factory text), `quick N "text"` sets it (up
 /// to 67 characters, as compose takes them; "" leaves it empty), `quick N factory` puts the factory text back.
-fn quick<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
+fn quick<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, No> {
     let usage = "quick 3 \"On my way\", quick 3 factory, or quick 3 to show it";
-    let i = index(t.word(usage)?, crate::words::QUICK as u32, "quick")? as u8;
+    let i = index(t.word(usage)?, crate::words::QUICK as u32, "quick", t)? as u8;
     let d = st.data();
     let new = match t.next()? {
         None => {
@@ -1048,37 +1091,37 @@ fn quick<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
         }
         Some(Tok::Word(w)) if same(w, b"factory") => None,
         Some(Tok::Quoted(q)) => {
-            let b: Buf<67> = unquote(q, "quick")?;
+            let b: Buf<67> = unquote(q, "quick", t)?;
             if b.as_bytes().iter().any(|c| b"|~{".contains(c)) {
-                return Err(msg!("quick: APRS can't carry {}", "| ~ {"));
+                return Err(no!(t, "quick: APRS can't carry {}", "| ~ {"));
             }
             Some(b)
         }
-        _ => return Err(msg!("{}", usage)),
+        _ => return Err(t.say(usage)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", usage));
+        return Err(t.say(usage));
     }
-    put(st, "Quick message", "quick", i as u16, d.quick(i as usize) == new, Op::Quick(i, new))
+    put(st, "Quick message", "quick", i as u16, d.quick(i as usize) == new, Op::Quick(i, new), t)
 }
 
 // ---- Settings ----
 
 /// The menu number after MENU (TERM-6): "0", the group, the item, and the third level where the item has one.
-fn path(t: &mut Toks) -> Result<([u8; 3], usize), Msg> {
-    let usage = || msg!("a menu number from MENU, e.g. 0 7 1 (Theme)");
+fn path(t: &mut Toks) -> Result<([u8; 3], usize), No> {
+    const USAGE: &str = "a menu number from MENU, e.g. 0 7 1 (Theme)";
     if t.word("")
         .ok()
         .filter(|w| *w == b"0")
         .is_none()
     {
-        return Err(usage());
+        return Err(t.say(USAGE));
     }
     let mut p = [0u8; 3];
-    let digit = |t: &mut Toks, n: usize| -> Result<u8, Msg> {
+    let digit = |t: &mut Toks, n: usize| -> Result<u8, No> {
         match t.word("").ok().and_then(number) {
             Some(d) if (1..=n as u32).contains(&d) => Ok(d as u8),
-            _ => Err(usage()),
+            _ => Err(t.say(USAGE)),
         }
     };
     p[0] = digit(t, 9)?;
@@ -1086,8 +1129,10 @@ fn path(t: &mut Toks) -> Result<([u8; 3], usize), Msg> {
     if SUBS.iter().any(|(q, _)| *q == (p[0], p[1])) {
         // TX-48: 0 8 8 alone still names Extend TX, as before Dry TX joined it in a list (0 8 8 4, 0 8 8 5).
         let n = groups::items(p[0], p[1]).len() as u32;
-        let mut peek = *t;
-        if (p[0], p[1]) == (8, 9) && !peek.word("").ok().and_then(number).is_some_and(|d| (1..=n).contains(&d)) {
+        let at = t.i;
+        let third = t.word("").ok().and_then(number).is_some_and(|d| (1..=n).contains(&d));
+        t.i = at;
+        if (p[0], p[1]) == (8, 9) && !third {
             return Ok((p, 2));
         }
         p[2] = digit(t, groups::items(p[0], p[1]).len())?;
@@ -1130,7 +1175,7 @@ fn value(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> bool {
     }
 }
 
-fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
+fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, No> {
     let (p, n) = path(t)?;
     let p = &p[..n];
     let name = path_name(p);
@@ -1140,21 +1185,21 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             app.set_dry_tx(true);
             return Ok(Done::Said(msg!("0 8 8 5 Dry TX: On")));
         }
-        return Err(msg!("Dry TX goes off only on the radio"));
+        return Err(no!(t, "Dry TX goes off only on the radio"));
     }
     if blocked(p) {
-        return Err(msg!("{} changes only on the radio", name));
+        return Err(no!(t, "{} changes only on the radio", name));
     }
     if super::list::radio_setting(app).is_some_and(|(q, ql)| &q[..ql] == p) {
-        return Err(msg!("{} is open on the radio's menu", name)); // TERM-17
+        return Err(no!(t, "{} is open on the radio's menu", name)); // TERM-17
     }
     if let Some(why) = groups::greyed(app, p) {
-        return Err(msg!("{}: {}", name, why));
+        return Err(no!(t, "{}: {}", name, why));
     }
     if p == [6, 9] || p == [5, 5, 5] {
         // GPS-3, GPS-21: the fixed position typed (its altitude kept): degrees, a grid square, or none.
         let want = t.rest();
-        match pos_val(want, name)? {
+        match pos_val(want, name, t)? {
             Some(pos) => (app.set.fixed, app.set.fixed_on) = (pos, true),
             None => app.set.fixed_on = false,
         }
@@ -1171,11 +1216,11 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         return Ok(Done::Said(m));
     }
     if !groups::is_settable(p) {
-        return Err(msg!("{} can't be set yet", name));
+        return Err(no!(t, "{} can't be set yet", name));
     }
     let want = t.rest();
     if want.is_empty() {
-        return Err(msg!("set needs a value, e.g. set 0 7 1 Dark"));
+        return Err(no!(t, "set needs a value, e.g. set 0 7 1 Dark"));
     }
     // Typed values (DEC-4's capcode, APRS-26's custom path): taken as written, "None" clears.
     match p {
@@ -1188,7 +1233,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
                 u32::MAX
             };
             if v > ferrite_core::decoders::CAPCODE_MAX {
-                return Err(msg!("{}: a capcode up to 2097151, or None", name));
+                return Err(no!(t, "{}: a capcode up to 2097151, or None", name));
             }
             app.set.pocsag_cap = v;
         }
@@ -1196,19 +1241,19 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         // APRS-50: the comment as written (a dump line's '#' starts its note, so none in it)
         [5, 5, 3] => {
             if want.len() > crate::aprs::COMMENT_LEN || !want.iter().all(|&c| (b' '..=b'~').contains(&c)) {
-                return Err(msg!("{}: up to 40 characters (no #), or None", name));
+                return Err(no!(t, "{}: up to 40 characters (no #), or None", name));
             }
             app.set_aprs_comment(want);
         }
         // MENU-31: a frequency setting typed in MHz, with the entry box's checks
         [5, 4] | [4, 2, 2] => {
             let fs = if p == [5, 4] { crate::screens::entry::FreqSet::Aprs } else { crate::screens::entry::FreqSet::Pager };
-            let f = ferrite_core::freq::parse(want).ok_or_else(|| msg!("{}: a frequency in MHz, e.g. 145.495", name))?;
+            let f = ferrite_core::freq::parse(want).ok_or_else(|| no!(t, "{}: a frequency in MHz, e.g. 145.495", name))?;
             let now = if p == [5, 4] { app.aprs_freq() } else { app.set.pocsag_freq };
             // `get` and `dump` show 3 decimals: the value as shown is the value kept (439.987 stays 439.9875)
             if ferrite_ui::widgets::freq3(now).as_bytes() != want {
                 if let Err(why) = fs.set_setting(app, f) {
-                    return Err(msg!("{}: {}", name, why));
+                    return Err(no!(t, "{}: {}", name, why));
                 }
             }
         }
@@ -1218,7 +1263,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
                 up.push(&[c.to_ascii_uppercase()]);
             }
             if !crate::aprs::path_ok(up.as_bytes()) {
-                return Err(msg!("{}: one or two entries like WIDE1-1,WIDE2-1 (16 characters at most), or None", name));
+                return Err(no!(t, "{}: one or two entries like WIDE1-1,WIDE2-1 (16 characters at most), or None", name));
             }
             app.set_aprs_custom_path(up.as_bytes());
         }
@@ -1236,7 +1281,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         let mut v = Buf::<24>::new();
         value(app, dev, p, &mut v);
         if !same(v.as_bytes(), want) {
-            return Err(msg!("{}: {}", name, why)); // VOX-10: the radio's toast, not "one of Off"
+            return Err(no!(t, "{}: {}", name, why)); // VOX-10: the radio's toast, not "one of Off"
         }
     }
     match walk(app, dev, p, name, want) {
@@ -1244,11 +1289,11 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         // "Level 1"); the walk again with that value, so it changes exactly as if typed in full.
         Walk::Short(v) => match walk(app, dev, p, name, v.as_bytes()) {
             Walk::Set(m) => Ok(Done::Said(m)),
-            Walk::Short(_) => Err(msg!("{}: not changed", name)), // never: the value was just seen
-            Walk::No(m) => Err(m),
+            Walk::Short(_) => Err(no!(t, "{}: not changed", name)), // never: the value was just seen
+            Walk::No(m) => Err(t.said(m)),
         },
         Walk::Set(m) => Ok(Done::Said(m)),
-        Walk::No(m) => Err(m),
+        Walk::No(m) => Err(t.said(m)),
     }
 }
 
@@ -1323,8 +1368,8 @@ fn walk(app: &mut App, dev: &Device, p: &[u8], name: &str, want: &[u8]) -> Walk 
     fail(all, hits, hit)
 }
 
-fn get(app: &App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
-    if t.clone().next()?.is_none() {
+fn get(app: &App, dev: &Device, t: &mut Toks) -> Result<Done, No> {
+    if t.peek()?.is_none() {
         return Ok(Done::List(List::Changed));
     }
     let (p, n) = path(t)?;
@@ -1367,23 +1412,23 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
 // ---- Satellites (SAT-3) ----
 
 /// `sat`: the satellites held; `sat add`: paste a TLE or OMM CSV next; `sat del N`: the satellite in place N goes.
-fn sat<S: ChannelStore>(st: &S, t: &mut Toks, loading: bool) -> Result<Done, Msg> {
+fn sat<S: ChannelStore>(st: &S, t: &mut Toks, loading: bool) -> Result<Done, No> {
     const USE: &str = "sat lists them; sat add pastes a TLE or OMM CSV; sat del N deletes one";
     match t.next()? {
         None => Ok(Done::List(List::Sats)),
-        Some(Tok::Word(w)) if same(w, b"add") && loading => Err(msg!("sat add can't be in a load")),
+        Some(Tok::Word(w)) if same(w, b"add") && loading => Err(no!(t, "sat add can't be in a load")),
         Some(Tok::Word(w)) if same(w, b"add") => Ok(Done::SatPaste),
         Some(Tok::Word(w)) if same(w, b"del") => {
-            let n = t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }).filter(|n| (1..=32).contains(n)).ok_or_else(|| msg!("sat del N: N as sat lists it, 1-32"))?;
+            let n = t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }).filter(|n| (1..=32).contains(n)).ok_or_else(|| no!(t, "sat del N: N as sat lists it, 1-32"))?;
             let k = n as u8 - 1;
-            let Some(x) = st.data().sat_rec(k) else { return Err(msg!("No satellite at {}", n)) };
+            let Some(x) = st.data().sat_rec(k) else { return Err(no!(t, "No satellite at {}", n)) };
             if st.data().request(Op::DeleteSat(k)) {
                 Ok(Done::Said(msg!("{} deleted", Bytes(x.name()))))
             } else {
-                Err(msg!("busy: try again"))
+                Err(no!(t, "busy: try again"))
             }
         }
-        _ => Err(msg!("{}", USE)),
+        _ => Err(t.say(USE)),
     }
 }
 
@@ -1437,20 +1482,25 @@ fn trim_sp(s: &[u8]) -> &[u8] {
 /// transponders and choices stay); another is added in the first free place, with no transponders (passes and
 /// pointing only: Console adds the frequencies).
 pub fn sat_line<S: ChannelStore>(st: &S, p: &mut SatPaste, line: &[u8]) -> Result<Done, Msg> {
+    let mut t = Toks::new(b"");
+    sat_paste(st, p, line, &mut t).map_err(|_| t.e)
+}
+
+fn sat_paste<S: ChannelStore>(st: &S, p: &mut SatPaste, line: &[u8], t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::sat::{tle, Sat, Status};
     let line = trim_sp(line);
     let (id, name, el) = if line.is_empty() || line.starts_with(b"OBJECT_NAME") {
         return Ok(Done::Nothing);
     } else if line.starts_with(b"1 ") && line.len() >= 61 {
-        p.l1 = Some((tle_id(line).ok_or_else(|| msg!("not a TLE: catalogue number"))?, tle::parse_l1(line).ok_or_else(|| msg!("not a TLE: line 1"))?));
+        p.l1 = Some((tle_id(line).ok_or_else(|| no!(t, "not a TLE: catalogue number"))?, tle::parse_l1(line).ok_or_else(|| no!(t, "not a TLE: line 1"))?));
         return Ok(Done::Nothing);
     } else if let (true, Some((id, l1))) = (line.starts_with(b"2 "), p.l1.take()) {
-        let el = tle::parse_l2(&l1, line).ok_or_else(|| msg!("not a TLE: line 1, then line 2"))?;
+        let el = tle::parse_l2(&l1, line).ok_or_else(|| no!(t, "not a TLE: line 1, then line 2"))?;
         (id, core::mem::take(&mut p.name), el)
     } else if let Some((id, name, el)) = line.contains(&b',').then(|| tle::parse_csv(line)).flatten() {
         (id, Buf::from(name), el)
     } else if line.contains(&b',') {
-        return Err(msg!("not OMM CSV: CelesTrak's columns, NAME,ID,EPOCH,..."));
+        return Err(no!(t, "not OMM CSV: CelesTrak's columns, NAME,ID,EPOCH,..."));
     } else {
         p.name.set(&line[..line.len().min(16)]);
         return Ok(Done::Nothing);
@@ -1461,7 +1511,7 @@ pub fn sat_line<S: ChannelStore>(st: &S, p: &mut SatPaste, line: &[u8]) -> Resul
     let (k, s) = match same_id {
         Some(k) => (k, Sat { el, ..d.sat_rec(k).unwrap_or_default() }),
         None => {
-            let k = (0..32u8).find(|k| held & 1 << k == 0).ok_or_else(|| msg!("32 satellites held: sat del N first"))?;
+            let k = (0..32u8).find(|k| held & 1 << k == 0).ok_or_else(|| no!(t, "32 satellites held: sat del N first"))?;
             let mut nm = [0u8; 16];
             let n = name.as_bytes().iter().map(|&c| if (0x20..0x7F).contains(&c) { c } else { b'?' });
             for (o, c) in nm.iter_mut().zip(n) {
@@ -1476,10 +1526,10 @@ pub fn sat_line<S: ChannelStore>(st: &S, p: &mut SatPaste, line: &[u8]) -> Resul
         }
     };
     if ferrite_core::sat::wire::decode(&ferrite_core::sat::wire::encode(&s)).is_err() {
-        return Err(msg!("elements out of range"));
+        return Err(no!(t, "elements out of range"));
     }
     if !d.sat_stage(&s) || !d.request(Op::PutSat(k)) {
-        return Err(msg!("busy: paste it again"));
+        return Err(no!(t, "busy: paste it again"));
     }
     Ok(Done::Said(if same_id.is_some() { msg!("{}: new elements", Bytes(s.name())) } else { msg!("{} added at {} (no transponders)", Bytes(s.name()), k as u32 + 1) }))
 }
@@ -1511,124 +1561,201 @@ pub fn writes(line: &[u8]) -> bool {
     !(reads || shows)
 }
 
+/// What a command is, by [`CMDS`]: the first five are the lines a dump holds (`load` takes only those).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum C {
+    Set,
+    Ch,
+    Zone,
+    Preset,
+    Home,
+    Quick,
+    Get,
+    Slot,
+    Ui,
+    Key,
+    Knob,
+    Xb,
+    Help,
+    Dump,
+    Gps,
+    Load,
+    Sat,
+    Clear,
+    #[cfg(feature = "bench")]
+    Mem(bool),
+    #[cfg(feature = "bench")]
+    Job(u8),
+    #[cfg(feature = "bench")]
+    Bench(u8),
+}
+
+/// The commands by name (TERM-12): one table, looked up once; the arguments are each command's.
+const CMDS: &[(&str, C)] = &[
+    ("set", C::Set),
+    ("ch", C::Ch),
+    ("zone", C::Zone),
+    ("preset", C::Preset),
+    ("home", C::Home),
+    ("quick", C::Quick),
+    ("get", C::Get),
+    ("slot", C::Slot),
+    ("ui", C::Ui),
+    ("key", C::Key),
+    ("knob", C::Knob),
+    ("xb", C::Xb),
+    ("help", C::Help),
+    ("?", C::Help),
+    ("dump", C::Dump),
+    ("gps", C::Gps),
+    #[cfg(feature = "bench")]
+    ("mem", C::Mem(false)),
+    #[cfg(feature = "bench")]
+    ("mem32", C::Mem(true)),
+    #[cfg(feature = "bench")]
+    ("gpio", C::Job(0)),
+    #[cfg(feature = "bench")]
+    ("mic", C::Job(1)),
+    #[cfg(feature = "bench")]
+    ("af", C::Job(2)),
+    #[cfg(feature = "bench")]
+    ("txtest", C::Bench(0)),
+    #[cfg(feature = "bench")]
+    ("bk", C::Bench(1)),
+    #[cfg(feature = "bench")]
+    ("fsk", C::Bench(2)),
+    #[cfg(feature = "bench")]
+    ("meter", C::Bench(3)),
+    #[cfg(feature = "bench")]
+    ("synthfsk", C::Bench(4)),
+    #[cfg(feature = "bench")]
+    ("pin", C::Bench(5)),
+    #[cfg(feature = "bench")]
+    ("si", C::Bench(6)),
+    #[cfg(feature = "bench")]
+    ("bt", C::Bench(7)),
+    #[cfg(feature = "bench")]
+    ("rx", C::Bench(8)),
+    #[cfg(feature = "bench")]
+    ("lcd", C::Bench(9)),
+    ("load", C::Load),
+    ("sat", C::Sat),
+    ("clear", C::Clear),
+];
+
 pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], loading: bool) -> Result<Done, Msg> {
     let mut t = Toks::new(line);
+    match line_run(app, st, dev, loading, &mut t) {
+        Ok(d) => Ok(d),
+        Err(No) => Err(t.e),
+    }
+}
+
+fn line_run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, loading: bool, t: &mut Toks) -> Result<Done, No> {
     let c = match t.next()? {
         None => return Ok(Done::Nothing),
         Some(Tok::Word(c)) => c,
-        Some(Tok::Quoted(_)) => return Err(msg!("a command first; help lists them")),
+        Some(Tok::Quoted(_)) => return Err(t.say("a command first; help lists them")),
     };
-    let only_typed = |what: &str| -> Result<Done, Msg> { Err(msg!("{} can't be in a load", what)) };
-    match () {
-        _ if same(c, b"set") => set(app, dev, &mut t),
-        _ if same(c, b"ch") => ch(app, st, &mut t),
-        _ if same(c, b"zone") => zone(st, &mut t),
-        _ if same(c, b"preset") => preset(st, &mut t),
-        _ if same(c, b"quick") && !loading => quick(st, &mut t),
-        _ if same(c, b"home") => {
-            let w = t.word("home: a channel number, or none")?;
-            if same(w, b"none") {
-                app.set.home_ch = None;
-                return Ok(Done::Said(msg!("No home channel")));
-            }
-            let n = index(w, MAX_CHANNELS as u32, "home")? as u16;
-            if st.get(n).is_none() {
-                return Err(msg!("home: channel {} doesn't exist", n as u32 + 1));
-            }
-            app.set.home_ch = Some(n);
-            Ok(Done::Said(msg!("Home channel: {}", n as u32 + 1)))
-        }
-        _ if loading => only_typed(core::str::from_utf8(c).unwrap_or("that")),
-        _ if same(c, b"get") => get(app, dev, &mut t),
-        _ if same(c, b"slot") => slot(app, st, &mut t),
-        _ if same(c, b"ui") => match t.next()? {
+    let cmd = CMDS.iter().find(|(n, _)| same(c, n.as_bytes())).map(|e| e.1);
+    let cmd = match cmd {
+        Some(k) if !loading || matches!(k, C::Set | C::Ch | C::Zone | C::Preset | C::Home) => k,
+        _ if loading => return Err(no!(t, "{} can't be in a load", core::str::from_utf8(c).unwrap_or("that"))),
+        // TERM-38 (decision 151): a user build knows the bench commands by name only.
+        #[cfg(not(feature = "bench"))]
+        _ if BENCH_ONLY.iter().any(|b| same(c, b.as_bytes())) => return Err(not_in_build(c, t)),
+        _ => return Err(no!(t, "{}: no such command; help lists them", Bytes(c))),
+    };
+    match cmd {
+        C::Set => set(app, dev, t),
+        C::Ch => ch(app, st, t),
+        C::Zone => zone(st, t),
+        C::Preset => preset(st, t),
+        C::Home => home(app, st, t),
+        C::Quick => quick(st, t),
+        C::Get => get(app, dev, t),
+        C::Slot => slot(app, st, t),
+        C::Ui => match t.next()? {
             None => Ok(Done::List(List::Ui)),
             Some(Tok::Word(w)) if same(w, b"keys") => Ok(Done::List(List::UiKeys)),
             Some(Tok::Word(w)) if same(w, b"status") => Ok(Done::List(List::UiStatus)),
-            _ => Err(msg!("ui, ui keys or ui status")),
+            _ => Err(t.say("ui, ui keys or ui status")),
         },
-        _ if same(c, b"key") => key(app, st, &mut t),
-        _ if same(c, b"knob") => knob(app, st, &mut t),
-        _ if same(c, b"xb") => xb(app, &mut t),
-        _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
-        _ if same(c, b"dump") => Ok(Done::Dump),
-        _ if same(c, b"gps") => gps(&mut t),
+        C::Key => key(app, st, t),
+        C::Knob => knob(app, st, t),
+        C::Xb => xb(app, t),
+        C::Help => Ok(Done::List(List::Help)),
+        C::Dump => Ok(Done::Dump),
+        C::Gps => gps(t),
         #[cfg(feature = "bench")]
-        _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
+        C::Mem(words) => mem(t, words),
         #[cfg(feature = "bench")]
-        _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
+        C::Job(j) => Ok(Done::Debug(Job::new([Kind::Gpio, Kind::Mic(false), Kind::Mic(true)][j as usize]))),
         #[cfg(feature = "bench")]
-        _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic(false)))),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"af") => Ok(Done::Debug(Job::new(Kind::Mic(true)))),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"txtest") => txtest(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"bk") => bk(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"fsk") => fsk(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"meter") => meter(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"synthfsk") => synthfsk(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"pin") => pin(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"si") => si(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"bt") => bt(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"rx") => rx(&mut t),
-        #[cfg(feature = "bench")]
-        _ if same(c, b"lcd") => lcd(&mut t),
-        // TERM-38 (decision 151): a user build knows the bench commands by name only.
-        #[cfg(not(feature = "bench"))]
-        _ if BENCH_ONLY.iter().any(|b| same(c, b.as_bytes())) => Err(not_in_build(c)),
-        _ if same(c, b"load") => Ok(Done::Load),
-        _ if same(c, b"sat") => sat(st, &mut t, loading),
-        _ if same(c, b"clear") => {
-            if !same(t.word("clear channels N: deletes every channel")?, b"channels") {
-                return Err(msg!("clear channels N: deletes every channel"));
-            }
-            let n = st.count();
-            match t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }) {
-                Some(k) if k == n as u32 && n > 0 => {
-                    app.erase_channels();
-                    Ok(Done::Said(msg!("All {} channels deleted", n)))
-                }
-                _ if n == 0 => Err(msg!("There are no channels to delete")),
-                _ => Err(msg!("This deletes all {} channels. To go ahead, type: clear channels {}", n, n)),
-            }
+        C::Bench(b) => [txtest, bk, fsk, meter, synthfsk, pin, si, bt, rx, lcd][b as usize](t),
+        C::Load => Ok(Done::Load),
+        C::Sat => sat(st, t, loading),
+        C::Clear => clear(app, st, t),
+    }
+}
+
+/// `home N`, `home none`: the home channel.
+fn home<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
+    let w = t.word("home: a channel number, or none")?;
+    if same(w, b"none") {
+        app.set.home_ch = None;
+        return Ok(Done::Said(msg!("No home channel")));
+    }
+    let n = index(w, MAX_CHANNELS as u32, "home", t)? as u16;
+    if st.get(n).is_none() {
+        return Err(no!(t, "home: channel {} doesn't exist", n as u32 + 1));
+    }
+    app.set.home_ch = Some(n);
+    Ok(Done::Said(msg!("Home channel: {}", n as u32 + 1)))
+}
+
+/// `clear channels N`: every channel deleted, N their count.
+fn clear<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
+    const USAGE: &str = "clear channels N: deletes every channel";
+    if !same(t.word(USAGE)?, b"channels") {
+        return Err(t.say(USAGE));
+    }
+    let n = st.count();
+    match t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }) {
+        Some(k) if k == n as u32 && n > 0 => {
+            app.erase_channels();
+            Ok(Done::Said(msg!("All {} channels deleted", n)))
         }
-        _ => Err(msg!("{}: no such command; help lists them", Bytes(c))),
+        _ if n == 0 => Err(t.say("There are no channels to delete")),
+        _ => Err(no!(t, "This deletes all {} channels. To go ahead, type: clear channels {}", n, n)),
     }
 }
 
 // ---- Remote keys (LINK-19) ----
 
 /// `key NAME [short|long|down|up]`: a keypad or side key, as the link's `KEY` presses it (LINK-19).
-fn key<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
+fn key<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
     use crate::remote::Press;
     let usage = "key NAME [long|down|up]: ui keys lists the names";
     let name = t.word(usage)?;
-    let Some(code) = crate::uistate::key_code(name) else { return Err(msg!("{}: no such key; ui keys lists them", Bytes(name))) };
+    let Some(code) = crate::uistate::key_code(name) else { return Err(no!(t, "{}: no such key; ui keys lists them", Bytes(name))) };
     let how = match t.next()? {
         None => Press::Short,
         Some(Tok::Word(w)) if same(w, b"short") => Press::Short,
         Some(Tok::Word(w)) if same(w, b"long") => Press::Long,
         Some(Tok::Word(w)) if same(w, b"down") => Press::Down,
         Some(Tok::Word(w)) if same(w, b"up") => Press::Up,
-        _ => return Err(msg!("{}", usage)),
+        _ => return Err(t.say(usage)),
     };
     let now = app.now;
     match app.remote_press(code, how, crate::remote::BY_TERM, now, st) {
         Ok(()) => Ok(Done::Said(msg!("key {} {}", crate::uistate::key_name(code), ["up", "down", "short", "long"][how as usize]))),
-        Err(r) => Err(msg!("key: {}", r.text())),
+        Err(r) => Err(no!(t, "key: {}", r.text())),
     }
 }
 
 /// `knob +N|-N`: knob steps, as the link's `KEY` turns it (LINK-19).
-fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
+fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
     let usage = "knob +N or -N: 1 to 20 steps, + clockwise";
     let w = t.word(usage)?;
     let (neg, digits) = match w.split_first() {
@@ -1636,11 +1763,11 @@ fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
         Some((b'+', d)) => (false, d),
         _ => (false, w),
     };
-    let n = number(digits).filter(|&n| (1..=20).contains(&n)).ok_or_else(|| msg!("{}", usage))? as i8;
+    let n = number(digits).filter(|&n| (1..=20).contains(&n)).ok_or_else(|| t.say(usage))? as i8;
     let now = app.now;
     match app.remote_knob(if neg { -n } else { n }, now, st) {
         Ok(()) => Ok(Done::Said(msg!("knob {}{}", if neg { "-" } else { "+" }, n as u32))),
-        Err(r) => Err(msg!("knob: {}", r.text())),
+        Err(r) => Err(no!(t, "knob: {}", r.text())),
     }
 }
 
@@ -1649,7 +1776,7 @@ fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
 /// `xb`, `xb start`, `xb stop` (XB-20, decision 161): the crossband repeater's state; started as its # starts it
 /// (XB-2's checks, its screen opened from home if it isn't up); stopped as a key stops it. Who ran it is logged
 /// (XB-20.6: the terminal, or the link's port).
-fn xb(app: &mut App, t: &mut Toks) -> Result<Done, Msg> {
+fn xb(app: &mut App, t: &mut Toks) -> Result<Done, No> {
     use crate::screens::xb;
     use crate::{Dest, Screen};
     let by = xb::BY_CMD | app.cmd_by;
@@ -1672,16 +1799,16 @@ fn xb(app: &mut App, t: &mut Toks) -> Result<Done, Msg> {
         }
         Some(Tok::Word(w)) if same(w, b"start") => {
             if xb::running(app) {
-                return Err(msg!("xb start: already running; xb stop stops it"));
+                return Err(no!(t, "xb start: already running; xb stop stops it"));
             }
             if app.radio.keyed.is_some() || app.remote_keyed() {
-                return Err(msg!("xb start: transmitting: send it after the unkey"));
+                return Err(no!(t, "xb start: transmitting: send it after the unkey"));
             }
             if app.screen().modal() {
-                return Err(msg!("xb start: not now: the radio shows {}", app.screen().name()));
+                return Err(no!(t, "xb start: not now: the radio shows {}", app.screen().name()));
             }
             if app.set.chan_only {
-                return Err(msg!("xb start: channel-only mode (PIN-5): no repeater"));
+                return Err(no!(t, "xb start: channel-only mode (PIN-5): no repeater"));
             }
             if !matches!(app.screen(), Screen::Crossband(_)) {
                 app.go_home(); // XB-20.4: its screen up while it runs, home under it
@@ -1689,17 +1816,17 @@ fn xb(app: &mut App, t: &mut Toks) -> Result<Done, Msg> {
             }
             match xb::try_start(app, by) {
                 Ok(()) => Ok(Done::Said(msg!("Crossband started: {}", Bytes(sides(app).as_bytes())))),
-                Err(why) => Err(msg!("xb start: can't start: {}", Bytes(why.as_bytes()))),
+                Err(why) => Err(no!(t, "xb start: can't start: {}", Bytes(why.as_bytes()))),
             }
         }
         Some(Tok::Word(w)) if same(w, b"stop") => {
             if !xb::running(app) {
-                return Err(msg!("xb stop: the repeater isn't running"));
+                return Err(no!(t, "xb stop: the repeater isn't running"));
             }
             xb::stop(app, by, xb::XB_CMD);
             Ok(Done::Said(msg!("Crossband stopped")))
         }
-        _ => Err(msg!("xb, xb start or xb stop: the crossband repeater")),
+        _ => Err(no!(t, "xb, xb start or xb stop: the crossband repeater")),
     }
 }
 
@@ -1716,8 +1843,8 @@ pub const BENCH_ONLY: [&str; 15] = ["pin", "mem", "mem32", "gpio", "bk", "si", "
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
-fn not_in_build(c: &[u8]) -> Msg {
-    msg!("{}: not in this build: a bench build has it", Bytes(c))
+fn not_in_build(c: &[u8], t: &mut Toks) -> No {
+    no!(t, "{}: not in this build: a bench build has it", Bytes(c))
 }
 
 #[cfg(feature = "bench")]
@@ -1731,31 +1858,31 @@ fn hexnum(w: &[u8]) -> Option<u32> {
 }
 
 #[cfg(feature = "bench")]
-fn hex_word(t: &mut Toks, what: &str) -> Result<u32, Msg> {
-    hexnum(t.word(what)?).ok_or_else(|| msg!("{}", what))
+fn hex_word(t: &mut Toks, what: &str) -> Result<u32, No> {
+    hexnum(t.word(what)?).ok_or_else(|| t.say(what))
 }
 
 #[cfg(feature = "bench")]
-fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
+fn mem(t: &mut Toks, words: bool) -> Result<Done, No> {
     let usage = if words { "mem32 ADDR [WORDS]: hex address, word-aligned; up to 256 words" } else { "mem ADDR [LEN]: hex address, up to 1024 bytes" };
     let addr = hex_word(t, usage)?;
     let n = match t.next()? {
-        Some(Tok::Word(w)) => number(w).ok_or_else(|| msg!("{}", usage))?,
+        Some(Tok::Word(w)) => number(w).ok_or_else(|| t.say(usage))?,
         _ => 16,
     };
     let len = if words { n * 4 } else { n };
     if n == 0 || len > MEM_MAX as u32 || (words && !addr.is_multiple_of(4)) {
-        return Err(msg!("{}", usage));
+        return Err(t.say(usage));
     }
     // TERM-22: refused here, before anything goes to the radio, when any of it is outside the readable map.
     if let Err(why) = ferrite_core::memmap::check(addr, len, words) {
-        return Err(msg!("{}", why));
+        return Err(t.say(why));
     }
     Ok(Done::Debug(Job::new(Kind::Mem { addr, len: len as u16, words })))
 }
 
 #[cfg(feature = "bench")]
-fn bk(t: &mut Toks) -> Result<Done, Msg> {
+fn bk(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bk CHIP REG [VALUE] (hex; 0 VHF, 1 UHF/HF), bk CHIP dump, bk settle|save|turns|rxaf|rxif|hold";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
@@ -1766,23 +1893,23 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         w if same(w, b"rxaf") => return rxaf(t),
         w if same(w, b"rxif") => return rxif(t),
         w if same(w, b"hold") => return hold(t),
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     let w = t.word(USAGE)?;
     if same(w, b"dump") {
         return Ok(Done::Debug(Job::new(Kind::BkDump { chip })));
     }
-    let reg = hexnum(w).filter(|r| *r < BK_REGS as u32).ok_or_else(|| msg!("{}", USAGE))? as u8;
+    let reg = hexnum(w).filter(|r| *r < BK_REGS as u32).ok_or_else(|| t.say(USAGE))? as u8;
     match t.next()? {
         None => Ok(Done::Debug(Job::new(Kind::BkRead { chip, reg }))),
         Some(Tok::Word(v)) => {
-            let val = hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))? as u16;
+            let val = hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| t.say(USAGE))? as u16;
             if let Some(why) = ferrite_core::msg::bk_write_refused(reg, val) {
-                return Err(msg!("refused: {}", why));
+                return Err(no!(t, "refused: {}", why));
             }
             Ok(Done::Debug(Job::new(Kind::BkWrite { chip, reg, val })))
         }
-        _ => Err(msg!("{}", USAGE)),
+        _ => Err(t.say(USAGE)),
     }
 }
 
@@ -1791,16 +1918,16 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
 /// bits 10:8 only: 400 the 300 Hz high-pass off, 200 the 3 kHz low-pass off, 100 de-emphasis off; 700 all three),
 /// written after every FM tune on either chip, `bk rxaf off` ends it. RAM only. TERM-42.1: a top nibble (e.g. 9700)
 /// also holds REG_47's receive route (bits 11:8; 9 Beken's bypass) wherever the receive tick sets the normal route.
-fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
+fn rxaf(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bk rxaf [HEX|off]: REG_2B 10:8 after FM tunes (400 HPF, 200 LPF, 100 de-emph off); 9xxx: route 9";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
-        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| v & !0xF700 == 0).ok_or_else(|| msg!("{}", USAGE))? as u16)),
-        _ => return Err(msg!("{}", USAGE)),
+        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| v & !0xF700 == 0).ok_or_else(|| t.say(USAGE))? as u16)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::RxAf(set))))
 }
@@ -1809,16 +1936,16 @@ fn rxaf(t: &mut Toks) -> Result<Done, Msg> {
 /// TERM-42.2 (decision 315, a bench test): `bk rxif` shows the receive IF override, `bk rxif HEX` sets it (the whole
 /// of REG_43: IF bandwidth strong and weak, TX LPF2, BW mode; stock's 25 kHz data mode is 5A20), written after every
 /// FM tune on either chip, `bk rxif off` ends it. RAM only.
-fn rxif(t: &mut Toks) -> Result<Done, Msg> {
+fn rxif(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bk rxif [HEX|off]: REG_43 after FM tunes (14:12 IF width, 11:9 weak, 5:4 BW; 5A20: 25 kHz data)";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
-        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))? as u16)),
-        _ => return Err(msg!("{}", USAGE)),
+        Some(Tok::Word(w)) => Some(Some(hexnum(w).filter(|v| *v <= 0xFFFF).ok_or_else(|| t.say(USAGE))? as u16)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::RxIf(set))))
 }
@@ -1827,26 +1954,26 @@ fn rxif(t: &mut Toks) -> Result<Done, Msg> {
 /// TERM-42.3 (decision 316, a bench test): `bk hold` shows the held registers, `bk hold REG VALUE` holds one (up to
 /// four; the same register again replaces it) on both chips after every FM tune, `bk hold off` ends them all. The
 /// raw write's refusals (`bk_write_refused`) apply. RAM only.
-fn hold(t: &mut Toks) -> Result<Done, Msg> {
+fn hold(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bk hold [REG VALUE|off]: hex register (not 00) and value, both chips after FM tunes; up to four";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(None),
         Some(Tok::Word(w)) => {
-            let reg = hexnum(w).filter(|r| (1..BK_REGS as u32).contains(r)).ok_or_else(|| msg!("{}", USAGE))? as u8;
+            let reg = hexnum(w).filter(|r| (1..BK_REGS as u32).contains(r)).ok_or_else(|| t.say(USAGE))? as u8;
             let val = match t.next()? {
-                Some(Tok::Word(v)) => hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))? as u16,
-                _ => return Err(msg!("{}", USAGE)),
+                Some(Tok::Word(v)) => hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| t.say(USAGE))? as u16,
+                _ => return Err(t.say(USAGE)),
             };
             if let Some(why) = ferrite_core::msg::bk_write_refused(reg, val) {
-                return Err(msg!("refused: {}", why));
+                return Err(no!(t, "refused: {}", why));
             }
             Some(Some((reg, val)))
         }
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Hold(set))))
 }
@@ -1854,23 +1981,22 @@ fn hold(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-46 (decisions 319, 320, a bench test): `pin PIN MODE` sets an audio pin now from the Radio task: PIN one of
 /// `ferrite_core::msg::PINS`, MODE 0 (driven low), 1 (driven high), u (input with pull-up) or d (input with pull-down).
-fn pin(t: &mut Toks) -> Result<Done, Msg> {
+fn pin(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::msg::{PinMode, PINS};
     const USAGE: &str = "pin pa15|pc12|pc9|pb8|pe1|pe4 0|1|u|d (u, d: an input with a pull), until the next path step";
-    let bad = || msg!("{}", USAGE);
     let which = match t.next()? {
-        Some(Tok::Word(w)) => PINS.iter().position(|p| same(w, p.as_bytes())).ok_or_else(bad)? as u8,
-        _ => return Err(bad()),
+        Some(Tok::Word(w)) => PINS.iter().position(|p| same(w, p.as_bytes())).ok_or_else(|| t.say(USAGE))? as u8,
+        _ => return Err(t.say(USAGE)),
     };
     let mode = match t.next()? {
         Some(Tok::Word(b"0")) => PinMode::Low,
         Some(Tok::Word(b"1")) => PinMode::High,
         Some(Tok::Word(w)) if same(w, b"u") => PinMode::PullUp,
         Some(Tok::Word(w)) if same(w, b"d") => PinMode::PullDown,
-        _ => return Err(bad()),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(bad());
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Pin { which, mode })))
 }
@@ -1880,10 +2006,9 @@ fn pin(t: &mut Toks) -> Result<Done, Msg> {
 /// `synthfsk MS SUB SHIFT DEV G0 G1 G2 G3` sends 4FSK (M17's symbols, PRBS9) by stepping the gain, SUB steps a
 /// symbol. MS the run (100-5000), SHIFT the carrier moved down (Hz, 0-9990), DEV REG_40's scale (0-4095), Gn the gains
 /// for -3, -1, +1, +3 (0-127). The Radio task runs it at once on the keyed chip, Dry TX on only.
-fn synthfsk(t: &mut Toks) -> Result<Done, Msg> {
+fn synthfsk(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::synthfsk::{Cfg, SUB_MAX};
     const USAGE: &str = "synthfsk cal MS SHIFT DEV, or synthfsk MS SUB SHIFT DEV G0 G1 G2 G3: while keyed, Dry TX only";
-    let bad = || msg!("{}", USAGE);
     let mut words = [0u32; 8];
     let mut n = 0;
     let mut cal = false;
@@ -1891,21 +2016,21 @@ fn synthfsk(t: &mut Toks) -> Result<Done, Msg> {
         match tok {
             Tok::Word(w) if n == 0 && !cal && same(w, b"cal") => cal = true,
             Tok::Word(w) if n < 8 => {
-                words[n] = number(w).ok_or_else(bad)?;
+                words[n] = number(w).ok_or_else(|| t.say(USAGE))?;
                 n += 1;
             }
-            _ => return Err(bad()),
+            _ => return Err(t.say(USAGE)),
         }
     }
     let ok = |v: u32, lo: u32, hi: u32| (lo..=hi).contains(&v);
     let cfg = if cal {
         if n != 3 || !ok(words[0], 100, 5000) || !ok(words[1], 0, 9990) || !ok(words[2], 0, 4095) {
-            return Err(bad());
+            return Err(t.say(USAGE));
         }
         Cfg { cal, ms: words[0] as u16, sub: 1, shift_hz: words[1] as u16, dev: words[2] as u16, g: [0; 4] }
     } else {
         if n != 8 || !ok(words[0], 100, 5000) || !ok(words[1], 1, SUB_MAX as u32) || !ok(words[2], 0, 9990) || !ok(words[3], 0, 4095) || words[4..8].iter().any(|&g| g > 127) {
-            return Err(bad());
+            return Err(t.say(USAGE));
         }
         Cfg { cal, ms: words[0] as u16, sub: words[1] as u8, shift_hz: words[2] as u16, dev: words[3] as u16, g: [words[4] as u8, words[5] as u8, words[6] as u8, words[7] as u8] }
     };
@@ -1915,16 +2040,16 @@ fn synthfsk(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-44 (decision 315, a bench test): `meter` shows the receive level meter's bins, `meter on` zeroes and starts
 /// it, `meter off` stops it.
-fn meter(t: &mut Toks) -> Result<Done, Msg> {
+fn meter(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "meter [on|off]: receive audio levels, 50 Hz-12.5 kHz from ADC1 at 48 kHz, loudest 100 ms";
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"on") => Some(true),
         Some(Tok::Word(w)) if same(w, b"off") => Some(false),
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Meter(set))))
 }
@@ -1934,15 +2059,14 @@ fn meter(t: &mut Toks) -> Result<Done, Msg> {
 /// ends it, `fsk rx SPEED [nocrc]` receives on the active slot's chip, `fsk tx SPEED N [nocrc]` arms N frames (1 to
 /// 999) for the next PTT key-up. SPEED: `1200`, `2400` (any plain FSK rate 300 to 9600), `ffsk1800`, `ffsk2400`;
 /// `nocrc` turns the chip's CRC off. Anything else is refused here, before anything is sent.
-fn fsk(t: &mut Toks) -> Result<Done, Msg> {
+fn fsk(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::fskbench::{Ask, Cfg, Speed, COUNT_MAX};
     const USAGE: &str = "fsk [off], fsk rx|tx SPEED [N] [nocrc]: SPEED 300-9600, ffsk1800 or ffsk2400; tx N 1-999";
-    let bad = || msg!("{}", USAGE);
-    fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
+    fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, No> {
         match t.next()? {
             None => Ok(None),
             Some(Tok::Word(w)) => Ok(Some(w)),
-            _ => Err(msg!("{}", USAGE)),
+            _ => Err(t.say(USAGE)),
         }
     }
     let ask = match word(t)? {
@@ -1950,12 +2074,12 @@ fn fsk(t: &mut Toks) -> Result<Done, Msg> {
         Some(w) if same(w, b"off") => Ask::Off,
         Some(w) if same(w, b"rx") || same(w, b"tx") => {
             let tx = same(w, b"tx");
-            let speed = word(t)?.and_then(Speed::parse).ok_or_else(bad)?;
-            let n = if tx { Some(word(t)?.and_then(number).filter(|n| (1..=COUNT_MAX as u32).contains(n)).ok_or_else(bad)? as u16) } else { None };
+            let speed = word(t)?.and_then(Speed::parse).ok_or_else(|| t.say(USAGE))?;
+            let n = if tx { Some(word(t)?.and_then(number).filter(|n| (1..=COUNT_MAX as u32).contains(n)).ok_or_else(|| t.say(USAGE))? as u16) } else { None };
             let crc = match word(t)? {
                 None => true,
                 Some(w) if same(w, b"nocrc") => false,
-                Some(_) => return Err(bad()),
+                Some(_) => return Err(t.say(USAGE)),
             };
             let cfg = Cfg { speed, crc };
             match n {
@@ -1963,10 +2087,10 @@ fn fsk(t: &mut Toks) -> Result<Done, Msg> {
                 None => Ask::Rx(cfg),
             }
         }
-        Some(_) => return Err(bad()),
+        Some(_) => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(bad());
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Fsk(ask))))
 }
@@ -1980,21 +2104,20 @@ fn fsk(t: &mut Toks) -> Result<Done, Msg> {
 /// [rc]`, `gmsk BAUD` (300 to 9600) and `g3ruh` (TERM-33.17), and after FILTERS, in any order, `bypass` (TERM-33.15)
 /// and `eq` or `eq8` (TERM-33.16), neither with `voice`; LEVEL always last. Anything else is refused here, before
 /// anything is sent.
-fn txtest(t: &mut Toks) -> Result<Done, Msg> {
+fn txtest(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::txtest::{Arm, Ask, Eq, Filters, Signal, BAUD_MAX, BAUD_MIN, LEVEL_MAX, LEVEL_MIN};
     const USAGE: &str = "txtest 4fsk|sweep|afsk[-bk]|fsk|gmsk B|g3ruh|suite|off [voice|flat|data] [bypass] [eq|eq8] [%]";
-    let usage = || msg!("{}", USAGE);
-    let level = |w: &[u8]| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(usage);
+    let level = |w: &[u8], t: &mut Toks| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(|| t.say(USAGE));
     let ask = match t.next()? {
         None => Ask::Show,
         Some(Tok::Word(w)) if same(w, b"off") => Ask::Set(None),
         Some(Tok::Word(w)) => {
-            let signal = Signal::parse(w).ok_or_else(usage)?;
+            let signal = Signal::parse(w).ok_or_else(|| t.say(USAGE))?;
             let mut arm = Arm::new(signal);
             if signal.takes_baud() {
                 arm.baud = match t.next()? {
-                    Some(Tok::Word(b)) => number(b).filter(|n| (BAUD_MIN as u32..=BAUD_MAX as u32).contains(n)).ok_or_else(usage)? as u16,
-                    _ => return Err(usage()),
+                    Some(Tok::Word(b)) => number(b).filter(|n| (BAUD_MIN as u32..=BAUD_MAX as u32).contains(n)).ok_or_else(|| t.say(USAGE))? as u16,
+                    _ => return Err(t.say(USAGE)),
                 };
             }
             let (mut filters, mut eq) = (false, false);
@@ -2002,10 +2125,10 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
                 let w = match t.next()? {
                     None => break,
                     Some(Tok::Word(w)) if signal.takes_level() => w,
-                    _ => return Err(usage()),
+                    _ => return Err(t.say(USAGE)),
                 };
                 if !signal.dac() {
-                    arm.level = level(w)?; // afsk-bk: LEVEL alone
+                    arm.level = level(w, t)?; // afsk-bk: LEVEL alone
                     break;
                 }
                 if let Some(f) = Filters::parse(w).filter(|_| !filters && !arm.bypass && !eq) {
@@ -2017,19 +2140,19 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
                 } else if let Some(e) = Eq::parse(w).filter(|_| !eq) {
                     (arm.eq, eq) = (e, true);
                 } else {
-                    arm.level = level(w)?; // LEVEL: the last word
+                    arm.level = level(w, t)?; // LEVEL: the last word
                     break;
                 }
             }
             if arm.filters == Filters::Voice && (arm.bypass || eq) {
-                return Err(usage());
+                return Err(t.say(USAGE));
             }
             Ask::Set(Some(arm))
         }
-        _ => return Err(usage()),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(usage());
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::TxTest(ask))))
 }
@@ -2038,7 +2161,7 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
 /// TERM-41 (a bench test, the power bench): `bk save` shows Battery Save's cycle; `bk save lp` puts Low Power Mode's
 /// in place of the level's, `bk save ON OFF [HOLD_S [RECENT_S]]` any (ms, then seconds; hold and recent default
 /// 0), `bk save normal` gives the level back. RAM only.
-fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
+fn bk_save(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::rxsleep::{Cycle, LOW_POWER};
     const USAGE: &str = "bk save [lp|normal|ON_MS OFF_MS [HOLD_S [RECENT_S]]]: on/off 10-5000 ms, hold/recent 0-3600 s";
     let mut n = [None; 4];
@@ -2050,12 +2173,12 @@ fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
                 word = Some(same(w, b"lp"));
                 break;
             }
-            Some(Tok::Word(w)) => *slot = Some(number(w).ok_or_else(|| msg!("{}", USAGE))?),
-            _ => return Err(msg!("{}", USAGE)),
+            Some(Tok::Word(w)) => *slot = Some(number(w).ok_or_else(|| t.say(USAGE))?),
+            _ => return Err(t.say(USAGE)),
         }
     }
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     let set = match (word, n) {
         (Some(true), _) => Some(Some(LOW_POWER)),
@@ -2063,14 +2186,14 @@ fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
         (None, [None, ..]) => None,
         (None, [Some(on), Some(off), hold, recent]) => {
             let ms = |v: u32| (10..=5000).contains(&v);
-            let s = |v: Option<u32>| v.filter(|&v| v <= 3600).map(|v| v * 1000).ok_or_else(|| msg!("{}", USAGE));
+            let mut s = |v: Option<u32>| v.filter(|&v| v <= 3600).map(|v| v * 1000).ok_or_else(|| t.say(USAGE));
             if !ms(on) || !ms(off) {
-                return Err(msg!("{}", USAGE));
+                return Err(t.say(USAGE));
             }
             let (hold_ms, recent_ms) = (s(hold.or(Some(0)))?, s(recent.or(Some(0)))?);
             Some(Some(Cycle { on_ms: on as u16, off_ms: off as u16, hold_ms, recent_ms }))
         }
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     Ok(Done::Debug(Job::new(Kind::Save(set))))
 }
@@ -2079,15 +2202,14 @@ fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
 /// TERM-40 (a bench test, the power bench): `lcd` shows the display's bench state; `lcd idle|partial|sleep on|off`,
 /// `lcd fps N` (1-20, 0 normal), `lcd bl N|normal`, `lcd keys N|normal` (percent) change one thing; `lcd reset`;
 /// `lcd bus` times a whole-screen fill.
-fn lcd(t: &mut Toks) -> Result<Done, Msg> {
+fn lcd(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::msg::LcdSet;
     const USAGE: &str = "lcd [idle|partial|sleep on|off] [fps 0-20] [bl|keys 0-100|normal] [paint old|new] [bus] [reset]";
-    let bad = || msg!("{}", USAGE);
-    fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
+    fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, No> {
         match t.next()? {
             None => Ok(None),
             Some(Tok::Word(w)) => Ok(Some(w)),
-            _ => Err(msg!("{}", USAGE)),
+            _ => Err(t.say(USAGE)),
         }
     }
     let Some(what) = word(t)? else { return Ok(Done::Debug(Job::new(Kind::Lcd(LcdSet::Ask)))) };
@@ -2099,10 +2221,10 @@ fn lcd(t: &mut Toks) -> Result<Done, Msg> {
             Some(a) if same(a, b"old") => Some(false),
             Some(a) if same(a, b"new") => Some(true),
             None => None,
-            Some(_) => return Err(bad()),
+            Some(_) => return Err(t.say(USAGE)),
         };
         if t.next()?.is_some() {
-            return Err(bad());
+            return Err(t.say(USAGE));
         }
         if let Some(on) = on {
             set_single_pass(on);
@@ -2114,21 +2236,21 @@ fn lcd(t: &mut Toks) -> Result<Done, Msg> {
     } else if same(what, b"bus") {
         LcdSet::Bus
     } else {
-        let arg = word(t)?.ok_or_else(bad)?;
+        let arg = word(t)?.ok_or_else(|| t.say(USAGE))?;
         let on = || if same(arg, b"on") { Some(true) } else if same(arg, b"off") { Some(false) } else { None };
         let pct = |max: u32| if same(arg, b"normal") { Some(None) } else { number(arg).filter(|&n| n <= max).map(|n| Some(n as u8)) };
         match what {
-            _ if same(what, b"idle") => LcdSet::Idle(on().ok_or_else(bad)?),
-            _ if same(what, b"partial") => LcdSet::Partial(on().ok_or_else(bad)?),
-            _ if same(what, b"sleep") => LcdSet::Sleep(on().ok_or_else(bad)?),
-            _ if same(what, b"fps") => LcdSet::Fps(pct(20).ok_or_else(bad)?.unwrap_or(0)),
-            _ if same(what, b"bl") => LcdSet::Bl(pct(100).ok_or_else(bad)?),
-            _ if same(what, b"keys") => LcdSet::Keys(pct(100).ok_or_else(bad)?),
-            _ => return Err(bad()),
+            _ if same(what, b"idle") => LcdSet::Idle(on().ok_or_else(|| t.say(USAGE))?),
+            _ if same(what, b"partial") => LcdSet::Partial(on().ok_or_else(|| t.say(USAGE))?),
+            _ if same(what, b"sleep") => LcdSet::Sleep(on().ok_or_else(|| t.say(USAGE))?),
+            _ if same(what, b"fps") => LcdSet::Fps(pct(20).ok_or_else(|| t.say(USAGE))?.unwrap_or(0)),
+            _ if same(what, b"bl") => LcdSet::Bl(pct(100).ok_or_else(|| t.say(USAGE))?),
+            _ if same(what, b"keys") => LcdSet::Keys(pct(100).ok_or_else(|| t.say(USAGE))?),
+            _ => return Err(t.say(USAGE)),
         }
     };
     if t.next()?.is_some() {
-        return Err(bad());
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Lcd(set))))
 }
@@ -2136,15 +2258,15 @@ fn lcd(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// WATCH-17.1 (decision 262, a bench measure): `bk turns` shows each slot's whole turns on a chip and their total ms
 /// since boot or the last reset; `bk turns reset` shows them, then zeroes them.
-fn turns(t: &mut Toks) -> Result<Done, Msg> {
+fn turns(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bk turns [reset]: each slot's turns on a chip and their ms";
     let reset = match t.next()? {
         None => false,
         Some(Tok::Word(w)) if same(w, b"reset") => true,
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Turns { reset })))
 }
@@ -2152,18 +2274,18 @@ fn turns(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-31 (decision 119, a bench test): `bk settle` says the BK4829 settle waits in force, `bk settle N` sets both
 /// to N ms, `bk settle W S` the wake and the sleep wait apart; 0 to 20 ms, decimal; 0 is stock's (no wait).
-fn settle(t: &mut Toks) -> Result<Done, Msg> {
+fn settle(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bk settle [WAKE [SLEEP]]: ms, 0 to 20 (0 is stock's, no wait); bk settle alone shows them";
     let mut ms = [None; 2];
     for m in ms.iter_mut() {
         *m = match t.next()? {
             None => break,
-            Some(Tok::Word(w)) => Some(number(w).filter(|&n| n <= ferrite_core::settle::MAX_MS as u32).ok_or_else(|| msg!("{}", USAGE))? as u8),
-            _ => return Err(msg!("{}", USAGE)),
+            Some(Tok::Word(w)) => Some(number(w).filter(|&n| n <= ferrite_core::settle::MAX_MS as u32).ok_or_else(|| t.say(USAGE))? as u8),
+            _ => return Err(t.say(USAGE)),
         };
     }
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     let set = ms[0].and_then(|w| ferrite_core::settle::Settle::new(w, ms[1].unwrap_or(w)));
     Ok(Done::Debug(Job::new(Kind::Settle(set))))
@@ -2172,27 +2294,27 @@ fn settle(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-29 (decision 114, a bench test): `rx both` holds both band receive selects on, `rx one` goes back to
 /// the normal one, `rx` alone says which. The Radio task refuses it while keyed, in HF mode and in crossband.
-fn rx(t: &mut Toks) -> Result<Done, Msg> {
+fn rx(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "rx both, rx one, or rx to ask: both band receive selects held on (a bench test)";
     let on = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"both") => Some(true),
         Some(Tok::Word(w)) if same(w, b"one") => Some(false),
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::RxBoth(on))))
 }
 
 /// TERM-30, TERM-38: a user build's `gps`, the last GGA; the module's CASIC sends (TERM-36) are a bench build's.
 #[cfg(not(feature = "bench"))]
-fn gps(t: &mut Toks) -> Result<Done, Msg> {
+fn gps(t: &mut Toks) -> Result<Done, No> {
     match t.next()? {
         None => Ok(Done::Debug(Job::new(Kind::Gga))),
-        Some(Tok::Word(w)) if [&b"query"[..], b"nmea", b"standby"].iter().any(|b| same(w, b)) => Err(msg!("gps {}: not in this build: a bench build has it", Bytes(w))),
-        _ => Err(msg!("gps alone: query, nmea and standby need a bench build")),
+        Some(Tok::Word(w)) if [&b"query"[..], b"nmea", b"standby"].iter().any(|b| same(w, b)) => Err(no!(t, "gps {}: not in this build: a bench build has it", Bytes(w))),
+        _ => Err(no!(t, "gps alone: query, nmea and standby need a bench build")),
     }
 }
 
@@ -2200,7 +2322,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
 /// (CAS03, all NMEA off) and `gps nmea on` (Ferrite's NMEA set, GPS-34), `gps standby N [quiet]` (CAS12 for N s; quiet: NMEA off
 /// first, not on after): nothing else goes to the module ([`ferrite_core::gpspower::casic_refused`]).
 #[cfg(feature = "bench")]
-fn gps(t: &mut Toks) -> Result<Done, Msg> {
+fn gps(t: &mut Toks) -> Result<Done, No> {
     use ferrite_core::gpspower::{casic_refused, CAS_NMEA, CAS_QUERY, CAS_STANDBY};
     const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (1-65535 s)";
     let mut quiet = false;
@@ -2208,48 +2330,48 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
         None => return Ok(Done::Debug(Job::new(Kind::Gga))),
         Some(Tok::Word(w)) if same(w, b"query") => match t.next()? {
             None => (CAS_QUERY, 0),
-            Some(Tok::Word(n)) => (CAS_QUERY, number(n).filter(|&n| n <= 9).ok_or_else(|| msg!("{}", USAGE))? as u16),
-            _ => return Err(msg!("{}", USAGE)),
+            Some(Tok::Word(n)) => (CAS_QUERY, number(n).filter(|&n| n <= 9).ok_or_else(|| t.say(USAGE))? as u16),
+            _ => return Err(t.say(USAGE)),
         },
         Some(Tok::Word(w)) if same(w, b"nmea") => match t.next()? {
             Some(Tok::Word(o)) if same(o, b"off") => (CAS_NMEA, 0),
             Some(Tok::Word(o)) if same(o, b"on") => (CAS_NMEA, 1),
-            _ => return Err(msg!("{}", USAGE)),
+            _ => return Err(t.say(USAGE)),
         },
         Some(Tok::Word(w)) if same(w, b"standby") => {
             let n = match t.next()? {
-                Some(Tok::Word(n)) => number(n).filter(|&n| n <= 65535).ok_or_else(|| msg!("{}", USAGE))? as u16,
-                _ => return Err(msg!("{}", USAGE)),
+                Some(Tok::Word(n)) => number(n).filter(|&n| n <= 65535).ok_or_else(|| t.say(USAGE))? as u16,
+                _ => return Err(t.say(USAGE)),
             };
             match t.next()? {
                 None => {}
                 Some(Tok::Word(q)) if same(q, b"quiet") => quiet = true,
-                _ => return Err(msg!("{}", USAGE)),
+                _ => return Err(t.say(USAGE)),
             }
             (CAS_STANDBY, n)
         }
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     if let Some(why) = casic_refused(id, arg) {
-        return Err(msg!("refused: {}", why));
+        return Err(no!(t, "refused: {}", why));
     }
     Ok(Done::Debug(Job::new(Kind::Gps { id, arg, quiet })))
 }
 
 #[cfg(feature = "bench")]
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
-fn bt(t: &mut Toks) -> Result<Done, Msg> {
+fn bt(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only); bt stat; bt baud 9600; bt pace 20 50";
-    let Some(Tok::Word(w)) = t.next()? else { return Err(msg!("{}", USAGE)) };
+    let Some(Tok::Word(w)) = t.next()? else { return Err(t.say(USAGE)) };
     // `bt stat`: USART1's counters; `bt baud N`: USART1 at N for this power-on (the MCU's side; the module untouched).
-    if same(w, b"stat") && t.clone().next()?.is_none() {
+    if same(w, b"stat") && t.peek()?.is_none() {
         return Ok(Done::Debug(Job::new(Kind::BtStat(0, None))));
     }
     // `bt linkz`: the link codecs timed on the radio (decision 285, step 3)
-    if same(w, b"linkz") && t.clone().next()?.is_none() {
+    if same(w, b"linkz") && t.peek()?.is_none() {
         return Ok(Done::Debug(Job::new(Kind::Linkz)));
     }
     // `bt pace B G`: LINK-36's bursts of B bytes and G ms gaps, in RAM until a restart (B 0: unpaced).
@@ -2260,7 +2382,7 @@ fn bt(t: &mut Toks) -> Result<Done, Msg> {
             _ => None,
         };
         let p = num().zip(num()).and_then(|(b, g)| ferrite_core::link::BtPace::new(b, g));
-        let Some(p) = p.filter(|_| matches!(t.next(), Ok(None))) else { return Err(msg!("{}", PACE)) };
+        let Some(p) = p.filter(|_| matches!(t.next(), Ok(None))) else { return Err(t.say(PACE)) };
         return Ok(Done::Debug(Job::new(Kind::BtStat(0, Some(p)))));
     }
     if same(w, b"baud") {
@@ -2269,14 +2391,14 @@ fn bt(t: &mut Toks) -> Result<Done, Msg> {
             Some(Tok::Word(n)) => number(n).filter(|r| ferrite_core::msg::BT_BENCH_RATES.contains(r)),
             _ => None,
         };
-        let Some(r) = r.filter(|_| matches!(t.next(), Ok(None))) else { return Err(msg!("{}", RATES)) };
+        let Some(r) = r.filter(|_| matches!(t.next(), Ok(None))) else { return Err(t.say(RATES)) };
         return Ok(Done::Debug(Job::new(Kind::BtStat(r, None))));
     }
     if t.next()?.is_some() || w.len() > 16 {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     if let Some(why) = ferrite_core::msg::bt_query_refused(w) {
-        return Err(msg!("refused: {}", why));
+        return Err(no!(t, "refused: {}", why));
     }
     let mut text = [0u8; 16];
     text[..w.len()].copy_from_slice(w);
@@ -2284,38 +2406,38 @@ fn bt(t: &mut Toks) -> Result<Done, Msg> {
 }
 
 #[cfg(feature = "bench")]
-fn si(t: &mut Toks) -> Result<Done, Msg> {
+fn si(t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "si BYTES... [reply N], si prop P [V]: hex; the reply starts with the status byte";
     let mut cmd = [0u8; 8];
     let (mut n, mut reply) = (0usize, 8u32);
-    if let Some(Tok::Word(w)) = t.clone().next()? {
+    if let Some(Tok::Word(w)) = t.peek()? {
         if same(w, b"prop") {
             t.next()?;
             let p = hex_word(t, USAGE)?.min(0xFFFF);
             return Ok(Done::Debug(Job::new(match t.next()? {
                 None => Kind::Si { cmd: [0x13, 0, (p >> 8) as u8, p as u8, 0, 0, 0, 0], n: 4, reply: 4 },
                 Some(Tok::Word(v)) => {
-                    let v = hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))?;
+                    let v = hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| t.say(USAGE))?;
                     Kind::Si { cmd: [0x12, 0, (p >> 8) as u8, p as u8, (v >> 8) as u8, v as u8, 0, 0], n: 6, reply: 1 }
                 }
-                _ => return Err(msg!("{}", USAGE)),
+                _ => return Err(t.say(USAGE)),
             })));
         }
     }
     while let Some(tok) = t.next()? {
-        let Tok::Word(w) = tok else { return Err(msg!("{}", USAGE)) };
+        let Tok::Word(w) = tok else { return Err(t.say(USAGE)) };
         if same(w, b"reply") {
-            reply = t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }).filter(|r| (1..=16).contains(r)).ok_or_else(|| msg!("reply: 1 to 16 bytes"))?;
+            reply = t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }).filter(|r| (1..=16).contains(r)).ok_or_else(|| no!(t, "reply: 1 to 16 bytes"))?;
             break;
         }
         if n == cmd.len() {
-            return Err(msg!("si: at most 8 command bytes"));
+            return Err(no!(t, "si: at most 8 command bytes"));
         }
-        cmd[n] = hexnum(w).filter(|b| *b <= 0xFF).ok_or_else(|| msg!("{}", USAGE))? as u8;
+        cmd[n] = hexnum(w).filter(|b| *b <= 0xFF).ok_or_else(|| t.say(USAGE))? as u8;
         n += 1;
     }
     if n == 0 {
-        return Err(msg!("{}", USAGE));
+        return Err(t.say(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Si { cmd, n: n as u8, reply: reply as u8 })))
 }
@@ -2547,16 +2669,16 @@ const HELP_BENCH: &str = concat!(
 /// `slot`, `slot X`, `slot X [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]`: the
 /// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing. T is
 /// one word (off, 100.0, D023N) or a mode and a value (ctcss 100.0, dcs-n 023, dcs-i 023; TONE-2.1).
-fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
+fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, No> {
     const USAGE: &str = "slot A|B|C [vfo] [FREQ] [MODE] [POWER] [tone|rxtone|txtone T] [offset N] [split TX] [active]";
     let s = match t.next()? {
         None => return Ok(Done::List(List::Slots)),
         Some(Tok::Word(w)) if w.len() == 1 && (b'a'..=b'c').contains(&w[0].to_ascii_lowercase()) => w[0].to_ascii_lowercase() - b'a',
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(t.say(USAGE)),
     };
     let mut c = crate::slotctl::SlotChange::default();
     while let Some(tok) = t.next()? {
-        let Tok::Word(w) = tok else { return Err(msg!("{}", USAGE)) };
+        let Tok::Word(w) = tok else { return Err(t.say(USAGE)) };
         if let Some(m) = ["fm", "nfm", "am"].iter().position(|m| same(w, m.as_bytes())) {
             c.mode = Some(m as u8);
         } else if let Some(p) = POWERS.iter().position(|p| same(w, p.as_bytes())) {
@@ -2574,17 +2696,17 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
             c.tx_tone = Some(tone_arg(t, "txtone")?);
         } else if same(w, b"offset") {
             let v = t.word("offset: off, or MHz with a sign, e.g. -0.6")?;
-            c.offset = Some((if same(v, b"off") { 0 } else { offset(v)? }, false));
+            c.offset = Some((if same(v, b"off") { 0 } else { offset(v, t)? }, false));
         } else if same(w, b"split") {
-            c.offset = Some((freq(t.word("split: the TX frequency in MHz")?, "split")? as i32, true));
+            c.offset = Some((freq(t.word("split: the TX frequency in MHz")?, "split", t)? as i32, true));
         } else if w.first().is_some_and(u8::is_ascii_digit) {
-            c.freq = Some(freq(w, "slot: the frequency in MHz, e.g. 146.52")?);
+            c.freq = Some(freq(w, "slot: the frequency in MHz, e.g. 146.52", t)?);
         } else {
-            return Err(msg!("{}: not a slot word; {}", Bytes(w), USAGE));
+            return Err(no!(t, "{}: not a slot word; {}", Bytes(w), USAGE));
         }
     }
     if !c.is_empty() {
-        app.slot_apply(s, &c, st).map_err(|why| msg!("slot {}: {}", Bytes(&[b'A' + s]), why))?;
+        app.slot_apply(s, &c, st).map_err(|why| no!(t, "slot {}: {}", Bytes(&[b'A' + s]), why))?;
     }
     let mut l = Line::new();
     slot_line(app, st, s, &mut l);
