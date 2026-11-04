@@ -35,12 +35,12 @@ def hf_type(t, mhz):
 
 
 def hf_mode(t, want, tries=6):
-    """* until HF mode's mode is `want` (or it never comes: None)."""
+    """SIDE2 until HF mode's mode is `want` (or it never comes: None; HF-12, decision 349)."""
     u = t.ui()
     for _ in range(tries):
         if hf_line(u).get("mode") == want:
             return u
-        u = t.keys("STAR", settle=0.25)
+        u = t.keys("SIDE2", settle=0.25)
     return u if hf_line(u).get("mode") == want else None
 
 
@@ -79,7 +79,7 @@ def hf_screen_shows_its_fields(t):
         h = hf_line(u)
         t.eq((h["band"], h["rx"], h["mode"]), ("31 m", "SI4732", "AM"), "9.58 MHz AM")
         t.check(h["step"].endswith("kHz") and h["bw"].endswith("kHz"), "AM: a step and a bandwidth in kHz", h)
-        t.check(h["signal"].startswith("SNR "), "the SI4732's signal is its SNR", h["signal"])
+        t.check(h["signal"].startswith("S") and "SNR " in h["signal"], "the SI4732's signal: S units and its SNR", h["signal"])
         t.eq(h["bfo"], "", "no BFO in AM")
         u = hf_mode(t, "USB")
         if u is not None:
@@ -141,9 +141,9 @@ def hf_no_ssb_from_18_mhz(t):
 
 @test("HF-12", pages=("More", "Hf", "Home", "Recall"))
 def hf_keys(t):
-    """HF mode's keys: knob and ▲▼ tune by the step, SIDE2 + knob by 1 MHz, ◀▶ the next band, * the mode, digits
-    a frequency (* point, OK enters), # the recent list, hold MENU the options (0 there the full menu); hold # stays
-    key lock."""
+    """HF mode's keys (decision 349): knob and ▲▼ tune by the step, SIDE2 + knob by 1 MHz, ◀▶ the step, SIDE1 the
+    next band, SIDE2 the mode, * # the filter, digits a frequency (* point, OK enters), hold 7 the recent list, hold
+    MENU the options (0 there the full menu); hold # stays key lock."""
     vfo = HfVfo(t)
     try:
         hf_type(t, 9.6)
@@ -164,17 +164,23 @@ def hf_keys(t):
         u = t.ui(0.3)
         t.check(abs(float(hf_line(u)["freq"]) - (f1 + 1.0)) < 1e-6, "SIDE2 + knob: 1 MHz", hf_line(u))
         b0 = hf_line(u)["band"]
-        u = t.keys("RIGHT", settle=0.3)
-        t.check(hf_line(u)["band"] not in ("", b0), "▶: the next band", (b0, hf_line(u)))
-        m0 = hf_line(u)["mode"]
+        u = t.keys("SIDE1", settle=0.3)
+        t.check(hf_line(u)["band"] not in ("", b0), "SIDE1: the next band", (b0, hf_line(u)))
+        s0 = hf_line(u)["step"]
+        u = t.keys("LEFT", settle=0.3)
+        t.check(hf_line(u)["step"] != s0, "◀: a bigger step", (s0, hf_line(u)))
+        bw0 = hf_line(u)["bw"]
         u = t.keys("STAR", settle=0.3)
-        t.check(hf_line(u)["mode"] != m0, "*: the next mode", (m0, hf_line(u)))
+        t.check(hf_line(u)["bw"] != bw0, "*: a narrower filter", (bw0, hf_line(u)))
+        m0 = hf_line(u)["mode"]
+        u = t.keys("SIDE2", settle=0.3)
+        t.check(hf_line(u)["mode"] != m0, "SIDE2: the next mode", (m0, hf_line(u)))
         u = t.keys("7 STAR 1")
         t.eq(hf_line(u)["entry"], "Go to 7.1 MHz", "digits and * type a frequency")
         u = t.keys("MENU", settle=0.3)
         t.eq((hf_line(u)["freq"], hf_line(u)["entry"]), ("7.10000", ""), "OK enters it")
-        u = t.keys("HASH")
-        t.eq(u.id, "Recall", "#: the recent list")
+        u = t.press("7", long=True)
+        t.eq(u.id, "Recall", "hold 7: the recent list")
         u = t.keys("BACK")
         t.eq(u.id, "Hf", "BACK: HF mode again")
         u = t.press("MENU", long=True)
@@ -186,29 +192,6 @@ def hf_keys(t):
         u = t.press("HASH", long=True)
         t.eq(u.bar["lock"], 1, "hold #: key lock, as everywhere")
         t.press("HASH", long=True)
-    finally:
-        vfo.restore()
-
-
-@test("HF-12", pages=("Hf", "Squelch"), xfail="SIDE1 does nothing in HF mode: chip 1 has no squelch there at all (the "
-      "Radio task's HF mode opens its audio unconditionally, firmware radio/hf.rs), so monitor and the squelch level "
-      "need building first")
-def hf_side1_on_chip_1(t):
-    """SIDE1 in HF mode on chip 1: monitor, and with the knob the squelch (HF-12)."""
-    vfo = HfVfo(t)
-    try:
-        hf_type(t, 28.4)
-        hf_mode(t, "FM")
-        f0 = hf_line(t.ui())["freq"]
-        t.r.down("SIDE1")
-        try:
-            t.r.knob(1)
-            u = t.ui(0.3)
-        finally:
-            t.r.up("SIDE1")
-        t.check(u.id == "Squelch" or hf_line(u).get("freq") == f0, "SIDE1 + knob: the squelch, not the frequency",
-                (u.id, hf_line(u)))
-        t.eq(u.id, "Squelch", "SIDE1 + knob: chip 1's squelch")
     finally:
         vfo.restore()
 
@@ -270,10 +253,10 @@ def no_patch_no_ssb_modes(t):
             hf_type(t, mhz)
             seen = set()
             for _ in range(6):
-                seen.add(hf_line(t.keys("STAR", settle=0.25))["mode"])
+                seen.add(hf_line(t.keys("SIDE2", settle=0.25))["mode"])
             t.check(not seen & {"USB", "LSB", "CW"}, f"{mhz} MHz: no USB, LSB or CW", seen)
-        u = t.keys("RIGHT", settle=0.3)
-        t.check(hf_line(u)["band"], "◀▶ still steps the bands", hf_line(u))
+        u = t.keys("SIDE1", settle=0.3)
+        t.check(hf_line(u)["band"], "SIDE1 still steps the bands", hf_line(u))
     finally:
         vfo.restore()
 
@@ -647,7 +630,7 @@ def hf_patch_streams_on_each_entry(t):
             t.wait(lambda u: "freq" in hf_line(u), timeout=20, what="loaded")
         seen = []
         for _ in range(5):
-            t.r.press("STAR")
+            t.r.press("SIDE2")
             for _ in range(3):
                 seen.append(hf_line(t.ui(0.05)))
         t.check(not any("loading" in h for h in seen), "mode changes: no load again", seen[:4])

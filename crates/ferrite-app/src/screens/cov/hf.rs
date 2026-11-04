@@ -48,17 +48,18 @@ fn ssb_modes() {
     assert_eq!(t.screen().mockup(), Some("HfMode.png"));
     t.reads("title=\"HF\"");
     t.shows("SI4732");
-    t.shows("SNR 12 dB");
+    t.shows("SNR 12");
+    // HF-12 (decision 349): SIDE2 steps the mode, its row shown a moment
     for (m, step) in [("USB", "100 Hz"), ("LSB", "100 Hz"), ("CW", "100 Hz")] {
-        t.tap(Key::Star);
+        t.tap(Key::Side(2));
         assert_eq!(hf::mode_name(t.app.set.hf.mode), m);
         t.shows(m);
-        t.shows("BFO 0");
+        t.shows("MODE   SIDE2 next");
         t.shows(step);
         t.shows("3 kHz");
         t.reads(m);
     }
-    t.tap(Key::Star);
+    t.tap(Key::Side(2));
     assert_eq!(hf::mode_name(t.app.set.hf.mode), "AM", "no FM below 18 MHz");
 }
 
@@ -137,9 +138,8 @@ fn chip1_range() {
     t.app.set.hf.mode = hf::FM;
     t.app.set.hf.bw = 0;
     t.wait(100);
-    t.shows("CHIP 1");
+    t.shows("chip 1"); // on the step line (HF-15, decision 349)
     t.shows("Wide");
-    t.shows("PTT transmits here on chip 1.");
     t.reads("CHIP 1");
     t.hold(Key::Menu);
     t.tap(Key::Down);
@@ -159,13 +159,13 @@ fn side2_knob_big_step() {
     assert_eq!(t.app.set.hf.freq, f + 100_000);
 }
 
-/// HF-32: \u{25c0} outside any band in USB goes to the amateur band below.
+/// HF-32: hold SIDE1 outside any band in USB goes to the amateur band below.
 #[test]
 fn band_down_from_outside_the_bands() {
     let mut t = open(255);
-    t.tap(Key::Star); // USB
+    t.tap(Key::Side(2)); // USB
     t.app.set.hf.freq = mhz(16);
-    t.tap(Key::Left);
+    t.hold(Key::Side(1));
     assert_eq!(t.app.set.hf.freq, 1_407_400, "20 m's start");
 }
 

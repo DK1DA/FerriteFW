@@ -5,11 +5,13 @@
 //! ([`super::activity::Mode::Hf`]) and leaving home stops it, and the status bar shows `HF` without TW/DW/SCN
 //! and with the alerts-paused bell when SAME is on (HF-5, SBAR-18).
 //!
-//! Keys (HF-12, HF-13): knob or ▲▼ tune by the step (SIDE2 + knob: 1 MHz), ◀▶ band, * mode (a point while
-//! typing, then OK once a digit follows it, VFO-24), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
-//! BACK leaves HF mode, one level back; hold 9 saves it as a channel (CHAN-26, KEY-23). SLOT, V/M (held too)
-//! and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
-//! (HF-23), and refuses on the SI4732's frequencies and modes (HF-24).
+//! Keys (HF-12, HF-13; decision 349, after nicFW's tuner keys): knob or ▲▼ tune by the step (SIDE2 + knob:
+//! 1 MHz), ◀▶ the step (the tuned digit underlined), SIDE2 the mode (its row shown a moment), SIDE1 the band (held:
+//! the one before), * # a narrower or wider filter, digits a frequency (kHz, or MHz with a point; OK enters), hold
+//! 3 / 1 seek, hold 4 the AGC, hold 7 the recent list, hold 9 saves a channel (CHAN-26, KEY-23), hold MENU the
+//! options, BACK leaves HF mode, one level back. SLOT and V/M (held too) do nothing here. Every key shows in the
+//! screen's grid (HF-15). PTT transmits on the HF frequency without going home (HF-23), and refuses on the SI4732's
+//! frequencies and modes (HF-24).
 
 use super::activity::Mode;
 use super::groups::agc_text;
@@ -98,6 +100,158 @@ const BW_SSB: [&str; 4] = ["3 kHz", "2.2 kHz", "1.2 kHz", "0.5 kHz"];
 const BW_FM: [&str; 2] = ["Wide", "Narrow"];
 /// Fine tune (BFO) steps, Hz (SSB, not built yet: HF-35).
 const BFO_STEP: i16 = 25;
+
+/// HF-15: the keys as the screen's grid shows them (decision 349).
+const KEY_GRID: [(&str, &str); 8] = [
+    ("SIDE2", "Mode"),
+    ("SIDE1", "Band"),
+    ("* #", "Filter"),
+    ("0-9", "Freq"),
+    ("hold 3", "Seek"),
+    ("hold 4", "AGC"),
+    ("hold 7", "Recent"),
+    ("hold 9", "Save"),
+];
+/// HF-12: how long SIDE2's mode row shows.
+const PICK_MS: u32 = 1_500;
+
+/// HF-15: the mode badge's colour: sideband amber, CW violet, AM green, FM blue.
+fn mode_colour(m: u8) -> u16 {
+    match m {
+        USB | LSB => AMBER,
+        CW => VIOLET,
+        AM => GREEN,
+        _ => BLUE,
+    }
+}
+
+/// HF-15: an amateur band's CW and data parts (their tops; phone above them), for the band strip: IARU Region
+/// 2's plan, rounded (a guide, not a rule).
+fn plan(name: &str) -> Option<(Freq10, Freq10)> {
+    Some(match name {
+        "160 m" => (184_000, 184_300),
+        "80 m" => (357_000, 360_000),
+        "40 m" => (704_000, 705_000),
+        "30 m" => (1_013_000, 1_015_000),
+        "20 m" => (1_407_000, 1_415_000),
+        "17 m" => (1_809_500, 1_811_000),
+        "15 m" => (2_107_000, 2_115_000),
+        "12 m" => (2_491_500, 2_493_000),
+        "10 m" => (2_807_000, 2_830_000),
+        "6 m" => (5_010_000, 5_030_000),
+        _ => return None,
+    })
+}
+
+/// The band strip's span on the screen.
+const STRIP_X: i32 = 12;
+const STRIP_W: i32 = 216;
+
+fn strip_x(f: Freq10, lo: Freq10, hi: Freq10) -> i32 {
+    let f = f.clamp(lo, hi);
+    STRIP_X + ((f - lo) as u64 * STRIP_W as u64 / (hi - lo).max(1) as u64) as i32
+}
+
+/// HF-15: where the frequency sits in its band: an amateur band's CW, data and phone parts, a broadcast band
+/// whole; its edges under it.
+#[inline(never)]
+fn band_strip(lcd: &mut impl Panel, band: Option<usize>, marker: i32) {
+    ferrite_ui::canvas::banded(lcd, 0, 118, 240, 34, BG, |lcd| {
+        let Some(b) = band else {
+            lcd.text4(12, 136, b"Between bands", &UI_12, DIM, BG);
+            return;
+        };
+        let (name, lo, hi, _, _) = BANDS[b];
+        let x = |f| strip_x(f, lo, hi);
+        let (cw_c, data_c, ph_c, bc_c) = (rgb565(0x3B, 0x2F, 0x5E), rgb565(0x24, 0x50, 0x3D), rgb565(0x1F, 0x3B, 0x5C), rgb565(0x24, 0x50, 0x3D));
+        let mid: &[u8] = match plan(name) {
+            Some((cw, data)) => {
+                lcd.fill(x(lo), 122, x(cw) - x(lo), 10, cw_c);
+                lcd.fill(x(cw), 122, x(data) - x(cw), 10, data_c);
+                lcd.fill(x(data), 122, x(hi) - x(data), 10, ph_c);
+                b"CW  data  phone"
+            }
+            None => {
+                lcd.fill(STRIP_X, 122, STRIP_W, 10, bc_c);
+                if HAM[b] { b"" } else { b"broadcast" }
+            }
+        };
+        lcd.fill(marker - 1, 119, 3, 16, TEXT);
+        let (l, r) = (crate::slot::mhz3(lo), crate::slot::mhz3(hi));
+        lcd.text4(12, 148, l.as_bytes(), &UI_12, DIM, BG);
+        let rw = text4_width(r.as_bytes(), &UI_12);
+        lcd.text4(228 - rw, 148, r.as_bytes(), &UI_12, DIM, BG);
+        let mw = text4_width(mid, &UI_12);
+        lcd.text4(120 - mw / 2, 148, mid, &UI_12, DIM, BG);
+    });
+}
+
+/// HF-12: SIDE2's row of the modes this frequency allows, the one picked lit.
+#[inline(never)]
+fn mode_row(lcd: &mut impl Panel, h: &HfMem, patch: bool) {
+    ferrite_ui::canvas::banded(lcd, 0, 118, 240, 64, BG, |lcd| {
+        lcd.fill_r(8, 118, 224, 62, 4, BLUE);
+        lcd.fill_r(9, 119, 222, 60, 4, SURFACE);
+        lcd.text4(16, 134, b"MODE   SIDE2 next", &UI_12, SUB, SURFACE);
+        let modes = MODE_ORDER.iter().copied().filter(|&m| h.allowed(m, patch));
+        let n = modes.clone().count().max(1) as i32;
+        let bw = (208 - 4 * (n - 1)) / n;
+        for (i, m) in modes.enumerate() {
+            let x = 16 + i as i32 * (bw + 4);
+            let on = m == h.mode;
+            let c = if on { mode_colour(m) } else { LINE };
+            lcd.fill_r(x, 142, bw, 30, 3, c);
+            if !on {
+                lcd.fill_r(x + 1, 143, bw - 2, 28, 3, SURFACE);
+            }
+            let t = mode_name(m).as_bytes();
+            let tw = text4_width(t, &UI_15B);
+            lcd.text4(x + (bw - tw) / 2, 163, t, &UI_15B, if on { BG } else { SUB }, if on { c } else { SURFACE });
+        }
+    });
+}
+
+/// HF-12: the frequency's digit a step tunes, as x and width on the screen (the 5 and 9 kHz steps: the kHz digit).
+fn digit_under(f: Freq10, step: u32) -> (i32, i32) {
+    let mut b = [0u8; 16];
+    let n = ferrite_core::freq::format(f, &mut b);
+    let split = n.saturating_sub(3);
+    let (big, tail) = (&b[..split], &b[split + 1..n]);
+    let x_tail = 12 + text4_width(big, &DIG_46) + 4;
+    // in the tail: 100 Hz then 10 Hz; in the big digits, from the end: 1, 10, 100 kHz, then the MHz past the point
+    let (font, text, x0, i) = match step {
+        0..=9 => (&DIG_28, tail, x_tail, 1),
+        10..=99 => (&DIG_28, tail, x_tail, 0),
+        _ => {
+            let k = match step {
+                100..=999 => 0,
+                1_000..=9_999 => 1,
+                10_000..=99_999 => 2,
+                _ => 3,
+            };
+            // skip the point between MHz and kHz
+            let i = if k < 3 { split - 1 - k } else { split - 5 };
+            (&DIG_46, big, 12, i)
+        }
+    };
+    let x = x0 + text4_width(&text[..i], font);
+    (x, text4_width(&text[i..i + 1], font))
+}
+
+/// HF-15: the signal in S units: S0 to S9 (S9 = -73 dBm, 6 dB an S unit), then dB over S9; with the SNR.
+fn s_units(dbm: i16, snr: Option<u8>) -> Buf<24> {
+    let mut t = Buf::<24>::new();
+    let d = dbm as i32;
+    if d <= -73 {
+        let _ = uwrite!(t, "S{}", ((d + 127).max(0) / 6).min(9));
+    } else {
+        let _ = uwrite!(t, "S9+{}", (d + 73) / 10 * 10);
+    }
+    if let Some(n) = snr {
+        let _ = uwrite!(t, "  SNR {}", n);
+    }
+    t
+}
 /// A frequency counts as used after 10 s (HF-28).
 const USED_MS: u32 = 10_000;
 pub const RECENT: usize = 10;
@@ -437,16 +591,6 @@ fn option_values(h: &HfMem) -> [Buf<24>; 4] {
     vals
 }
 
-/// The signal under the meter (HF-15): the S-meter on chip 1, the SNR on the SI4732.
-fn signal_text(chip1: bool, rssi: i16, snr: u8) -> Buf<24> {
-    let mut t = Buf::<24>::new();
-    if chip1 {
-        t.set(w::s_text(rssi).as_bytes());
-    } else {
-        let _ = uwrite!(t, "SNR {} dB", snr);
-    }
-    t
-}
 
 /// What HF mode shows (HF-15), for the UI readback (LINK-19): the same values its `render` draws.
 pub(crate) struct Shown {
@@ -516,7 +660,7 @@ impl Hf {
             step: STEP_NAMES[h.rx()][h.step as usize % 4],
             bw: h.bw_text(),
             bfo,
-            signal: signal_text(h.chip1(), rssi, snr),
+            signal: s_units(rssi, (!h.chip1()).then_some(snr)),
             entry: self.entry_text(app),
             tx: h.can_tx(),
             seeking: app.radio.hf_seeking,
@@ -605,9 +749,14 @@ impl View for Hf {
                 let s = h.step() as i32 * if e.key == Key::Up { 1 } else { -1 };
                 tune_to(app, (h.freq as i32 + s) as Freq10, None);
             }
+            // HF-12: ◀ a bigger step, ▶ a smaller, stopping at either end; the tuned digit is underlined
             (Key::Left | Key::Right, Short | Repeat) => {
-                // HF-32: the next band up or down in the mode's list
-                let b = h.next_band(e.key == Key::Right);
+                let s = app.set.hf.step as i32 + if e.key == Key::Left { 1 } else { -1 };
+                app.set.hf.step = s.clamp(0, 3) as u8;
+            }
+            // HF-12, HF-32: SIDE1 the next band in the mode's list, held the one before
+            (Key::Side(1), Short | Long) => {
+                let b = h.next_band(e.press == Short);
                 // HF-27: the band's own VFO as it was left; its start the first time.
                 match app.set.hf.band_vfo(b) {
                     Some((f, m, step, bw, bfo)) => tune_vfo(app, f, Some(m), Some((step, bw, bfo))),
@@ -618,8 +767,8 @@ impl View for Hf {
                     }
                 }
             }
-            (Key::Star, Short) => {
-                // the next mode this frequency allows
+            // HF-12: SIDE2 the next mode the frequency allows, its row shown for a moment
+            (Key::Side(2), Short) => {
                 let i = MODE_ORDER.iter().position(|&m| m == h.mode).unwrap_or(0);
                 let patch = app.radio.ssb_patch;
                 let next = (1..=MODE_ORDER.len()).map(|k| MODE_ORDER[(i + k) % MODE_ORDER.len()]).find(|&m| h.allowed(m, patch));
@@ -627,6 +776,14 @@ impl View for Hf {
                     app.set.hf.step = if matches!(m, USB | LSB | CW) { 2 } else { app.set.hf.step };
                     tune_to(app, h.freq, Some(m));
                 }
+                app.radio.hf_pick_at = app.now.max(1);
+            }
+            // HF-12: * a narrower filter, # a wider one, stopping at either end
+            (Key::Star | Key::Hash, Short) => {
+                let n = if h.rx() == 2 { 2 } else { 4 };
+                let bw = app.set.hf.bw as i32 + if e.key == Key::Star { 1 } else { -1 };
+                app.set.hf.bw = bw.clamp(0, n - 1) as u8;
+                app.send_si_opts(); // HF-35
             }
             (Key::Digit(d), Short) => {
                 app.radio.hf_entry = d as u32;
@@ -634,16 +791,19 @@ impl View for Hf {
             }
             // HF-31: hold 3 seeks up, hold 1 down (nicFW's tuner keys), with the SI4732's own seek.
             (Key::Digit(d @ (1 | 3)), Long) => seek(app, d == 3),
-            (Key::Hash, Short) => app.open(Dest::HfRecent),
+            // HF-12: hold 4 the next AGC
+            (Key::Digit(4), Long) => {
+                app.set.hf.agc = (app.set.hf.agc + 1) % (crate::settings::AGC_MAX + 1);
+                app.send_si_opts(); // HF-35
+            }
+            (Key::Digit(7), Long) => app.open(Dest::HfRecent),
             // CHAN-26, KEY-23: hold 9 saves the HF frequency and mode as a channel, as on a home VFO
             (Key::Digit(9), Long) => {
                 app.open(Dest::SaveChannel);
                 app.screen = Screen::Save(super::save::Save::hf());
             }
             // HF-13; hold V/M too (KEY-23: no zones in HF mode)
-            (Key::Slot | Key::VfoMem, Short) | (Key::VfoMem, Long) | (Key::Side(2), Short) => {
-                app.show_toast(b"Not in HF mode", b"BACK leaves", false)
-            }
+            (Key::Slot | Key::VfoMem, Short) | (Key::VfoMem, Long) => app.show_toast(b"Not in HF mode", b"BACK leaves", false),
             (Key::Exit, Short) => app.back(), // HF-4: BACK leaves HF mode, one level back
             _ => {}
         }
@@ -721,7 +881,6 @@ impl View for Hf {
             return;
         }
         let h = app.set.hf;
-        let rx = h.rx();
         if self.menu {
             let vals = option_values(&h);
             for (i, ((name, _), v)) in OPTIONS.iter().zip(&vals).enumerate() {
@@ -733,60 +892,102 @@ impl View for Hf {
             app.help_txt(lcd, 186, 46, OPTIONS[self.row as usize % OPTIONS.len()].1, b"HF MENU");
             return;
         }
-        // Band and receiver (HF-15).
-        let band = h.band().map_or("", |b| BANDS[b].0);
+        // HF-15 (decision 349): the "rig" layout.
+        let band_i = h.band();
+        let band = band_i.map_or("", |b| BANDS[b].0);
         let chip1 = h.chip1();
-        if app.dirty(R_HEAD, Mix::new().h(&band).h(&chip1).get()) {
-            w::field(lcd, 10, 120, 24, 42, 38, band.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
-            ferrite_ui::canvas::banded(lcd, 130, 24, 102, 18, BG, |lcd| {
-                w::tag(lcd, 230, 25, if chip1 { b"CHIP 1".as_slice() } else { b"SI4732" }, SUB, BG);
+        let mut agc = Buf::<24>::new();
+        agc_text(h.agc, &mut agc);
+        // Row 1: the mode as a badge, the filter and AGC as chips, the band at the right.
+        if app.dirty(R_HEAD, Mix::new().h(&h.mode).b(h.bw_text().as_bytes()).b(agc.as_bytes()).b(band.as_bytes()).get()) {
+            ferrite_ui::canvas::banded(lcd, 0, 22, 240, 20, BG, |lcd| {
+                let name = mode_name(h.mode).as_bytes();
+                let c = mode_colour(h.mode);
+                let bw = text4_width(name, &UI_15B) + 12;
+                lcd.fill_r(10, 23, bw, 18, 3, c);
+                lcd.text4(16, 37, name, &UI_15B, BG, c);
+                let left = 230 - w::tag(lcd, 230, 25, band.as_bytes(), TEXT, BG);
+                w::chips(lcd, 16 + bw, 24, left - 22 - bw, &[h.bw_text().as_bytes(), agc.as_bytes()], BG);
             });
         }
+        // The frequency, and its tuning digit underlined (HF-12).
         if app.dirty(R_FREQ, Mix::new().h(&h.freq).get()) {
-            w::freq(lcd, 12, 232, 96, h.freq, &DIG_46, &DIG_28, TEXT, SUB, BG);
+            w::freq(lcd, 12, 232, 92, h.freq, &DIG_46, &DIG_28, TEXT, SUB, BG);
         }
-        // Mode, step, bandwidth, BFO in USB/LSB/CW.
-        let mut bfo = Buf::<16>::new();
-        if h.ssb() {
-            let _ = uwrite!(bfo, "BFO {}{}", if h.bfo > 0 { "+" } else { "" }, h.bfo);
+        let (ux, uw) = digit_under(h.freq, h.step());
+        if app.dirty(R_LINE, Mix::new().h(&h.freq).h(&h.step).get()) {
+            ferrite_ui::canvas::banded(lcd, 12, 96, 220, 3, BG, |lcd| lcd.fill(ux, 96, uw, 3, BLUE)); // one pass: no flicker
         }
-        let step = STEP_NAMES[rx][h.step as usize % 4];
-        if app.dirty(R_INFO, Mix::new().h(&h.mode).h(&step).h(&h.bw_text()).h(&bfo).get()) {
-            ferrite_ui::canvas::banded(lcd, 12, 106, 220, 17, BG, |lcd| {
-                w::chips(lcd, 12, 106, 220, &[mode_name(h.mode).as_bytes(), step.as_bytes(), h.bw_text().as_bytes(), bfo.as_bytes()], BG);
-            });
-        }
-        // Signal: SNR on the SI4732, an S-meter on chip 1 (HF-15).
+        // The step and receiver, and the signal in S units (with the SNR on the SI4732).
         let (rssi, snr) = match cx.live.mode {
             ModeLive::Hf { rssi, snr, .. } => (rssi, snr),
             _ => (-127, 0),
         };
-        // dBuV = dBm + 107; the bar spans 0-70 dBuV.
-        let lit = ((rssi + 107).clamp(0, 70) as u32 * w::METER_SEGS as u32 / 70) as u8;
-        if app.dirty(R_SUB, Mix::new().h(&rssi).h(&snr).h(&chip1).get()) {
-            let t = signal_text(chip1, rssi, snr);
-            w::meter(lcd, 12, 140, None, lit, GREEN, BG);
-            w::field(lcd, 214, 18, 132, 150, 146, b"", const { &w::st(&UI_12, TEXT, BG, Align::Right) });
-            w::field(lcd, 12, 220, 152, 170, 166, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+        let su = s_units(rssi, (!chip1).then_some(snr));
+        let step = STEP_NAMES[h.rx()][h.step as usize % 4];
+        if app.dirty(R_INFO, Mix::new().b(step.as_bytes()).h(&chip1).b(su.as_bytes()).get()) {
+            let mut t = Buf::<32>::new();
+            let _ = uwrite!(t, "{} step \u{b7} {}", step, if chip1 { "chip 1" } else { "SI4732" });
+            w::field(lcd, 12, 140, 104, 120, 116, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
+            w::field(lcd, 152, 80, 104, 120, 116, su.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Right) });
         }
-        // Typing a frequency.
-        let ent = self.entry_text(app);
-        if app.dirty(R_NOTE, Mix::new().h(&ent).get()) {
-            w::field(lcd, 12, 220, 178, 196, 192, ent.as_bytes(), const { &w::st(&UI_12B, AMBER, BG, Align::Left) });
+        // SIDE2's mode row for a moment (HF-12), over the band strip and the meter; else those.
+        let picking = app.radio.hf_pick_at != 0 && app.now.wrapping_sub(app.radio.hf_pick_at) < PICK_MS;
+        let marker = band_i.map_or(0, |b| strip_x(h.freq, BANDS[b].1, BANDS[b].2));
+        if app.dirty(R_TOP, Mix::new().h(&picking).h(&h.mode).h(&band_i.map_or(99, |b| b as u32)).h(&marker).get()) {
+            if picking {
+                mode_row(lcd, &h, app.radio.ssb_patch);
+            } else {
+                band_strip(lcd, band_i, marker);
+            }
         }
-        // What is paused (HF-6), and whether PTT can transmit here.
-        let tx = h.can_tx();
-        let patch = app.radio.ssb_patch;
-        if app.dirty(R_HELP, Mix::new().h(&tx).h(&patch).get()) {
-            ferrite_ui::canvas::banded(lcd, 0, 204, 240, 96, BG, |lcd| {
-                lcd.fill_r(8, 206, 224, 76, 2, SURFACE);
-                let mut t = Buf::<140>::new();
-                t.push(crate::text::load(txt!("Paused: watch, scan, APRS, decoders, jobs and beacons. ")).as_bytes());
-                t.push(if tx { b"PTT transmits here on chip 1.".as_slice() } else { b"Receive only here." });
-                if !patch {
-                    t.push(b" No SSB patch: AM only.");
+        let lit = w::meter_level(rssi);
+        if !picking && app.dirty(R_SUB, Mix::new().h(&lit).get()) {
+            w::meter(lcd, 12, 158, None, lit, GREEN, BG);
+        }
+        if !picking && app.dirty(R_SCROLL, 1) {
+            ferrite_ui::canvas::banded(lcd, 0, 167, 240, 14, BG, |lcd| {
+                // S1, S3, S5, S7, S9 and +20 under their segments (meter_level's scale)
+                for (seg, t) in [(1, "1"), (5, "3"), (9, "5"), (13, "7"), (17, "9"), (18, "+20")] {
+                    lcd.text4(12 + seg * 10, 178, t.as_bytes(), &UI_12, DIM, BG);
                 }
-                w::wrap(lcd, 16, 208, 209, 279, 222, 15, t.as_bytes(), &UI_12, SUB, SURFACE);
+            });
+        }
+        if picking {
+            app.forget(R_SUB, 1);
+            app.forget(R_SCROLL, 1);
+        }
+        // The last two recent frequencies, or the frequency being typed.
+        let ent = self.entry_text(app);
+        let mut rec = Buf::<40>::new();
+        for (f, m) in recent(&h).filter(|&(f, _)| f != h.freq).take(2) {
+            if !rec.is_empty() {
+                rec.push(" \u{b7} ".as_bytes());
+            }
+            rec.push(crate::slot::mhz3(f).as_bytes());
+            rec.push(b" ");
+            rec.push(mode_name(m).as_bytes());
+        }
+        if app.dirty(R_NOTE, Mix::new().b(ent.as_bytes()).b(rec.as_bytes()).get()) {
+            ferrite_ui::canvas::banded(lcd, 0, 184, 240, 16, BG, |lcd| {
+                if !ent.is_empty() {
+                    lcd.text4(12, 196, ent.as_bytes(), &UI_12B, AMBER, BG);
+                } else if !rec.is_empty() {
+                    let x = lcd.text4(12, 196, b"Recent ", &UI_12, DIM, BG);
+                    lcd.text4(12 + x, 196, rec.as_bytes(), &UI_12, TEXT, BG);
+                }
+            });
+        }
+        // Every key, in a grid of eight (HF-15): none hidden.
+        if app.dirty(R_HELP, 1) {
+            ferrite_ui::canvas::banded(lcd, 0, 204, 240, 92, BG, |lcd| {
+                for (i, (k, what)) in KEY_GRID.iter().enumerate() {
+                    let (x, y) = (5 + (i as i32 % 4) * 58, 206 + (i as i32 / 4) * 45);
+                    lcd.fill_r(x, y, 56, 42, 3, LINE);
+                    lcd.fill_r(x + 1, y + 1, 54, 40, 3, SURFACE);
+                    lcd.text4(x + 5, y + 15, k.as_bytes(), &UI_12, DIM, SURFACE);
+                    lcd.text4(x + 5, y + 33, what.as_bytes(), &UI_12B, TEXT, SURFACE);
+                }
             });
         }
     }
@@ -801,7 +1002,7 @@ impl View for Hf {
         } else if self.n > 0 {
             Hints::new(&[("*", "Point"), ("OK", "Go"), ("BACK", "Cancel")])
         } else {
-            Hints::new(&[("*", "Mode"), ("#", "Recent"), ("Hold MENU", "Options")])
+            Hints::new(&[("Knob", "Tune"), (ARROWS_LR, "Step"), ("Hold MENU", "More")])
         }
     }
 }

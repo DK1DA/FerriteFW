@@ -65,8 +65,9 @@ fn no_ssb_patch() {
     r.run("menu 0 9; expect text \"SSB patch Not installed\"");
     r.run("menu 0 3 4; wait 3s; expect screen \"HF mode\"");
     for _ in 0..4 {
-        r.press(Key::Star);
-        let t = r.text();
+        r.press(Key::Side(2)); // HF-12: SIDE2 the mode (decision 349)
+        // the recent line may name an earlier frequency's mode; the badge and SIDE2's row may not
+        let t: String = r.text().lines().filter(|l| !l.contains("Recent")).collect::<Vec<_>>().join("\n");
         assert!(!t.contains("USB") && !t.contains("LSB") && !t.contains(" CW"), "an SSB mode without the patch:\n{t}");
     }
 }

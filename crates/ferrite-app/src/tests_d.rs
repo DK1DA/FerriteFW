@@ -317,7 +317,7 @@ fn hf_mode() {
     }
     t.tap(Key::Menu);
     assert_eq!(t.app.set.hf.freq, 2_840_000);
-    t.tap(Key::Hash);
+    t.hold(Key::Digit(7)); // HF-12: hold 7 the recent list
     assert_eq!(t.app.screen().name(), "HF recent");
     t.tap(Key::Menu); // tunes the newest, back in HF mode
     assert!(matches!(t.app.screen(), Screen::Hf(_)));
@@ -549,20 +549,20 @@ fn hf_bands_remember_their_vfo() {
     t.app.set.hf.bw = 2;
     let (f31, s31) = (t.app.set.hf.freq, t.app.set.hf.step);
     assert_ne!(f31, start);
-    t.tap(Key::Right); // 25 m (AM walks the broadcast list, HF-32): first visit, its start
+    t.tap(Key::Side(1)); // 25 m (AM walks the broadcast list, HF-32): first visit, its start
     assert_eq!(t.app.set.hf.freq, 1_177_000);
     t.tap(Key::Up);
     let f25 = t.app.set.hf.freq;
-    t.tap(Key::Left); // back to 31 m: as it was left
+    t.hold(Key::Side(1)); // back to 31 m: as it was left
     let h = t.app.set.hf;
     assert_eq!((h.freq, h.step, h.bw), (f31, s31, 2));
-    t.tap(Key::Right); // and 25 m as it was left
+    t.tap(Key::Side(1)); // and 25 m as it was left
     assert_eq!(t.app.set.hf.freq, f25);
     // In the settings: the band VFOs survive leaving HF mode.
     t.tap(Key::Exit);
     menu0(&mut t, &[3, 4]);
     assert_eq!(t.app.set.hf.freq, f25);
-    t.tap(Key::Left);
+    t.hold(Key::Side(1));
     assert_eq!(t.app.set.hf.freq, f31);
 }
 

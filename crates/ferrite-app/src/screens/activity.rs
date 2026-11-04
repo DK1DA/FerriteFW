@@ -96,6 +96,8 @@ pub struct RadioUi {
     /// frequency being typed, as a number (the screen state holds its length and point).
     pub hf_tuned_at: u32,
     pub hf_counted: bool,
+    /// HF-12: when SIDE2 last changed the mode (its row shows a moment); 0 none.
+    pub hf_pick_at: u32,
     /// A seek (hold 3 or 1) is running: the receiver's frequency is taken as it lands.
     pub hf_seeking: bool,
     pub hf_entry: u32,
@@ -162,6 +164,7 @@ impl RadioUi {
             act: [0; SLOTS],
             act_bucket: 0,
             hf_tuned_at: 0,
+            hf_pick_at: 0,
             hf_counted: false,
             hf_seeking: false,
             hf_entry: 0,
