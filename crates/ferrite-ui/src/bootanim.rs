@@ -5,8 +5,8 @@
 //! The 14 windings are one mask: each pixel's winding is found from its angle round the logo's centre. They sit
 //! 7-10° apart with clear gaps, so the angle is taken once per run of winding pixels along a row (a few per row,
 //! an integer division each), not per pixel.
-use crate::assets::{LOGO112_RING, LOGO112_WIND};
-use crate::font4::{Font4, MaskRows};
+use crate::font4::Font4;
+use crate::logo::{Rows, RING, WIND};
 use crate::gfx::{blend, text_row, RleAt};
 use crate::panel::{Panel, W};
 
@@ -87,7 +87,8 @@ pub fn logo(lcd: &mut dyn Panel, x: i32, y: i32, l: &Logo) {
     if lcd.text_only() {
         return;
     }
-    let (mut r1, mut r2) = (MaskRows::new(&LOGO112_RING), MaskRows::new(&LOGO112_WIND));
+    // the masks streamed from the logo part (UPD-23): about 2.5 KB read a drawing
+    let (mut r1, mut r2) = (Rows::new(RING), Rows::new(WIND));
     let (mut a1, mut a2) = ([0u8; SIZE as usize], [0u8; SIZE as usize]);
     let mut line = [0u16; SIZE as usize];
     for row in 0..SIZE {

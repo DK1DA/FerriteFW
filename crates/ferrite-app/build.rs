@@ -1,6 +1,12 @@
 //! Compiles the terminal's page templates (`src/term/pages.vt`) into the template pack: the bytes `term::tpl` reads,
 //! in the format the SPI flash would hold them (decision 342; the format is described in `src/term/tpl.rs`), and
-//! the names' numbers for the firmware's side. Only with the `vt100` feature.
+//! the names' numbers for the firmware's side. Only with the `vt100` feature. On the radio the pack is an SPI part
+//! (decision 335): the static is in host builds only (the packer writes it out, tests read it).
+//!
+//! It also builds the text pack (decision 335, UPD-22): every `txt!("...")` and `txtc!("...")` literal in `src/`
+//! (and the terminal's `no!(t, "...")`, which goes through `txt!`)
+//! gets a number, the pack's body (`text_en.bin`, the SPI part's body) holds the texts, and the two macros map each
+//! literal to its number, so the text itself never reaches the MCU's flash.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -8,6 +14,7 @@ use std::fmt::Write as _;
 fn main() {
     println!("cargo:rerun-if-changed=src/term/pages.vt");
     println!("cargo:rerun-if-changed=build.rs");
+    texts();
     if std::env::var_os("CARGO_FEATURE_VT100").is_none() {
         return;
     }
@@ -18,8 +25,9 @@ fn main() {
     for (k, v) in &ids {
         writeln!(rs, "pub const {k}: u8 = {v};").unwrap();
     }
-    // the slow flash: a page row is drawn a few times a second at most
-    rs.push_str("#[cfg_attr(target_os = \"none\", link_section = \".slow_rodata\")]\n");
+    // host builds only: on the radio the pack is an SPI part (decision 335, UPD-21), read by `tpl::load`
+    assert!(pack.len() <= 4096, "the template pack is {} bytes: tpl::PACK_MAX is 4096", pack.len());
+    rs.push_str("#[cfg(not(target_os = \"none\"))]\n");
     writeln!(rs, "pub static PACK: [u8; {}] = {:?};", pack.len(), pack).unwrap();
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     std::fs::write(out.join("vt_pack.rs"), rs).unwrap();
@@ -322,4 +330,164 @@ fn compile(src: &str) -> Result<Compiled, String> {
         o.extend(s);
     }
     Ok((o, ids))
+}
+
+// ---- the text pack ----
+
+/// A `txt!`/`txtc!` literal: its source text between the quotes (what the macro arm matches) and its value.
+struct Lit {
+    raw: String,
+    value: Vec<u8>,
+}
+
+/// The string literal starting at `b[i]` (a `"`): its raw text and value, and where it ends.
+fn literal(b: &[u8], i: usize) -> Result<(Lit, usize), String> {
+    let mut j = i + 1;
+    let mut v = Vec::new();
+    while j < b.len() && b[j] != b'"' {
+        if b[j] == b'\\' {
+            j += 1;
+            match b[j] {
+                b'n' => v.push(b'\n'),
+                b't' => v.push(b'\t'),
+                b'r' => v.push(b'\r'),
+                b'0' => v.push(0),
+                b'\\' | b'"' | b'\'' => v.push(b[j]),
+                b'x' => {
+                    v.push(u8::from_str_radix(std::str::from_utf8(&b[j + 1..j + 3]).unwrap(), 16).map_err(|e| e.to_string())?);
+                    j += 2;
+                }
+                b'u' => {
+                    let end = j + b[j..].iter().position(|&c| c == b'}').ok_or("no } in \\u{}")?;
+                    let h = std::str::from_utf8(&b[j + 2..end]).unwrap();
+                    let c = char::from_u32(u32::from_str_radix(h, 16).map_err(|e| e.to_string())?).ok_or("bad \\u")?;
+                    let mut t = [0u8; 4];
+                    v.extend_from_slice(c.encode_utf8(&mut t).as_bytes());
+                    j = end;
+                }
+                b'\n' => {
+                    while j + 1 < b.len() && b[j + 1].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                }
+                c => return Err(format!("unknown escape \\{}", c as char)),
+            }
+            j += 1;
+        } else {
+            v.push(b[j]);
+            j += 1;
+        }
+    }
+    if j >= b.len() {
+        return Err("no closing quote".into());
+    }
+    Ok((Lit { raw: String::from_utf8(b[i + 1..j].to_vec()).unwrap(), value: v }, j + 1))
+}
+
+fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let mut v: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    v.sort();
+    for p in v {
+        if p.is_dir() {
+            rs_files(&p, out);
+        } else if p.extension().is_some_and(|e| e == "rs") {
+            out.push(p);
+        }
+    }
+}
+
+/// The text pack: every literal of `txt!(` and `txtc!(` in `src/`, in file order, each once.
+fn texts() {
+    println!("cargo:rerun-if-changed=src");
+    let mut files = Vec::new();
+    rs_files(std::path::Path::new("src"), &mut files);
+    let mut lits: Vec<Lit> = Vec::new();
+    for f in &files {
+        let src = std::fs::read_to_string(f).unwrap();
+        let b = src.as_bytes();
+        let mut i = 0;
+        // The terminal's refusals, `no!(t, "...", ...)` (term/cmd.rs), go through `txt!` too.
+        let mut k = 0;
+        while let Some(p) = src[k..].find("no!(") {
+            let at = k + p;
+            k = at + 4;
+            let line_start = src[..at].rfind('\n').map_or(0, |n| n + 1);
+            if src[line_start..at].contains("//") || at > 0 && (b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_') {
+                continue;
+            }
+            // the first argument (an expression without quotes), a comma, then the literal
+            let Some(q) = src[k..].find(['"', ')', ';']) else { continue };
+            if b[k + q] != b'"' || !src[k..k + q].contains(',') {
+                continue;
+            }
+            let (lit, _) = literal(b, k + q).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+            if lit.value.len() > 255 {
+                panic!("{}: a text of {} bytes (255 at most: split it): {}", f.display(), lit.value.len(), lit.raw);
+            }
+            if !lits.iter().any(|l| l.raw == lit.raw) {
+                lits.push(lit);
+            }
+        }
+        while let Some(p) = src[i..].find("txt") {
+            let at = i + p;
+            i = at + 3;
+            let rest = &src[at..];
+            let skip = if rest.starts_with("txt!(") {
+                5
+            } else if rest.starts_with("txtc!(") {
+                6
+            } else {
+                continue;
+            };
+            // not in a comment, nor part of a longer name
+            let line_start = src[..at].rfind('\n').map_or(0, |n| n + 1);
+            if src[line_start..at].contains("//") || at > 0 && (b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_') {
+                continue;
+            }
+            let mut j = at + skip;
+            while b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if b[j] != b'"' {
+                continue; // the macro's own definition (`$t`)
+            }
+            let (lit, end) = literal(b, j).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+            if lit.value.len() > 255 {
+                panic!("{}: a text of {} bytes (255 at most: split it): {}", f.display(), lit.value.len(), lit.raw);
+            }
+            if !lits.iter().any(|l| l.raw == lit.raw) {
+                lits.push(lit);
+            }
+            i = end;
+        }
+    }
+    assert!(lits.len() < 31 << 6, "too many texts for txtc!'s two characters");
+    // The body: count u16, 0 u16, an entry per text (offset from the body's start, length in the top 8 bits), texts.
+    let n = lits.len();
+    let mut body = Vec::new();
+    body.extend_from_slice(&(n as u16).to_le_bytes());
+    body.extend_from_slice(&[0, 0]);
+    let mut at = 4 + 4 * n;
+    for l in &lits {
+        body.extend_from_slice(&((at as u32) | (l.value.len() as u32) << 24).to_le_bytes());
+        at += l.value.len();
+    }
+    for l in &lits {
+        body.extend_from_slice(&l.value);
+    }
+    let mut rs = String::from("// Generated by build.rs from the txt!/txtc! literals in src/ (the text pack).\n");
+    rs.push_str("/// A text in the text pack, by its literal: its number (UPD-22).\n#[allow(unused_macros)]\nmacro_rules! txt {\n");
+    for (k, l) in lits.iter().enumerate() {
+        writeln!(rs, "    (\"{}\") => {{ $crate::text::Txt({k}) }};", l.raw).unwrap();
+    }
+    rs.push_str("    ($t:tt) => { compile_error!(\"txt!: a string literal\") };\n");
+    rs.push_str("}\n/// A text's number as two characters, for a table string (`concat!`): `text::code`.\n#[allow(unused_macros)]\nmacro_rules! txtc {\n");
+    for (k, l) in lits.iter().enumerate() {
+        // a control character, then one of 0x20-0x5F: never a `|`, so a table string's fields still split
+        writeln!(rs, "    (\"{}\") => {{ \"\\u{{{:x}}}\\u{{{:x}}}\" }};", l.raw, 1 + (k >> 6), 0x20 + (k & 0x3F)).unwrap();
+    }
+    rs.push_str("    ($t:tt) => { compile_error!(\"txtc!: a string literal\") };\n}\n");
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    std::fs::write(out.join("txt_macros.rs"), rs).unwrap();
+    std::fs::write(out.join("text_en.bin"), body).unwrap();
 }

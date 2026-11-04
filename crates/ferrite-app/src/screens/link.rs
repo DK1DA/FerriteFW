@@ -120,7 +120,7 @@ impl View for Link {
         match self.page {
             LinkPage::Status => {
                 app.table(lcd, &STATUS, cx.live, dev, &(), None);
-                app.help_box(lcd, 160, 48, b"The web app connects by cable or Bluetooth.", b"");
+                app.help_txt(lcd, 160, 48, txt!("The web app connects by cable or Bluetooth."), b"");
             }
             LinkPage::Progress => {
                 let pct = dev.link.write_pct.unwrap_or(100);

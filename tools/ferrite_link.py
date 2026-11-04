@@ -832,6 +832,7 @@ class Radio:
         self.port = Port(port)
         self.link = Link(self.port)
         hello = self.link.hello(name)
+        self.hello = hello  # HELLO's answer: its build, capabilities and layouts (LINK-35.2, LINK-62)
         if not hello[2]:
             if not pin:
                 raise RadioError(5)

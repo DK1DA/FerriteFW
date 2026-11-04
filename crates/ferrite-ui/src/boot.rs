@@ -177,7 +177,10 @@ fn anim(lcd: &mut dyn Panel, t: u32) {
         }
     });
     let peak = |k: u32| ((k * f + 127) / 255) as u8;
-    bootanim::logo(lcd, 64, 28, &Logo { bg, ring, wind, halo, peak: peak(LOGO_HALO) });
+    if crate::logo::present() {
+        // UPD-23: no logo part, the wordmark alone
+        bootanim::logo(lcd, 64, 28, &Logo { bg, ring, wind, halo, peak: peak(LOGO_HALO) });
+    }
     if !flashed {
         return; // the wordmark's line stays as drawn: empty
     }
@@ -190,6 +193,17 @@ fn anim(lcd: &mut dyn Panel, t: u32) {
     let area = (x.min(x + l - NAME_REACH), (x + w).max(x + r + NAME_REACH), NAME_Y.0, NAME_Y.1);
     let name = Name { bg, fg: hi, alpha: level(ease(t - FLASH_AT, 90)), halo, peak: peak(NAME_HALO), core, reach: NAME_REACH };
     bootanim::name(lcd, s, &WORD_40, x, 188, area, &name);
+}
+
+/// The still logo (the animation's last frame: the ring and the windings at full), when the logo part is there
+/// (UPD-23); the wordmark alone otherwise.
+#[inline(never)]
+fn still_logo(lcd: &mut dyn Panel) {
+    if crate::logo::present() {
+        let bg = map_bg(BG);
+        let (ring, wind) = (ink_on(map(SUB), bg), ink_on(map(BLUE), bg));
+        bootanim::logo(lcd, 64, 28, &Logo { bg, ring, wind: [(wind, 15); WINDINGS], halo: [bg; 16], peak: 0 });
+    }
 }
 
 fn paint(lcd: &mut impl Panel, b: &BootInfo, full: bool) {
@@ -208,7 +222,7 @@ fn paint_at(lcd: &mut impl Panel, b: &BootInfo, full: bool, t: Option<u32>) {
         if let Some(t) = t {
             anim(lcd, t);
         } else {
-            lcd.mask4(64, 28, &LOGO112_RING, SUB, Some((&LOGO112_WIND, BLUE)), BG);
+            still_logo(lcd);
             lcd.text4_aligned(120, 188, Align::Center, b"FERRITE", &WORD_40, TEXT, BG);
         }
         lcd.text4_aligned(120, 209, Align::Center, b.version.as_bytes(), &UI_12, SUB, BG);

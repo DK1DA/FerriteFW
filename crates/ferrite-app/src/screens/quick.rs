@@ -138,8 +138,13 @@ impl View for Quick {
         let why = app.greyed(item);
         let mut p = Buf::<16>::new();
         let _ = uwrite!(p, "MENU {}", (row + 1) % 10);
-        let help = if item == Item::Tones && heard(app) != 0 { "OK uses the heard tone." } else { why.unwrap_or(item.help(!sl.on_channel())) };
-        app.help_box(lcd, 265, 33, help.as_bytes(), p.as_bytes());
+        use super::groups::Help;
+        let help = match why {
+            _ if item == Item::Tones && heard(app) != 0 => Help::Why("OK uses the heard tone."),
+            Some(w) => Help::Why(w),
+            None => Help::Note(Some(item.help(!sl.on_channel()))),
+        };
+        app.help_note(lcd, 265, 33, help, p.as_bytes());
     }
 
     fn hints(self, app: &App) -> Hints {
@@ -217,10 +222,10 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
         app.list_row(lcd, i as usize, 41 + 22 * i as i32, 22, &r);
     }
     let i = row.min(FM_ROWS);
-    let help = if i < FM_ROWS { fm::OPTIONS[i as usize].1 } else { "Every setting, by group." };
+    let help = if i < FM_ROWS { fm::OPTIONS[i as usize].1 } else { txt!("Every setting, by group.") };
     let mut p = Buf::<16>::new();
     let _ = uwrite!(p, "MENU {}", if i < FM_ROWS { i + 1 } else { 0 });
-    app.help_box(lcd, 265, 33, help.as_bytes(), p.as_bytes());
+    app.help_txt(lcd, 265, 33, help, p.as_bytes());
 }
 
 /// The active slot's tone hint (TSRCH-16), 0 none.

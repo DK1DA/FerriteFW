@@ -181,6 +181,12 @@ pub fn make() -> (Option<(u32, u32)>, &'static Store) {
     (id, store)
 }
 
+/// The SPI parts' reader (decision 335, `ferrite_core::part`): straight from the chip through the store, a program
+/// or erase suspended meanwhile; false before the store is made or while the chip is in use.
+pub fn part_read(addr: u32, buf: &mut [u8]) -> bool {
+    STORE.try_get().is_some_and(|s| s.0.part_read(addr, buf))
+}
+
 /// Tells the Storage task about queued writes.
 pub fn wake(store: &Store) {
     if store.has_jobs() {

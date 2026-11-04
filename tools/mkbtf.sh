@@ -18,7 +18,8 @@
 # features turn it on (firmware/Cargo.toml). The receive and tx images leave them out; their terminal says "not in
 # this build: a bench build has it".
 #
-# Flash with: python3 tools/flash.py PORT target/ferrite-bringup.btf --backup flash.bin
+# Each Ferrite build also packs target/NAME.ffw (decision 335): the .btf and its SPI parts (text pack, logo, terminal
+# templates), unsigned. Flash with: python3 tools/flash.py PORT target/ferrite-tx.ffw --backup flash.bin --dev-unsigned
 set -e
 cd "$(dirname "$0")/.."
 name=ferrite
@@ -63,5 +64,17 @@ fi
 python3 tools/btf.py pack "target/$name.bin" "target/$name.btf"
 python3 tools/flash.py --dry-run - "target/$name.btf"
 shasum -a 256 "target/$name.btf"
+# The update file (decision 335, UPD-20): the image and its SPI parts in one .ffw beside the .btf, unsigned (CI
+# signs releases). The parts carry the image's build ID, read back from the image itself.
+if [ "$elf" = ferrite ]; then
+    bid=$(python3 tools/ffw.py build-id "target/$name.bin")
+    rm -rf "target/parts/$name"
+    cargo run -q -p ferrite-sim --bin ferrite-mkparts -- --build "$bid" "target/parts/$name" > /dev/null
+    ver=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+    kind=${name#ferrite}; kind=${kind#-}
+    python3 tools/ffw.py pack "target/$name.ffw" --btf "target/$name.btf" --parts "target/parts/$name" \
+        --kind "${kind:-rx}" --build "$bid" --version "$ver"
+    python3 tools/ffw.py check "target/$name.ffw" --dev-unsigned > /dev/null
+fi
 # The size against the last recorded build; on a clean main it records this one (tools/size-history.tsv).
 if [ "$elf" = ferrite ]; then python3 tools/sizelog.py "$name"; fi

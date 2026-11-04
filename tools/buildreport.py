@@ -5,7 +5,7 @@
     python3 tools/buildreport.py tx --ui RESULTS.json    # with the sim UI tests' results (tools/uitest.py --sim)
     python3 tools/buildreport.py tx --no-build --no-tests
     python3 tools/buildreport.py tx --from-logs HOST.log DRIVERS.log   # tests already run under cargo llvm-cov (CI)
-    python3 tools/buildreport.py tx --sig IMAGE.btf.minisig            # the image's minisign signature (CI)
+    python3 tools/buildreport.py tx --sig FILE.ffw                     # the update file's signature (CI)
 
 --from-logs takes the output of `cargo llvm-cov --no-report` (the workspace, then the drivers with --all-features)
 saved by the caller: the counts come from those logs and the coverage from that run's data, so nothing runs twice.
@@ -63,7 +63,21 @@ def build_info(build):
 
 def signature(path, btf):
     """The image's minisign signature (--sig): its key ID, trusted comment and text, and whether it verifies against
-    minisign.pub (needs the minisign tool; None when it isn't installed)."""
+    minisign.pub (needs the minisign tool; None when it isn't installed). A signed `.ffw` (decision 335): the
+    signature over its manifest, checked by tools/ffw.py."""
+    if path.endswith(".ffw"):
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import ffw
+        mbytes, sig, _ = ffw.read(open(path, "rb"))
+        if sig is None:
+            return None
+        text = sig.decode()
+        lines = text.splitlines()
+        raw = base64.b64decode(lines[1])
+        ok = not ffw.minisign_verify(open(os.path.join(ROOT, "minisign.pub")).read(), mbytes, sig)
+        trusted = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("trusted comment:")), "")
+        return dict(file=os.path.basename(path) + " (manifest.minisig)", key_id=raw[2:10][::-1].hex().upper(),
+                    trusted_comment=trusted, verified=ok, text=text)
     text = open(path).read()
     lines = text.splitlines()
     raw = base64.b64decode(lines[1])
@@ -355,7 +369,8 @@ def main():
     ap.add_argument("--no-build", action="store_true", help="use the image as last built")
     ap.add_argument("--no-tests", action="store_true", help="skip the host tests")
     ap.add_argument("--no-coverage", action="store_true", help="skip code coverage (cargo llvm-cov, about 4 minutes)")
-    ap.add_argument("--sig", metavar="IMAGE.btf.minisig", help="the image's minisign signature, shown in the report")
+    ap.add_argument("--sig", metavar="IMAGE.btf.minisig", help="the image's minisign signature, or the signed .ffw, "
+                    "shown in the report")
     ap.add_argument("--from-logs", nargs=2, metavar=("HOST.log", "DRIVERS.log"),
                     help="the host and driver tests already run under cargo llvm-cov --no-report: count them from "
                     "these logs and report that run's coverage instead of running anything again")
@@ -365,7 +380,9 @@ def main():
     slow = run(sys.executable, "tools/slowcheck.py", check=False)
     r = dict(build=build_info(a.build), mcu=elf_sizes(), spi=spi_map(), tests=None)
     if a.sig:
-        r["signature"] = signature(a.sig, os.path.join(ROOT, "target", BUILDS[a.build][1] + ".btf"))
+        sig = signature(a.sig, os.path.join(ROOT, "target", BUILDS[a.build][1] + ".btf"))
+        if sig:
+            r["signature"] = sig
     if not a.no_tests:
         if a.from_logs:
             host, drivers = (logged_tests(f) for f in a.from_logs)

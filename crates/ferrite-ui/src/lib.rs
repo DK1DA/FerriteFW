@@ -29,6 +29,7 @@ pub mod clipcheck;
 pub mod font4;
 pub mod gfx;
 pub mod home;
+pub mod logo;
 pub mod panel;
 pub mod prof;
 pub mod qr;

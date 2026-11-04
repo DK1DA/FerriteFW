@@ -551,15 +551,15 @@ pub(crate) fn zone_rows(near: bool) -> u16 {
 
 
 /// The editor's rows: label and help (layout as data; values from [`value`]).
-const ROWS: [(&str, &str); 8] = [
-    ("Name", "Up to 16 characters"),
-    ("Scan all", "In the set \"zones in scan all\" scans"),
-    ("Shown on home", "Home's left and right stop on it (CHAN-11)"),
-    ("Sort by distance", "Nearest channel first, with a GPS fix"),
-    ("Resume", "After a hit; the radio's rule unless set"),
-    ("Dwell", "Wait before resuming"),
-    ("Priority 1", "Checked during scans (SCAN-12)"),
-    ("Priority 2", "Checked during scans (SCAN-12)"),
+const ROWS: [(&str, crate::text::Txt); 8] = [
+    ("Name", txt!("Up to 16 characters")),
+    ("Scan all", txt!("In the set \"zones in scan all\" scans")),
+    ("Shown on home", txt!("Home's left and right stop on it (CHAN-11)")),
+    ("Sort by distance", txt!("Nearest channel first, with a GPS fix")),
+    ("Resume", txt!("After a hit; the radio's rule unless set")),
+    ("Dwell", txt!("Wait before resuming")),
+    ("Priority 1", txt!("Checked during scans (SCAN-12)")),
+    ("Priority 2", txt!("Checked during scans (SCAN-12)")),
 ];
 
 /// The defaults, for the dot (MENU-12) and # (MENU-18).
@@ -796,7 +796,7 @@ impl View for Zones {
             }
             let mut p = Buf::<16>::new();
             let _ = uwrite!(p, "MENU 0 2 3");
-            app.help_box(lcd, 300 - 38, 34, ROWS[row as usize].1.as_bytes(), p.as_bytes());
+            app.help_txt(lcd, 300 - 38, 34, ROWS[row as usize].1, p.as_bytes());
             return;
         }
         let near = nearby(app, store);

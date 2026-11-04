@@ -323,14 +323,14 @@ impl View for PosEntry {
             None => f.set(b"No fix"),
         }
         app.row1(lcd, 4, b"From GPS", f.as_bytes(), false, self.row == 4, false);
-        let note: &[u8] = if self.row == 4 {
-            b"OK keeps the current GPS fix as the fixed position."
+        let note = if self.row == 4 {
+            txt!("OK keeps the current GPS fix as the fixed position.")
         } else if self.row == 3 {
-            b"OK types a grid square: its centre is used. # clears it."
+            txt!("OK types a grid square: its centre is used. # clears it.")
         } else {
-            b"Used when there is no GPS fix (APRS, Nearby). # clears it."
+            txt!("Used when there is no GPS fix (APRS, Nearby). # clears it.")
         };
-        app.help_box(lcd, 300 - 52, 48, note, b"MENU 0 6 9");
+        app.help_txt(lcd, 300 - 52, 48, note, b"MENU 0 6 9");
     }
 
     fn hints(self, _: &App) -> Hints {

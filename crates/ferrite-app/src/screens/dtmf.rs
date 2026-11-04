@@ -162,7 +162,7 @@ impl View for DtmfPad {
                 }
                 app.row1(lcd, k as usize, name.as_bytes(), v.as_bytes(), false, i == self.cur, false);
             }
-            app.help_box(lcd, 300 - 38, 34, b"OK opens one; # names it; * clears it.", b"MENU 0 8 5 2");
+            app.help_txt(lcd, 300 - 38, 34, txt!("OK opens one; # names it; * clears it."), b"MENU 0 8 5 2");
             return;
         }
         // Dialer: what's typed, large; the slot it goes out on; how A-D are typed.
@@ -193,7 +193,7 @@ impl View for DtmfPad {
         if app.dirty(R_LINE, Mix::new().h(&slot).get()) {
             w::field(lcd, 8, 224, 128, 146, 142, slot.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
         }
-        app.help_box(lcd, 300 - 52, 48, b"Hold 1-4 for A-D. Hold MENU keeps it as a memory.", b"MENU 0 8 5 1");
+        app.help_txt(lcd, 300 - 52, 48, txt!("Hold 1-4 for A-D. Hold MENU keeps it as a memory."), b"MENU 0 8 5 1");
     }
 
     fn hints(self, _: &App) -> Hints {

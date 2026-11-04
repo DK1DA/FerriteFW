@@ -147,6 +147,9 @@ SECTIONS
     /* Helpers only the UI task uses: the SSB patch check's SHA-256, `str` search (entry::commit) and UTF-8
      * checks, the frequency formatter. */
     *(.text.*12ferrite_core6sha256*);
+    /* The SPI parts (decision 335): checked once at power-on, read when a screen or the terminal draws. */
+    *(.text.*12ferrite_core4part*);
+    *(.text.*7ferrite5store9part_read*);
     *(.text.*4core3str7pattern*);
     *(.text.*4core3str8converts9from_utf8*);
     *(.text.*12ferrite_core4freq6format*);

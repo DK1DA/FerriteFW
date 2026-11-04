@@ -41,6 +41,7 @@ pub mod mcutemp;
 pub mod memmap;
 pub mod msg;
 pub mod name;
+pub mod part;
 pub mod path;
 pub mod rawaudio;
 pub mod rxmeter;

@@ -97,28 +97,28 @@ pub(crate) enum Act {
     MsgDelete,
 }
 
-pub(crate) type Opt = (&'static str, Act, &'static str);
+pub(crate) type Opt = (&'static str, Act, crate::text::Txt);
 
 /// The rows: label, action, help line.
 const LOG: [Opt; 3] = [
-    ("Mark all read", Act::Do(Simple::ReadAll), "Clears the log's new count"),
-    ("Clear the log", Act::Confirm(Simple::ClearLog), "All events, unread ones too"),
-    ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DTMF, popups, weather"),
+    ("Mark all read", Act::Do(Simple::ReadAll), txt!("Clears the log's new count")),
+    ("Clear the log", Act::Confirm(Simple::ClearLog), txt!("All events, unread ones too")),
+    ("Decoder settings", Act::Open(Dest::Group(4)), txt!("Pagers, DTMF, popups, weather")),
 ];
 const MESSAGES: [Opt; 6] = [
-    ("Write a message", Act::Open(Dest::Compose), "Recipient, then the text"),
-    ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
-    ("Contacts", Act::Open(Dest::Contacts), "Saved stations and their names"),
-    ("Mark all read", Act::Do(Simple::MessagesReadAll), "Clears the unread count"), // APRS-46
-    ("Delete all messages", Act::Confirm(Simple::ClearMessages), "Inbox and sent, unread too"), // APRS-46
-    ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
+    ("Write a message", Act::Open(Dest::Compose), txt!("Recipient, then the text")),
+    ("Quick messages", Act::Open(Dest::QuickMessages), txt!("The nine shown on an empty message")),
+    ("Contacts", Act::Open(Dest::Contacts), txt!("Saved stations and their names")),
+    ("Mark all read", Act::Do(Simple::MessagesReadAll), txt!("Clears the unread count")), // APRS-46
+    ("Delete all messages", Act::Confirm(Simple::ClearMessages), txt!("Inbox and sent, unread too")), // APRS-46
+    ("APRS settings", Act::Open(Dest::Group(5)), txt!("Ringer, path, retries")),
 ];
 /// APRS-46.1: deletes the message under the page.
-const MSG_DELETE: Opt = ("Delete message", Act::MsgDelete, "This one only, either way");
+const MSG_DELETE: Opt = ("Delete message", Act::MsgDelete, txt!("This one only, either way"));
 /// APRS-13.1, APRS-13.2, APRS-46.1: the messages' rows under one of ours that is being tried, or ended without an
 /// ack, or under any other message.
 const MSG_SENDING: [Opt; 8] = [
-    ("Stop sending", Act::MsgStop, "No more tries; it stays, cancelled"),
+    ("Stop sending", Act::MsgStop, txt!("No more tries; it stays, cancelled")),
     MSG_DELETE,
     MESSAGES[0],
     MESSAGES[1],
@@ -128,7 +128,7 @@ const MSG_SENDING: [Opt; 8] = [
     MESSAGES[5],
 ];
 const MSG_ENDED: [Opt; 8] = [
-    ("Send again", Act::MsgResend, "As a new message, five new tries"),
+    ("Send again", Act::MsgResend, txt!("As a new message, five new tries")),
     MSG_DELETE,
     MESSAGES[0],
     MESSAGES[1],
@@ -139,43 +139,43 @@ const MSG_ENDED: [Opt; 8] = [
 ];
 const MSG: [Opt; 7] = [MSG_DELETE, MESSAGES[0], MESSAGES[1], MESSAGES[2], MESSAGES[3], MESSAGES[4], MESSAGES[5]];
 const GPS: [Opt; 3] = [
-    ("Mark here", Act::Do(Simple::MarkHere), "A waypoint at this fix"),
-    ("Waypoints", Act::Open(Dest::Waypoints), "Distance and bearing to each"),
-    ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
+    ("Mark here", Act::Do(Simple::MarkHere), txt!("A waypoint at this fix")),
+    ("Waypoints", Act::Open(Dest::Waypoints), txt!("Distance and bearing to each")),
+    ("GPS settings", Act::Open(Dest::Group(6)), txt!("On or off, format, units, time zone")),
 ];
-const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
+const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), txt!("Bars, step, speed, trigger, waterfall"))];
 /// APRS-17.7 (decision 257): the one APRS list, the same from the APRS slot (OK or hold MENU on home) and from the
 /// heard list (hold MENU). OK on the APRS slot opens it on its "Heard" row (APRS mode, KISS) or its "Beacon now"
 /// row (beacons alone hold C); a digit opens a row that opens a screen (MENU-25), so OK 1 reads the messages.
 pub(crate) const APRS_ROW_HEARD: u8 = 1;
 pub(crate) const APRS_ROW_BEACON_NOW: u8 = 3;
 const APRS: [Opt; 8] = [
-    ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
-    ("Heard", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
-    ("Sent", Act::Open(Dest::AprsSent), "Your beacons and who repeated them"),
-    ("Beacon now", Act::Do(Simple::BeaconNow), "Sends your position once (needs a callsign)"),
-    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
-    ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"),
-    ("Clear the heard list", Act::Confirm(Simple::ClearHeard), "Stations return when heard"),
-    ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
+    ("Messages", Act::Open(Dest::AprsMessages), txt!("Inbox, sent and compose")),
+    ("Heard", Act::Open(Dest::AprsHeard), txt!("Stations heard, newest first")),
+    ("Sent", Act::Open(Dest::AprsSent), txt!("Your beacons and who repeated them")),
+    ("Beacon now", Act::Do(Simple::BeaconNow), txt!("Sends your position once (needs a callsign)")),
+    ("Beacon on/off", Act::Beacon, txt!("Automatic beacons, in their mode (0 5 6 1)")),
+    ("Event log", Act::Open(Dest::EventLog), txt!("Everything decoded and logged")),
+    ("Clear the heard list", Act::Confirm(Simple::ClearHeard), txt!("Stations return when heard")),
+    ("APRS settings", Act::Open(Dest::Group(5)), txt!("Beacon, path, symbol, frequency")),
 ];
-const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
+const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, txt!("Hidden channels stay reachable by number"))];
 const WAYPOINTS: [Opt; 5] = [
-    ("Mark here", Act::Do(Simple::MarkHere), "A waypoint at this fix"),
-    ("Add a grid square", Act::Grid, "A waypoint at a square's centre: FN31pr"),
-    ("Arrival alarm", Act::Arrival, "Off, 50 m to 1 km from the one you go to"),
-    ("Use as fixed position", Act::Sel(Sel::Fixed, false), "This waypoint, used when there's no fix"),
-    ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
+    ("Mark here", Act::Do(Simple::MarkHere), txt!("A waypoint at this fix")),
+    ("Add a grid square", Act::Grid, txt!("A waypoint at a square's centre: FN31pr")),
+    ("Arrival alarm", Act::Arrival, txt!("Off, 50 m to 1 km from the one you go to")),
+    ("Use as fixed position", Act::Sel(Sel::Fixed, false), txt!("This waypoint, used when there's no fix")),
+    ("GPS position", Act::Open(Dest::GpsPosition), txt!("Fix, satellites, grid square")),
 ];
 const STATION: [Opt; 3] = [
-    ("Message", Act::Sel(Sel::Message, false), "Write this station a message"),
-    ("Save contact", Act::Sel(Sel::Name, false), "Its callsign and a name; renames a saved one"),
-    ("Save waypoint", Act::Sel(Sel::Waypoint, false), "Its last position, named with its callsign"),
+    ("Message", Act::Sel(Sel::Message, false), txt!("Write this station a message")),
+    ("Save contact", Act::Sel(Sel::Name, false), txt!("Its callsign and a name; renames a saved one")),
+    ("Save waypoint", Act::Sel(Sel::Waypoint, false), txt!("Its last position, named with its callsign")),
 ];
 const CONTACTS: [Opt; 3] = [
-    ("Edit name", Act::Sel(Sel::Name, false), "Up to 12 characters"),
-    ("Delete", Act::Sel(Sel::Delete, true), "Contact goes; messages stay"),
-    ("Station", Act::Sel(Sel::Station, false), "Its page, when it is in the heard list"),
+    ("Edit name", Act::Sel(Sel::Name, false), txt!("Up to 12 characters")),
+    ("Delete", Act::Sel(Sel::Delete, true), txt!("Contact goes; messages stay")),
+    ("Station", Act::Sel(Sel::Station, false), txt!("Its page, when it is in the heard list")),
 ];
 
 pub(crate) fn rows(of: Of) -> &'static [Opt] {
@@ -351,14 +351,14 @@ impl View for Options {
             let mut q = Buf::<32>::new();
             q.push(label.as_bytes());
             q.push(b"?");
-            app.confirm_box(lcd, q.as_bytes(), help.as_bytes());
+            app.confirm_box_t(lcd, q.as_bytes(), help);
         } else {
             let mut p = Buf::<24>::new();
             p.set(title(self.of));
             p.push(b" MENU");
             // under the rows and "0 Full menu": six or seven rows push it down
             let y = OPTS_HELP_Y.max(23 + 22 * (all.len() as i32 + 1) + 6);
-            app.help_box(lcd, y, 46, help.as_bytes(), p.as_bytes());
+            app.help_txt(lcd, y, 46, help, p.as_bytes());
         }
     }
 

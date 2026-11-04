@@ -236,21 +236,21 @@ impl View for Save {
             app.list_row(lcd, i, 96 + 24 * i as i32, 24, &row);
         }
         let why = s.refuse(app);
-        let tip: &[u8] = match s.at() {
-            F::Name => b"OK: type the name. It can stay empty.",
-            F::Freq => b"OK: type it. The shift follows the band.",
-            F::Number => b"Knob: the next free number.",
-            F::Zone => b"Knob: another zone, or none.",
-            F::Shift | F::Tone => b"Knob: change it. #: back to the usual one.",
-            F::Save => b"OK saves it.",
+        let tip = match s.at() {
+            F::Name => txt!("OK: type the name. It can stay empty."),
+            F::Freq => txt!("OK: type it. The shift follows the band."),
+            F::Number => txt!("Knob: the next free number."),
+            F::Zone => txt!("Knob: another zone, or none."),
+            F::Shift | F::Tone => txt!("Knob: change it. #: back to the usual one."),
+            F::Save => txt!("OK saves it."),
         };
-        if app.dirty(R_NOTE, Mix::new().h(&why).h(&tip).get()) {
+        if app.dirty(R_NOTE, Mix::new().h(&why).h(&tip.0).get()) {
             let y = 100 + 24 * s.rows().len() as i32;
             // Add repeater's seven rows leave 28 px: two lines at 14 (at 16 only one, and the notes are two)
             let lh = if s.repeater() { 14 } else { 16 };
             match why {
                 Some(t) => para(lcd, 8, y, 224, (296 - y) / lh, lh, t.as_bytes(), &UI_12, AMBER, BG),
-                None => para(lcd, 8, y, 224, (296 - y) / lh, lh, tip, &UI_12, SUB, BG),
+                None => para(lcd, 8, y, 224, (296 - y) / lh, lh, crate::text::load(tip).as_bytes(), &UI_12, SUB, BG),
             };
         }
     }

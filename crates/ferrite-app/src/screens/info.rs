@@ -55,7 +55,8 @@ pub(crate) type InfoRow = (&'static str, Val<()>);
 pub(crate) struct PageDef {
     pub title: &'static str,
     pub rows: &'static [InfoRow],
-    pub note: &'static str,
+    /// The note at the foot, in the text pack (UPD-22), or fixed in the MCU's flash (About's licence, SELF-10).
+    pub note: Note,
     hints: &'static [(&'static str, &'static str)],
 }
 
@@ -236,13 +237,19 @@ fn grouped(b: &mut Buf<40>, n: u32) {
     }
 }
 
-const CHECKS: [InfoRow; 6] = [
+const CHECKS: [InfoRow; 7] = [
     ("MCU", |Ctx { dev: d, .. }, b| check_row(0, d, b)),
     ("SPI flash", |Ctx { dev: d, .. }, b| check_row(1, d, b)),
     ("BK4829 VHF", |Ctx { dev: d, .. }, b| check_row(2, d, b)),
     ("BK4829 UHF", |Ctx { dev: d, .. }, b| check_row(3, d, b)),
     ("SI4732", |Ctx { dev: d, .. }, b| check_row(4, d, b)),
     ("Calibration", |Ctx { dev: d, .. }, b| check_row(5, d, b)),
+    // UPD-21: the text pack, logo and terminal templates for this build (not a transmit lock)
+    ("SPI parts", |_, b| {
+        let (ok, all) = ferrite_core::part::count();
+        let _ = ufmt::uwrite!(b, "{} of {}", ok, all);
+        if ok == all { GREEN } else { AMBER }
+    }),
 ];
 
 const CALIBRATION: [InfoRow; 3] = [
@@ -304,19 +311,19 @@ pub(crate) fn def(p: Page) -> PageDef {
             title: "About",
             rows: &ABOUT,
             // SELF-10: the licence and the copyright holder, with the update hint.
-            note: "Copyright 2026 Alex Harvey. Free for any noncommercial use: PolyForm Noncommercial 1.0.0. To update, hold PF1 + PF2 while switching on.",
+            note: Note::Fixed("Copyright 2026 Alex Harvey. Free for any noncommercial use: PolyForm Noncommercial 1.0.0. To update, hold PF1 + PF2 while switching on."),
             hints: &[(ARROWS_LR, "System"), ("BACK", "Back")], // HELP-1: the page ▶ goes to
         },
         Page::System => PageDef {
             title: "System",
             rows: &SYSTEM,
-            note: "Live: CPU is the share of the last 10 s the MCU was awake; RAM is the statics and the stack's peak since power-on; Clock is the MCU's speed now and its switches.",
+            note: Note::Txt(txt!("Live: CPU is the share of the last 10 s the MCU was awake; RAM is the statics and the stack's peak since power-on; Clock is the MCU's speed now and its switches.")),
             hints: &[(ARROWS_LR, "Manual"), ("BACK", "Back")],
         },
         Page::Checks => PageDef {
             title: "Self-test",
             rows: &CHECKS,
-            note: "A failed check never stops receive. Transmit needs the MCU and calibration checks to pass.",
+            note: Note::Txt(txt!("A failed check never stops receive. Transmit needs the MCU and calibration checks to pass.")),
             hints: &[(ARROWS_LR, "About"), ("BACK", "Back")],
         },
         // The hint bar names the page ▶ goes to.
@@ -328,40 +335,63 @@ pub(crate) fn def(p: Page) -> PageDef {
                 Help::Digits => ("Holds", &[(ARROWS_LR, "Menu numbers"), ("BACK", "Back")]),
                 Help::MenuNos => ("Menu numbers", &[(ARROWS_LR, "Self-test"), ("BACK", "Back")]),
             };
-            PageDef { title, rows: &NONE, note: "", hints }
+            PageDef { title, rows: &NONE, note: Note::None, hints }
         }
         Page::Calibration => PageDef {
             title: "Calibrate",
             rows: &CALIBRATION,
-            note: "Read only: Ferrite never writes the factory calibration. A failed check locks transmit on every band.",
+            note: Note::Txt(txt!("Read only: Ferrite never writes the factory calibration. A failed check locks transmit on every band.")),
             hints: &BACK_ONLY,
         },
         Page::AdvSquelch => PageDef {
             title: "Squelch",
             rows: &ADV_SQUELCH,
-            note: "Noise open, ceiling, RSSI open, glitch and hysteresis per band come from the calibration. Editing comes later.",
+            note: Note::Txt(txt!("Noise open, ceiling, RSSI open, glitch and hysteresis per band come from the calibration. Editing comes later.")),
             hints: &BACK_ONLY,
         },
         Page::SsbPatch => PageDef {
             title: "SSB patch",
             rows: &SSB_PATCH,
-            note: "Import it from your own stock firmware with the flasher (--ssb-from) or the web app. Without it HF mode has AM only.",
+            note: Note::Txt(txt!("Import it from your own stock firmware with the flasher (--ssb-from) or the web app. Without it HF mode has AM only.")),
             hints: &BACK_ONLY,
         },
         Page::SsbConfirm => PageDef {
             title: "SSB patch",
             rows: &NONE,
-            note: "",
+            note: Note::None,
             hints: &[("OK", "Use it"), ("BACK", "Not now")],
         },
-        Page::PowerOff | Page::EmptyBattery => PageDef { title: "Power", rows: &NONE, note: "", hints: &[] },
-        Page::FinishUpdate => PageDef { title: "Update", rows: &NONE, note: "", hints: &[("BACK", "Use it")] },
+        Page::PowerOff | Page::EmptyBattery => PageDef { title: "Power", rows: &NONE, note: Note::None, hints: &[] },
+        Page::FinishUpdate => PageDef { title: "Update", rows: &NONE, note: Note::None, hints: &[("BACK", "Use it")] },
         Page::Mailbox => PageDef {
             title: "Mailbox",
             rows: &MAILBOX,
-            note: "Callers connect to your callsign-SSID at 1200 baud to leave and read mail. Settings come with the packet station.",
+            note: Note::Txt(txt!("Callers connect to your callsign-SSID at 1200 baud to leave and read mail. Settings come with the packet station.")),
             hints: &BACK_ONLY,
         },
+    }
+}
+
+/// A page's note at the foot.
+#[derive(Clone, Copy)]
+pub(crate) enum Note {
+    None,
+    /// In the text pack (UPD-22).
+    Txt(crate::text::Txt),
+    /// In the MCU's flash: About's licence (SELF-10), there whatever the SPI flash holds.
+    Fixed(&'static str),
+}
+
+/// A page's note, a text pack's read when drawn (UPD-22). Without the pack the self-test says so (the update
+/// installs it); the other notes are left out.
+pub(crate) fn note_text(p: Page, n: Note) -> crate::text::Text {
+    match n {
+        Note::None => crate::text::Text::EMPTY,
+        Note::Fixed(s) => crate::text::Text::from_bytes(s.as_bytes()),
+        Note::Txt(_) if p == Page::Checks && !crate::text::present() => {
+            crate::text::Text::from_bytes(b"Text pack missing: install this version's update file (.ffw) again with Ferrite Console or flash.py.")
+        }
+        Note::Txt(t) => crate::text::load(t),
     }
 }
 
@@ -446,12 +476,13 @@ impl View for Info {
             return;
         }
         app.table(lcd, &Table { rows: d.rows, go: &[], y: 22, h: 20, style: w::KV_STATUS }, cx.live, cx.dev, &(), None);
-        if !d.note.is_empty() && app.dirty(R_HELP, Mix::new().any(&self.page).get()) {
+        if !matches!(d.note, Note::None) && app.dirty(R_HELP, Mix::new().any(&self.page).get()) {
             let y = 30 + 20 * d.rows.len() as i32;
             let h = (292 - y).min(110);
+            let note = note_text(self.page, d.note);
             ferrite_ui::canvas::banded(lcd, 0, y - 6, 240, 300 - y + 6, BG, |lcd| {
                 lcd.fill_r(8, y, 224, h, 2, SURFACE);
-                w::wrap(lcd, 16, 208, y + 3, y + h - 3, y + 16, 15, d.note.as_bytes(), &UI_12, TEXT, SURFACE);
+                w::wrap(lcd, 16, 208, y + 3, y + h - 3, y + 16, 15, note.as_bytes(), &UI_12, TEXT, SURFACE);
             });
         }
     }

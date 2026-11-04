@@ -328,15 +328,20 @@ impl App {
     }
 
     /// The box asking before a destructive action (MENU-23): what goes, and the keys.
-    pub(crate) fn confirm_box(&mut self, lcd: &mut impl Panel, what: &[u8], name: &[u8]) {
-        if self.dirty(R_HELP, Mix::new().h(&what).h(&name).get()) {
-            let (y, h) = (104, 92);
-            lcd.fill_r(16, y, 208, h, 3, SURFACE);
-            lcd.frame_r(16, y, 208, h, 3, RED);
-            w::field(lcd, 24, 192, y + 12, y + 30, y + 26, what, const { &w::st(&UI_12B, TEXT, SURFACE, Align::Center) });
-            w::field(lcd, 24, 192, y + 34, y + 52, y + 48, name, const { &w::st(&UI_12, TEXT, SURFACE, Align::Center) });
-            w::field(lcd, 24, 192, y + 62, y + 80, y + 76, "OK confirms \u{b7} BACK keeps it".as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Center) });
+    /// [`Self::confirm_box`] with its second line from the text pack (UPD-22), read only when the box is drawn.
+    pub(crate) fn confirm_box_t(&mut self, lcd: &mut impl Panel, what: &[u8], name: crate::text::Txt) {
+        if self.dirty(R_HELP, Mix::new().h(&what).h(&name.0).get()) {
+            self.confirm_box_draw(lcd, what, crate::text::load(name).as_bytes());
         }
+    }
+
+    fn confirm_box_draw(&mut self, lcd: &mut impl Panel, what: &[u8], name: &[u8]) {
+        let (y, h) = (104, 92);
+        lcd.fill_r(16, y, 208, h, 3, SURFACE);
+        lcd.frame_r(16, y, 208, h, 3, RED);
+        w::field(lcd, 24, 192, y + 12, y + 30, y + 26, what, const { &w::st(&UI_12B, TEXT, SURFACE, Align::Center) });
+        w::field(lcd, 24, 192, y + 34, y + 52, y + 48, name, const { &w::st(&UI_12, TEXT, SURFACE, Align::Center) });
+        w::field(lcd, 24, 192, y + 62, y + 80, y + 76, "OK confirms \u{b7} BACK keeps it".as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Center) });
     }
 }
 

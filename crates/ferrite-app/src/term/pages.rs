@@ -83,6 +83,8 @@ pub(super) struct Cx<'a, S> {
     pub(super) store: &'a S,
     pub(super) dev: &'a Device,
     pub(super) live: &'a LiveAll,
+    /// The template pack, read for this redraw (TERM-47, UPD-21).
+    pub(super) pk: &'a [u8],
 }
 
 /// Where a row's bytes go: the hash that tells whether it changed, or the sink.
@@ -301,7 +303,13 @@ impl Term {
 
     /// Each row whose text changed, while the sink has room.
     pub(super) fn draw<S: ChannelStore>(&mut self, app: &App, store: &S, dev: &Device, live: &LiveAll, out: &mut impl Sink) {
-        let cx = Cx { app, store, dev, live };
+        if self.dirty == 0 {
+            return;
+        }
+        // the pack once a redraw (about once a second, and per key), never kept
+        let mut buf = [0u8; tpl::PACK_MAX];
+        let Some(pk) = tpl::load(&mut buf) else { return };
+        let cx = Cx { app, store, dev, live, pk };
         for r in 0..self.rows {
             if self.dirty & (1 << r) == 0 {
                 continue;
@@ -481,11 +489,11 @@ impl Term {
             return;
         }
         if r == self.rows - 1 {
-            return self.hints(w);
+            return self.hints(cx.pk, w);
         }
         let b = r - 1;
         if self.help {
-            return self.help_row(b, w);
+            return self.help_row(cx.pk, b, w);
         }
         self.tpl_row(b, cx, w);
     }
@@ -516,7 +524,7 @@ impl Term {
     }
 
     /// The bottom line: the keys for this page (TERM-11).
-    pub(super) fn hints(&self, w: &mut W) {
+    pub(super) fn hints(&self, pk: &[u8], w: &mut W) {
         if self.cmd {
             // The command line: its tail, when it is wider than the row.
             let n = self.clen as usize;
@@ -538,11 +546,11 @@ impl Term {
             return;
         }
         let keys = if self.line.is_some() {
-            tpl::global(tpl::KEYS_TYPE)
+            tpl::global(pk, tpl::KEYS_TYPE)
         } else if self.help {
-            tpl::global(tpl::KEYS_HELP)
+            tpl::global(pk, tpl::KEYS_HELP)
         } else {
-            tpl::hints(self.tpl_page())
+            tpl::hints(pk, self.tpl_page())
         };
         w.rev();
         w.s(b" ");
@@ -557,8 +565,8 @@ impl Term {
         w.fill();
     }
 
-    pub(super) fn help_row(&self, b: u8, w: &mut W) {
-        let lines = tpl::help(self.tpl_page());
+    pub(super) fn help_row(&self, pk: &[u8], b: u8, w: &mut W) {
+        let lines = tpl::help(pk, self.tpl_page());
         if b == 1 {
             w.s(b" ");
             w.bold(b"Help");

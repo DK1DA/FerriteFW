@@ -47,6 +47,7 @@ pub(crate) fn save_fb(fb: &FrameBuffer, path: &Path, scale: u32) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    ferrite_sim::parts::from_args(&args); // decision 335: --parts DIR, --no-parts
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
     if let Some(secs) = arg("--term-headless").and_then(|s| s.parse::<u64>().ok()) {
         // No window: the radio and its cable only, for scripted terminal checks (`--term-tcp PORT` for TCP).

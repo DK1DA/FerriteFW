@@ -5,6 +5,7 @@
 pub mod face;
 pub mod fake;
 pub mod fakegps;
+pub mod parts;
 pub mod simcore;
 
 /// An RGB image (0xRRGGBB per pixel) as a PNG.

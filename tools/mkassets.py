@@ -127,7 +127,10 @@ def main():
         up = name.upper()
         raw = bytes(a[i] << 4 | (a[i + 1] if i + 1 < len(a) else 0) for i in range(0, len(a), 2))
         data = rle(a, size, size) if packed_rle else raw
-        rs += rust_bytes(f"{up}_BITS", data, [f'#[cfg_attr(target_os = "none", link_section = "{SLOW}")]'])
+        # The logo's masks are an SPI part on the radio (decision 335; ferrite-ui logo.rs): host builds only here.
+        host = ['#[cfg(not(target_os = "none"))]'] if name.startswith("logo") else []
+        rs += rust_bytes(f"{up}_BITS", data, host or [f'#[cfg_attr(target_os = "none", link_section = "{SLOW}")]'])
+        rs += host
         rs.append(f"pub static {up}: Mask4 = Mask4 {{ w: {size}, h: {size}, rle: {str(packed_rle).lower()}, "
                   f"bits: &{up}_BITS }};")
         if packed_rle:

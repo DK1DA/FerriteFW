@@ -577,7 +577,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 row(d, i + 1, name.as_bytes(), v.as_bytes(), i == g.row, dot, grey);
             }
             let (path, h) = g.help(app);
-            help(d, path.as_bytes(), h.as_bytes());
+            help(d, path.as_bytes(), h.load().as_bytes());
         }
         Screen::Options(o) => {
             let all = opts::rows(o.of);
@@ -587,6 +587,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             }
             row(d, 0, b"Full menu", b">", false, false, false);
             let (label, _, h) = all[o.row as usize % all.len()];
+            let h = crate::text::load(h);
             if o.confirm {
                 ask(d, label.as_bytes(), b"?", h.as_bytes());
             } else {
@@ -610,8 +611,8 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 let p = info::def(i.page);
                 let t = screens::table::Table { rows: p.rows, go: &[], y: 0, h: 0, style: w::KV_STATUS };
                 table(app, cx, &t, None, d);
-                if !p.note.is_empty() {
-                    help(d, p.title.as_bytes(), p.note.as_bytes()); // the page's note under its rows
+                if !matches!(p.note, info::Note::None) {
+                    help(d, p.title.as_bytes(), info::note_text(i.page, p.note).as_bytes()); // the page's note under its rows
                 }
             }
         }
@@ -634,8 +635,8 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             if let Some(l) = d.ln() {
                 l.push(b"ask ");
                 q(l, title.as_bytes());
-                kq(l, "goes", goes.as_bytes());
-                kq(l, "kept", kept.as_bytes());
+                kq(l, "goes", goes.map(crate::text::load).as_ref().map_or(&b""[..], |t| t.as_bytes()));
+                kq(l, "kept", crate::text::load(kept).as_bytes());
             }
         }
         Screen::Coming(c) => {
@@ -690,7 +691,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             for (label, v, _) in info.rows.iter().filter(|r| !r.0.is_empty()) {
                 row(d, 0, label, v.as_bytes(), false, false, false);
             }
-            help(d, b"", e.tip());
+            help(d, b"", crate::text::load(e.tip()).as_bytes());
         }
         Screen::Zones(z) => zones_lines(app, cx, z, d),
         Screen::Text(_) => {

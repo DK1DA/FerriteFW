@@ -19,6 +19,9 @@
 #[cfg(test)]
 extern crate std;
 
+// `txt!` and `txtc!` (the text pack, build.rs): before the modules, which use them.
+include!(concat!(env!("OUT_DIR"), "/txt_macros.rs"));
+
 pub mod aprs;
 pub mod aprs_card;
 pub mod bcast;
@@ -44,6 +47,7 @@ pub mod screens;
 pub mod slotctl;
 pub mod settings;
 pub mod slot;
+pub mod text;
 pub mod words;
 pub mod term;
 pub mod uistate;

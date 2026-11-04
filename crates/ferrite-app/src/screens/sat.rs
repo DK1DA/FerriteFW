@@ -413,13 +413,13 @@ impl View for SatScr {
 // ---- the satellite's options (SAT-22) ----
 
 /// The rows: Doppler, the uplink's power, duplex, the transponder, the trim; 1 + the row in `SatScr::opt`.
-pub(crate) const OPT_ROWS: [(&str, &str); 6] = [
-    ("Doppler", "Both sides, or the 70 cm side only"),
-    ("Uplink power", "Low to start: a Yagi needs little"),
-    ("Duplex", "Half mutes the downlink while you talk"),
-    ("Transponder", "Which mode PTT and the page use"),
-    ("Trim", "Downlink fine tune; OK sets it to 0"),
-    ("Lowest pass", "Every satellite: passes peaking lower aren't listed"),
+pub(crate) const OPT_ROWS: [(&str, crate::text::Txt); 6] = [
+    ("Doppler", txt!("Both sides, or the 70 cm side only")),
+    ("Uplink power", txt!("Low to start: a Yagi needs little")),
+    ("Duplex", txt!("Half mutes the downlink while you talk")),
+    ("Transponder", txt!("Which mode PTT and the page use")),
+    ("Trim", txt!("Downlink fine tune; OK sets it to 0")),
+    ("Lowest pass", txt!("Every satellite: passes peaking lower aren't listed")),
 ];
 const OPT_TRIM: u8 = 5;
 
@@ -498,7 +498,7 @@ fn opts_page(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
     let mut p = Buf::<24>::new();
     p.set(name_of(app, s.sat).as_bytes());
     p.push(b" MENU");
-    app.help_box(lcd, super::opts::OPTS_HELP_Y.max(23 + 22 * (OPT_ROWS.len() as i32 + 1) + 6), 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1.as_bytes(), p.as_bytes());
+    app.help_txt(lcd, super::opts::OPTS_HELP_Y.max(23 + 22 * (OPT_ROWS.len() as i32 + 1) + 6), 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1, p.as_bytes());
 }
 
 // ---- drawing parts ----

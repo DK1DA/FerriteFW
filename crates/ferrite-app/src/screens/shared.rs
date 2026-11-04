@@ -393,6 +393,24 @@ impl App {
         }
     }
 
+    /// The help box with a menu's [`Help`]: its region hashes the note's number, so the note is read from the text
+    /// pack only when the box is drawn (UPD-22).
+    pub(crate) fn help_note(&mut self, lcd: &mut impl Panel, y: i32, h: i32, help: crate::screens::groups::Help, path: &[u8]) {
+        use crate::screens::groups::Help;
+        let m = match help {
+            Help::Note(t) => Mix::new().h(&1u8).h(&t.map_or(0xFFFF, |t| t.0)),
+            Help::Why(w) => Mix::new().h(&2u8).h(w),
+        };
+        if self.dirty(R_HELP, m.h(&path).get()) {
+            w::help_box(lcd, y, h, help.load().as_bytes(), path);
+        }
+    }
+
+    /// The help box with a note from the text pack (UPD-22), read only when the box is drawn.
+    pub(crate) fn help_txt(&mut self, lcd: &mut impl Panel, y: i32, h: i32, t: crate::text::Txt, path: &[u8]) {
+        self.help_note(lcd, y, h, crate::screens::groups::Help::Note(Some(t)), path)
+    }
+
     /// A message page (prompts, power off): a centred heading in `c`, an optional second line, wrapped text.
     pub(crate) fn message(&mut self, lcd: &mut impl Panel, head: &[u8], line: &[u8], text: &[u8], c: u16) {
         if self.dirty(R_TOP, Mix::new().h(&head).h(&line).h(&text).get()) {

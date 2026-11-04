@@ -41,15 +41,15 @@ const BAND_VIEWS: [(Freq10, Freq10); 5] =
 const RECENT_MAX: u16 = crate::chan::RECENT_MAX as u16;
 
 /// The row actions (C10), in order.
-const ACTIONS: [(&str, &str); 8] = [
-    ("Edit", "Its settings, in place on the active slot"),
-    ("Rename", "Up to 16 characters"),
-    ("Move", "To another zone, or none"),
-    ("Renumber", "Changes its place in its zone"),
-    ("Copy to slot", "The active slot goes to this channel"),
-    ("Skip", "Left out of every scan"),
-    ("Hide", "Out of the lists; still there by number"),
-    ("Delete", "Asks first"),
+const ACTIONS: [(&str, crate::text::Txt); 8] = [
+    ("Edit", txt!("Its settings, in place on the active slot")),
+    ("Rename", txt!("Up to 16 characters")),
+    ("Move", txt!("To another zone, or none")),
+    ("Renumber", txt!("Changes its place in its zone")),
+    ("Copy to slot", txt!("The active slot goes to this channel")),
+    ("Skip", txt!("Left out of every scan")),
+    ("Hide", txt!("Out of the lists; still there by number")),
+    ("Delete", txt!("Asks first")),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -506,16 +506,16 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
     });
     app.rows_end(lcd, rows, ROWS1, ROW1_H);
     app.list_cue(lcd, cur, picker_n(store), ROWS1, ROW1_H, rows, &|i| picker_keep(store, i));
-    let help: &[u8] = if cur.sel < z { b"A zone's channels, by number" } else {
+    let help = if cur.sel < z { txt!("A zone's channels, by number") } else {
         match (cur.sel - z) as u8 + 1 {
-            V_ALL => b"Every channel, zoned or not",
-            V_RECENT => b"Channels heard lately, from the event log",
-            V_NEARBY => b"Channels with a position, nearest first",
-            V_BROADCAST => b"Saved FM stations: the FM screen's OK",
-            _ => b"Every channel on this band",
+            V_ALL => txt!("Every channel, zoned or not"),
+            V_RECENT => txt!("Channels heard lately, from the event log"),
+            V_NEARBY => txt!("Channels with a position, nearest first"),
+            V_BROADCAST => txt!("Saved FM stations: the FM screen's OK"),
+            _ => txt!("Every channel on this band"),
         }
     };
-    app.help_box(lcd, 300 - 38, 34, help, b"MENU 0 2 1");
+    app.help_txt(lcd, 300 - 38, 34, help, b"MENU 0 2 1");
 }
 
 /// C10: the actions for one channel, or picking a zone or number for it.
@@ -550,12 +550,12 @@ fn actions(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, b: Br
         };
         app.row1(lcd, i, name.as_bytes(), val.as_bytes(), false, sel, false);
     }
-    let help: &[u8] = match b.mode {
-        Mode::Actions(a) => ACTIONS[a as usize].1.as_bytes(),
-        Mode::Move => b"Knob picks the zone; OK moves it",
-        _ => b"Knob steps 1, left and right 10; OK sets it",
+    let help = match b.mode {
+        Mode::Actions(a) => ACTIONS[a as usize].1,
+        Mode::Move => txt!("Knob picks the zone; OK moves it"),
+        _ => txt!("Knob steps 1, left and right 10; OK sets it"),
     };
-    app.help_box(lcd, 300 - 38, 34, help, b"");
+    app.help_txt(lcd, 300 - 38, 34, help, b"");
 }
 
 /// After the shared confirm deleted a channel: the list again, its cursor on a channel that still exists.

@@ -126,12 +126,12 @@ impl View for SameCodes {
             }
             app.row1(lcd, k, name.as_bytes(), v.as_bytes(), false, sel, false);
         }
-        let help: &[u8] = if used == 0 {
-            b"None set: every warning shows. Six digits each."
+        let help = if used == 0 {
+            txt!("None set: every warning shows. Six digits each.")
         } else {
-            b"A warning shows when one of its areas is here."
+            txt!("A warning shows when one of its areas is here.")
         };
-        app.help_box(lcd, 300 - 38, 34, help, b"MENU 0 4 5 2");
+        app.help_txt(lcd, 300 - 38, 34, help, b"MENU 0 4 5 2");
     }
 
     fn hints(self, _: &App) -> Hints {

@@ -7,6 +7,15 @@
     python3 tools/flash.py --dry-run - stock.BTF                               # checks only, no radio
     python3 tools/flash.py PORT target/ferrite.btf --backup flash.bin         # Ferrite: needs the backup
     python3 tools/flash.py PORT stock.BTF --backup flash.bin                  # back to stock, marker put back
+    python3 tools/flash.py PORT ferrite-0.9.ffw --backup flash.bin           # an update file (decision 335)
+    python3 tools/flash.py PORT target/ferrite-tx.ffw --backup flash.bin --dev-unsigned   # a local build's
+    python3 tools/flash.py PORT FILE.ffw --parts-only                         # only the SPI parts, radio running
+
+A `.ffw` (tools/ffw.py, UPD-20 - UPD-24) is checked whole before anything is written: the release key's signature
+(an unsigned file only with --dev-unsigned), every file's SHA-256, each SPI part's target (never calibration, the
+update area, the layout header or the migration mark, nor outside the layout 3 regions parts may use, whatever the
+manifest says). Then the MCU is flashed as below; once Ferrite is running, its SPI parts are written over the link's
+raw write (LINK-60, the cable only), each read back by CRC, and the layout stamped (LINK-62): the radio restarts.
 
 Ferrite images (they contain "Ferrite terminal") are refused without --backup: the whole SPI flash read with
 the hwtest image (tools/flashdump.py, in ../fw). The backup must look like this radio's chip (2, 4 or 8 MB,
@@ -220,13 +229,36 @@ def main():
                     help="the 16 bytes at 0x080F0000 recorded at backup time (default: marker.bin beside --backup)")
     ap.add_argument("--as-is", action="store_true",
                     help="send a stock file unchanged (no padding over the marker sector's first page)")
+    ap.add_argument("--dev-unsigned", action="store_true",
+                    help="take an unsigned .ffw (a local build): releases are signed with the release key")
+    ap.add_argument("--parts-only", action="store_true",
+                    help="a .ffw's SPI parts only, to a radio already running that build (no MCU flash)")
+    ap.add_argument("--pin", help="the radio's PIN, if it has a PIN lock (for writing the SPI parts)")
     a = ap.parse_args()
 
-    data = open(a.file, "rb").read()
-    is_btf = a.file.upper().endswith(".BTF")
+    parts = []
+    if a.file.lower().endswith(".ffw"):
+        import ffw
+        try:
+            m, entries, signed = ffw.check(open(a.file, "rb"), a.dev_unsigned)
+            parts = ffw.spi_parts(m, entries)
+        except ffw.Refused as e:
+            sys.exit("refusing the update file:\n  " + "\n  ".join(e.problems))
+        print(ffw.describe(m, signed))
+        if a.parts_only:
+            if not a.dry_run:
+                write_spi(a, parts)
+            return
+        data, is_btf = entries["firmware.btf"], True
+    elif a.parts_only:
+        sys.exit("--parts-only takes a .ffw")
+    else:
+        data = open(a.file, "rb").read()
+        is_btf = a.file.upper().endswith(".BTF")
     img = btf.unpack(data)[0] if is_btf else data
     errs = btf.check_image(img, btf.BOOT_MAX if is_btf else btf.APP_MAX)
-    errs += check_sha256(a.file, data)
+    if not parts:
+        errs += check_sha256(a.file, data)
     if FERRITE_MARK in img:
         if a.backup:
             berrs, desc = check_backup(a.backup)
@@ -297,6 +329,33 @@ def main():
         r = command(port, CMD_END)
         print(f"{chr(10) if a.progress else ''}done in {time.monotonic() - t0:.0f} s{'' if r == ACK else ' (no reply to end; check the radio)'}; "
               "the radio restarts into the new image")
+    if parts:
+        write_spi(a, parts)
+
+
+def write_spi(a, parts):
+    """UPD-21: the .ffw's SPI parts, once Ferrite answers on the cable: written, read back, the layout stamped."""
+    import ffw
+    import ferrite_link
+    print("waiting for Ferrite to start, then writing its SPI parts over the cable...")
+    end = time.monotonic() + 45
+    while True:
+        try:
+            r = ferrite_link.Remote(a.port, a.pin, name=b"flash.py")
+            break
+        except ferrite_link.RadioError as e:
+            sys.exit(f"the radio refused the link ({e}): with a PIN lock, pass --pin")
+        except (TimeoutError, OSError, SystemExit):
+            if time.monotonic() > end:
+                sys.exit("no answer from Ferrite on the cable: once it runs, write the parts with --parts-only")
+            time.sleep(2)
+    try:
+        ffw.write_parts(lambda ty, p: r.link.ask(ty, p), r.hello, parts)
+    except ffw.Refused as e:
+        sys.exit("SPI parts not written:\n  " + "\n  ".join(e.problems) +
+                 "\n(the firmware runs without them: short messages, the plain terminal, no logo)")
+    finally:
+        r.close()
 
 
 if __name__ == "__main__":

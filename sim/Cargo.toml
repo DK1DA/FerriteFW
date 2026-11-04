@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "ferrite-sim"
 path = "src/main.rs"
 
+# The SPI parts for a build (decision 335): tools/mkbtf.sh packs them into the .ffw.
+[[bin]]
+name = "ferrite-mkparts"
+path = "src/bin/mkparts.rs"
+
 # Records the simulator for videos (tools/promo/mkvideo.py).
 [[bin]]
 name = "ferrite-sim-record"

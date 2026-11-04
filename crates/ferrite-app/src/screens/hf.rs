@@ -364,11 +364,11 @@ pub fn tune_recent(app: &mut App, f: Freq10, mode: u8) {
 }
 
 /// The options (HF-14): name and help. LNA and fine tune (BFO) are left out until SSB is built (HF-35).
-const OPTIONS: [(&str, &str); 4] = [
-    ("Step", "Knob step: AM 1-10 kHz."),
-    ("Bandwidth", "The receiver's filter."),
-    ("AGC", "Auto, or a fixed gain: 1 the most, 10 the least."),
-    ("Recent list", "The last 10 frequencies. # clears."),
+const OPTIONS: [(&str, crate::text::Txt); 4] = [
+    ("Step", txt!("Knob step: AM 1-10 kHz.")),
+    ("Bandwidth", txt!("The receiver's filter.")),
+    ("AGC", txt!("Auto, or a fixed gain: 1 the most, 10 the least.")),
+    ("Recent list", txt!("The last 10 frequencies. # clears.")),
 ];
 /// The recent list's row.
 const ROW_RECENT: u8 = 3;
@@ -730,7 +730,7 @@ impl View for Hf {
             }
             let r = Row { num: Some(0), name: b"Full menu", value: b">", dot: false, selected: false, grey: false };
             app.list_row(lcd, 6, 23 + 22 * 6, 22, &r);
-            app.help_box(lcd, 186, 46, OPTIONS[self.row as usize % OPTIONS.len()].1.as_bytes(), b"HF MENU");
+            app.help_txt(lcd, 186, 46, OPTIONS[self.row as usize % OPTIONS.len()].1, b"HF MENU");
             return;
         }
         // Band and receiver (HF-15).
@@ -781,7 +781,7 @@ impl View for Hf {
             ferrite_ui::canvas::banded(lcd, 0, 204, 240, 96, BG, |lcd| {
                 lcd.fill_r(8, 206, 224, 76, 2, SURFACE);
                 let mut t = Buf::<140>::new();
-                t.push(b"Paused: watch, scan, APRS, decoders, jobs and beacons. ");
+                t.push(crate::text::load(txt!("Paused: watch, scan, APRS, decoders, jobs and beacons. ")).as_bytes());
                 t.push(if tx { b"PTT transmits here on chip 1.".as_slice() } else { b"Receive only here." });
                 if !patch {
                     t.push(b" No SSB patch: AM only.");

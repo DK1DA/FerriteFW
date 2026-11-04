@@ -31,11 +31,11 @@ pub(crate) const HI: u16 = 10_800;
 
 /// The options (BCR-3): label, help and the setting's menu path (0 3 1 1-4, kept for the terminal and muscle
 /// memory). Quick settings shows the same rows on a broadcast slot (BCR-28).
-pub(crate) const OPTIONS: [(&str, &str, &[u8]); 4] = [
-    ("Step", "Tuning step: 50, 100 or 200 kHz.", &[3, 1, 1]),
-    ("AGC", "Automatic gain, or a fixed gain.", &[3, 1, 2]),
-    ("Radio monitor", "Slots keep watching; one opening interrupts.", &[3, 1, 3]),
-    ("Sleep timer", "End the broadcast after a time.", &[3, 1, 4]),
+pub(crate) const OPTIONS: [(&str, crate::text::Txt, &[u8]); 4] = [
+    ("Step", txt!("Tuning step: 50, 100 or 200 kHz."), &[3, 1, 1]),
+    ("AGC", txt!("Automatic gain, or a fixed gain."), &[3, 1, 2]),
+    ("Radio monitor", txt!("Slots keep watching; one opening interrupts."), &[3, 1, 3]),
+    ("Sleep timer", txt!("End the broadcast after a time."), &[3, 1, 4]),
 ];
 const ROWS: u8 = OPTIONS.len() as u8;
 
@@ -159,7 +159,7 @@ impl View for Fm {
             // The shared options style (MENU-25), the help under its "0 Full menu" row.
             super::opts::options_page(app, lcd, OPTIONS.iter().zip(&vals).map(|((name, ..), v)| (name.as_bytes(), v.as_bytes())), self.row);
             let help = OPTIONS[(self.row % ROWS) as usize].1;
-            app.help_box(lcd, 23 + 22 * (ROWS as i32 + 1) + 6, 46, help.as_bytes(), b"FM MENU");
+            app.help_txt(lcd, 23 + 22 * (ROWS as i32 + 1) + 6, 46, help, b"FM MENU");
             return;
         }
         let (ps, rt, rssi, snr, stereo) = match cx.live.mode {

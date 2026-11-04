@@ -4,6 +4,7 @@
 //! then hold # for 3 s. Other screens ask with [`ask`] (the browser's delete, the zones list, tone search's "TX
 //! too?").
 
+use crate::text::Txt;
 use super::forms::para;
 use super::nav::Dest;
 use super::shared::*;
@@ -57,23 +58,23 @@ pub fn ask(app: &mut App, ask: Ask) {
     app.screen = Screen::Confirm(Confirm { ask, boot: false, since: 0 });
 }
 
-/// Title, what goes, what stays (PIN-7: what will be cleared and what is kept).
-pub(crate) fn words(ask: Ask) -> (&'static str, &'static str, &'static str, &'static str) {
+/// Title, what goes, what stays (PIN-7: what will be cleared and what is kept; the last two in the text pack, UPD-22).
+pub(crate) fn words(ask: Ask) -> (&'static str, Option<Txt>, Txt, &'static str) {
     match ask {
         Ask::Reset { armed } => (
             if armed { "Hold # for 3 s to reset" } else { "Reset the radio?" },
-            "Every setting and the PIN, channels, zones, range presets, the home channel, messages, the event log, waypoints. Setup runs again.",
-            "Calibration, the SSB patch, the bootloader.",
+            Some(txt!("Every setting and the PIN, channels, zones, range presets, the home channel, messages, the event log, waypoints. Setup runs again.")),
+            txt!("Calibration, the SSB patch, the bootloader."),
             "Reset",
         ),
-        Ask::DeleteChannel(_) => ("Delete this channel?", "", "Every other channel, and the zone it was in.", "Delete"),
-        Ask::DeleteZone(_) => ("Delete this zone?", "", "Its channels: they move to no zone and stay in All.", "Delete"),
-        Ask::DeletePreset(_) => ("Delete this range?", "Its skipped frequencies too.", "Every other range preset, and the channels.", "Delete"),
-        Ask::ToneTx(_) => ("Set the TX tone too?", "", "The RX tone is already set. BACK leaves TX as it is.", "Set"),
+        Ask::DeleteChannel(_) => ("Delete this channel?", None, txt!("Every other channel, and the zone it was in."), "Delete"),
+        Ask::DeleteZone(_) => ("Delete this zone?", None, txt!("Its channels: they move to no zone and stay in All."), "Delete"),
+        Ask::DeletePreset(_) => ("Delete this range?", Some(txt!("Its skipped frequencies too.")), txt!("Every other range preset, and the channels."), "Delete"),
+        Ask::ToneTx(_) => ("Set the TX tone too?", None, txt!("The RX tone is already set. BACK leaves TX as it is."), "Set"),
         Ask::CopyToVfo => (
             "Copy to VFO?",
-            "The VFO's frequency and settings: the channel's take their place.",
-            "The channel, untouched: V/M goes back to it.",
+            Some(txt!("The VFO's frequency and settings: the channel's take their place.")),
+            txt!("The channel, untouched: V/M goes back to it."),
             "Copy",
         ),
     }
@@ -233,13 +234,13 @@ impl View for Confirm {
                 w::field(lcd, 16, 208, y + 6, y + 24, y + 20, what.as_bytes(), const { &w::st(&UI_12B, TEXT, SURFACE, Align::Left) });
                 y += 40;
             }
-            if !goes.is_empty() {
+            if let Some(goes) = goes {
                 w::field(lcd, 12, 216, y, y + 17, y + 13, b"Goes", const { &w::st(&UI_12B, SUB, BG, Align::Left) });
-                y += 18 + 17 * para(lcd, 12, y + 18, 216, 4, 17, goes.as_bytes(), &UI_12, TEXT, BG);
+                y += 18 + 17 * para(lcd, 12, y + 18, 216, 4, 17, crate::text::load(goes).as_bytes(), &UI_12, TEXT, BG);
                 y += 8;
             }
             w::field(lcd, 12, 216, y, y + 17, y + 13, b"Kept", const { &w::st(&UI_12B, SUB, BG, Align::Left) });
-            para(lcd, 12, y + 18, 216, 4, 17, kept.as_bytes(), &UI_12, TEXT, BG);
+            para(lcd, 12, y + 18, 216, 4, 17, crate::text::load(kept).as_bytes(), &UI_12, TEXT, BG);
         }
     }
 

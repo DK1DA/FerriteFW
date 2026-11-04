@@ -43,16 +43,16 @@ fn step(app: &App, row: u8, d: i32) -> u8 {
 }
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
-pub(crate) const GROUPS: [(&str, &str); 9] = [
-    ("Watch and scan", "Watch, resume, priority, ranges, skips."),
-    ("Channels", "Browse channels and zones, add a repeater."),
-    ("Tools", "FM, scope, counter, HF, crossband, tones."),
-    ("Decoders and alerts", "Event log, pagers, DTMF, weather alerts."),
-    ("APRS", "Heard, messages, beacons, your station."),
-    ("GPS and time", "GPS, position, units, time zone, clock."),
-    ("Display, sound, power", "Theme, layout, backlight, sounds, power."),
-    ("Transmit", "Timeout, VOX, mic gain, DTMF, callsign, ID."),
-    ("System", "Keys, links, PIN, region, receiver, reset."),
+pub(crate) const GROUPS: [(&str, crate::text::Txt); 9] = [
+    ("Watch and scan", txt!("Watch, resume, priority, ranges, skips.")),
+    ("Channels", txt!("Browse channels and zones, add a repeater.")),
+    ("Tools", txt!("FM, scope, counter, HF, crossband, tones.")),
+    ("Decoders and alerts", txt!("Event log, pagers, DTMF, weather alerts.")),
+    ("APRS", txt!("Heard, messages, beacons, your station.")),
+    ("GPS and time", txt!("GPS, position, units, time zone, clock.")),
+    ("Display, sound, power", txt!("Theme, layout, backlight, sounds, power.")),
+    ("Transmit", txt!("Timeout, VOX, mic gain, DTMF, callsign, ID.")),
+    ("System", txt!("Keys, links, PIN, region, receiver, reset.")),
 ];
 
 impl View for Advanced {
@@ -146,7 +146,7 @@ impl View for Advanced {
             }
             None => {
                 let _ = uwrite!(p, "MENU 0 {}", row.min(8) + 1);
-                app.help_box(lcd, 242, 34, GROUPS[row.min(8) as usize].1.as_bytes(), p.as_bytes());
+                app.help_txt(lcd, 242, 34, GROUPS[row.min(8) as usize].1, p.as_bytes());
             }
         }
     }

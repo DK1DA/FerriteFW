@@ -18,7 +18,7 @@ impl Term {
     }
 
     /// The banner once, then the prompt and what is typed, when either changed.
-    pub(super) fn prompt(&mut self, out: &mut impl Sink) {
+    pub(super) fn line_prompt(&mut self, out: &mut impl Sink) {
         if self.clear {
             if out.room() < 160 {
                 return;

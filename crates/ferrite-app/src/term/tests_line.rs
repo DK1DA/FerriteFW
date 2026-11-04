@@ -1,4 +1,5 @@
-//! TERM-47: the terminal without its pages (decision 342), a plain command line.
+//! TERM-47: the terminal without its pages (decision 342), a plain command line: the build without the `vt100`
+//! feature, or one with it whose template part is missing (UPD-21; `NO_VT` here).
 
 use super::*;
 use crate::sample::Sample;
@@ -27,6 +28,7 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
+        super::NO_VT.with(|v| v.set(true));
         let mut app = App::new(crate::tests::set(), crate::tests::alert());
         while app.pop_cmd().is_some() {}
         Rig { app, store: Sample::new(), term: Term::new(), out: Out(Vec::new()), dev: Device::default(), now: 1000 }

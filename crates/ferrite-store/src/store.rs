@@ -580,6 +580,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         (self.f.into_inner(), self.extra)
     }
 
+    /// Raw chip bytes for the SPI parts (decision 335: `ferrite_core::part`'s reader): false when the chip is in use
+    /// at that moment or the read fails, never a panic.
+    pub fn part_read(&self, addr: u32, buf: &mut [u8]) -> bool {
+        self.f.try_read(addr, buf)
+    }
+
     /// The flash itself, for the simulator's image and the tests.
     pub fn nor(&self) -> core::cell::RefMut<'_, N> {
         self.f.nor()

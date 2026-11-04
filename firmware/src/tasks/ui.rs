@@ -241,6 +241,15 @@ pub async fn task() {
         // them again then).
         store.heard_rows(ferrite_app::aprs::HEARD_MAX as usize, &mut |s, seq| store.extra.aprs.restore(&s, seq, now_ms() / 1000));
     }
+    // The SPI parts (decision 335: the text pack, the logo, the terminal's templates): each checked once here (its
+    // build ID and CRC, about 30 KB read), before the boot screen draws the logo.
+    if flash.is_some() {
+        ferrite_core::part::set_reader(store::part_read);
+        let ok = ferrite_core::part::mount();
+        bringup::linef(|l| {
+            let _ = ufmt::uwrite!(l, "spi parts: {} of {} for this build", ok.count_ones(), ferrite_core::part::KINDS.len());
+        });
+    }
     check(Source::Storage, CHECK_FLASH, flash.is_some());
     // Calibration present: the factory sector isn't blank (read only, CAL-1). Its CRC check comes with 1b.
     let mut cal = [0u8; 32];

@@ -45,8 +45,17 @@ mod pages;
 mod tpl;
 #[cfg(feature = "vt100")]
 use pages::*;
-#[cfg(not(feature = "vt100"))]
 mod line;
+
+/// The template pack as built with this crate (host builds: the packer writes it as the `.ffw`'s template part).
+#[cfg(all(feature = "vt100", not(target_os = "none")))]
+pub use tpl::body as template_pack;
+
+#[cfg(test)]
+std::thread_local! {
+    /// Tests: the template part missing (TERM-47's plain command line in a vt100 build).
+    pub(crate) static NO_VT: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {
@@ -146,6 +155,9 @@ fn cmd_trim(s: &[u8]) -> &[u8] {
 
 pub struct Term {
     page: Page,
+    /// The full-screen pages: a vt100 build with its template part there (TERM-47, UPD-21; decided at start);
+    /// otherwise the plain command line.
+    vt: bool,
     #[cfg(feature = "vt100")]
     help: bool,
     /// Ctrl-C: say goodbye on the next poll and wait for Enter again.
@@ -261,6 +273,7 @@ impl Term {
     pub const fn new() -> Self {
         Term {
             page: Page::Off,
+            vt: false,
             #[cfg(feature = "vt100")]
             help: false,
             bye: false,
@@ -454,11 +467,19 @@ impl Term {
         *self = Term { cols: self.cols, rows: self.rows, bt: self.bt, pin_need: self.pin_need, ..Term::new() };
         #[cfg(feature = "vt100")]
         {
-            self.page = Page::Splash;
-            self.ask_size = true;
+            #[cfg(test)]
+            let no = NO_VT.with(|v| v.get());
+            #[cfg(not(test))]
+            let no = false;
+            self.vt = tpl::present() && !no;
         }
-        #[cfg(not(feature = "vt100"))]
-        {
+        if self.vt {
+            self.page = Page::Splash;
+            #[cfg(feature = "vt100")]
+            {
+                self.ask_size = true;
+            }
+        } else {
             self.page = Page::Main; // the command line: the banner, then a prompt
         }
         self.redraw();
@@ -656,10 +677,10 @@ impl Term {
             K::CtrlL => return self.redraw(),
             _ => {}
         }
-        #[cfg(feature = "vt100")]
-        self.page_key(app, k, store);
-        #[cfg(not(feature = "vt100"))]
-        {
+        if self.vt {
+            #[cfg(feature = "vt100")]
+            self.page_key(app, k, store);
+        } else {
             let _ = (app, store);
             self.line_key(k);
         }
@@ -704,12 +725,12 @@ impl Term {
             return;
         }
         #[cfg(feature = "vt100")]
-        if now.wrapping_sub(self.last) >= REFRESH_MS {
+        if self.vt && now.wrapping_sub(self.last) >= REFRESH_MS {
             self.last = now;
             self.all_dirty();
         }
         #[cfg(feature = "vt100")]
-        if self.ask_size {
+        if self.vt && self.ask_size {
             if out.room() < 32 {
                 return;
             }
@@ -718,7 +739,7 @@ impl Term {
             self.ask_size = false;
         }
         #[cfg(feature = "vt100")]
-        if !self.page_poll(app, store, out) {
+        if self.vt && !self.page_poll(app, store, out) {
             return;
         }
         // A whole line: run it once the store has taken the last one's writes (TERM-13 never drops a line).
@@ -729,10 +750,12 @@ impl Term {
         if self.con != Con::Off {
             return self.console(app, store, dev, live, out);
         }
-        #[cfg(feature = "vt100")]
-        self.draw(app, store, dev, live, out);
-        #[cfg(not(feature = "vt100"))]
-        self.prompt(out);
+        if self.vt {
+            #[cfg(feature = "vt100")]
+            self.draw(app, store, dev, live, out);
+        } else {
+            self.line_prompt(out);
+        }
     }
 
     /// Runs the line in the buffer: a typed command, or a load's next line (its result and the count go out).
@@ -780,12 +803,12 @@ impl Term {
             }
             Err(m) => (m, true),
         };
-        #[cfg(feature = "vt100")]
-        {
-            (self.note, self.warn, self.bnote) = (m, warn, true);
-        }
-        #[cfg(not(feature = "vt100"))]
-        {
+        if self.vt {
+            #[cfg(feature = "vt100")]
+            {
+                (self.note, self.warn, self.bnote) = (m, warn, true);
+            }
+        } else {
             let _ = warn;
             out.put(b"\r\x1b[K  ");
             out.put(m.as_bytes());
@@ -804,11 +827,11 @@ impl Term {
                 if out.room() < LINE_ROOM {
                     return;
                 }
-                out.put(if cfg!(feature = "vt100") { b"\x1b[0m\x1b[2J\x1b[H" } else { b"\r\x1b[K" });
+                out.put(if self.vt { b"\x1b[0m\x1b[2J\x1b[H" } else { b"\r\x1b[K" });
                 if let (Body::Load { .. }, Some(_)) = (b, self.sat) {
-                    out.put("Paste satellites: a TLE (name, line 1, line 2) or OMM CSV lines. One with a catalogue number\r\nheld gets the new elements; another is added. It ends at \"end\" or Ctrl-D; Ctrl-C stops.\r\n\r\n".as_bytes());
+                    out.put(crate::text::load(txt!("Paste satellites: a TLE (name, line 1, line 2) or OMM CSV lines. One with a catalogue number\r\nheld gets the new elements; another is added. It ends at \"end\" or Ctrl-D; Ctrl-C stops.\r\n\r\n")).as_bytes());
                 } else if let Body::Load { .. } = b {
-                    out.put("Load: send the dump now. A bad line is skipped and named. It ends at \"end\" or Ctrl-D;\r\nCtrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n".as_bytes());
+                    out.put(crate::text::load(txt!("Load: send the dump now. A bad line is skipped and named. It ends at \"end\" or Ctrl-D;\r\nCtrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n")).as_bytes());
                 }
                 self.con = Con::Run(b);
                 self.console(app, store, dev, live, out);
@@ -860,14 +883,10 @@ impl Term {
     }
 
     fn done(&mut self, out: &mut impl Sink) {
-        #[cfg(feature = "vt100")]
-        {
+        if self.vt {
             out.put("\r\n  Enter or Esc returns to the menu.".as_bytes());
             (self.con, self.clen) = (Con::Done, 0);
-        }
-        #[cfg(not(feature = "vt100"))]
-        {
-            let _ = out;
+        } else {
             (self.con, self.clen) = (Con::Off, 0);
             self.all_dirty(); // the prompt again
         }
@@ -886,6 +905,7 @@ fn blocked(p: &[u8]) -> bool {
 
 /// The `i`-th piece of `t` cut at each `sep` (a page's hints and help lines).
 #[inline(never)]
+#[cfg(feature = "vt100")]
 fn piece(mut t: &[u8], sep: u8, i: usize) -> Option<&[u8]> {
     for _ in 0..i {
         t = &t[t.iter().position(|&c| c == sep)? + 1..];
@@ -950,5 +970,5 @@ pub(crate) fn digits(mut n: u32, d: &mut [u8; 10]) -> &[u8] {
 
 #[cfg(all(test, feature = "vt100"))]
 mod tests;
-#[cfg(all(test, not(feature = "vt100")))]
+#[cfg(test)]
 mod tests_line;

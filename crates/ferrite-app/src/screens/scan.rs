@@ -387,8 +387,8 @@ fn hit_list(s: Scan, app: &mut App, lcd: &mut impl Panel, store: &impl ChannelSt
         }
         app.row1(lcd, k as usize, name.as_bytes(), v.as_bytes(), false, h.what != 0 && i == s.sel as usize, false);
     }
-    let help: &[u8] = if app.slot(s.slot).on_channel() { b"OK goes to that channel." } else { b"OK tunes the VFO there; hold 9 saves it." };
-    app.help_box(lcd, 300 - 38, 34, help, b"");
+    let help = if app.slot(s.slot).on_channel() { txt!("OK goes to that channel.") } else { txt!("OK tunes the VFO there; hold 9 saves it.") };
+    app.help_txt(lcd, 300 - 38, 34, help, b"");
 }
 
 /// SCAN-17: # on a hit sets the channel's Skip flag (CHAN-4), so no scan stops there again, and the scan goes

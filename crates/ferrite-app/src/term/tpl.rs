@@ -40,51 +40,100 @@ use pack::*;
 /// What a channel source shows with no channel (never drawn: the template checks `ch` first).
 const BLANK: Channel = Channel { num: 0, zone: crate::chan::NO_ZONE, rx: 0, name: [0; 16], cfg: crate::slot::DEFAULT_CFG, flags: 0, tones: 0 };
 
-fn u16_at(p: usize) -> usize {
-    PACK[p] as usize | (PACK[p + 1] as usize) << 8
+/// Page `pg`'s binding for key `code` (TERM-11): its action, argument, and a line command's bytes (TERM-12) copied
+/// out, so the pack's buffer is gone before the action runs.
+#[inline(never)]
+fn binding(pg: u8, code: u8) -> Option<(u8, usize, [u8; 64], usize)> {
+    let mut buf = [0u8; PACK_MAX];
+    let pk = load(&mut buf)?;
+    let mut p = u16_at(pk, page_at(pk, pg) + 4);
+    while p + 4 <= pk.len() && pk[p] != 0 {
+        let (key, act, arg) = (pk[p], pk[p + 1], u16_at(pk, p + 2));
+        p += 4;
+        if key == code || key == 0x8A && (b'1'..=b'9').contains(&code) {
+            let s = string(pk, arg);
+            let mut cmd = [0u8; 64];
+            let n = s.len().min(cmd.len());
+            cmd[..n].copy_from_slice(&s[..n]);
+            return Some((act, arg, cmd, n));
+        }
+    }
+    None
 }
 
-fn string(off: usize) -> &'static [u8] {
-    &PACK[off + 2..off + 2 + u16_at(off)]
+/// The pack's largest size: the stack buffer it is read into (build.rs checks it fits).
+pub(super) const PACK_MAX: usize = 4096;
+
+/// The pack as built with this crate (host builds: the packer writes it; tests and the simulators without parts
+/// read it).
+#[cfg(not(target_os = "none"))]
+pub fn body() -> &'static [u8] {
+    &PACK
 }
 
-fn page_at(pg: u8) -> usize {
-    u16_at(6 + 2 * PACK[5] as usize + 2 * pg as usize)
+/// Whether the template part is there (TERM-47, UPD-21: without it the terminal is the plain command line).
+pub(super) fn present() -> bool {
+    (cfg!(not(target_os = "none")) && !ferrite_core::part::has_reader()) || ferrite_core::part::ok(&ferrite_core::part::TERM)
+}
+
+/// The pack: the template part read into `buf` (3.6 KB at SPI speed, about 2.5 ms; once a redraw or key, never
+/// kept), or a host build's own with no reader set. None when the part isn't there.
+#[inline(never)]
+pub(super) fn load(buf: &mut [u8; PACK_MAX]) -> Option<&[u8]> {
+    use ferrite_core::part::{self, TERM};
+    #[cfg(not(target_os = "none"))]
+    if !part::has_reader() {
+        return Some(&PACK);
+    }
+    let n = (part::len(&TERM) as usize).min(PACK_MAX);
+    (n > 6 && part::read_body(&TERM, 0, &mut buf[..n]) && buf[..3] == *b"FVT").then_some(&buf[..n])
+}
+
+fn u16_at(pk: &[u8], p: usize) -> usize {
+    pk.get(p).map_or(0, |&b| b as usize) | pk.get(p + 1).map_or(0, |&b| b as usize) << 8
+}
+
+fn string(pk: &[u8], off: usize) -> &[u8] {
+    pk.get(off + 2..off + 2 + u16_at(pk, off)).unwrap_or_default()
+}
+
+fn page_at(pk: &[u8], pg: u8) -> usize {
+    u16_at(pk, 6 + 2 * pk[5] as usize + 2 * pg as usize)
 }
 
 /// A string the pages share (the hints while typing, or in help).
-pub(super) fn global(id: u8) -> &'static [u8] {
-    string(u16_at(6 + 2 * id as usize))
+pub(super) fn global(pk: &[u8], id: u8) -> &[u8] {
+    string(pk, u16_at(pk, 6 + 2 * id as usize))
 }
 
 pub(super) const KEYS_TYPE: u8 = STR_KEYS_TYPE;
 pub(super) const KEYS_HELP: u8 = STR_KEYS_HELP;
 
 /// The page's hints line (TERM-11) and help (TERM-16).
-pub(super) fn hints(pg: u8) -> &'static [u8] {
-    string(u16_at(page_at(pg)))
+pub(super) fn hints(pk: &[u8], pg: u8) -> &[u8] {
+    string(pk, u16_at(pk, page_at(pk, pg)))
 }
 
-pub(super) fn help(pg: u8) -> &'static [u8] {
-    string(u16_at(page_at(pg) + 2))
+pub(super) fn help(pk: &[u8], pg: u8) -> &[u8] {
+    string(pk, u16_at(pk, page_at(pk, pg) + 2))
 }
 
 /// The bytes an op takes after its code.
-fn arg_len(q: usize) -> usize {
-    match PACK[q] {
-        0x10 | 0x1B => 1 + PACK[q + 1] as usize,
-        0x1C => 2 + PACK[q + 2] as usize,
+fn arg_len(pk: &[u8], q: usize) -> usize {
+    match pk[q] {
+        0x10 | 0x1B => 1 + pk.get(q + 1).map_or(0, |&b| b as usize),
+        0x1C => 2 + pk.get(q + 2).map_or(0, |&b| b as usize),
         0x11 | 0x12 | 0x1D | 0x20 | 0x21 | 0x22 => 1,
         _ => 0,
     }
 }
 
 /// From an IF (or ELSE) not taken: past the matching ELSE (`at_else`) or FI.
-fn skip(mut q: usize, end: usize, at_else: bool) -> usize {
+fn skip(pk: &[u8], mut q: usize, end: usize, at_else: bool) -> usize {
     let mut depth = 0;
     while q < end {
-        let op = PACK[q];
-        let n = 1 + arg_len(q);
+        let op = pk[q];
+        let n = 1 + arg_len(pk, q);
         q += n;
         match op {
             0x20..=0x22 => depth += 1,
@@ -121,15 +170,16 @@ impl Term {
         if self.page == Page::Off || self.page == Page::Edit && self.edit.is_none() {
             return;
         }
-        let mut p = page_at(self.tpl_page()) + 6;
+        let pk = cx.pk;
+        let mut p = page_at(pk, self.tpl_page()) + 6;
         let body = self.rows as i32 - 2;
         let mut end = 0u16;
         loop {
-            let kind = PACK[p];
-            if kind == 0 {
+            let kind = pk.get(p).copied().unwrap_or(0);
+            if kind == 0 || p + 4 > pk.len() {
                 return;
             }
-            let (x, y, len) = (PACK[p + 1], PACK[p + 2], PACK[p + 3] as usize);
+            let (x, y, len) = (pk[p + 1], pk[p + 2], pk[p + 3] as usize);
             let ops = p + 4;
             p = ops + len;
             let i = match kind {
@@ -154,13 +204,14 @@ impl Term {
     }
 
     fn run<S: ChannelStore>(&self, mut q: usize, end: usize, i: u16, cx: &Cx<S>, w: &mut W) {
-        let mut ch = None;
+        let (pk, mut ch) = (cx.pk, None);
+        let end = end.min(pk.len());
         while q < end {
-            let op = PACK[q];
-            let a = PACK.get(q + 1).copied().unwrap_or(0);
-            let next = q + 1 + arg_len(q);
+            let op = pk[q];
+            let a = pk.get(q + 1).copied().unwrap_or(0);
+            let next = (q + 1 + arg_len(pk, q)).min(end);
             match op {
-                0x10 => w.s(&PACK[q + 2..next]),
+                0x10 => w.s(pk.get(q + 2..next).unwrap_or_default()),
                 0x11 => w.at(a as u16),
                 0x12 => self.src(a, i, ch.as_ref(), cx, w),
                 0x13 => w.bon(),
@@ -171,8 +222,8 @@ impl Term {
                 0x18 => w.fill(),
                 0x19 => w.plain(),
                 0x1A => w.digit(i as u8 + 1),
-                0x1B => w.s(piece(&PACK[q + 2..next], b'|', i as usize).unwrap_or_default()),
-                0x1C => w.s(piece(&PACK[q + 3..next], b'|', self.pickn(a, cx) as usize).unwrap_or_default()),
+                0x1B => w.s(piece(pk.get(q + 2..next).unwrap_or_default(), b'|', i as usize).unwrap_or_default()),
+                0x1C => w.s(piece(pk.get(q + 3..next).unwrap_or_default(), b'|', self.pickn(a, cx) as usize).unwrap_or_default()),
                 0x1D => {
                     ch = match a {
                         CTX_ROW => self.row_chan(i, cx.store),
@@ -186,12 +237,12 @@ impl Term {
                         _ => self.cond(a, i, ch.as_ref(), cx) == (op == 0x20),
                     };
                     if !yes {
-                        q = skip(next, end, true);
+                        q = skip(pk, next, end, true);
                         continue;
                     }
                 }
                 0x23 => {
-                    q = skip(next, end, false);
+                    q = skip(pk, next, end, false);
                     continue;
                 }
                 0x25 => return,
@@ -347,7 +398,7 @@ impl Term {
             SRC_ZROW_NAME => w.s(zone_name(zone_of(i, st), st).as_bytes()),
             SRC_ZROW_LEN => w.n(list_len(zone_of(i, st), st) as u32),
             SRC_GROUP_NAME => w.s(GROUPS[i as usize].0.as_bytes()),
-            SRC_GROUP_DESC => w.s(GROUPS[i as usize].1.as_bytes()),
+            SRC_GROUP_DESC => w.s(crate::text::load(GROUPS[i as usize].1).as_bytes()),
             SRC_SET_G => w.n(self.g as u32),
             SRC_GROUP_NAME_G => w.s(GROUPS[(self.g as usize).clamp(1, 9) - 1].0.as_bytes()),
             SRC_SET_SUB => w.n(self.sub as u32),
@@ -376,7 +427,7 @@ impl Term {
                 w.s(v.as_bytes());
             }
             SRC_ITEM_SEL_NAME => w.s(groups::items(self.g, self.sub)[self.set_sel as usize].name().as_bytes()),
-            SRC_ITEM_SEL_HELP => w.s(groups::items(self.g, self.sub)[self.set_sel as usize].help().as_bytes()),
+            SRC_ITEM_SEL_HELP => w.s(groups::items(self.g, self.sub)[self.set_sel as usize].help().map(crate::text::load).as_ref().map_or(&b""[..], |t| t.as_bytes())),
             SRC_PATH_SEL => {
                 let (p, pl) = self.path(self.set_sel);
                 for x in &p[..pl] {
@@ -444,21 +495,17 @@ impl Term {
             K::Esc => 0x89,
             _ => return false,
         };
-        let mut p = u16_at(page_at(self.tpl_page()) + 4);
-        while PACK[p] != 0 {
-            let (key, act, arg) = (PACK[p], PACK[p + 1], u16_at(p + 2));
-            p += 4;
-            let digit = key == 0x8A && (b'1'..=b'9').contains(&code);
-            if key == code || digit {
-                self.act(app, act, arg, code, k, store);
-                return true;
+        match binding(self.tpl_page(), code) {
+            Some((act, arg, cmd, n)) => {
+                self.act(app, act, arg, &cmd[..n], code, k, store);
+                true
             }
+            None => false,
         }
-        false
     }
 
     /// What a key does.
-    fn act<S: ChannelStore>(&mut self, app: &mut App, act: u8, arg: usize, code: u8, k: K, store: &S) {
+    fn act<S: ChannelStore>(&mut self, app: &mut App, act: u8, arg: usize, s: &[u8], code: u8, k: K, store: &S) {
         let n = self.sel_n(store);
         let cur = self.sel_get();
         match act {
@@ -522,7 +569,6 @@ impl Term {
             }
             _ => {
                 // a line command, as typed after `:` (TERM-12)
-                let s = string(arg);
                 self.cbuf[..s.len()].copy_from_slice(s);
                 (self.clen, self.pending) = (s.len() as u8, true);
             }

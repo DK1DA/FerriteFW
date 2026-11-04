@@ -404,23 +404,23 @@ impl Item {
         }
     }
 
-    /// The help line (MENU-15).
-    pub fn help(self, vfo: bool) -> &'static str {
+    /// The help line (MENU-15), in the text pack (UPD-22).
+    pub fn help(self, vfo: bool) -> crate::text::Txt {
         match self {
-            Item::Squelch => "Audio opens above this level. Home: SIDE1 + knob.",
-            Item::Power => "Transmit power on this slot. Home: hold 2.",
-            Item::RxTone => "The tone that opens squelch. Off: any carrier.",
-            Item::Tones => "CTCSS or DCS sent with TX. OK: RX and TX apart.",
-            Item::Offset => "Simplex, + or -, or Split: a TX freq. Hold 7.",
-            Item::Step => "How far a VFO tunes. Home: hold 6.",
-            Item::Watch => "Listen on two or three slots. Home: hold 4.",
-            Item::Channel if vfo => "Save this VFO as a channel. Home: hold 9.",
-            Item::Channel => "Edit this channel: name, zone, number, flags.",
-            Item::BatterySave => "Receiver sleep: deeper saves more, hears later.",
-            Item::Advanced => "Everything else, in nine groups.",
-            Item::Mode => "FM wide, NFM narrow, AM. USB, LSB, CW: HF mode.",
-            Item::BusyLock => "Refuse transmit while the channel is busy.",
-            Item::Reverse => "Listen on the repeater's input. Hold *, PTT A.",
+            Item::Squelch => txt!("Audio opens above this level. Home: SIDE1 + knob."),
+            Item::Power => txt!("Transmit power on this slot. Home: hold 2."),
+            Item::RxTone => txt!("The tone that opens squelch. Off: any carrier."),
+            Item::Tones => txt!("CTCSS or DCS sent with TX. OK: RX and TX apart."),
+            Item::Offset => txt!("Simplex, + or -, or Split: a TX freq. Hold 7."),
+            Item::Step => txt!("How far a VFO tunes. Home: hold 6."),
+            Item::Watch => txt!("Listen on two or three slots. Home: hold 4."),
+            Item::Channel if vfo => txt!("Save this VFO as a channel. Home: hold 9."),
+            Item::Channel => txt!("Edit this channel: name, zone, number, flags."),
+            Item::BatterySave => txt!("Receiver sleep: deeper saves more, hears later."),
+            Item::Advanced => txt!("Everything else, in nine groups."),
+            Item::Mode => txt!("FM wide, NFM narrow, AM. USB, LSB, CW: HF mode."),
+            Item::BusyLock => txt!("Refuse transmit while the channel is busy."),
+            Item::Reverse => txt!("Listen on the repeater's input. Hold *, PTT A."),
         }
     }
 
@@ -642,7 +642,8 @@ mod tests {
         // The help box holds two lines of 29 characters, with the path after the text where it fits.
         for it in QUICK.iter().chain(&GRID) {
             for vfo in [true, false] {
-                assert!(it.help(vfo).len() <= 50, "{:?}: {}", it, it.help(vfo));
+                let h = crate::text::load(it.help(vfo));
+                assert!(h.as_bytes().len() <= 50, "{:?}: {}", it, h.as_str());
             }
         }
     }

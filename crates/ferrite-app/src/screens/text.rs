@@ -308,18 +308,18 @@ impl View for Text {
                 (MODES[self.next_mode() as usize].as_bytes(), b"space")
             };
             keypad(lcd, 104, |d| legend(m, d), star, hash_);
-            let tip: &[u8] = if self.to == TextFor::Clock {
-                b"Year, month, day, hour, minute: 202610081430. Local time."
+            let tip = if self.to == TextFor::Clock {
+                txt!("Year, month, day, hour, minute: 202610081430. Local time.")
             } else if self.to == TextFor::Capcode {
-                b"The capcode's digits. Empty keeps every capcode."
+                txt!("The capcode's digits. Empty keeps every capcode.")
             } else if self.to == TextFor::AprsPath {
-                b"Like WIDE1-1,WIDE2-1: up to 2 entries, # between."
+                txt!("Like WIDE1-1,WIDE2-1: up to 2 entries, # between.")
             } else if self.to.callsign() {
-                b"Tap a key again for its next letter. Capitals only."
+                txt!("Tap a key again for its next letter. Capitals only.")
             } else {
-                b"Tap a key again for its next letter; * changes case."
+                txt!("Tap a key again for its next letter; * changes case.")
             };
-            para(lcd, 8, 206, 224, 2, 17, tip, &UI_12, SUB, BG);
+            para(lcd, 8, 206, 224, 2, 17, crate::text::load(tip).as_bytes(), &UI_12, SUB, BG);
         }
     }
 

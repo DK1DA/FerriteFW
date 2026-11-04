@@ -27,7 +27,8 @@ use ferrite_ui::widgets::Row;
 use ufmt::uwrite;
 
 /// One item: name, value shown until it is wired (a list shows a summary) and help line, in one string as
-/// "name|value|help". One string per item, not three: 8 bytes of table per item instead of 24 (about 3 KB).
+/// "name|value|help". One string per item, not three: 8 bytes of table per item instead of 24 (about 3 KB). The
+/// help line is in the text pack (UPD-22): the string holds its number (`txtc!`, two characters).
 #[derive(Clone, Copy)]
 pub struct Entry(&'static str);
 
@@ -47,98 +48,117 @@ impl Entry {
         self.parts().1
     }
 
-    pub fn help(self) -> &'static str {
-        self.parts().2
+    /// The help line's text in the pack (MENU-15; UPD-22).
+    pub fn help(self) -> Option<crate::text::Txt> {
+        crate::text::code(self.parts().2)
+    }
+}
+
+/// What a menu's help box says: the item's note, from the text pack (MENU-15, UPD-22: none without the pack), or
+/// why the item is greyed (MENU-14).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Help {
+    Note(Option<crate::text::Txt>),
+    Why(&'static str),
+}
+
+impl Help {
+    /// Its words (a note read from the pack: when drawn or sent, never per frame).
+    pub(crate) fn load(self) -> crate::text::Text {
+        match self {
+            Help::Note(t) => t.map_or(crate::text::Text::EMPTY, crate::text::load),
+            Help::Why(w) => crate::text::Text::from_bytes(w.as_bytes()),
+        }
     }
 }
 
 /// SND-3: the beep volume (0 7 5 2), three DAC levels (decision 100).
 const BEEP_VOLS: [&str; 3] = ["Low", "Mid", "High"];
 const G1: [Entry; 6] = [
-    Entry("Watch|A+B|Which slots are heard besides the active one."),
-    Entry("Resume|5 s|When a stopped scan moves on."),
-    Entry("Priority check|Every 2 s|Look at the priority channels."),
-    Entry("Range presets|4 presets|Named ranges to scan."),
-    Entry("Skip list|Empty|Frequencies * skipped in this scan."),
-    Entry("Advanced||Pause time, direction, scan inputs, return to."),
+    Entry(concat!("Watch|A+B|", txtc!("Which slots are heard besides the active one."))),
+    Entry(concat!("Resume|5 s|", txtc!("When a stopped scan moves on."))),
+    Entry(concat!("Priority check|Every 2 s|", txtc!("Look at the priority channels."))),
+    Entry(concat!("Range presets|4 presets|", txtc!("Named ranges to scan."))),
+    Entry(concat!("Skip list|Empty|", txtc!("Frequencies * skipped in this scan."))),
+    Entry(concat!("Advanced||", txtc!("Pause time, direction, scan inputs, return to."))),
 ];
 const G2: [Entry; 5] = [
-    Entry("Browse||Zones, all channels, nearby, recent."),
-    Entry("Add repeater||Frequency, shift, tone, name."),
-    Entry("Zones||Name, scan options, priority channels."),
-    Entry("Channel display|Name|Name, number or frequency on home."),
-    Entry("Local zone|50 km|A zone of the channels within this range of you, nearest first. Needs a GPS fix or the fixed position (0 6 9)."),
+    Entry(concat!("Browse||", txtc!("Zones, all channels, nearby, recent."))),
+    Entry(concat!("Add repeater||", txtc!("Frequency, shift, tone, name."))),
+    Entry(concat!("Zones||", txtc!("Name, scan options, priority channels."))),
+    Entry(concat!("Channel display|Name|", txtc!("Name, number or frequency on home."))),
+    Entry(concat!("Local zone|50 km|", txtc!("A zone of the channels within this range of you, nearest first. Needs a GPS fix or the fixed position (0 6 9)."))),
 ];
 const G3: [Entry; 7] = [
-    Entry("FM broadcast||Listen now; hold MENU there for its settings."),
-    Entry("Band scope|60 bars|Bars, step, speed, trigger, waterfall."),
-    Entry("Frequency counter||Find a nearby transmitter's frequency."),
-    Entry("HF mode||Below 64 MHz. Everything else pauses."),
-    Entry("Crossband repeater||Repeat one slot's band on another's."),
-    Entry("Tone search||Find the CTCSS or DCS in use."),
-    Entry("Satellites||Passes, pointing and Doppler for FM satellites."),
+    Entry(concat!("FM broadcast||", txtc!("Listen now; hold MENU there for its settings."))),
+    Entry(concat!("Band scope|60 bars|", txtc!("Bars, step, speed, trigger, waterfall."))),
+    Entry(concat!("Frequency counter||", txtc!("Find a nearby transmitter's frequency."))),
+    Entry(concat!("HF mode||", txtc!("Below 64 MHz. Everything else pauses."))),
+    Entry(concat!("Crossband repeater||", txtc!("Repeat one slot's band on another's."))),
+    Entry(concat!("Tone search||", txtc!("Find the CTCSS or DCS in use."))),
+    Entry(concat!("Satellites||", txtc!("Passes, pointing and Doppler for FM satellites."))),
 ];
 const G4: [Entry; 5] = [
-    Entry("Event log||Every decode and alert."),
-    Entry("POCSAG|439.9875|Pager frequency, baud, capcodes."),
-    Entry("DTMF decode|On|DTMF digits heard, on the slot's card."),
-    Entry("Popups|On|A 3 s toast for each decode."),
-    Entry("Weather alerts|On|SAME and your location codes."),
+    Entry(concat!("Event log||", txtc!("Every decode and alert."))),
+    Entry(concat!("POCSAG|439.9875|", txtc!("Pager frequency, baud, capcodes."))),
+    Entry(concat!("DTMF decode|On|", txtc!("DTMF digits heard, on the slot's card."))),
+    Entry(concat!("Popups|On|", txtc!("A 3 s toast for each decode."))),
+    Entry(concat!("Weather alerts|On|", txtc!("SAME and your location codes."))),
 ];
 const G5: [Entry; 9] = [
-    Entry("Heard||Stations heard, newest first."),
-    Entry("Messages||Messages sent to you and by you."),
-    Entry("APRS mode|Off|Slot C becomes the APRS slot."),
-    Entry("Frequency|144.390|OK types it; # the region's."),
-    Entry("My station|SSID 9|SSID, symbol, comment, position."),
-    Entry("Beacon|Off|When to beacon: manual, timed, smart."),
-    Entry("Digipeat|Off|Relay others' packets."),
+    Entry(concat!("Heard||", txtc!("Stations heard, newest first."))),
+    Entry(concat!("Messages||", txtc!("Messages sent to you and by you."))),
+    Entry(concat!("APRS mode|Off|", txtc!("Slot C becomes the APRS slot."))),
+    Entry(concat!("Frequency|144.390|", txtc!("OK types it; # the region's."))),
+    Entry(concat!("My station|SSID 9|", txtc!("SSID, symbol, comment, position."))),
+    Entry(concat!("Beacon|Off|", txtc!("When to beacon: manual, timed, smart."))),
+    Entry(concat!("Digipeat|Off|", txtc!("Relay others' packets."))),
     // The KISS TNC (the mailbox beside it waits until it is built, decision 245).
-    Entry("KISS TNC|Off|Raw KISS on the cable or Bluetooth."),
-    Entry("Advanced||Path, TX delay and level, FX.25."),
+    Entry(concat!("KISS TNC|Off|", txtc!("Raw KISS on the cable or Bluetooth."))),
+    Entry(concat!("Advanced||", txtc!("Path, TX delay and level, FX.25."))),
 ];
 const G6: [Entry; 9] = [
-    Entry("GPS|Auto|Off, Auto (when needed) or On."),
-    Entry("Position||Fix, satellites, position, grid."),
-    Entry("Coordinate format|DDM|Decimal, DDM, DMS or grid square."),
-    Entry("Units|Metric|Distance, altitude and speed units."),
-    Entry("Time zone|UTC|The clock's offset from UTC."),
-    Entry("Clock|24 h|12 or 24 h, from GPS; OK sets it by hand."),
-    Entry("Waypoints||Marked places; go to one."),
-    Entry("GPS during RX/TX|Always on|Turn the GPS off around signals."),
-    Entry("Fixed position|None|Used when there is no fix."),
+    Entry(concat!("GPS|Auto|", txtc!("Off, Auto (when needed) or On."))),
+    Entry(concat!("Position||", txtc!("Fix, satellites, position, grid."))),
+    Entry(concat!("Coordinate format|DDM|", txtc!("Decimal, DDM, DMS or grid square."))),
+    Entry(concat!("Units|Metric|", txtc!("Distance, altitude and speed units."))),
+    Entry(concat!("Time zone|UTC|", txtc!("The clock's offset from UTC."))),
+    Entry(concat!("Clock|24 h|", txtc!("12 or 24 h, from GPS; OK sets it by hand."))),
+    Entry(concat!("Waypoints||", txtc!("Marked places; go to one."))),
+    Entry(concat!("GPS during RX/TX|Always on|", txtc!("Turn the GPS off around signals."))),
+    Entry(concat!("Fixed position|None|", txtc!("Used when there is no fix."))),
 ];
 const G7: [Entry; 9] = [
-    Entry("Theme|Dark|Dark, daylight or night red."),
-    Entry("Home layout|Watch|What home shows."),
-    Entry("Display|Bars|S-meter, power-on message, boot screen."),
-    Entry("Backlight|15 s|Timeout, brightness, wake."),
-    Entry("Sounds|Beep on|Key beep, volume, alert tones."),
-    Entry("LEDs|RX, TX and heartbeat|And a flash while the screen is dark."),
-    Entry("Power saving|Level 1|Battery Save, Low Power Mode."),
-    Entry("Auto power off|Off|Off after a time without key or signal."),
-    Entry("Menu timeout|30 s|An idle menu returns home."),
+    Entry(concat!("Theme|Dark|", txtc!("Dark, daylight or night red."))),
+    Entry(concat!("Home layout|Watch|", txtc!("What home shows."))),
+    Entry(concat!("Display|Bars|", txtc!("S-meter, power-on message, boot screen."))),
+    Entry(concat!("Backlight|15 s|", txtc!("Timeout, brightness, wake."))),
+    Entry(concat!("Sounds|Beep on|", txtc!("Key beep, volume, alert tones."))),
+    Entry(concat!("LEDs|RX, TX and heartbeat|", txtc!("And a flash while the screen is dark."))),
+    Entry(concat!("Power saving|Level 1|", txtc!("Battery Save, Low Power Mode."))),
+    Entry(concat!("Auto power off|Off|", txtc!("Off after a time without key or signal."))),
+    Entry(concat!("Menu timeout|30 s|", txtc!("An idle menu returns home."))),
 ];
 const G8: [Entry; 8] = [
-    Entry("Timeout|120 s|Transmit stops after this; a beep says so."),
-    Entry("VOX|Off|Voice-operated transmit."),
-    Entry("Mic gain|5|Higher is louder on air: 1-9."),
-    Entry("End tone|Off|A short tone as you let go of PTT."),
-    Entry("DTMF|100 ms|Dialer, memories, timing."),
-    Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
-    Entry("Busy lockout default|Off|For new channels and the VFO."),
-    Entry("Advanced||Subtone level, tail, Extend TX, Dry TX."),
+    Entry(concat!("Timeout|120 s|", txtc!("Transmit stops after this; a beep says so."))),
+    Entry(concat!("VOX|Off|", txtc!("Voice-operated transmit."))),
+    Entry(concat!("Mic gain|5|", txtc!("Higher is louder on air: 1-9."))),
+    Entry(concat!("End tone|Off|", txtc!("A short tone as you let go of PTT."))),
+    Entry(concat!("DTMF|100 ms|", txtc!("Dialer, memories, timing."))),
+    Entry(concat!("Callsign and ID|Empty|", txtc!("Your callsign, and CW ID."))),
+    Entry(concat!("Busy lockout default|Off|", txtc!("For new channels and the VFO."))),
+    Entry(concat!("Advanced||", txtc!("Subtone level, tail, Extend TX, Dry TX."))),
 ];
 const G9: [Entry; 9] = [
-    Entry("Keys and lock|No auto lock|Auto lock, key test, shortcuts."),
-    Entry("Connections|BT off|Bluetooth, link status, cable port."),
-    Entry("PIN and lock|Off|PIN lock, channel-only mode, PIN."),
-    Entry("Region|Not set|Your amateur bands and defaults."),
-    Entry("Squelch|Software|Decided in software, or by the chip as stock."),
-    Entry("SSB patch||USB, LSB and CW in HF mode."),
-    Entry("Setup and reset||Run setup again, reset settings."),
-    Entry("About||Version, identity, checks, battery."),
-    Entry("Advanced||Squelch, calibration, cable log, MCU clock."),
+    Entry(concat!("Keys and lock|No auto lock|", txtc!("Auto lock, key test, shortcuts."))),
+    Entry(concat!("Connections|BT off|", txtc!("Bluetooth, link status, cable port."))),
+    Entry(concat!("PIN and lock|Off|", txtc!("PIN lock, channel-only mode, PIN."))),
+    Entry(concat!("Region|Not set|", txtc!("Your amateur bands and defaults."))),
+    Entry(concat!("Squelch|Software|", txtc!("Decided in software, or by the chip as stock."))),
+    Entry(concat!("SSB patch||", txtc!("USB, LSB and CW in HF mode."))),
+    Entry(concat!("Setup and reset||", txtc!("Run setup again, reset settings."))),
+    Entry(concat!("About||", txtc!("Version, identity, checks, battery."))),
+    Entry(concat!("Advanced||", txtc!("Squelch, calibration, cable log, MCU clock."))),
 ];
 /// The nine groups' items (MENU 0 1 to MENU 0 9).
 pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7, &G8, &G9];
@@ -148,136 +168,136 @@ const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS"
 /// The third-level lists, by group and item.
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ((1, 6), &[
-        Entry("Pause time|1 min|# on home pauses watch this long."),
-        Entry("Direction|Up|Scan up or down."),
-        Entry("Scan inputs|Off|Also a channel's TX frequency."),
-        Entry("Return to|Start|Where a stopped scan returns."),
+        Entry(concat!("Pause time|1 min|", txtc!("# on home pauses watch this long."))),
+        Entry(concat!("Direction|Up|", txtc!("Scan up or down."))),
+        Entry(concat!("Scan inputs|Off|", txtc!("Also a channel's TX frequency."))),
+        Entry(concat!("Return to|Start|", txtc!("Where a stopped scan returns."))),
     ]),
     ((3, 1), &[
-        Entry("Step|100 kHz|Tuning step."),
-        Entry("AGC|Auto|Auto, or a fixed gain: 1 the most, 10 the least."),
-        Entry("Radio monitor|On|A slot opening interrupts the broadcast."),
-        Entry("Sleep timer|Off|End the broadcast after a time."),
+        Entry(concat!("Step|100 kHz|", txtc!("Tuning step."))),
+        Entry(concat!("AGC|Auto|", txtc!("Auto, or a fixed gain: 1 the most, 10 the least."))),
+        Entry(concat!("Radio monitor|On|", txtc!("A slot opening interrupts the broadcast."))),
+        Entry(concat!("Sleep timer|Off|", txtc!("End the broadcast after a time."))),
     ]),
     ((3, 2), &[
-        Entry("Bars|60|Bars across; span is bars x step."),
-        Entry("Step|25 kHz|Distance between bars."),
-        Entry("Sweep speed|1 ms|Time on each point."),
-        Entry("Trigger|Off|Over the line: monitor or log."),
-        Entry("Waterfall row|Off|History under the scope."),
-        Entry("Open band scope||Sweep around the active slot. Home: hold 1."),
+        Entry(concat!("Bars|60|", txtc!("Bars across; span is bars x step."))),
+        Entry(concat!("Step|25 kHz|", txtc!("Distance between bars."))),
+        Entry(concat!("Sweep speed|1 ms|", txtc!("Time on each point."))),
+        Entry(concat!("Trigger|Off|", txtc!("Over the line: monitor or log."))),
+        Entry(concat!("Waterfall row|Off|", txtc!("History under the scope."))),
+        Entry(concat!("Open band scope||", txtc!("Sweep around the active slot. Home: hold 1."))),
     ]),
     ((4, 2), &[
-        Entry("Decode|Off|Pagers on a slot tuned to the frequency."),
-        Entry("Frequency|439.9875|The pager channel, any baud; OK types it."),
-        Entry("Capcode filter|None|Only this capcode: OK types it, # clears it."),
+        Entry(concat!("Decode|Off|", txtc!("Pagers on a slot tuned to the frequency."))),
+        Entry(concat!("Frequency|439.9875|", txtc!("The pager channel, any baud; OK types it."))),
+        Entry(concat!("Capcode filter|None|", txtc!("Only this capcode: OK types it, # clears it."))),
     ]),
     ((4, 5), &[
-        Entry("SAME|On|Decode weather alerts."),
-        Entry("Location codes|None|Up to 8 FIPS or CLC codes."),
+        Entry(concat!("SAME|On|", txtc!("Decode weather alerts."))),
+        Entry(concat!("Location codes|None|", txtc!("Up to 8 FIPS or CLC codes."))),
     ]),
     ((5, 5), &[
-        Entry("SSID|7 Handheld|0-15 after your callsign."),
-        Entry("Symbol|Person|Your map symbol."),
-        Entry("Comment|Empty|Up to 40 characters."),
-        Entry("Position source|GPS|GPS, or always the fixed position."),
-        Entry("Fixed position|None|Used without GPS."),
-        Entry("Ambiguity|Exact|Digits dropped from your position."),
-        Entry("Mic-E|Off|Short beacons with a status."),
+        Entry(concat!("SSID|7 Handheld|", txtc!("0-15 after your callsign."))),
+        Entry(concat!("Symbol|Person|", txtc!("Your map symbol."))),
+        Entry(concat!("Comment|Empty|", txtc!("Up to 40 characters."))),
+        Entry(concat!("Position source|GPS|", txtc!("GPS, or always the fixed position."))),
+        Entry(concat!("Fixed position|None|", txtc!("Used without GPS."))),
+        Entry(concat!("Ambiguity|Exact|", txtc!("Digits dropped from your position."))),
+        Entry(concat!("Mic-E|Off|", txtc!("Short beacons with a status."))),
     ]),
     ((5, 6), &[
-        Entry("Mode|Off|Manual, timed or smart."),
-        Entry("After voice TX|Off|Beacon after you talk."),
-        Entry("Power|Low|Beacon and message power."),
-        Entry("Telemetry|Off|Battery, temperature, power in the comment."),
+        Entry(concat!("Mode|Off|", txtc!("Manual, timed or smart."))),
+        Entry(concat!("After voice TX|Off|", txtc!("Beacon after you talk."))),
+        Entry(concat!("Power|Low|", txtc!("Beacon and message power."))),
+        Entry(concat!("Telemetry|Off|", txtc!("Battery, temperature, power in the comment."))),
     ]),
     ((5, 7), &[
-        Entry("Digipeat|Off|Relay others' packets."),
-        Entry("Aliases|WIDE1-1|WIDE1-1, and your call if chosen."),
-        Entry("Wait|0 s|Delay before relaying, 0-5 s."),
+        Entry(concat!("Digipeat|Off|", txtc!("Relay others' packets."))),
+        Entry(concat!("Aliases|WIDE1-1|", txtc!("WIDE1-1, and your call if chosen."))),
+        Entry(concat!("Wait|0 s|", txtc!("Delay before relaying, 0-5 s."))),
     ]),
     ((5, 9), &[
-        Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, APRSAT, ARISS, or custom."),
-        Entry("Custom path|None|Your own path, like WIDE2-2: OK types it."),
-        Entry("TX delay|300 ms|Carrier before data."),
-        Entry("TX level|Mid|Modulation level."),
-        Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
-        Entry("Mute speaker|On|Mute packets on the speaker."),
-        Entry("Shared VHF|APRS first|When A or B shares C's VHF chip: APRS first gives C long turns and A and B short looks; A·B first gives A and B their usual turns, and C misses more packets."),
+        Entry(concat!("Path|WIDE1-1,WIDE2-1|", txtc!("None, WIDE1-1, WIDE1-1,WIDE2-1, APRSAT, ARISS, or custom."))),
+        Entry(concat!("Custom path|None|", txtc!("Your own path, like WIDE2-2: OK types it."))),
+        Entry(concat!("TX delay|300 ms|", txtc!("Carrier before data."))),
+        Entry(concat!("TX level|Mid|", txtc!("Modulation level."))),
+        Entry(concat!("FX.25 on TX|16 bytes|", txtc!("Error correction on what you send."))),
+        Entry(concat!("Mute speaker|On|", txtc!("Mute packets on the speaker."))),
+        Entry(concat!("Shared VHF|APRS first|", txtc!("When A or B shares C's VHF chip: APRS first gives C long turns and A and B short looks; A·B first gives A and B their usual turns, and C misses more packets."))),
     ]),
     ((7, 3), &[
-        Entry("S-meter|Bars|Bars or dBm."),
-        Entry("Power-on message|Callsign|Off, callsign or text."),
-        Entry("Boot screen|Logo|Logo, or the owner card."),
+        Entry(concat!("S-meter|Bars|", txtc!("Bars or dBm."))),
+        Entry(concat!("Power-on message|Callsign|", txtc!("Off, callsign or text."))),
+        Entry(concat!("Boot screen|Logo|", txtc!("Logo, or the owner card."))),
     ]),
     ((7, 4), &[
-        Entry("Timeout|1 min|Backlight off after this."),
-        Entry("Brightness|7|1-10; night red keeps its own."),
-        Entry("On transmit|On|Light up while transmitting."),
-        Entry("Wake screen on|Keys and RX|What wakes the screen."),
-        Entry("Keypad light|With screen|Off, with the screen, on key press, always."),
+        Entry(concat!("Timeout|1 min|", txtc!("Backlight off after this."))),
+        Entry(concat!("Brightness|7|", txtc!("1-10; night red keeps its own."))),
+        Entry(concat!("On transmit|On|", txtc!("Light up while transmitting."))),
+        Entry(concat!("Wake screen on|Keys and RX|", txtc!("What wakes the screen."))),
+        Entry(concat!("Keypad light|With screen|", txtc!("Off, with the screen, on key press, always."))),
     ]),
     ((7, 5), &[
-        Entry("Key beep|On|Beep on key presses."),
-        Entry("Beep volume|3|1-5."),
-        Entry("Alert tones|On|Tones for alerts."),
-        Entry("Arrival tone|On|A tone on reaching a waypoint."),
-        Entry("Message sound|Packet|Sound for a message to you."),
-        Entry("Message volume|Max|How loud the message sound is."),
+        Entry(concat!("Key beep|On|", txtc!("Beep on key presses."))),
+        Entry(concat!("Beep volume|3|", txtc!("1-5."))),
+        Entry(concat!("Alert tones|On|", txtc!("Tones for alerts."))),
+        Entry(concat!("Arrival tone|On|", txtc!("A tone on reaching a waypoint."))),
+        Entry(concat!("Message sound|Packet|", txtc!("Sound for a message to you."))),
+        Entry(concat!("Message volume|Max|", txtc!("How loud the message sound is."))),
     ]),
     ((7, 7), &[
-        Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
-        Entry("Low Power Mode|Off|One VFO, everything else off. SIDE1+SIDE2 hold: leave."),
-        Entry("Auto below|20 %|Auto turns it on below this battery."),
+        Entry(concat!("Battery Save|Level 1|", txtc!("Receiver sleep: longer life, slower."))),
+        Entry(concat!("Low Power Mode|Off|", txtc!("One VFO, everything else off. SIDE1+SIDE2 hold: leave."))),
+        Entry(concat!("Auto below|20 %|", txtc!("Auto turns it on below this battery."))),
     ]),
     ((8, 2), &[
-        Entry("VOX|Off|Transmit when you talk."),
-        Entry("Level|5|Higher needs a louder voice: 1 keys easiest."),
-        Entry("Tail|2 s|Hang time after speech."),
+        Entry(concat!("VOX|Off|", txtc!("Transmit when you talk."))),
+        Entry(concat!("Level|5|", txtc!("Higher needs a louder voice: 1 keys easiest."))),
+        Entry(concat!("Tail|2 s|", txtc!("Hang time after speech."))),
     ]),
     ((8, 5), &[
-        Entry("Dialer||Type and send DTMF."),
-        Entry("Memories||16 stored sequences."),
-        Entry("Speed|100 ms|Each tone and each gap."),
-        Entry("Sidetone|On|Hear the digits you send."),
-        Entry("First digit delay|300 ms|Wait after key-up so a repeater opens."),
+        Entry(concat!("Dialer||", txtc!("Type and send DTMF."))),
+        Entry(concat!("Memories||", txtc!("16 stored sequences."))),
+        Entry(concat!("Speed|100 ms|", txtc!("Each tone and each gap."))),
+        Entry(concat!("Sidetone|On|", txtc!("Hear the digits you send."))),
+        Entry(concat!("First digit delay|300 ms|", txtc!("Wait after key-up so a repeater opens."))),
     ]),
     ((8, 6), &[
-        Entry("Callsign|Empty|For APRS, CW ID, power-on message."),
-        Entry("CW ID|Off|Send your callsign in CW."),
+        Entry(concat!("Callsign|Empty|", txtc!("For APRS, CW ID, power-on message."))),
+        Entry(concat!("CW ID|Off|", txtc!("Send your callsign in CW."))),
     ]),
     ((8, 8), &[
-        Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
-        Entry("Tail elimination|Off|Receive, transmit or both."),
-        Entry("Phase|55 Hz|55 Hz or a phase shift."),
-        Entry("Extend TX|Off|Transmit beyond the amateur bands."),
-        Entry("Dry TX|Off|Key with no RF out: bench tests."),
+        Entry(concat!("Subtone level|Normal|", txtc!("CTCSS/DCS strength: raise for a deaf repeater."))),
+        Entry(concat!("Tail elimination|Off|", txtc!("Receive, transmit or both."))),
+        Entry(concat!("Phase|55 Hz|", txtc!("55 Hz or a phase shift."))),
+        Entry(concat!("Extend TX|Off|", txtc!("Transmit beyond the amateur bands."))),
+        Entry(concat!("Dry TX|Off|", txtc!("Key with no RF out: bench tests."))),
     ]),
     ((9, 1), &[
-        Entry("Auto lock|Off|Lock the keys after a time."),
-        Entry("Key test||Each key's code, name and press."),
-        Entry("Shortcuts||What holding each digit on home does."),
+        Entry(concat!("Auto lock|Off|", txtc!("Lock the keys after a time."))),
+        Entry(concat!("Key test||", txtc!("Each key's code, name and press."))),
+        Entry(concat!("Shortcuts||", txtc!("What holding each digit on home does."))),
     ]),
     ((9, 2), &[
-        Entry("Bluetooth|Off|The Bluetooth link to the web app."),
-        Entry("Link status||Cable and Bluetooth now."),
-        Entry("Cable port|Auto|Link, terminal or KISS."),
+        Entry(concat!("Bluetooth|Off|", txtc!("The Bluetooth link to the web app."))),
+        Entry(concat!("Link status||", txtc!("Cable and Bluetooth now."))),
+        Entry(concat!("Cable port|Auto|", txtc!("Link, terminal or KISS."))),
     ]),
     ((9, 3), &[
-        Entry("PIN lock|Off|Ask for the PIN at power on, or unlock too."),
-        Entry("Channel-only mode|Off|Hide VFO and editing."),
-        Entry("Change PIN|None|Type a new PIN; the old one first."),
+        Entry(concat!("PIN lock|Off|", txtc!("Ask for the PIN at power on, or unlock too."))),
+        Entry(concat!("Channel-only mode|Off|", txtc!("Hide VFO and editing."))),
+        Entry(concat!("Change PIN|None|", txtc!("Type a new PIN; the old one first."))),
     ]),
     ((9, 7), &[
-        Entry("Run setup again||The first-boot questions."),
-        Entry("Reset||Everything but calibration."),
+        Entry(concat!("Run setup again||", txtc!("The first-boot questions."))),
+        Entry(concat!("Reset||", txtc!("Everything but calibration."))),
     ]),
     ((9, 9), &[
-        Entry("Advanced squelch||Thresholds per band."),
-        Entry("Calibration||The factory calibration, read only."),
-        Entry("Cable log|Off|Plain log on the cable at power on."),
-        Entry("Terminal colour|Off|ANSI colour on the cable terminal."),
-        Entry("MCU clock|Dynamic|Fast only while needed, or always."),
+        Entry(concat!("Advanced squelch||", txtc!("Thresholds per band."))),
+        Entry(concat!("Calibration||", txtc!("The factory calibration, read only."))),
+        Entry(concat!("Cable log|Off|", txtc!("Plain log on the cable at power on."))),
+        Entry(concat!("Terminal colour|Off|", txtc!("ANSI colour on the cable terminal."))),
+        Entry(concat!("MCU clock|Dynamic|", txtc!("Fast only while needed, or always."))),
     ]),
 ];
 
@@ -1312,14 +1332,18 @@ impl Group {
     }
 
     /// The help box: the highlighted item's path ("MENU 0 7 1") and help line (or why it is greyed).
-    pub(crate) fn help(self, app: &App) -> (Buf<20>, &'static str) {
+    pub(crate) fn help(self, app: &App) -> (Buf<20>, Help) {
         let (p, pl) = self.path(self.row);
         let mut path = Buf::<20>::new();
         path.push(b"MENU 0");
         for x in &p[..pl] {
             let _ = uwrite!(path, " {}", x);
         }
-        (path, greyed(app, &p[..pl]).unwrap_or(self.items().get(self.row as usize).map_or("", |e| e.help())))
+        let h = match greyed(app, &p[..pl]) {
+            Some(why) => Help::Why(why),
+            None => Help::Note(self.items().get(self.row as usize).and_then(|e| e.help())),
+        };
+        (path, h)
     }
 
     fn draw(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
@@ -1330,7 +1354,7 @@ impl Group {
             app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
         }
         let (path, help) = self.help(app);
-        app.help_box(lcd, 226, 46, help.as_bytes(), path.as_bytes());
+        app.help_note(lcd, 226, 46, help, path.as_bytes());
     }
 
     /// OK (or its digit) on the highlighted row: its screen, its list, or (OK only) a toggle.

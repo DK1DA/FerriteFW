@@ -1328,7 +1328,8 @@ fn contact_names_in_rows() {
 /// SELF-10: About names the licence and the copyright holder.
 #[test]
 fn about_names_the_licence() {
-    let n = crate::screens::info::def(crate::screens::info::Page::About).note;
+    let n = crate::screens::info::note_text(crate::screens::info::Page::About, crate::screens::info::def(crate::screens::info::Page::About).note);
+    let n = n.as_str();
     assert!(n.contains("Copyright 2026 Alex Harvey") && n.contains("PolyForm Noncommercial 1.0.0"), "{n}");
 }
 

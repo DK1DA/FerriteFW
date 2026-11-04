@@ -315,8 +315,8 @@ impl View for Tones {
             let s: &[u8] = if typed.is_empty() { b"885 is 88.5 Hz; any 60-260 Hz" } else { typed.as_bytes() };
             w::field(lcd, 8, 224, 216, 233, 229, s, &w::st(&UI_12, if typed.is_empty() { DIM } else { TEXT }, BG, Align::Center));
         }
-        let help: &[u8] = if rows(app) == 4 { b"RX and TX apart; further down, end tone and tail." } else { b"RX and TX are set apart: any cross mode is a pair." };
-        app.help_box(lcd, 250, 46, help, b"MENU 4");
+        let help = if rows(app) == 4 { txt!("RX and TX apart; further down, end tone and tail.") } else { txt!("RX and TX are set apart: any cross mode is a pair.") };
+        app.help_txt(lcd, 250, 46, help, b"MENU 4");
     }
 
     fn hints(self, app: &App) -> Hints {
@@ -362,6 +362,6 @@ impl Tones {
         if app.dirty(R_NOTE, Mix::new().h(&1u8).get()) {
             w::field(lcd, 8, 224, 216, 233, 229, b"Global: the radio's, MENU 0 8 8", const { &w::st(&UI_12, DIM, BG, Align::Center) });
         }
-        app.help_box(lcd, 250, 46, b"This channel's end tone and tail elimination.", b"MENU 4");
+        app.help_txt(lcd, 250, 46, txt!("This channel's end tone and tail elimination."), b"MENU 4");
     }
 }

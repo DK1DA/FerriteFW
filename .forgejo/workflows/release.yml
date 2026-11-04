@@ -1,7 +1,8 @@
 name: release
 # Runs only when a release is published (or by hand from the Actions tab), so the one worker isn't busy on every
-# push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. Two images go
-# out: the user build (tx) as ferrite-VERSION.btf and Console's backup reader, with the build report.
+# push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. Two files go
+# out: the user build (tx) as one update file, ferrite-VERSION.ffw (decision 335: the image and its SPI parts, signed
+# inside), and Console's backup reader, with the build report.
 # The receive-only and tx-bench images aren't built here (tx-bench is for local bench work only).
 on:
   release:
@@ -48,6 +49,8 @@ jobs:
           cargo llvm-cov --no-report -q -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea \
             --all-features 2>&1 | tee target/ci/driver-tests.log
           cargo test -q --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench
+          # the update file's installer checks (UPD-20 - UPD-24)
+          python3 -m unittest tools/test_ffw.py
       - name: Lints
         run: |
           cargo clippy -q --all-targets -- -D warnings
@@ -59,8 +62,8 @@ jobs:
       - name: Sim UI tests
         run: python3 tools/uitest.py --sim auto -j "$(nproc)" --results target/ci-ui
 
-      # Every run, by hand too, keeps target/out as a download on the run's page: the two images, SHA256SUMS, their
-      # signatures and the build report.
+      # Every run, by hand too, keeps target/out as a download on the run's page: the update file, the reader image,
+      # SHA256SUMS, their signatures and the build report.
       - name: Images
         run: |
           tools/mkbtf.sh tx
@@ -69,35 +72,50 @@ jobs:
           tag="${{ github.event.release.tag_name }}"
           ver="${tag#v}"
           mkdir -p target/out
-          cp target/ferrite-tx.btf "target/out/ferrite-${ver:-$(git rev-parse --short HEAD)}.btf"
+          # the .btf goes inside the .ffw (anyone with another flasher can unzip it)
+          cp target/ferrite-tx.ffw "target/out/ferrite-${ver:-$(git rev-parse --short HEAD)}.ffw"
           cp target/ferrite-reader.btf target/out/
-          (cd target/out && sha256sum *.btf > SHA256SUMS)
-      # The images and SHA256SUMS signed with minisign (a .minisig beside each), once the MINISIGN_KEY secret is set:
-      # the secret key file's contents, made without a password (minisign -G -W); the public key ships in Console.
+      # Signed with minisign once the MINISIGN_KEY secret is set (the secret key file's contents, made without a
+      # password: minisign -G -W; the public key ships in Console): the .ffw's manifest (its signature goes inside, as
+      # manifest.minisig, UPD-21), then the reader image and SHA256SUMS (a .minisig beside each). SHA256SUMS is made
+      # after the .ffw is signed, so it covers the file as shipped.
       - name: Sign
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
           apt-get install -y -q --no-install-recommends minisign # also the build report's check
-          if [ -z "$MINISIGN_KEY" ]; then echo "no MINISIGN_KEY secret: not signed"; exit 0; fi
+          if [ -z "$MINISIGN_KEY" ]; then
+            echo "no MINISIGN_KEY secret: not signed"
+            (cd target/out && sha256sum *.ffw *.btf > SHA256SUMS)
+            exit 0
+          fi
           # The key file is a comment line and the key's base64 line; the secret may hold the base64 line alone or
           # both joined into one, so rebuild the file around the base64.
           b64=$(printf '%s' "$MINISIGN_KEY" | grep -oE 'RW[A-Za-z0-9+/]{100,}={0,2}' | tail -1)
           key=$(mktemp)
           printf 'untrusted comment: minisign encrypted secret key\n%s\n' "$b64" > "$key"
           cd target/out
-          minisign -S -s "$key" -t "Ferrite ${TAG:-build} $(git rev-parse --short HEAD)" -m *.btf SHA256SUMS
+          comment="Ferrite ${TAG:-build} $(git rev-parse --short HEAD)"
+          for f in *.ffw; do
+            python3 ../../tools/ffw.py manifest "$f" > manifest.json
+            minisign -S -s "$key" -t "$comment" -m manifest.json
+            python3 ../../tools/ffw.py add-sig "$f" manifest.json.minisig
+            rm manifest.json manifest.json.minisig
+            python3 ../../tools/ffw.py check "$f" # the installers' check: the release key, every hash
+          done
+          sha256sum *.ffw *.btf > SHA256SUMS
+          minisign -S -s "$key" -t "$comment" -m *.btf SHA256SUMS
           rm "$key"
           # Each signature checked against the public key in the repo (the one Console carries): a wrong secret fails here.
           for f in *.btf SHA256SUMS; do minisign -Vqm "$f" -p ../../minisign.pub; done
-          echo "signed: $(ls *.minisig | tr '\n' ' ')"
+          echo "signed: $(ls *.ffw *.minisig | tr '\n' ' ')"
       # Only reads what the steps above made (the tests' logs and coverage, the UI results, the image and its
       # signature): nothing is built or run again.
       - name: Build report
         run: |
           ui=$(ls -t target/ci-ui/*/ui/results.json | head -1)
-          sig=$(ls target/out/ferrite-*.btf.minisig 2>/dev/null | grep -v reader | head -1)
+          sig=$(ls target/out/ferrite-*.ffw 2>/dev/null | head -1)
           python3 tools/buildreport.py tx --no-build --ui "$ui" ${sig:+--sig "$sig"} \
             --from-logs target/ci/host-tests.log target/ci/driver-tests.log
           # Only the tx build ships, so the report drops the build from its name.
@@ -116,7 +134,7 @@ jobs:
           API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets
         run: |
           cd target/out
-          for f in *.btf *.minisig SHA256SUMS build-report.html; do # build-report.json: the run's download only
+          for f in *.ffw *.btf *.minisig SHA256SUMS build-report.html; do # build-report.json: the run's download only
             curl -sSf -X POST -H "Authorization: token $TOKEN" -F "attachment=@$f" "$API?name=$f" > /dev/null
             echo "attached $f"
           done

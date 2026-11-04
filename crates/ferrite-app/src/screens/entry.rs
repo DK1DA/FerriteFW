@@ -458,8 +458,8 @@ impl View for Entry {
             para(lcd, 8, 210, 224, 2, 17, note, &UI_12, AMBER, BG);
         }
         let tip = self.tip();
-        if app.dirty(R_HELP, Mix::new().h(&tip).get()) {
-            para(lcd, 8, 250, 224, 3, 15, tip, &UI_12, SUB, BG);
+        if app.dirty(R_HELP, Mix::new().h(&tip.0).get()) {
+            para(lcd, 8, 250, 224, 3, 15, crate::text::load(tip).as_bytes(), &UI_12, SUB, BG);
         }
     }
 
@@ -662,13 +662,13 @@ match self.to {
         Info { rows, note }
     }
 
-    /// The help paragraph at the bottom.
-    pub fn tip(self) -> &'static [u8] {
+    /// The help paragraph at the bottom (in the text pack, UPD-22).
+    pub fn tip(self) -> crate::text::Txt {
         match self.to {
-            EntryFor::Vfo => b"After three digits the point comes by itself; * types it, and * again enters (52*525*).",
-            EntryFor::Channel => b"Type the channel number, then OK.",
-            EntryFor::SplitTx => b"Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift.",
-            _ => b"* is the point, then * or OK keeps it. BACK deletes.",
+            EntryFor::Vfo => txt!("After three digits the point comes by itself; * types it, and * again enters (52*525*)."),
+            EntryFor::Channel => txt!("Type the channel number, then OK."),
+            EntryFor::SplitTx => txt!("Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift."),
+            _ => txt!("* is the point, then * or OK keeps it. BACK deletes."),
         }
     }
 }

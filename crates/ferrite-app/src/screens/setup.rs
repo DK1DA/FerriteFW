@@ -39,31 +39,31 @@ enum Ask {
 }
 
 /// The eight pages: heading, text, what they ask (SETUP-2).
-const PAGES: [(&str, &str, Ask); 8] = [
+const PAGES: [(&str, crate::text::Txt, Ask); 8] = [
     (
         "Welcome to Ferrite",
-        "A few questions, one per page. Each has a default, so OK on every page gives a working radio. OK goes on, BACK goes back, # skips the rest.",
+        txt!("A few questions, one per page. Each has a default, so OK on every page gives a working radio. OK goes on, BACK goes back, # skips the rest."),
         Ask::Nothing,
     ),
     (
         "Your callsign",
-        "For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 6 1).",
+        txt!("For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 6 1)."),
         Ask::Callsign,
     ),
-    ("Region", "Where you may transmit, and defaults like weather alerts.", Ask::Region),
+    ("Region", txt!("Where you may transmit, and defaults like weather alerts."), Ask::Region),
     (
         "Owner card",
-        "Optional. Shown at power on if chosen (MENU 0 7 3 3); later, edit it in the web app.",
+        txt!("Optional. Shown at power on if chosen (MENU 0 7 3 3); later, edit it in the web app."),
         Ask::Owner,
     ),
-    ("Time", "Time zone, clock and units. The GPS sets the time once it has a fix.", Ask::Time),
-    ("Look", "What home shows, and the colours.", Ask::Look),
+    ("Time", txt!("Time zone, clock and units. The GPS sets the time once it has a fix."), Ask::Time),
+    ("Look", txt!("What home shows, and the colours."), Ask::Look),
     (
         "Battery Save",
-        "The receivers sleep between checks: deeper lasts longer, but hears a call later.",
+        txt!("The receivers sleep between checks: deeper lasts longer, but hears a call later."),
         Ask::BatterySave,
     ),
-    ("All set", "", Ask::Summary),
+    ("All set", txt!(""), Ask::Summary),
 ];
 const LAST: u8 = PAGES.len() as u8 - 1;
 
@@ -71,11 +71,11 @@ const LAST: u8 = PAGES.len() as u8 - 1;
 /// the mock-up's "Other ..." row is gone). Extend TX is the row after them.
 const REGION_ROWS: u8 = REGION_LIST.len() as u8;
 /// Battery Save levels and their trade-off (chapter 33's table).
-const SAVE: [(&str, &str, &str); 4] = [
-    ("Off", "always on", "Receivers always on: hears everything, shortest battery life."),
-    ("Level 1", "38 % on", "On 300 ms, off 500 ms: a signal can be heard up to 0.5 s late."),
-    ("Level 2", "20 % on", "On 180 ms, off 700 ms: a signal can be heard up to 0.7 s late."),
-    ("Level 3", "18 % on", "On 180 ms, off 800 ms: a signal can be heard up to 0.8 s late."),
+const SAVE: [(&str, &str, crate::text::Txt); 4] = [
+    ("Off", "always on", txt!("Receivers always on: hears everything, shortest battery life.")),
+    ("Level 1", "38 % on", txt!("On 300 ms, off 500 ms: a signal can be heard up to 0.5 s late.")),
+    ("Level 2", "20 % on", txt!("On 180 ms, off 700 ms: a signal can be heard up to 0.7 s late.")),
+    ("Level 3", "18 % on", txt!("On 180 ms, off 800 ms: a signal can be heard up to 0.8 s late.")),
 ];
 /// Owner card fields.
 const OWNER: [&str; 3] = ["Name", "Phone", "E-mail"];
@@ -345,6 +345,7 @@ impl View for Setup {
         let (head, text, _) = PAGES[page as usize];
         if app.dirty(R_TOP, Mix::new().h(&page).get()) {
             w::field(lcd, 10, 220, 24, 50, 45, head.as_bytes(), const { &w::st(&UI_15B, TEXT, BG, Align::Left) });
+            let text = crate::text::load(text); // UPD-22: read when the page is drawn
             if !text.is_empty() {
                 w::wrap(lcd, 10, 220, 50, if ask == Ask::Nothing { 200 } else { 94 }, 63, 15, text.as_bytes(), &UI_12, SUB, BG);
             }
@@ -387,7 +388,7 @@ impl View for Setup {
                         w::field(lcd, 10, 120, 249, 267, 262, b"Extend TX", &w::st(&UI_12, if sel { BLUE } else { TEXT }, bg, Align::Left));
                         w::field(lcd, 130, 100, 249, 267, 262, ON_OFF[ext as usize].as_bytes(), &w::st(&UI_12, SUB, bg, Align::Right));
                     });
-                    w::wrap(lcd, 10, 220, 270, 300, 283, 15, b"On: transmit outside the amateur bands too. Warns first.", &UI_12, SUB, BG);
+                    w::wrap(lcd, 10, 220, 270, 300, 283, 15, crate::text::load(txt!("On: transmit outside the amateur bands too. Warns first.")).as_bytes(), &UI_12, SUB, BG);
                 }
             }
             Ask::Owner => {
@@ -442,18 +443,19 @@ impl View for Setup {
                     }
                 }
                 if app.dirty(R_ROW + 4, Mix::new().h(&b).get()) {
-                    w::wrap(lcd, 10, 220, 236, 280, 250, 14, SAVE[b as usize % 4].2.as_bytes(), &UI_12, TEXT, BG);
+                    w::wrap(lcd, 10, 220, 236, 280, 250, 14, crate::text::load(SAVE[b as usize % 4].2).as_bytes(), &UI_12, TEXT, BG);
                 }
             }
             Ask::Summary => {
                 let n = cx.store.count();
-                let (vals, note) = summary(app, n);
+                let vals = summary(app, n);
                 for (i, (l, v)) in SUMMARY.iter().zip(&vals).enumerate() {
                     let c = if i == 6 && n == 0 { SUB } else { TEXT };
                     app.kv(lcd, i, 53 + 24 * i as i32, 24, &w::KV_STATUS, l.as_bytes(), v.as_bytes(), c, false);
                 }
-                if app.dirty(R_HELP, Mix::new().h(&note).get()) {
-                    w::wrap(lcd, 10, 220, 222, 299, 236, 15, note.as_bytes(), &UI_12, SUB, BG);
+                let no_call = app.set.callsign.is_empty();
+                if app.dirty(R_HELP, Mix::new().h(&no_call).get()) {
+                    w::wrap(lcd, 10, 220, 222, 299, 236, 15, summary_note(app).as_bytes(), &UI_12, SUB, BG);
                 }
             }
         }
@@ -475,7 +477,7 @@ const SUMMARY: [&str; 7] = ["Callsign", "Region", "Extend TX", "Time zone", "Hom
 
 /// The summary's values and its note (SETUP-10: the transmit state, no channels yet and how to add them), with
 /// `n` channels stored.
-fn summary(app: &App, n: u16) -> ([Buf<32>; 7], Buf<160>) {
+fn summary(app: &App, n: u16) -> [Buf<32>; 7] {
     let s = *app.set;
     let mut v = [Buf::<32>::new(); 7];
     v[0].set(if s.callsign.is_empty() { b"none".as_slice() } else { s.callsign.as_bytes() });
@@ -496,12 +498,17 @@ fn summary(app: &App, n: u16) -> ([Buf<32>; 7], Buf<160>) {
     } else {
         let _ = uwrite!(v[6], "{}", n);
     }
+    v
+}
+
+/// The summary's note (from the text pack, UPD-22: read when drawn).
+fn summary_note(app: &App) -> Buf<160> {
     let mut note = Buf::<160>::new();
-    if s.callsign.is_empty() {
-        note.push(b"No callsign: automatic transmissions stay off. ");
+    if app.set.callsign.is_empty() {
+        note.push(crate::text::load(txt!("No callsign: automatic transmissions stay off. ")).as_bytes());
     }
-    note.push(b"Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 7 1.");
-    (v, note)
+    note.push(crate::text::load(txt!("Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 7 1.")).as_bytes());
+    note
 }
 
 /// A row of a setup page for the readback: name, value, focused.
@@ -546,11 +553,11 @@ impl Setup {
                 }
             }
             Ask::Summary => {
-                let (vals, n2) = summary(app, n);
+                let vals = summary(app, n);
                 for (l, v) in SUMMARY.iter().zip(&vals) {
                     row(l.as_bytes(), v.as_bytes(), false);
                 }
-                note = n2;
+                note = summary_note(app);
             }
         }
         (self.page + 1, PAGES.len() as u8, PAGES[self.page as usize].0, note)

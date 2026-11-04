@@ -60,6 +60,12 @@ impl<N: Nor> Flash<N> {
         Ok(())
     }
 
+    /// The bytes in the chip, unless the chip is in use right now (false then, or when the read fails): the SPI
+    /// parts' reads (decision 335), which come from drawing code and must never panic on a borrow.
+    pub fn try_read(&self, addr: u32, buf: &mut [u8]) -> bool {
+        self.nor.try_borrow_mut().is_ok_and(|mut n| n.read(addr, buf).is_ok())
+    }
+
     /// The bytes in the chip.
     pub fn raw_read(&self, addr: u32, buf: &mut [u8]) -> Result {
         self.nor.borrow_mut().read(addr, buf)

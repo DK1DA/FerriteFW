@@ -41,14 +41,14 @@ const ALL: fn(u16) -> bool = |_| true;
 pub const PRESETS_MAX: u8 = 16;
 
 /// The editor's rows and their help.
-const ROWS: [(&str, &str); 7] = [
-    ("Name", "Up to 12 characters"),
-    ("Start", "Knob 100 kHz, left and right 1 MHz"),
-    ("End", "Knob 100 kHz, left and right 1 MHz"),
-    ("Step", "The scan's step through the range"),
-    ("Mode", "FM wide, NFM narrow or AM (VFO-20)"),
-    ("Resume", "Global follows MENU 0 1 2; or this range's own"),
-    ("Skips", "Never stopped on (up to 48); * on a hit adds"),
+const ROWS: [(&str, crate::text::Txt); 7] = [
+    ("Name", txt!("Up to 12 characters")),
+    ("Start", txt!("Knob 100 kHz, left and right 1 MHz")),
+    ("End", txt!("Knob 100 kHz, left and right 1 MHz")),
+    ("Step", txt!("The scan's step through the range")),
+    ("Mode", txt!("FM wide, NFM narrow or AM (VFO-20)")),
+    ("Resume", txt!("Global follows MENU 0 1 2; or this range's own")),
+    ("Skips", txt!("Never stopped on (up to 48); * on a hit adds")),
 ];
 
 fn range_text(p: &RangePreset, b: &mut Buf<24>) {
@@ -256,14 +256,14 @@ impl View for ScanLists {
                     app.row1(lcd, i, label.as_bytes(), v.as_bytes(), false, i as u8 == row, i == 6);
                 }
                 // The help, or why this range won't scan (SCAN-14).
-                let text: &[u8] = if crosses_relay(&p) {
-                    b"Crosses 64 MHz: a scan of it is refused (SCAN-14)"
+                let text = if crosses_relay(&p) {
+                    txt!("Crosses 64 MHz: a scan of it is refused (SCAN-14)")
                 } else if band_of(p.start) != band_of(p.end.saturating_sub(1)) {
-                    b"Spans more than one band"
+                    txt!("Spans more than one band")
                 } else {
-                    ROWS[row as usize].1.as_bytes()
+                    ROWS[row as usize].1
                 };
-                app.help_box(lcd, 300 - 38, 34, text, b"MENU 0 1 4");
+                app.help_txt(lcd, 300 - 38, 34, text, b"MENU 0 1 4");
             }
             Page::Skips => {
                 let n = data.skips();
