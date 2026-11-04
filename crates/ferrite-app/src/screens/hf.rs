@@ -213,6 +213,28 @@ fn mode_row(lcd: &mut impl Panel, h: &HfMem, patch: bool) {
     });
 }
 
+/// HF-3, HF-19: the SSB patch's progress, in the mode row's box (over the band strip and the meter), so the
+/// rest of the screen stays as it is while it streams.
+#[inline(never)]
+fn patch_box(lcd: &mut impl Panel) {
+    ferrite_ui::canvas::banded(lcd, 0, 120, 240, 62, BG, |lcd| {
+        lcd.fill_r(8, 121, 224, 59, 4, BLUE);
+        lcd.fill_r(9, 122, 222, 57, 4, SURFACE);
+        lcd.text4(16, 140, b"Loading SSB patch", &UI_15B, TEXT, SURFACE);
+        lcd.fill_r(16, 154, 208, 8, 3, LINE);
+        lcd.text4(16, 174, b"For USB, LSB and CW", &UI_12, SUB, SURFACE);
+    });
+}
+
+/// [`patch_box`]'s bar and percent at `pct`.
+#[inline(never)]
+fn patch_progress(lcd: &mut impl Panel, pct: u8) {
+    lcd.fill_r(16, 154, (208 * pct.min(100) as i32 / 100).max(6), 8, 3, BLUE);
+    let mut t = Buf::<8>::new();
+    let _ = uwrite!(t, "{} %", pct);
+    w::field(lcd, 170, 54, 128, 144, 140, t.as_bytes(), const { &w::st(&UI_12, SUB, SURFACE, Align::Right) });
+}
+
 /// HF-12: the frequency's digit a step tunes, as x and width on the screen (the 5 and 9 kHz steps: the kHz digit).
 fn digit_under(f: Freq10, step: u32) -> (i32, i32) {
     let mut b = [0u8; 16];
@@ -641,6 +663,12 @@ impl Hf {
         ent
     }
 
+    /// HF-3, HF-19: the patch's progress shows while the Radio task reports it streaming (a sideband after AM, or
+    /// entering on one); entering in AM shows none.
+    fn patch_loading(self, app: &App, live: &LiveAll) -> bool {
+        app.radio.ssb_patch && matches!(live.mode, ModeLive::Hf { loading, .. } if loading < 100)
+    }
+
     /// The screen's values (HF-15) for the readback.
     pub(crate) fn shown(self, app: &App, live: &LiveAll) -> Shown {
         let h = app.set.hf;
@@ -654,7 +682,7 @@ impl Hf {
             let _ = uwrite!(bfo, "BFO {}{}", if h.bfo > 0 { "+" } else { "" }, h.bfo);
         }
         Shown {
-            loading: (!self.loaded && app.radio.ssb_patch && pct < 100).then_some(pct),
+            loading: self.patch_loading(app, live).then_some(pct),
             menu: self.menu.then(|| (self.row, option_values(&h))),
             band: h.band().map_or("", |b| BANDS[b].0),
             rx: if h.chip1() { "CHIP 1" } else { "SI4732" },
@@ -869,21 +897,8 @@ impl View for Hf {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let pct = loading(cx.live);
-        // HF-3, HF-19: at entry until the first report, and whenever the Radio task reports the patch streaming
-        // (the first USB, LSB or CW after entering in AM)
-        let loading = app.radio.ssb_patch && pct < 100 && (!self.loaded || matches!(cx.live.mode, ModeLive::Hf { .. }));
-        app.new_page(lcd, Mix::new().h(&loading).h(&self.menu).get());
-        if loading {
-            // B13: the patch streams in behind a bar (HF-3, HF-19).
-            app.message(lcd, b"HF mode", b"Loading SSB patch", b"Streaming the patch into the SI4732 for USB, LSB and CW. A few seconds.", TEXT);
-            if app.dirty(R_NOTE, Mix::new().h(&pct).get()) {
-                let mut t = Buf::<8>::new();
-                let _ = uwrite!(t, "{} %", pct);
-                w::progress(lcd, 30, 230, 180, 6, pct, BLUE);
-                w::field(lcd, 10, 220, 242, 260, 256, t.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Center) });
-            }
-            return;
-        }
+        let loading = self.patch_loading(app, cx.live);
+        app.new_page(lcd, Mix::new().h(&self.menu).get());
         let h = app.set.hf;
         if self.menu {
             let vals = option_values(&h);
@@ -936,10 +951,15 @@ impl View for Hf {
             w::field(lcd, 152, 80, 104, 120, 116, su.as_bytes(), const { &w::st(&UI_12B, TEXT, BG, Align::Right) });
         }
         // SIDE2's mode row for a moment (HF-12), over the band strip and the meter; else those.
+        // HF-3, HF-19: the patch's progress in a box of the same place while it streams.
         let picking = app.radio.hf_pick_at != 0 && app.now.wrapping_sub(app.radio.hf_pick_at) < PICK_MS;
+        let covered = picking || loading;
         let marker = band_i.map_or(0, |b| strip_x(h.freq, BANDS[b].1, BANDS[b].2));
-        if app.dirty(R_TOP, Mix::new().h(&picking).h(&h.mode).h(&band_i.map_or(99, |b| b as u32)).h(&marker).get()) {
-            if picking {
+        let shown = if loading { 2 } else { picking as u32 };
+        if app.dirty(R_TOP, Mix::new().h(&shown).h(&h.mode).h(&band_i.map_or(99, |b| b as u32)).h(&marker).get()) {
+            if loading {
+                patch_box(lcd);
+            } else if picking {
                 mode_row(lcd, &h, app.radio.ssb_patch);
             } else {
                 band_strip(lcd, band_i, marker);
@@ -949,10 +969,13 @@ impl View for Hf {
             }
         }
         let lit = w::meter_level(rssi);
-        if !picking && app.dirty(R_SUB, Mix::new().h(&lit).get()) {
+        if loading && app.dirty(R_SUB, Mix::new().h(&pct).get()) {
+            patch_progress(lcd, pct); // only the bar and the percent change as it goes
+        }
+        if !covered && app.dirty(R_SUB, Mix::new().h(&lit).get()) {
             w::meter(lcd, 12, 158, None, lit, GREEN, BG);
         }
-        if !picking && app.dirty(R_SCROLL, 1) {
+        if !covered && app.dirty(R_SCROLL, 1) {
             ferrite_ui::canvas::banded(lcd, 0, 166, 240, 16, BG, |lcd| {
                 // S1, S3, S5, S7, S9 and +20 under their segments (meter_level's scale)
                 for (seg, t) in [(1, "1"), (5, "3"), (9, "5"), (13, "7"), (17, "9"), (18, "+20")] {
@@ -962,6 +985,8 @@ impl View for Hf {
         }
         if picking {
             app.forget(R_SUB, 1);
+        }
+        if covered {
             app.forget(R_SCROLL, 1);
         }
         // The last two recent frequencies, or the frequency being typed.

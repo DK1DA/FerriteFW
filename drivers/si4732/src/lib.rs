@@ -175,6 +175,11 @@ impl<B: I2c> Si4732<B> {
         self.mode
     }
 
+    /// The bus, for its owner to change its timing (a faster clock for the patch download).
+    pub fn bus_mut(&mut self) -> &mut B {
+        &mut self.bus
+    }
+
     /// Status byte: CTS and ERR.
     fn status(&mut self) -> Result<u8, Error> {
         let mut s = [0u8];

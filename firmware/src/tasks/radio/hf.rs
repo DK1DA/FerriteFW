@@ -7,6 +7,8 @@ const HF_SEEK_KHZ: (u16, u16) = (150, 18_000);
 /// HF-15.1: the board's front end (an LNA before the SI4732's AM input) gain, estimated at 20 dB: the chip reads
 /// 13-33 dBuV of indoor noise on the whip, which a receiver measured at the antenna shows as about S2-S5.
 const SI_FRONT_DB: i16 = 20;
+/// HF-19: the SI4732's I2C half period for the patch download, us (5 otherwise, about 50 kHz).
+const PATCH_HALF_US: u32 = 2;
 /// HF mode's modes as the UI sends them (`screens::hf`): USB, LSB, CW.
 const MODE_USB: u8 = 3;
 const MODE_LSB: u8 = 4;
@@ -101,8 +103,14 @@ impl Radio {
                 }
                 Timer::after_millis(5).await;
             }
-            Timer::after_millis(550).await; // the crystal, as stock waits before the patch
+            // The patch as soon as the chip answers (AN332: right after POWER_UP), then whatever is left of the
+            // crystal's 550 ms before the first tune (stock waits it out first)
+            let up = now_ms();
             self.ssb_patch(freq).await?;
+            let settled = up + 550;
+            if now_ms() < settled {
+                Timer::after_millis(settled - now_ms()).await;
+            }
             self.si.volume(SI_VOLUME, d)?;
             si_apply(&mut self.si, self.si_opts)?;
         }
@@ -130,23 +138,35 @@ impl Radio {
         let at = SSB_PATCH.start + ssb::HEADER as u32;
         let mut buf = [0u8; 64];
         let live = LIVE.sender();
-        for off in (0..p.len).step_by(buf.len()) {
-            let n = (p.len - off).min(buf.len() as u32) as usize;
-            part_read_wait(at + off, &mut buf[..n]).await?;
-            if off == 0 && buf[0] != 0x15 {
-                return Err(si4732::Error::Rejected); // not a patch's first record (ssb::records_ok)
+        let t0 = now_ms();
+        // The download only on a faster clock (2 us half periods, about 2.5 times the 5 us ones), within the chip's
+        // 400 kHz and gentle on SDA's internal pull-up; back to the usual after, whatever happened.
+        let slow = core::mem::replace(&mut self.si.bus_mut().0.half_us, PATCH_HALF_US);
+        let r = async {
+            for off in (0..p.len).step_by(buf.len()) {
+                let n = (p.len - off).min(buf.len() as u32) as usize;
+                part_read_wait(at + off, &mut buf[..n]).await?;
+                if off == 0 && buf[0] != 0x15 {
+                    return Err(si4732::Error::Rejected); // not a patch's first record (ssb::records_ok)
+                }
+                for r in buf[..n].as_chunks::<8>().0 {
+                    self.si.patch_record(r, &mut BusyDelay)?;
+                }
+                // This task runs above the UI and the link: a turn for them every 8 records, or the screen freezes
+                // for the whole download (black, Nov 3, 2026)
+                if off % 1024 == 0 {
+                    let loading = (off as u64 * 100 / p.len as u64) as u8;
+                    self.live.mode = ModeLive::Hf { freq, rssi: -127, snr: 0, si4732: true, loading };
+                    live.send(self.live);
+                }
+                Timer::after_millis(1).await;
             }
-            for r in buf[..n].as_chunks::<8>().0 {
-                self.si.patch_record(r, &mut BusyDelay)?;
-            }
-            if off % 1024 == 0 {
-                let loading = (off as u64 * 100 / p.len as u64) as u8;
-                self.live.mode = ModeLive::Hf { freq, rssi: -127, snr: 0, si4732: true, loading };
-                live.send(self.live);
-                Timer::after_millis(1).await; // the other tasks a turn
-            }
+            Ok(())
         }
-        log(b"hf ssb patch records ", p.len / 8);
+        .await;
+        self.si.bus_mut().0.half_us = slow;
+        r?;
+        log(b"hf ssb patch ms ", (now_ms() - t0) as u32);
         Ok(())
     }
 
