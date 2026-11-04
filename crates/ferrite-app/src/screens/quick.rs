@@ -109,7 +109,7 @@ impl View for Quick {
         let mut m = Buf::<16>::new();
         mode_chip(sl.cfg(), &mut m);
         let f = sl.freq();
-        if app.dirty(R_TOP, hash(&(a, head, m, f))) {
+        if app.dirty(R_TOP, Mix::new().h(&a).h(&head).h(&m).h(&f).get()) {
             // MENU-13: whose settings these are.
             w::badge(lcd, 8, 23, a, true, BG);
             w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
@@ -198,7 +198,7 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
     let mut fb = Buf::<16>::new();
     fm::fm_mhz(f, &mut fb);
     fb.push(b" MHz");
-    if app.dirty(R_TOP, hash(&(a, &fb, 2u8))) {
+    if app.dirty(R_TOP, Mix::new().h(&a).h(&fb).h(&2u8).get()) {
         w::badge(lcd, 8, 23, a, true, BG);
         w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
         w::field(lcd, 26, 66, 21, 39, 35, Align::Left, fb.as_bytes(), &UI_12B, TEXT, BG);

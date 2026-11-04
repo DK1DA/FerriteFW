@@ -708,11 +708,11 @@ impl View for Hf {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let pct = loading(cx.live);
         let loading = app.radio.ssb_patch && pct < 100;
-        app.new_page(lcd, hash(&(self.loaded || !loading, self.menu)));
+        app.new_page(lcd, Mix::new().h(&(self.loaded || !loading)).h(&self.menu).get());
         if !self.loaded && loading {
             // B13: the patch streams in behind a bar (HF-3, HF-19).
             app.message(lcd, b"HF mode", b"Loading SSB patch", b"Streaming the patch into the SI4732 for USB, LSB and CW. It takes a while. BACK cancels.", TEXT);
-            if app.dirty(R_NOTE, hash(&pct)) {
+            if app.dirty(R_NOTE, Mix::new().h(&pct).get()) {
                 let mut t = Buf::<8>::new();
                 let _ = uwrite!(t, "{} %", pct);
                 w::progress(lcd, 30, 230, 180, 6, pct, BLUE);
@@ -736,13 +736,13 @@ impl View for Hf {
         // Band and receiver (HF-15).
         let band = h.band().map_or("", |b| BANDS[b].0);
         let chip1 = h.chip1();
-        if app.dirty(R_HEAD, hash(&(band, chip1))) {
+        if app.dirty(R_HEAD, Mix::new().h(&band).h(&chip1).get()) {
             w::field(lcd, 10, 120, 24, 42, 38, Align::Left, band.as_bytes(), &UI_12B, TEXT, BG);
             ferrite_ui::canvas::banded(lcd, 130, 24, 102, 18, BG, |lcd| {
                 w::tag(lcd, 230, 25, if chip1 { b"CHIP 1".as_slice() } else { b"SI4732" }, SUB, BG);
             });
         }
-        if app.dirty(R_FREQ, hash(&h.freq)) {
+        if app.dirty(R_FREQ, Mix::new().h(&h.freq).get()) {
             w::freq(lcd, 12, 232, 96, h.freq, &DIG_46, &DIG_28, TEXT, SUB, BG);
         }
         // Mode, step, bandwidth, BFO in USB/LSB/CW.
@@ -751,7 +751,7 @@ impl View for Hf {
             let _ = uwrite!(bfo, "BFO {}{}", if h.bfo > 0 { "+" } else { "" }, h.bfo);
         }
         let step = STEP_NAMES[rx][h.step as usize % 4];
-        if app.dirty(R_INFO, hash(&(h.mode, step, h.bw_text(), bfo))) {
+        if app.dirty(R_INFO, Mix::new().h(&h.mode).h(&step).h(&h.bw_text()).h(&bfo).get()) {
             ferrite_ui::canvas::banded(lcd, 12, 106, 220, 17, BG, |lcd| {
                 w::chips(lcd, 12, 106, 220, &[mode_name(h.mode).as_bytes(), step.as_bytes(), h.bw_text().as_bytes(), bfo.as_bytes()], BG);
             });
@@ -763,7 +763,7 @@ impl View for Hf {
         };
         // dBuV = dBm + 107; the bar spans 0-70 dBuV.
         let lit = ((rssi + 107).clamp(0, 70) as u32 * w::METER_SEGS as u32 / 70) as u8;
-        if app.dirty(R_SUB, hash(&(rssi, snr, chip1))) {
+        if app.dirty(R_SUB, Mix::new().h(&rssi).h(&snr).h(&chip1).get()) {
             let t = signal_text(chip1, rssi, snr);
             w::meter(lcd, 12, 140, None, lit, GREEN, BG);
             w::field(lcd, 214, 18, 132, 150, 146, Align::Right, b"", &UI_12, TEXT, BG);
@@ -771,13 +771,13 @@ impl View for Hf {
         }
         // Typing a frequency.
         let ent = self.entry_text(app);
-        if app.dirty(R_NOTE, hash(&ent)) {
+        if app.dirty(R_NOTE, Mix::new().h(&ent).get()) {
             w::field(lcd, 12, 220, 178, 196, 192, Align::Left, ent.as_bytes(), &UI_12B, AMBER, BG);
         }
         // What is paused (HF-6), and whether PTT can transmit here.
         let tx = h.can_tx();
         let patch = app.radio.ssb_patch;
-        if app.dirty(R_HELP, hash(&(tx, patch))) {
+        if app.dirty(R_HELP, Mix::new().h(&tx).h(&patch).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 204, 240, 96, BG, |lcd| {
                 lcd.fill_r(8, 206, 224, 76, 2, SURFACE);
                 let mut t = Buf::<140>::new();

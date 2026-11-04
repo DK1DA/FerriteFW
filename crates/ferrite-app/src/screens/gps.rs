@@ -208,7 +208,7 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     // Status line (GPS-15): fix, satellites, accuracy; the fix's age at the right, amber once stale (GPS-2).
     let (l, age) = status_line(gps, fix, seen);
     let stale = fix.is_some_and(|f| f.age_s > 10);
-    if app.dirty(R_TOP, hash(&(l.as_bytes(), age.as_bytes(), stale))) {
+    if app.dirty(R_TOP, Mix::new().h(&l.as_bytes()).h(&age.as_bytes()).h(&stale).get()) {
         // the age gets just its own width at the right, and the status text is fitted to what is left, so
         // neither clears part of the other ("±5 m" lost its m)
         let aw = text4_width(age.as_bytes(), &UI_12);
@@ -217,7 +217,7 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     }
     // Between a fix and none, the page's layout changes: clear it and redraw every part.
     let none: (&[u8], &[u8]) = if gps == GpsState::Off { (b"GPS is off", b"MENU 0 6 1 turns it on") } else { (b"No fix yet", b"Left or right: the satellites") };
-    if app.dirty(R_HELP, hash(&fix.is_some())) {
+    if app.dirty(R_HELP, Mix::new().h(&fix.is_some()).get()) {
         app.drawn.hash[R_ROW..R_ROW + 8].fill(0);
         app.drawn.hash[R_NOTE] = 0;
         // in bands, with the message when the fix went: no blank page between (DISP-25)
@@ -227,7 +227,7 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
             }
         });
         if fix.is_none() {
-            app.dirty(R_NOTE, hash(&none));
+            app.dirty(R_NOTE, Mix::new().h(&none).get());
         }
     }
     let Some(f) = fix else {
@@ -236,7 +236,7 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     };
     // The position, large (GPS-15): latitude and longitude in the 0 6 3 format; as a grid square, the square
     // large and the coordinates small under it.
-    if app.dirty(R_ROW, hash(&(f.pos, fmt))) {
+    if app.dirty(R_ROW, Mix::new().any(&f.pos).h(&fmt).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 42, 240, 64, BG, |lcd| {
             let (big, small) = position_lines(f, fmt);
             if fmt == 3 {
@@ -252,14 +252,14 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     let moving = f.speed_kmh >= MOVING_KMH;
     for (k, (label, what)) in TILES.into_iter().enumerate() {
         let v = tile_value(app, f, dev, what);
-        if app.dirty(R_ROW + 1 + k, hash(&(v.as_bytes(), k))) {
+        if app.dirty(R_ROW + 1 + k, Mix::new().h(&v.as_bytes()).h(&k).get()) {
             tile(lcd, k as i32, label, v.as_bytes(), if what == 3 && !moving { SUB } else { TEXT });
         }
     }
     // The nearest waypoint (GPS-15): name, distance and bearing, a small arrow.
     let near = nearest(data, f);
     let key = near.map(|((m, d), wp)| (m, d, wp.name));
-    if app.dirty(R_NOTE, hash(&(key, units))) {
+    if app.dirty(R_NOTE, Mix::new().h(&key).h(&units).get()) {
         let y = NEAR_Y;
         ferrite_ui::canvas::banded(lcd, 6, y, 228, 47, BG, |lcd| {
             lcd.text4_rows(14, y + 15, b"Nearest waypoint", &UI_12, SUB, BG, y + 1, y + 18);
@@ -451,7 +451,7 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
     let bw = 224 / n as i32;
     for i in 0..n {
         let Some(s) = data.sat(i) else { continue };
-        if !app.dirty(R_ROW + 1 + i as usize, hash(&(s.prn, s.snr, s.used, s.beidou, bw))) {
+        if !app.dirty(R_ROW + 1 + i as usize, Mix::new().h(&s.prn).h(&s.snr).h(&s.used).h(&s.beidou).h(&bw).get()) {
             continue;
         }
         let x = 8 + i as i32 * bw;
@@ -540,7 +540,7 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
     let units = app.set.units;
     let where_ = fix.map(|f| dist_bearing(f.pos, wp.pos));
     let course = fix.filter(|f| f.speed_kmh >= MOVING_KMH).map(|f| (f.heading, f.speed_kmh));
-    if app.dirty(R_TOP, hash(&(wp, where_))) {
+    if app.dirty(R_TOP, Mix::new().any(&wp).h(&where_).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 20, 240, 50, BG, |lcd| {
             lcd.text4(8, 42, wp.name.as_bytes(), &UI_12B, TEXT, BG);
             // the position page's coordinate format (deg-min under a grid square), not the lists' compact one
@@ -555,7 +555,7 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
             lcd.text4(8, 60, w::fit(b.as_bytes(), &UI_12, 224), &UI_12, SUB, BG);
         });
     }
-    if app.dirty(R_NOTE, hash(&(where_, course))) {
+    if app.dirty(R_NOTE, Mix::new().h(&where_).h(&course).get()) {
         dial(lcd, 120, 142, 58, course.map(|c| c.0), where_.map(|w| w.1));
         let mut t = Buf::<40>::new();
         match course {
@@ -567,7 +567,7 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
         }
         w::field(lcd, 8, 224, 204, 221, 217, Align::Center, t.as_bytes(), &UI_12, SUB, BG);
     }
-    if app.dirty(R_HELP, hash(&(where_, course, units))) {
+    if app.dirty(R_HELP, Mix::new().h(&where_).h(&course).h(&units).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 222, 240, 76, BG, |lcd| {
             match where_ {
                 Some((m, deg)) => {

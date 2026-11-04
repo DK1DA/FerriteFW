@@ -325,9 +325,9 @@ impl View for Setup {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let (page, ask) = (self.page, self.ask());
         let single = self.flags & SINGLE != 0;
-        app.new_page(lcd, hash(&page));
+        app.new_page(lcd, Mix::new().h(&page).get());
         // Top bar: "Setup 2 of 8" and eight dashes, the pages so far in blue.
-        if app.dirty(R_LINE, hash(&(page, single))) {
+        if app.dirty(R_LINE, Mix::new().h(&page).h(&single).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 0, 240, 19, BG, |lcd| {
                 let x = 8 + lcd.text4(8, 14, b"Setup", &UI_12B, TEXT, BG);
                 if !single {
@@ -343,7 +343,7 @@ impl View for Setup {
         }
         // Heading and text.
         let (head, text, _) = PAGES[page as usize];
-        if app.dirty(R_TOP, hash(&page)) {
+        if app.dirty(R_TOP, Mix::new().h(&page).get()) {
             w::field(lcd, 10, 220, 24, 50, 45, Align::Left, head.as_bytes(), &UI_15B, TEXT, BG);
             if !text.is_empty() {
                 w::wrap(lcd, 10, 220, 50, if ask == Ask::Nothing { 200 } else { 94 }, 63, 15, text.as_bytes(), &UI_12, SUB, BG);
@@ -354,7 +354,7 @@ impl View for Setup {
             Ask::Callsign => {
                 let call = app.set.callsign;
                 let mode = self.flags & DIGITS;
-                if app.dirty(R_ROW, hash(&(call, mode))) {
+                if app.dirty(R_ROW, Mix::new().h(&call).h(&mode).get()) {
                     text_box(lcd, 120, 46, b"Callsign", call.as_bytes(), true, true);
                     let long = call.as_bytes().len() > super::transmit::AX25_CALL;
                     let tip: &[u8] = if long {
@@ -374,11 +374,11 @@ impl View for Setup {
                     let name = REGION_LIST[i as usize];
                     let note = if region == i + 1 { "chosen" } else { "" };
                     let focused = row == i;
-                    if app.dirty(R_ROW + i as usize, hash(&(focused, region == i + 1))) {
+                    if app.dirty(R_ROW + i as usize, Mix::new().h(&focused).h(&(region == i + 1)).get()) {
                         choice(lcd, 94 + 19 * i as i32, 17, name.as_bytes(), note.as_bytes(), focused); // 17: odd, DISP-20
                     }
                 }
-                if app.dirty(R_ROW + REGION_ROWS as usize, hash(&(ext, row == REGION_ROWS))) {
+                if app.dirty(R_ROW + REGION_ROWS as usize, Mix::new().h(&ext).h(&(row == REGION_ROWS)).get()) {
                     lcd.fill(10, 246, 220, 1, LINE);
                     let sel = row == REGION_ROWS;
                     let bg = if sel { FOCUS } else { BG };
@@ -394,12 +394,12 @@ impl View for Setup {
                 for i in 0..3 {
                     let v = app.set.owner[i];
                     let f = self.row as usize == i;
-                    if app.dirty(R_ROW + i, hash(&(v, f))) {
+                    if app.dirty(R_ROW + i, Mix::new().h(&v).h(&f).get()) {
                         text_box(lcd, 112 + 42 * i as i32, 38, OWNER[i].as_bytes(), v.as_bytes(), f, false);
                     }
                 }
                 let mode = self.flags & (LOWER | DIGITS);
-                if app.dirty(R_ROW + 3, hash(&mode)) {
+                if app.dirty(R_ROW + 3, Mix::new().h(&mode).get()) {
                     let m = ["ABC", "abc", "123"][(mode / 4) as usize];
                     let mut t = Buf::<48>::new();
                     let _ = uwrite!(t, "{} \u{b7} * changes", m);
@@ -417,31 +417,31 @@ impl View for Setup {
                 let vals: [&[u8]; 3] = [tz.as_bytes(), CLOCKS[s.clock as usize % 2].as_bytes(), UNITS[s.units as usize % 3].as_bytes()];
                 for (i, (name, v)) in ["Time zone", "Clock", "Units"].iter().zip(vals).enumerate() {
                     let f = self.row as usize == i;
-                    if app.dirty(R_ROW + i, hash(&(v, f))) {
+                    if app.dirty(R_ROW + i, Mix::new().h(&v).h(&f).get()) {
                         choice(lcd, 112 + 27 * i as i32, 23, name.as_bytes(), v, f);
                     }
                 }
             }
             Ask::Look => {
                 let (layout, theme, row) = (app.set.layout, app.set.theme, self.row);
-                if app.dirty(R_ROW, hash(&(layout, row == 0))) {
+                if app.dirty(R_ROW, Mix::new().h(&layout).h(&(row == 0)).get()) {
                     for i in 0..3 {
                         preview(lcd, 10 + 75 * i, 100, i as u8, layout == i as u8, row == 0);
                     }
                     w::field(lcd, 10, 220, 196, 212, 208, Align::Center, LAYOUTS[layout as usize % 3].as_bytes(), &UI_12, TEXT, BG);
                 }
-                if app.dirty(R_ROW + 1, hash(&(theme, row == 1))) {
+                if app.dirty(R_ROW + 1, Mix::new().h(&theme).h(&(row == 1)).get()) {
                     choice(lcd, 222, 23, b"Theme", THEMES[theme as usize % THEMES.len()].as_bytes(), row == 1);
                 }
             }
             Ask::BatterySave => {
                 let b = app.bsave;
                 for (i, (name, on, _)) in SAVE.iter().enumerate() {
-                    if app.dirty(R_ROW + i, hash(&(b as usize == i, self.row as usize == i))) {
+                    if app.dirty(R_ROW + i, Mix::new().h(&(b as usize == i)).h(&(self.row as usize == i)).get()) {
                         choice(lcd, 124 + 27 * i as i32, 23, name.as_bytes(), on.as_bytes(), b as usize == i);
                     }
                 }
-                if app.dirty(R_ROW + 4, hash(&b)) {
+                if app.dirty(R_ROW + 4, Mix::new().h(&b).get()) {
                     w::wrap(lcd, 10, 220, 236, 280, 250, 14, SAVE[b as usize % 4].2.as_bytes(), &UI_12, TEXT, BG);
                 }
             }
@@ -452,7 +452,7 @@ impl View for Setup {
                     let c = if i == 6 && n == 0 { SUB } else { TEXT };
                     app.kv(lcd, i, 53 + 24 * i as i32, 24, &w::KV_STATUS, l.as_bytes(), v.as_bytes(), c, false);
                 }
-                if app.dirty(R_HELP, hash(&note)) {
+                if app.dirty(R_HELP, Mix::new().h(&note).get()) {
                     w::wrap(lcd, 10, 220, 222, 299, 236, 15, note.as_bytes(), &UI_12, SUB, BG);
                 }
             }

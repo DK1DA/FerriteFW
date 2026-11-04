@@ -45,7 +45,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     }
     let mut h = Buf::<32>::new();
     app.head_text(a, live, cx.store, &mut h);
-    if app.dirty(1, hash(&(a, &h, state, &ht))) {
+    if app.dirty(1, Mix::new().h(&a).h(&h).h(&state).h(&ht).get()) {
         w::badge(lcd, 8, 25, a, true, BG);
         let ww = (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W);
         // HOME-4.3: the header takes what the state leaves (a 16-character zone name fits), at least 140 px
@@ -67,7 +67,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     }
     // Channel mode: the name large, the frequency small under it (HOME-4).
     let name = app.card_name(a, live, cx.store);
-    if let Some(clear) = app.dirty_shape(2, hash(&(f, name)), name.is_empty()) {
+    if let Some(clear) = app.dirty_shape(2, Mix::new().h(&f).h(&name).get(), name.is_empty()) {
         redraw_box!(clear, lcd, (8, 42, 224, 52, BG), {
             if name.is_empty() {
                 w::freq_centred(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, FREQ, SUB, BG); // HOME-3: centred
@@ -118,7 +118,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         if rssi > 0 {
             let _ = ufmt::uwrite!(sig, "{} dBuV \u{b7} SNR {} dB", rssi, snr);
         }
-        if app.dirty(4, hash(&(&sig, stereo, 2u8))) {
+        if app.dirty(4, Mix::new().h(&sig).h(&stereo).h(&2u8).get()) {
             canvas::banded(lcd, 8, 96, 224, 18, BG, |lcd| {
                 w::field(lcd, 8, 160, 96, 114, 110, Align::Left, sig.as_bytes(), &UI_12, SUB, BG);
                 if stereo {
@@ -127,22 +127,22 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             });
         }
         let text = crate::bcast::rds_text(&ps, &rt);
-        if app.dirty(3, hash(&(text, 2u8))) {
+        if app.dirty(3, Mix::new().h(&text).h(&2u8).get()) {
             canvas::banded(lcd, 8, 114, 224, 52, BG, |lcd| {
                 let t: &[u8] = if text.is_empty() { b"No RDS" } else { text };
                 w::wrap(lcd, 8, 224, 114, 166, 128, 15, t, &UI_12, if text.is_empty() { DIM } else { TEXT }, BG);
             });
         }
         for i in 5..9 {
-            app.dirty(i, hash(&2u8)); // drawn again when the slot leaves the band
+            app.dirty(i, Mix::new().h(&2u8).get()); // drawn again when the slot leaves the band
         }
     }
-    if app.dirty(13, hash(&bcast)) && !bcast {
+    if app.dirty(13, Mix::new().h(&bcast).get()) && !bcast {
         lcd.fill(8, 96, 224, 70, BG); // the broadcast's rows gone whole, gaps between the fields too
     }
     for (i, l) in LABELS.iter().enumerate() {
         let (x, y) = (8 + (i as i32 % 3) * 76, 96 + (i as i32 / 3) * 36);
-        if !bcast && app.dirty(3 + i, hash(&v[i])) {
+        if !bcast && app.dirty(3 + i, Mix::new().h(&v[i]).get()) {
             w::field(lcd, x, 74, y, y + 16, y + 12, Align::Left, l.as_bytes(), &UI_12, SUB, BG);
             w::field(lcd, x, 74, y + 16, y + 34, y + 30, Align::Left, v[i].as_bytes(), &UI_12B, TEXT, BG);
         }
@@ -164,7 +164,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     if dbm {
         app.drawn.meter[a as usize] = None; // the bars come back whole
         let t = w::dbm_text(lv.rssi);
-        if app.dirty(9, hash(&(&t, on, true))) {
+        if app.dirty(9, Mix::new().h(&t).h(&on).h(&true).get()) {
             w::field(lcd, 8, 226, 166, 196, 188, Align::Left, t.as_bytes(), &UI_15B, if on { GREEN } else { TEXT }, BG);
         }
     }
@@ -178,7 +178,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             app.drawn.meter[a as usize] = Some((lit, on));
         }
         let s = if bcast { Buf::new() } else { w::s_text(lv.rssi) };
-        if app.dirty(9, hash(&(s, bcast))) {
+        if app.dirty(9, Mix::new().h(&s).h(&bcast).get()) {
             canvas::banded(lcd, 8, 178, 226, 18, BG, |lcd| {
                 if bcast {
                     for (i, t) in ["0", "10", "20", "30", "40", "50", "60"].iter().enumerate() {
@@ -220,7 +220,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         }
         let y = 256 + 21 * i as i32;
         let st = if st.len() > 9 { "relay" } else { st }; // "Watch off: relay" (BCR-15) in the line's room
-        if !app.held(11 + i) && app.dirty(11 + i, hash(&(o, t, st))) {
+        if !app.held(11 + i) && app.dirty(11 + i, Mix::new().h(&o).h(&t).h(&st).get()) {
             w::badge(lcd, 8, y + 2, o, false, BG);
             // a long channel name cut on purpose, to the room the state leaves
             w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, w::fit(t.as_bytes(), &UI_12, 140), &UI_12, TEXT, BG);
@@ -243,9 +243,9 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             continue;
         }
         let border = if active { BLUE } else if matches!(state, "RX" | "RX muted") { GREEN } else { LINE }; // HOME-15.3
-        let geom = hash(&(s, 2u8)) | 1;
+        let geom = Mix::new().h(&s).h(&2u8).get() | 1;
         let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
-        if !app.dirty(R_FRAME + p, hash(&(s, border))) {
+        if !app.dirty(R_FRAME + p, Mix::new().h(&s).h(&border).get()) {
             // unchanged
         } else if drawn_before && app.drawn.card[p] == geom {
             w::card_border(lcd, 6, y, 228, h, border, active, BG); // the border's colour alone (DISP-25)
@@ -269,7 +269,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         } else {
             wide_state(state, &lv, app.slots[s as usize].cfg().rx_tone, &mut stt); // TSRCH-13, DEC-6.1: in a wider field
         }
-        if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
+        if app.dirty(R_HEAD + p, Mix::new().h(&head).h(&stt).h(&active).get()) {
             w::badge(lcd, 14, y + 5, s, active, BG);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
             // HOME-4.3: the state's own width (at least 40 px), so a zone name in the header has the rest
@@ -288,8 +288,8 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             right.set(w::freq3(f).as_bytes());
         }
         let (x, c, fo) = if name.is_empty() { (140, TEXT, &UI_12B) } else { (170, SUB, &UI_12) };
-        let info = app.dirty(R_INFO + p, hash(&right));
-        if app.dirty(R_FREQ + p, hash(&(f, name))) {
+        let info = app.dirty(R_INFO + p, Mix::new().h(&right).get());
+        if app.dirty(R_FREQ + p, Mix::new().h(&f).h(&name).get()) {
             // Off-screen, sent once with the text at its right, which shares the rows (DISP-25).
             canvas::banded(lcd, 15, y + 22, 211, 24, SURFACE, |b| {
                 if name.is_empty() {
@@ -332,7 +332,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             card_tone(&cfg, &mut cols[1]);
             cols[2].set(super::transmit::power_name(app, s).as_bytes());
         }
-        if app.dirty(R_SUB + p, hash(&cols)) {
+        if app.dirty(R_SUB + p, Mix::new().h(&cols).get()) {
             canvas::banded(lcd, 15, y + 46, 211, 15, SURFACE, |b| {
                 w::field(b, 15, 36, y + 46, y + 61, y + 58, Align::Left, cols[0].as_bytes(), &UI_12, SUB, SURFACE);
                 w::field(b, 51, 120, y + 46, y + 61, y + 58, Align::Left, cols[1].as_bytes(), &UI_12, SUB, SURFACE);
@@ -341,7 +341,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         // The last minute: a bar per 1.2 s bucket heard, newest at the right, on a dotted baseline.
         let act = app.radio.act[p];
-        if !app.held(16 + p) && app.dirty(16 + p, hash(&act)) {
+        if !app.held(16 + p) && app.dirty(16 + p, Mix::new().h(&act).get()) {
             let (by, bh) = (y + 62, 10);
             canvas::banded(lcd, 14, by, 212, bh + 1, SURFACE, |b| {
                 for i in 0..ACT_BUCKETS as i32 {

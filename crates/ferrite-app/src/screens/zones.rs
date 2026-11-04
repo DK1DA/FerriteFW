@@ -105,7 +105,7 @@ impl NearCache {
 
 /// What the Nearby answer depends on: the fix to about 100 m (0.001 degree), the records, show hidden.
 fn near_key(here: Pos, store: &impl ChannelStore, hidden: bool) -> u32 {
-    hash(&(here.lat / 10_000, here.lon / 10_000, store.data().version(), hidden))
+    Mix::new().h(&(here.lat / 10_000)).h(&(here.lon / 10_000)).h(&(store.data().version())).h(&hidden).get()
 }
 
 /// The place the zones page measures from: the fix, or the fixed position standing in (GPS-3).
@@ -508,7 +508,7 @@ fn pv_row_draw(lcd: &mut impl Panel, y: i32, r: Option<&PvRow>, dist_col: bool) 
 impl App {
     /// The preview panel (CHAN-27): each part redrawn when it changed.
     fn preview(&mut self, lcd: &mut impl Panel, p: &Preview) {
-        if self.dirty(R_PV, hash(&(&p.head, &p.state))) {
+        if self.dirty(R_PV, Mix::new().h(&p.head).h(&p.state).get()) {
             // A filled band (decision 178): the list (BG) above it and the channels (SURFACE) under it can't be
             // mistaken for each other; a DIM rule on its top edge ends the list.
             ferrite_ui::canvas::banded(lcd, 0, PV_Y, 240, PV_HEAD_H, PV_BAND, |b| {
@@ -522,12 +522,12 @@ impl App {
         }
         let dist = p.dist_col();
         for (i, r) in p.rows.iter().enumerate() {
-            if self.dirty(R_PV + 1 + i, hash(&(r, dist))) {
+            if self.dirty(R_PV + 1 + i, Mix::new().any(&r).h(&dist).get()) {
                 pv_row_draw(lcd, PV_Y + PV_HEAD_H + i as i32 * PV_ROW_H, r.as_ref(), dist);
             }
         }
         let fy = PV_Y + PV_HEAD_H + PV_ROWS as i32 * PV_ROW_H;
-        if self.dirty(R_PV + 1 + PV_ROWS, hash(&p.foot)) {
+        if self.dirty(R_PV + 1 + PV_ROWS, Mix::new().h(&p.foot).get()) {
             ferrite_ui::canvas::banded(lcd, 0, fy, 240, w::HINT_Y - fy, SURFACE, |b| {
                 b.fill(0, fy, 240, w::HINT_Y - fy, SURFACE);
                 b.text4_rows(8, fy + 14, w::fit(p.foot.as_bytes(), &UI_12, 224), &UI_12, DIM, SURFACE, fy, w::HINT_Y);
@@ -808,7 +808,7 @@ impl View for Zones {
         if let Some(nr) = near {
             let mut place = Buf::<12>::new();
             place_text(nr.m, nr.deg, app.set.units, &mut place);
-            if app.dirty(R_ROW, hash(&(1u8, &place, s.on_nearby()))) {
+            if app.dirty(R_ROW, Mix::new().h(&1u8).h(&place).h(&s.on_nearby()).get()) {
                 nearby_row(lcd, LIST_Y, place.as_bytes(), s.on_nearby(), app.cue());
             }
             first = 1;
@@ -819,7 +819,7 @@ impl View for Zones {
             let r = ZoneRow::of(app, store, zid(store, i));
             let sel = !s.on_nearby() && i == cur.sel;
             let at = first + row;
-            if app.dirty(R_ROW + at, hash(&(2u8, &r, sel))) {
+            if app.dirty(R_ROW + at, Mix::new().h(&2u8).any(&r).h(&sel).get()) {
                 zone_row(lcd, LIST_Y + at as i32 * ZROW_H, ZROW_H, &r, sel, app.cue());
             }
         });

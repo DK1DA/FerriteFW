@@ -94,7 +94,7 @@ impl App {
     /// False while the page shows exactly what `key` says (state, the store's version, the minute): the
     /// screen then reads nothing from the store and draws nothing.
     pub(crate) fn gate<K: Hash>(&mut self, key: K) -> bool {
-        self.dirty(R_GATE, hash(&key))
+        self.dirty(R_GATE, Mix::new().any(&key).get())
     }
 }
 
@@ -310,14 +310,14 @@ impl App {
 
     /// The list header: a count or title at the left, what the list holds at the right, a line under it.
     pub(crate) fn list_head(&mut self, lcd: &mut impl Panel, left: &[u8], right: &[u8]) {
-        if self.dirty(R_TOP, hash(&(left, right))) {
+        if self.dirty(R_TOP, Mix::new().h(&left).h(&right).get()) {
             head(lcd, left, right);
         }
     }
 
     /// What an empty list says, in the middle of the page.
     pub(crate) fn empty(&mut self, lcd: &mut impl Panel, line1: &[u8], line2: &[u8]) {
-        if self.dirty(R_NOTE, hash(&(line1, line2))) {
+        if self.dirty(R_NOTE, Mix::new().h(&line1).h(&line2).get()) {
             Self::empty_now(lcd, line1, line2);
         }
     }
@@ -329,7 +329,7 @@ impl App {
 
     /// The box asking before a destructive action (MENU-23): what goes, and the keys.
     pub(crate) fn confirm_box(&mut self, lcd: &mut impl Panel, what: &[u8], name: &[u8]) {
-        if self.dirty(R_HELP, hash(&(what, name))) {
+        if self.dirty(R_HELP, Mix::new().h(&what).h(&name).get()) {
             let (y, h) = (104, 92);
             lcd.fill_r(16, y, 208, h, 3, SURFACE);
             lcd.frame_r(16, y, 208, h, 3, RED);

@@ -228,7 +228,7 @@ impl View for ChEdit {
         // Top line: letter, number, the zone box, EDIT.
         let zone = cx.store.zone_label(ch.zone, b"None", b"?");
         let zone = zone.as_bytes();
-        if app.dirty(R_TOP, hash(&(a, ch.num, zone, cell == ZONE))) {
+        if app.dirty(R_TOP, Mix::new().h(&a).h(&ch.num).h(&zone).h(&(cell == ZONE)).get()) {
             w::badge(lcd, 7, 26, a, true, BG);
             let mut l = Buf::<32>::new();
             chan_label(ch.num, &mut l);
@@ -238,11 +238,11 @@ impl View for ChEdit {
             lcd.fill(190, 23, 2, 20, BG);
             w::tag(lcd, 232, 25, b"EDIT", BLUE, BG);
         }
-        if app.dirty(R_NOTE, hash(&(ch.name, cell == NAME))) {
+        if app.dirty(R_NOTE, Mix::new().h(&ch.name).h(&(cell == NAME)).get()) {
             field_box(lcd, 7, 46, 226, 22, b"Name", ch.name(), cell == NAME, false);
         }
         // Regions: the grid takes 1-12, so the frequency uses R_SUB.
-        if app.dirty(R_SUB, hash(&(ch.rx, cell == FREQ))) {
+        if app.dirty(R_SUB, Mix::new().h(&ch.rx).h(&(cell == FREQ)).get()) {
             w::freq(lcd, 7, 232, 102, ch.rx, &DIG_46, &DIG_28, TEXT, SUB, BG);
             lcd.fill(7, 104, 225, 2, if cell == FREQ { BLUE } else { BG });
         }
@@ -281,7 +281,7 @@ impl View for ChEdit {
             (_, Some(Cell::F(ChField::Home))) => note.set(b"Hold 0 on home tunes it"),
             _ => {}
         }
-        if app.dirty(R_HELP, hash(&(note, col))) {
+        if app.dirty(R_HELP, Mix::new().h(&note).h(&col).get()) {
             w::field(lcd, 7, 226, 242, 259, 255, Align::Left, note.as_bytes(), &UI_12, col, BG);
         }
         other_slots(app, lcd, cx.live);

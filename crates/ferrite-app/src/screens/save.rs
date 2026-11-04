@@ -200,7 +200,7 @@ impl View for Save {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let s = self.ready(app, cx.store);
         let f = s.freq_of(app);
-        if app.dirty(R_TOP, hash(&(s.kind, f))) {
+        if app.dirty(R_TOP, Mix::new().any(&s.kind).h(&f).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 21, 240, 72, BG, |lcd| {
                 let head: &[u8] = match s.kind {
                     Kind::Repeater => b"Add a repeater",
@@ -244,7 +244,7 @@ impl View for Save {
             F::Shift | F::Tone => b"Knob: change it. #: back to the usual one.",
             F::Save => b"OK saves it.",
         };
-        if app.dirty(R_NOTE, hash(&(why, tip))) {
+        if app.dirty(R_NOTE, Mix::new().h(&why).h(&tip).get()) {
             let y = 100 + 24 * s.rows().len() as i32;
             // Add repeater's seven rows leave 28 px: two lines at 14 (at 16 only one, and the notes are two)
             let lh = if s.repeater() { 14 } else { 16 };

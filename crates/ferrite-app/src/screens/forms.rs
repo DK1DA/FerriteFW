@@ -58,7 +58,7 @@ impl App {
         let mut m = Buf::<16>::new();
         mode_chip(sl.cfg(), &mut m);
         let f = sl.freq();
-        if self.dirty(R_TOP, hash(&(a, head, m, f))) {
+        if self.dirty(R_TOP, Mix::new().h(&a).h(&head).h(&m).h(&f).get()) {
             w::badge(lcd, 8, 23, a, true, BG);
             w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
             w::field(lcd, 26, 66, 21, 39, 35, Align::Left, head.as_bytes(), &UI_12, SUB, BG);

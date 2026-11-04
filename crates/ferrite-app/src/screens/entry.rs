@@ -430,7 +430,7 @@ impl View for Entry {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let a = app.active;
         // What is typed, big, with a block cursor.
-        if app.dirty(R_TOP, hash(&(a, self.to, self.typed()))) {
+        if app.dirty(R_TOP, Mix::new().h(&a).any(&self.to).h(&self.typed()).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 21, 240, 92, BG, |lcd| {
                 w::badge(lcd, 8, 26, a, true, BG);
                 let what = self.what();
@@ -454,11 +454,11 @@ impl View for Entry {
         for (i, (label, v, c)) in rows.iter().enumerate() {
             app.kv(lcd, i, 116 + 22 * i as i32, 22, &w::KV_STATUS, label, v.as_bytes(), *c, false);
         }
-        if app.dirty(R_NOTE, hash(&note)) {
+        if app.dirty(R_NOTE, Mix::new().h(&note).get()) {
             para(lcd, 8, 210, 224, 2, 17, note, &UI_12, AMBER, BG);
         }
         let tip = self.tip();
-        if app.dirty(R_HELP, hash(&tip)) {
+        if app.dirty(R_HELP, Mix::new().h(&tip).get()) {
             para(lcd, 8, 250, 224, 3, 15, tip, &UI_12, SUB, BG);
         }
     }

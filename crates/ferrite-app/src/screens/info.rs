@@ -429,7 +429,7 @@ impl View for Info {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let d = def(self.page);
-        app.new_page(lcd, hash(&self.page));
+        app.new_page(lcd, Mix::new().any(&self.page).get());
         if let Page::Help(h) = self.page {
             return help::render(app, lcd, h);
         }
@@ -439,14 +439,14 @@ impl View for Info {
             if self.page == Page::PowerOff {
                 // A bar that moves while writes finish (PWR-17).
                 let pct = ((app.now / 40) % 100) as u8;
-                if app.dirty(R_NOTE, hash(&pct)) {
+                if app.dirty(R_NOTE, Mix::new().h(&pct).get()) {
                     w::progress(lcd, 60, 240, 120, 4, pct, BLUE);
                 }
             }
             return;
         }
         app.table(lcd, &Table { rows: d.rows, go: &[], y: 22, h: 20, style: w::KV_STATUS }, cx.live, cx.dev, &(), None);
-        if !d.note.is_empty() && app.dirty(R_HELP, hash(&self.page)) {
+        if !d.note.is_empty() && app.dirty(R_HELP, Mix::new().any(&self.page).get()) {
             let y = 30 + 20 * d.rows.len() as i32;
             let h = (292 - y).min(110);
             ferrite_ui::canvas::banded(lcd, 0, y - 6, 240, 300 - y + 6, BG, |lcd| {

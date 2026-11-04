@@ -41,14 +41,14 @@ fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, store: &impl C
         lcd.fill_r(6, y, 228, h, 3, SURFACE);
         lcd.frame_r(6, y, 228, h, 3, BLUE);
     }
-    if app.dirty(2, hash(&(head, st, lv.squelch_open))) {
+    if app.dirty(2, Mix::new().h(&head).h(&st).h(&lv.squelch_open).get()) {
         w::badge(lcd, 14, y + 8, s, true, SURFACE);
         w::field(lcd, 34, 140, y + 7, y + 24, y + 20, Align::Left, w::fit(head.as_bytes(), &UI_12, 140), &UI_12, SUB, SURFACE);
         let c = if lv.squelch_open { GREEN } else { DIM };
         w::field(lcd, 174, 52, y + 7, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, c, SURFACE);
     }
     let f = app.slot(s).freq();
-    if app.dirty(3, hash(&f)) {
+    if app.dirty(3, Mix::new().h(&f).get()) {
         w::freq(lcd, 15, 226, y + 60, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
     }
 }
@@ -82,7 +82,7 @@ fn hit_rows(app: &mut App, lcd: &mut impl Panel, y: i32, region: usize, what: im
             t.set(b"None yet");
         }
         let ry = y + 18 + 18 * i as i32;
-        if app.dirty(region + 1 + i, hash(&(a, t, sig))) {
+        if app.dirty(region + 1 + i, Mix::new().h(&a).h(&t).h(&sig).get()) {
             w::field(lcd, 8, 52, ry, ry + 18, ry + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
             w::field(lcd, 60, 140, ry, ry + 18, ry + 13, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
             w::field(lcd, 200, 32, ry, ry + 18, ry + 13, Align::Right, sig.as_bytes(), &UI_12B, GREEN, BG);
@@ -191,7 +191,7 @@ impl View for ToneSearch {
             mmss(secs, &mut m);
             kind.push(m.as_bytes());
         }
-        if app.dirty(4, hash(&(d, kind))) {
+        if app.dirty(4, Mix::new().h(&d).h(&kind).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 100, 240, 60, BG, |lcd| {
                 if t != 0 {
                     w::field(lcd, 8, 224, 102, 118, 114, Align::Left, b"Found", &UI_12, SUB, BG);
@@ -215,7 +215,7 @@ impl View for ToneSearch {
         } else {
             let _ = uwrite!(now, "Now: RX {} \u{b7} TX {}", or_none(&rx), or_none(&tx));
         }
-        if app.dirty(5, hash(&now)) {
+        if app.dirty(5, Mix::new().h(&now).get()) {
             let c = if self.ask_tx { AMBER } else { SUB };
             w::field(lcd, 8, 224, 162, 180, 175, Align::Left, now.as_bytes(), &UI_12, c, BG);
             lcd.fill(0, 184, 240, 1, LINE);
@@ -347,7 +347,7 @@ impl View for Counter {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let (f, rssi, live) = self.shown(app, cx.live);
-        if app.dirty(1, hash(&self.hold)) {
+        if app.dirty(1, Mix::new().h(&self.hold).get()) {
             w::field(lcd, 8, 170, 22, 40, 35, Align::Left, b"Strongest nearby signal", &UI_12, SUB, BG);
             ferrite_ui::canvas::banded(lcd, 178, 22, 62, 18, BG, |lcd| {
                 if self.hold {
@@ -355,7 +355,7 @@ impl View for Counter {
                 }
             });
         }
-        if app.dirty(2, hash(&f)) {
+        if app.dirty(2, Mix::new().h(&f).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 42, 240, 52, BG, |lcd| {
                 if f == 0 {
                     w::field(lcd, 8, 224, 56, 76, 70, Align::Left, b"Listening...", &UI_12B, AMBER, BG);
@@ -365,7 +365,7 @@ impl View for Counter {
             });
         }
         let lit = if f == 0 { 0 } else { w::meter_level(rssi) };
-        if app.dirty(3, hash(&lit)) {
+        if app.dirty(3, Mix::new().h(&lit).get()) {
             w::meter(lcd, 8, 104, None, lit, if live { GREEN } else { DIM }, BG);
             let st = if f == 0 { Buf::new() } else { w::s_text(rssi) };
             w::field(lcd, 208, 24, 98, 116, 112, Align::Right, st.as_bytes(), &UI_12B, TEXT, BG);

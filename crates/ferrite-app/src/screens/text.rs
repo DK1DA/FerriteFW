@@ -282,7 +282,7 @@ impl View for Text {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         let t = app.text;
-        if app.dirty(R_TOP, hash(&(self.to, t, self.mode, self.tail))) {
+        if app.dirty(R_TOP, Mix::new().any(&self.to).h(&t).h(&self.mode).h(&self.tail).get()) {
             w::field(lcd, 8, 224, 24, 41, 37, Align::Left, self.to.label().as_bytes(), &UI_12B, TEXT, BG);
             field_box(lcd, 8, 44, 224, 30, b"", t.as_bytes(), true, self.tail == 0);
             if self.tail > 0 {
@@ -298,7 +298,7 @@ impl View for Text {
                 w::tag(lcd, 232, 78, MODES[self.mode as usize % 4].as_bytes(), BLUE, BG);
             });
         }
-        if app.dirty(R_HELP, hash(&(self.mode, self.to))) {
+        if app.dirty(R_HELP, Mix::new().h(&self.mode).any(&self.to).get()) {
             let m = self.keys();
             let (star, hash_): (&[u8], &[u8]) = if self.to.kind() == Kind::Digits {
                 (b"", b"")

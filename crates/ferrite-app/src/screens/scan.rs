@@ -220,7 +220,7 @@ impl View for Scan {
             ("scanning", SUB)
         };
         let first = app.drawn.hash[1] == 0;
-        if app.dirty(1, hash(&(state == "RX"))) {
+        if app.dirty(1, Mix::new().h(&(state == "RX")).get()) {
             let border = if state == "RX" { GREEN } else { BLUE };
             if first {
                 lcd.fill(6, y, 228, h, BG);
@@ -235,7 +235,7 @@ impl View for Scan {
         head.push(b"SCAN");
         head.push(" \u{b7} ".as_bytes());
         head.push(band_name(lv.freq).as_bytes());
-        if app.dirty(2, hash(&(head, state))) {
+        if app.dirty(2, Mix::new().h(&head).h(&state).get()) {
             w::badge(lcd, 14, y + 8, s, true, SURFACE);
             w::field(lcd, 34, 120, y + 7, y + 24, y + 20, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
             if state == "RX" {
@@ -246,7 +246,7 @@ impl View for Scan {
                 w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
             }
         }
-        if app.dirty(3, hash(&lv.freq)) {
+        if app.dirty(3, Mix::new().h(&lv.freq).get()) {
             w::freq(lcd, 15, 226, y + 64, lv.freq, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
         }
         // The channel it stopped on, or the S-meter text.
@@ -259,7 +259,7 @@ impl View for Scan {
             }
         }
         let st = if lv.squelch_open { w::s_text(lv.rssi) } else { Buf::new() };
-        if app.dirty(4, hash(&(name, st))) {
+        if app.dirty(4, Mix::new().h(&name).h(&st).get()) {
             w::field(lcd, 15, 170, y + 70, y + 88, y + 84, Align::Left, name.as_bytes(), &UI_12, TEXT, SURFACE);
             w::field(lcd, 185, 41, y + 70, y + 88, y + 84, Align::Right, st.as_bytes(), &UI_12B, GREEN, SURFACE);
         }
@@ -331,7 +331,7 @@ impl View for Scan {
                 what.set(b"None yet");
             }
             let y = 232 + 18 * i as i32;
-            if app.dirty(11 + i, hash(&(a, what, len, sig))) {
+            if app.dirty(11 + i, Mix::new().h(&a).h(&what).h(&len).h(&sig).get()) {
                 w::field(lcd, 8, 46, y, y + 18, y + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
                 w::field(lcd, 54, 104, y, y + 18, y + 13, Align::Left, w::fit(what.as_bytes(), &UI_12, 104), &UI_12, TEXT, BG);
                 w::field(lcd, 158, 40, y, y + 18, y + 13, Align::Right, len.as_bytes(), &UI_12, SUB, BG);

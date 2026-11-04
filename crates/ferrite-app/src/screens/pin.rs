@@ -342,13 +342,13 @@ impl View for Pin {
             CHANGE | OFF => (b"Current PIN", b"The PIN set on this radio."),
             _ => (b"Enter PIN", b"This radio has a PIN."),
         };
-        if app.dirty(R_TOP, hash(&head)) {
+        if app.dirty(R_TOP, Mix::new().h(&head).get()) {
             w::field(lcd, 10, 220, 40, 66, 60, Align::Center, head, &UI_15B, TEXT, BG);
             w::field(lcd, 10, 220, 70, 88, 84, Align::Center, t, &UI_12, SUB, BG);
         }
         // Six boxes: a dot per digit typed (PIN-2), the digit itself when setting.
         let n = self.n;
-        if app.dirty(R_ROW, hash(&(n, self.value(), set))) {
+        if app.dirty(R_ROW, Mix::new().h(&n).h(&self.value()).h(&set).get()) {
             let mut digits = [0u8; 6];
             for (i, d) in digits.iter_mut().enumerate().take(n as usize) {
                 *d = b'0' + self.digit(i);
@@ -367,7 +367,7 @@ impl View for Pin {
         }
         let (line, amber) = self.note(app);
         let c = if amber { AMBER } else { SUB };
-        if app.dirty(R_NOTE, hash(&(line, c))) {
+        if app.dirty(R_NOTE, Mix::new().h(&line).h(&c).get()) {
             w::field(lcd, 10, 220, 156, 174, 170, Align::Center, line.as_bytes(), &UI_12, c, BG);
         }
         // No "forgot it" hint on the screen (Alex, Oct 15, 2026): the way out (hold MENU at power on, PIN-6) is in the

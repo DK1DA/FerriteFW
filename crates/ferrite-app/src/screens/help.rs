@@ -124,7 +124,7 @@ pub enum Help {
 }
 
 pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, h: Help) {
-    if !app.dirty(R_TOP, hash(&h)) {
+    if !app.dirty(R_TOP, Mix::new().any(&h).get()) {
         return;
     }
     lcd.fill(0, 21, 240, 279, BG);

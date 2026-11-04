@@ -79,7 +79,7 @@ impl View for Squelch {
         let a = app.active;
         let sq = app.sq_level(a);
         let lv = cx.live.slots[a as usize];
-        if app.dirty(1, hash(&(a, sq))) {
+        if app.dirty(1, Mix::new().h(&a).h(&sq).get()) {
             w::badge(lcd, 8, 30, a, true, BG);
             w::field(lcd, 28, 200, 28, 46, 41, Align::Left, b"Squelch, active slot", &UI_12, SUB, BG);
             ferrite_ui::canvas::banded(lcd, 0, 52, 240, 60, BG, |lcd| {
@@ -95,7 +95,7 @@ impl View for Squelch {
         }
         // The live signal: what the level lets through (SQL-7).
         let lit = w::meter_level(lv.rssi);
-        if app.dirty(2, hash(&(lit, lv.squelch_open))) {
+        if app.dirty(2, Mix::new().h(&lit).h(&lv.squelch_open).get()) {
             lcd.fill(0, 170, 240, 1, LINE);
             let (t, c): (&[u8], u16) = if lv.squelch_open { (b"Open: you hear it", GREEN) } else { (b"Closed", SUB) };
             w::field(lcd, 8, 160, 178, 196, 191, Align::Left, t, &UI_12B, c, BG);
@@ -104,7 +104,7 @@ impl View for Squelch {
         }
         // SQL-12: the floor and how far the signal is above it
         let fl = self.floor_text(lv.rssi, lv.squelch_open);
-        if app.dirty(4, hash(&fl)) {
+        if app.dirty(4, Mix::new().h(&fl).get()) {
             w::field(lcd, 8, 224, 216, 234, 229, Align::Left, fl.as_bytes(), &UI_12, SUB, BG);
         }
         if app.dirty(3, 1) {

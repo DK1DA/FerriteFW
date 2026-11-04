@@ -74,7 +74,7 @@ impl View for Edit {
         let a = app.active;
         let mut head = Buf::<32>::new();
         app.head_text(a, live, cx.store, &mut head);
-        if app.dirty(R_TOP, hash(&(a, head))) {
+        if app.dirty(R_TOP, Mix::new().h(&a).h(&head).get()) {
             w::badge(lcd, 7, 26, a, true, BG);
             w::field(lcd, 21, 6, 25, 42, 38, Align::Left, b"", &UI_12, SUB, BG);
             w::field(lcd, 27, 160, 25, 42, 38, Align::Left, w::fit(head.as_bytes(), &UI_12, 160), &UI_12, SUB, BG); // HOME-4.3
@@ -82,7 +82,7 @@ impl View for Edit {
         }
         let f = app.shown_freq(a, live);
         // R_FREQ is grid cell 6's region (R_ROW + 6): the frequency uses R_SUB.
-        if app.dirty(R_SUB, hash(&f)) {
+        if app.dirty(R_SUB, Mix::new().h(&f).get()) {
             w::freq(lcd, 7, 232, 76, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
         }
         let cfg = *app.slots[a as usize].cfg();
@@ -97,7 +97,7 @@ impl View for Edit {
         // The note under the grid: why the focused setting is greyed (EDIT-7), or what hold 9 does.
         let why = app.greyed(GRID[cell as usize]);
         let vfo = !app.slots[a as usize].on_channel();
-        if app.dirty(R_NOTE, hash(&(why, vfo))) {
+        if app.dirty(R_NOTE, Mix::new().h(&why).h(&vfo).get()) {
             match why {
                 Some(t) => {
                     let mut b = Buf::<40>::new();
@@ -144,7 +144,7 @@ pub(crate) fn other_slots(app: &mut App, lcd: &mut impl Panel, live: &ferrite_co
             t.push(" \u{b7} ".as_bytes());
             t.push(st.as_bytes());
         }
-        if app.dirty(R_LINE + k, hash(&(s, t))) {
+        if app.dirty(R_LINE + k, Mix::new().h(&s).h(&t).get()) {
             let y = 268 + k as i32 * 17;
             w::badge(lcd, 7, y, s, false, BG);
             w::field(lcd, 21, 4, y - 1, y + 16, y + 11, Align::Left, b"", &UI_12, SUB, BG);

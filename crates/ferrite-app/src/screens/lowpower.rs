@@ -68,7 +68,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     }
     // The top band: LOW POWER, the clock, the battery.
     let (clock, pct) = (cx.dev.clock_min, cx.dev.battery_pct);
-    if app.dirty(R_TOP, hash(&(clock, pct))) {
+    if app.dirty(R_TOP, Mix::new().h(&clock).h(&pct).get()) {
         lcd.fill(0, 0, 240, TOP_H, LP_AMBER);
         w::field(lcd, 8, 90, 0, TOP_H, 18, Align::Left, b"LOW POWER", &UI_12B, LP_BLACK, LP_AMBER);
         if let Some(m) = clock {
@@ -85,7 +85,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     let rx = live.slots[a as usize].squelch_open;
     let mut h = Buf::<32>::new();
     app.head_text(a, live, cx.store, &mut h);
-    if app.dirty(R_HEAD, hash(&(&h, keyed, rx))) || drew {
+    if app.dirty(R_HEAD, Mix::new().h(&h).h(&keyed).h(&rx).get()) || drew {
         lcd.fill(SIDE_W, HEAD.0, 240 - 2 * SIDE_W, HEAD.1 - HEAD.0, LP_BLACK);
         let tag_w = if keyed || rx { 44 } else { 0 };
         let name = w::fit(h.as_bytes(), &UI_15B, W - tag_w);
@@ -99,7 +99,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     }
     // The frequency (the transmit one while keyed), big.
     let f = if keyed { app.tuned_cfg(a).tx_of(app.tuned_freq(a)) } else { app.shown_freq(a, live) };
-    if app.dirty(R_FREQ, hash(&f)) || drew {
+    if app.dirty(R_FREQ, Mix::new().h(&f).get()) || drew {
         lcd.fill(SIDE_W, FREQ.0, 240 - 2 * SIDE_W, FREQ.1 - FREQ.0, LP_BLACK);
         w::freq(lcd, 10, 232, FREQ.2, f, &DIG_46, &DIG_28, LP_TEXT, LP_SUB, LP_BLACK);
         drew = true;
@@ -122,7 +122,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
             line.push(part.as_bytes());
         }
     }
-    if app.dirty(R_INFO, hash(&line)) || drew {
+    if app.dirty(R_INFO, Mix::new().h(&line).get()) || drew {
         // the strips either side of the text column too: the leaving box reaches into them
         lcd.fill(SIDE_W, INFO.0, X - SIDE_W, INFO.1 - INFO.0, LP_BLACK);
         lcd.fill(X + W, INFO.0, 240 - SIDE_W - X - W, INFO.1 - INFO.0, LP_BLACK);
@@ -133,7 +133,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     let rssi = live.slots[a as usize].rssi;
     let lit = if rx { ((w::meter_level(rssi) as u32 * BLOCKS as u32).div_ceil(w::METER_SEGS as u32)) as i32 } else { 0 };
     let secs = if keyed { app.now.wrapping_sub(app.radio.t0) / 1000 } else { 0 };
-    if app.dirty(R_SUB, hash(&(keyed, rx, lit, secs))) || drew {
+    if app.dirty(R_SUB, Mix::new().h(&keyed).h(&rx).h(&lit).h(&secs).get()) || drew {
         lcd.fill(SIDE_W, SUB.0, 240 - 2 * SIDE_W, SUB.1 - SUB.0, LP_BLACK);
         let mut t = Buf::<8>::new();
         let (text, c) = if keyed {
@@ -177,7 +177,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         heard.push(" ago \u{b7} ".as_bytes());
         heard.push(w::s_text(peak).as_bytes());
     }
-    if app.dirty(R_NOTE, hash(&heard)) || drew {
+    if app.dirty(R_NOTE, Mix::new().h(&heard).get()) || drew {
         lcd.fill(SIDE_W, SUB.1, 240 - 2 * SIDE_W, BOTTOM_Y - SUB.1, LP_BLACK);
         w::field(lcd, X, W, SUB.1, BOTTOM_Y - 4, HEARD_BASE, Align::Left, w::fit(heard.as_bytes(), &UI_15B, W), &UI_15B, LP_SUB, LP_BLACK);
     }
@@ -191,7 +191,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         _ => home,
     };
     let toast = app.toast_shown();
-    if app.dirty(R_LINE, hash(&(hints.as_slice(), toast))) && !toast {
+    if app.dirty(R_LINE, Mix::new().any(&hints.as_slice()).h(&toast).get()) && !toast {
         lcd.fill(0, BOTTOM_Y, 240, 320 - BOTTOM_Y, LP_AMBER);
         let items = hints.as_slice();
         let n = items.len();
@@ -210,7 +210,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     match app.lpm_leave_progress() {
         Some(p) => {
             let fill = (BOX.2 - 24) * p as i32 / 1000;
-            if app.dirty(R_PAGE, hash(&fill)) || drew {
+            if app.dirty(R_PAGE, Mix::new().h(&fill).get()) || drew {
                 let (x, y, bw, bh) = BOX;
                 lcd.fill(x, y, bw, bh, LP_AMBER);
                 lcd.fill(x + 2, y + 2, bw - 4, bh - 4, LP_BLACK);

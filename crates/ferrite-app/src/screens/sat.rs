@@ -492,30 +492,6 @@ fn opts_page(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
 
 // ---- drawing parts ----
 
-/// A region's hash (FNV-1a over its parts), one copy: the generic `hash` was copied for every tuple type.
-#[derive(Clone, Copy)]
-struct H(u32);
-
-impl H {
-    const fn new() -> H {
-        H(2_166_136_261)
-    }
-    #[inline(never)]
-    fn b(self, s: &[u8]) -> H {
-        let mut h = self.0;
-        for &x in s {
-            h = (h ^ x as u32).wrapping_mul(16_777_619);
-        }
-        H(h.rotate_left(5) ^ s.len() as u32)
-    }
-    fn n(self, v: u32) -> H {
-        self.b(&v.to_le_bytes())
-    }
-    fn get(self) -> u32 {
-        self.0 | 1
-    }
-}
-
 /// A small bell (the marked pass, SAT-12): 9 x 10.
 fn bell(lcd: &mut impl Panel, x: i32, y: i32, c: u16) {
     lcd.fill_r(x + 1, y, 7, 7, 3, c);
@@ -591,7 +567,7 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
     // SAT-9: the oldest elements' age, read from every satellite only when the line is drawn (each a record read
     // from the SPI flash on the radio): its key is the source's version and the hour
     let aged = nsats > 0 && now != 0 && state != State::Busy;
-    if app.dirty(1, H::new().b(l.as_bytes()).n(app.sat_data().version()).n(if aged { now / 3600 + 1 } else { 0 }).get()) {
+    if app.dirty(1, Mix::new().b(l.as_bytes()).n(app.sat_data().version()).n(if aged { now / 3600 + 1 } else { 0 }).get()) {
         let d = app.sat_data();
         let (age, lvl) = (0..d.sats()).filter_map(|i| d.sat(i)).map(|x| (x.el.age_days(now), x.age_level(now))).max().unwrap_or((0, 0));
         let mut r = Buf::<16>::new();
@@ -611,7 +587,7 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
         _ => None,
     };
     if let Some((a, b)) = msg {
-        if app.dirty(15, H::new().b(a).b(b).get()) {
+        if app.dirty(15, Mix::new().b(a).b(b).get()) {
             app.forget(2, 12);
             lcd.fill(0, 40, 240, 260, BG);
             app.empty(lcd, a, b);
@@ -649,7 +625,7 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
             }
             let _ = uwrite!(el, "{}\u{b0}", p.max_el);
         }
-        let h = H::new().n(p.map_or(0, |p| 1 + p.sat as u32 * 256 + p.max_el as u32)).b(t.as_bytes()).b(m.as_bytes()).n(sel as u32 | (marked as u32) << 1 | (up as u32) << 2 | (app.sat.alarm_lead as u32) << 3).get();
+        let h = Mix::new().n(p.map_or(0, |p| 1 + p.sat as u32 * 256 + p.max_el as u32)).b(t.as_bytes()).b(m.as_bytes()).n(sel as u32 | (marked as u32) << 1 | (up as u32) << 2 | (app.sat.alarm_lead as u32) << 3).get();
         if !app.dirty(3 + k, h) {
             continue;
         }
@@ -699,7 +675,7 @@ fn predict_progress(app: &App) -> (u8, u8) {
 // ---- the alarm picker (SAT-12) ----
 
 fn picker(app: &mut App, lcd: &mut impl Panel, sel: u8) {
-    if !app.dirty(14, H::new().n(sel as u32).get()) {
+    if !app.dirty(14, Mix::new().n(sel as u32).get()) {
         return;
     }
     let (x, y, wd) = (40, 84, 160);
@@ -744,7 +720,7 @@ fn xy(l: &Look, (cx, cy, r): (i32, i32, i32)) -> (i32, i32) {
 fn plot(app: &mut App, lcd: &mut impl Panel, p: &Pass, now: u32, g: (i32, i32, i32), r_dot: i32) {
     let (cx, cy, r) = g;
     let up = p.up(now);
-    let h = H::new().n(p.aos).n(p.sat as u32).n(g.2 as u32).n(if up { now } else { 0 }).get();
+    let h = Mix::new().n(p.aos).n(p.sat as u32).n(g.2 as u32).n(if up { now } else { 0 }).get();
     if !app.dirty(1, h) {
         return;
     }
@@ -833,7 +809,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
     if !app.sat.by_gps {
         lines[3].set(b"time \xc2\xb11 min"); // SAT-5
     }
-    if app.dirty(2, H::new().b(head).n(secs).b(lines[0].as_bytes()).b(lines[1].as_bytes()).b(lines[2].as_bytes()).b(lines[3].as_bytes()).get()) {
+    if app.dirty(2, Mix::new().b(head).n(secs).b(lines[0].as_bytes()).b(lines[1].as_bytes()).b(lines[2].as_bytes()).b(lines[3].as_bytes()).get()) {
         ferrite_ui::canvas::banded(lcd, 128, 24, 112, 122, BG, |lcd| {
             lcd.text4(132, 38, head, &UI_12, SUB, BG);
             if secs > 0 {
@@ -851,7 +827,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
     mhz(down, up, &mut f);
     let mut sh = Buf::<12>::new();
     khz(down as i32 - t.down as i32 - pr.trim as i32, &mut sh);
-    if app.dirty(3, H::new().b(f.as_bytes()).b(sh.as_bytes()).get()) {
+    if app.dirty(3, Mix::new().b(f.as_bytes()).b(sh.as_bytes()).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 149, 240, 34, BG, |lcd| {
             arrow(lcd, 8, 162, false, GREEN);
             let wd = lcd.text4(26, 178, f.as_bytes(), &DIG_26, FREQ, BG);
@@ -859,7 +835,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
         });
     }
     let (su, open) = s_level(live);
-    if app.dirty(4, H::new().n(up as u32 | (open as u32) << 1).n(su as u32).get()) {
+    if app.dirty(4, Mix::new().n(up as u32 | (open as u32) << 1).n(su as u32).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 183, 240, 10, BG, |lcd| {
             if up {
                 bars(lcd, 26, 184, 168, 7, 7, (su as i32 * 7 + 8) / 9, if open { GREEN } else { DIM });
@@ -883,7 +859,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
             us.push(tt.as_bytes());
         }
     }
-    if app.dirty(5, H::new().b(uf.as_bytes()).b(us.as_bytes()).get()) {
+    if app.dirty(5, Mix::new().b(uf.as_bytes()).b(us.as_bytes()).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 194, 240, 24, BG, |lcd| {
             if t.up == 0 {
                 lcd.text4(26, 211, b"Receive only", &UI_12, SUB, BG);
@@ -908,7 +884,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
     }
     let age = sat.el.age_days(now);
     let lvl = sat.age_level(now);
-    if app.dirty(6, H::new().b(info.as_bytes()).n(pr.hd as u32 | (lvl as u32) << 1).n(age).get()) {
+    if app.dirty(6, Mix::new().b(info.as_bytes()).n(pr.hd as u32 | (lvl as u32) << 1).n(age).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 219, 240, 18, BG, |lcd| {
             let wd = lcd.text4(8, 232, info.as_bytes(), &UI_12, SUB, BG);
             let x = lcd.text4(14 + wd, 232, if pr.hd { b"* HD" } else { b"* FD" }, &UI_12B, TEXT, BG) + 14 + wd;
@@ -921,7 +897,7 @@ fn pass_page(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
 }
 
 fn lcd_rule(app: &mut App, lcd: &mut impl Panel, y: i32) {
-    if app.dirty(11, H::new().n(y as u32).get()) {
+    if app.dirty(11, Mix::new().n(y as u32).get()) {
         lcd.fill(0, y, 240, 2, LINE);
     }
 }
@@ -949,7 +925,7 @@ fn timeline(app: &mut App, lcd: &mut impl Panel, p: &Pass, now: u32, y: i32) {
         let _ = nm;
         let _ = uwrite!(nl, "Next pass {}, {}\u{b0} high", crate::screens::lists::Txt(t.as_bytes()), q.max_el);
     }
-    if !app.dirty(7, H::new().n(frac as u32).n(up as u32).b(a.as_bytes()).b(mid.as_bytes()).b(z.as_bytes()).b(nl.as_bytes()).get()) {
+    if !app.dirty(7, Mix::new().n(frac as u32).n(up as u32).b(a.as_bytes()).b(mid.as_bytes()).b(z.as_bytes()).b(nl.as_bytes()).get()) {
         return;
     }
     let c = if up { GREEN } else { AMBER };
@@ -975,7 +951,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     let secs = app.now.wrapping_sub(app.radio.t0) / 1000;
     let mut tt = Buf::<8>::new();
     crate::screens::activity::mmss(secs, &mut tt);
-    if app.dirty(9, H::new().b(tt.as_bytes()).n(pr.power as u32).get()) {
+    if app.dirty(9, Mix::new().b(tt.as_bytes()).n(pr.power as u32).get()) {
         // the status bar's place: the red bar (the screen draws its own while keyed)
         ferrite_ui::canvas::banded(lcd, 0, 0, 240, w::SBAR_H, RED, |lcd| {
             let mut n = Buf::<20>::new();
@@ -992,7 +968,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     let mut a = Buf::<24>::new();
     let _ = uwrite!(a, "Az {}\u{b0} \u{b7} El {}\u{b0}", (l.az + 0.5) as u32 % 360, l.el.max(0.0) as u32);
     let left = p.los().saturating_sub(now);
-    if app.dirty(2, H::new().b(a.as_bytes()).n(left).get()) {
+    if app.dirty(2, Mix::new().b(a.as_bytes()).n(left).get()) {
         ferrite_ui::canvas::banded(lcd, 96, 24, 140, 86, BG, |lcd| {
             lcd.text4(100, 38, b"Sets in", &UI_12, SUB, BG);
             big_time(lcd, 100, 62, left, &DIG_17, GREEN);
@@ -1013,7 +989,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
         sh.push(tn.as_bytes());
     }
     let pw = crate::sat::POWER_BARS[pr.power.min(2) as usize];
-    if app.dirty(3, H::new().b(f.as_bytes()).b(sh.as_bytes()).n(pw as u32).get()) {
+    if app.dirty(3, Mix::new().b(f.as_bytes()).b(sh.as_bytes()).n(pw as u32).get()) {
         let bg = rgb565(0x2A, 0x0F, 0x0F);
         ferrite_ui::canvas::banded(lcd, 4, 117, 232, 54, BG, |lcd| {
             lcd.fill_r(6, 118, 228, 34, 4, bg);
@@ -1029,7 +1005,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     mhz(down, true, &mut df);
     let mut ds = Buf::<12>::new();
     khz(down as i32 - t.down as i32 - pr.trim as i32, &mut ds);
-    if app.dirty(5, H::new().b(df.as_bytes()).b(ds.as_bytes()).n(su as u32 | (open as u32) << 8 | (pr.hd as u32) << 9).get()) {
+    if app.dirty(5, Mix::new().b(df.as_bytes()).b(ds.as_bytes()).n(su as u32 | (open as u32) << 8 | (pr.hd as u32) << 9).get()) {
         ferrite_ui::canvas::banded(lcd, 4, 172, 232, 64, BG, |lcd| {
             arrow(lcd, 12, 178, false, if pr.hd { DIM } else { GREEN });
             let wd = lcd.text4(30, 192, df.as_bytes(), &DIG_17, if pr.hd { DIM } else { TEXT }, BG);
@@ -1051,7 +1027,7 @@ fn keyed_page(app: &mut App, lcd: &mut impl Panel, p: &Pass, sat: &ferrite_core:
     let mut b = Buf::<48>::new();
     b.set("Doppler on \u{b7} timeout ".as_bytes());
     mmss_after(&mut b, to);
-    if app.dirty(10, H::new().b(b.as_bytes()).get()) {
+    if app.dirty(10, Mix::new().b(b.as_bytes()).get()) {
         w::field(lcd, 8, 224, 278, 296, 291, Align::Left, b.as_bytes(), &UI_12, SUB, BG);
     }
 }
@@ -1108,7 +1084,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
     } else {
         let _ = uwrite!(mv, "moving {}", if daz > 0.0 { "right" } else { "left" });
     }
-    if app.dirty(1, H::new().n(az).b(mv.as_bytes()).get()) {
+    if app.dirty(1, Mix::new().n(az).b(mv.as_bytes()).get()) {
         big_angle(lcd, 24, b"Azimuth \xc2\xb7 point to", az, look::point16(l.az).as_bytes(), mv.as_bytes());
     }
     let el = l.el.max(0.0) as u32;
@@ -1120,7 +1096,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
     } else {
         em.set(b"falling");
     }
-    if app.dirty(2, H::new().n(el).b(em.as_bytes()).get()) {
+    if app.dirty(2, Mix::new().n(el).b(em.as_bytes()).get()) {
         big_angle(lcd, 112, b"Elevation \xc2\xb7 tilt up", el, b"", em.as_bytes());
     }
     // SAT-18: the compass bearing; SAT-19: from the sun while it is over 10°
@@ -1152,7 +1128,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
             s2.set(b"sun too low");
         }
     }
-    if app.dirty(3, H::new().b(c1.as_bytes()).b(c2.as_bytes()).b(s1.as_bytes()).b(s2.as_bytes()).get()) {
+    if app.dirty(3, Mix::new().b(c1.as_bytes()).b(c2.as_bytes()).b(s1.as_bytes()).b(s2.as_bytes()).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 200, 240, 62, BG, |lcd| {
             for (i, (h, a, b, c)) in [(&b"On a compass"[..], &c1, &c2, TEXT), (b"From the sun", &s1, &s2, AMBER)].into_iter().enumerate() {
                 let x = 8 + i as i32 * 114;
@@ -1176,7 +1152,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
         r.set(b"rises ");
         mmss_after(&mut r, p.aos - now);
     }
-    if app.dirty(4, H::new().b(f.as_bytes()).b(r.as_bytes()).get()) {
+    if app.dirty(4, Mix::new().b(f.as_bytes()).b(r.as_bytes()).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 266, 240, 32, BG, |lcd| {
             lcd.fill(0, 266, 240, 2, LINE);
             arrow(lcd, 14, 276, false, GREEN);

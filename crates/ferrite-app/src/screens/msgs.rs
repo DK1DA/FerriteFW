@@ -218,7 +218,7 @@ impl View for Msgs {
                 let c = row(&m, &mut time, &mut st);
                 age_text(m.ago_s, &mut age);
                 let top = Row2 { tag: if m.inbound { b"From" } else { b"To" }, title: m.peer.as_bytes(), big: true, right: time.as_bytes(), sub: if m.inbound { b"Received" } else { b"Sent" }, ..Row2::default() };
-                if app.dirty(R_TOP, hash(&top)) {
+                if app.dirty(R_TOP, Mix::new().any(&top).get()) {
                     row2(lcd, 22, &top, w::Cue::default());
                 }
                 let mut b = Buf::<40>::new();
@@ -226,7 +226,7 @@ impl View for Msgs {
                 let y = app.kv(lcd, 0, 58, 0, &w::KV_DETAIL, b"Age", if m.ago_s == crate::data::AGO_UNKNOWN { &b"Before restart"[..] } else { ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes())) }, TEXT, false);
                 let (l, v): (&[u8], &[u8]) = if m.inbound { (b"", b"") } else { (b"State", st.as_bytes()) };
                 app.kv(lcd, 1, y, 0, &w::KV_DETAIL, l, v, c, false);
-                if app.dirty(R_NOTE, hash(&m.text)) {
+                if app.dirty(R_NOTE, Mix::new().h(&m.text).get()) {
                     ferrite_ui::canvas::banded(lcd, 0, 100, 240, 196, BG, |b| {
                         wrap(b, 8, 104, 224, 296, m.text.as_bytes(), TEXT);
                     });
@@ -923,7 +923,7 @@ impl View for Compose {
         }
         let pending_tap = self.key != 0;
         // the recipient, or which quick message this is
-        if app.dirty(R_TOP, hash(&(d.to, self.field, pending_tap && self.field == 0, self.edit))) {
+        if app.dirty(R_TOP, Mix::new().h(&d.to).h(&self.field).h(&(pending_tap && self.field == 0)).h(&self.edit).get()) {
             if self.quick_edit_on() {
                 ferrite_ui::canvas::banded(lcd, 0, 24, 240, 60, BG, |lcd| {
                     let mut b = Buf::<40>::new();
@@ -945,7 +945,7 @@ impl View for Compose {
         if self.book_up(cx.store) {
             // APRS-38, DISP-28: the book is built only when the pick or the data changed, and only the rows that
             // changed repaint (it was rebuilt from flash and its whole box repainted on every pass and step).
-            if app.dirty(R_LIST_GATE, hash(&(1u8, self.quick, ver))) {
+            if app.dirty(R_LIST_GATE, Mix::new().h(&1u8).h(&self.quick).h(&ver).get()) {
                 let b = super::contacts::Book::new(cx.store.data());
                 book_rows(app, lcd, cx.store.data(), &b, self.quick as u16, y, h, ver);
             }
@@ -953,9 +953,9 @@ impl View for Compose {
             app.forget(R_LIST_GATE, 1); // the book draws whole when it comes back
             let focus = self.field == 1;
             let bg = if focus { FOCUS } else { SURFACE };
-            let key = hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list));
+            let key = Mix::new().h(&full).h(&self.tail).h(&word).h(&self.field).h(&(pending_tap && self.field == 1)).h(&quick_list).get();
             // DISP-28: the quick list's box once; its rows below, each when it changes.
-            let boxed = app.dirty(R_LIST_BOX, if quick_list { hash(&(2u8, self.field)) } else { hash(&(9u8, key)) });
+            let boxed = app.dirty(R_LIST_BOX, if quick_list { Mix::new().h(&2u8).h(&self.field).get() } else { Mix::new().h(&9u8).h(&key).get() });
             let full_box = boxed || !quick_list;
             if app.dirty(R_ROW, key) || boxed {
                 ferrite_ui::canvas::banded(lcd, 0, y, 240, if full_box { h + 24 } else { 18 }, BG, |lcd| {
@@ -999,7 +999,7 @@ impl View for Compose {
         let callsign = cx.store.data().callsign();
         let marks = pred && self.field == 1 && keys.is_empty() && self.punct > 0;
         let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head, self.list & SVC, (marks, self.punct, full.is_empty()));
-        if app.dirty(R_NOTE, hash(&strip)) {
+        if app.dirty(R_NOTE, Mix::new().any(&strip).get()) {
             let y = 236;
             ferrite_ui::canvas::banded(lcd, 0, y, 240, 60, BG, |lcd| {
                 if pred && self.field == 1 && !keys.is_empty() {
@@ -1084,7 +1084,7 @@ fn book_rows(app: &mut App, lcd: &mut impl Panel, d: &dyn crate::data::Data, b: 
     let n = b.len();
     let sel = sel.min(n - 1);
     let (g, from, len) = b.group(sel);
-    if app.dirty(R_ROW, hash(&(3u8, sel, from, len, g))) {
+    if app.dirty(R_ROW, Mix::new().h(&3u8).h(&sel).h(&from).h(&len).h(&g).get()) {
         ferrite_ui::canvas::banded(lcd, 0, y, 240, 18, BG, |lcd| {
             lcd.text4(8, y + 12, "Address book".as_bytes(), &UI_12, SUB, BG);
             let mut c = Buf::<20>::new();
@@ -1093,7 +1093,7 @@ fn book_rows(app: &mut App, lcd: &mut impl Panel, d: &dyn crate::data::Data, b: 
             lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
         });
     }
-    if app.dirty(R_LIST_BOX, hash(&3u8)) {
+    if app.dirty(R_LIST_BOX, Mix::new().h(&3u8).get()) {
         ferrite_ui::canvas::banded(lcd, 0, y + 18, 240, h + 6, BG, |lcd| {
             lcd.fill_r(8, y + 18, 224, h, 2, FOCUS);
             lcd.frame_r(8, y + 18, 224, h, 2, BLUE);
@@ -1105,7 +1105,7 @@ fn book_rows(app: &mut App, lcd: &mut impl Panel, d: &dyn crate::data::Data, b: 
     for k in 0..LIST_VIS {
         let i = top + k as u16;
         let on = i == sel;
-        if !app.dirty(R_LIST_ROW + k, hash(&(i, on, ver, i < n))) {
+        if !app.dirty(R_LIST_ROW + k, Mix::new().h(&i).h(&on).h(&ver).h(&(i < n)).get()) {
             continue;
         }
         let ry = y + 22 + k as i32 * 19;
@@ -1134,7 +1134,7 @@ fn quick_rows(app: &mut App, store: &impl ChannelStore, lcd: &mut impl Panel, y:
     for k in 0..LIST_VIS {
         let i = top + k;
         let on = i == sel;
-        if !app.dirty(R_LIST_ROW + k, hash(&(i, on, ver, bg))) {
+        if !app.dirty(R_LIST_ROW + k, Mix::new().h(&i).h(&on).h(&ver).h(&bg).get()) {
             continue;
         }
         let ry = y + 2 + k as i32 * 19;

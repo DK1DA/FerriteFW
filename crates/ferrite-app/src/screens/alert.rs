@@ -97,12 +97,12 @@ impl View for Alert {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let a = *app.alert_info;
         let on = self.silenced || (app.now / FLASH_MS).is_multiple_of(2);
-        if app.dirty(R_FRAME, hash(&on)) {
+        if app.dirty(R_FRAME, Mix::new().h(&on).get()) {
             let c = if on { RED } else { ALERT_BG };
             lcd.frame_r(4, 24, 232, 272, 3, c);
             lcd.frame_r(5, 25, 230, 270, 2, c);
         }
-        if app.dirty(R_TOP, hash(&(a.kind, a.event, a.areas))) {
+        if app.dirty(R_TOP, Mix::new().h(&a.kind).h(&a.event).h(&a.areas).get()) {
             lcd.fill_r(6, 26, 228, 268, 2, ALERT_BG);
             w::warn_icon(lcd, 16, 34, RED, ALERT_BG);
             lcd.text4(34, 45, KINDS[a.kind as usize % 3].as_bytes(), &UI_12B, RED, ALERT_BG);
@@ -130,12 +130,12 @@ impl View for Alert {
         }
         for (i, (label, v)) in ["Issued", "Until", "From", "Heard"].iter().zip(&rows).enumerate() {
             let y = 122 + 16 * i as i32;
-            if app.dirty(R_ROW + i, hash(&v)) {
+            if app.dirty(R_ROW + i, Mix::new().h(&v).get()) {
                 w::field(lcd, 15, 52, y, y + 16, y + 12, Align::Left, label.as_bytes(), &UI_12, SUB, ALERT_BG);
                 w::field(lcd, 70, 160, y, y + 16, y + 12, Align::Left, v.as_bytes(), &UI_12, TEXT, ALERT_BG);
             }
         }
-        if app.dirty(R_HELP, hash(&self.silenced)) {
+        if app.dirty(R_HELP, Mix::new().h(&self.silenced).get()) {
             let (c, t): (u16, &[u8]) = if self.silenced { (SUB, "Tone off \u{b7} in the event log".as_bytes()) } else { (rgb565(0xF2, 0x8B, 0x8E), b"Tone sounding") };
             w::bell(lcd, 16, 272, c, ALERT_BG, self.silenced);
             w::field(lcd, 32, 196, 268, 286, 282, Align::Left, t, &UI_12, c, ALERT_BG);

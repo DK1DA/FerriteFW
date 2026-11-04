@@ -137,7 +137,7 @@ impl View for Value {
             _ if app.slots[a as usize].on_channel() => b"channel",
             _ => b"VFO",
         });
-        if app.dirty(R_NOTE, hash(&(item, def))) {
+        if app.dirty(R_NOTE, Mix::new().any(&item).h(&def).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 41, 240, BOX_H + 6, BG, |b| {
                 b.frame_r(6, BOX_Y, 228, BOX_H, 3, BLUE);
                 let mut h = Buf::<24>::new();
@@ -153,7 +153,7 @@ impl View for Value {
             }
         }
         // The value, large, between the arrows; greyed with why (MENU-14).
-        if app.dirty(R_FREQ, hash(&(vt, grey))) {
+        if app.dirty(R_FREQ, Mix::new().h(&vt).h(&grey).get()) {
             let (y0, y1) = (BOX_Y + 28, BOX_Y + 70);
             // Squelch's level bars start at BOX_Y + 68: the band stops above them, as they draw only when they change.
             let bot = if item == Item::Squelch { BOX_Y + 68 } else { y1 };
@@ -176,7 +176,7 @@ impl View for Value {
         if item == Item::Squelch {
             let l = app.sq_level(a) as i32; // Global shows the slot's level it uses
             self.squelch(app, lcd, cx, l);
-        } else if app.dirty(R_SUB, hash(&(v, n, grey))) {
+        } else if app.dirty(R_SUB, Mix::new().h(&v).h(&n).h(&grey).get()) {
             let y = BOX_Y + 74;
             match grey {
                 Some(why) => {
@@ -220,7 +220,7 @@ impl Value {
     /// Squelch: the ten levels, and the signal now against where audio opens (SQL-7: live).
     fn squelch(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, v: i32) {
         let y = BOX_Y + 68;
-        if app.dirty(R_SUB, hash(&v)) {
+        if app.dirty(R_SUB, Mix::new().h(&v).get()) {
             ferrite_ui::canvas::banded(lcd, 11, y, 220, 41, BG, |b| {
                 for i in 0..10 {
                     let x = 15 + i * 22;
@@ -235,7 +235,7 @@ impl Value {
         let open = 15 + 10 + v * 19;
         let level = (w::meter_level(rssi) as i32 * 210 / w::METER_SEGS as i32).clamp(0, 210);
         let st = w::s_text(rssi);
-        if app.dirty(R_INFO, hash(&(level, open, st))) {
+        if app.dirty(R_INFO, Mix::new().h(&level).h(&open).h(&st).get()) {
             let by = y + 42;
             ferrite_ui::canvas::banded(lcd, 12, by - 2, 216, 14, BG, |b| {
                 b.fill_r(15, by, 210, 10, 1, LINE);

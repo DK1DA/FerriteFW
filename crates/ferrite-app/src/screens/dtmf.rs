@@ -178,7 +178,7 @@ impl View for DtmfPad {
         let mut right = Buf::<16>::new();
         let _ = uwrite!(right, "{}/16", self.digits.len);
         app.list_head(lcd, head.as_bytes(), right.as_bytes());
-        if app.dirty(R_NOTE, hash(&t)) {
+        if app.dirty(R_NOTE, Mix::new().h(&t).get()) {
             ferrite_ui::canvas::banded(lcd, 8, 60, 224, 60, BG, |lcd| {
                 lcd.frame_r(8, 60, 224, 60, 3, if t.is_empty() { LINE } else { BLUE });
                 let s: &[u8] = if t.is_empty() { b"type the digits" } else { t.as_bytes() };
@@ -190,7 +190,7 @@ impl View for DtmfPad {
         let mut slot = Buf::<32>::new();
         let _ = uwrite!(slot, "Sends on slot {} \u{b7} ", ["A", "B", "C"][a as usize % 3]);
         slot.push(w::freq3(app.slot(a).freq()).as_bytes());
-        if app.dirty(R_LINE, hash(&slot)) {
+        if app.dirty(R_LINE, Mix::new().h(&slot).get()) {
             w::field(lcd, 8, 224, 128, 146, 142, Align::Left, slot.as_bytes(), &UI_12, SUB, BG);
         }
         app.help_box(lcd, 300 - 52, 48, b"Hold 1-4 for A-D. Hold MENU keeps it as a memory.", b"MENU 0 8 5 1");

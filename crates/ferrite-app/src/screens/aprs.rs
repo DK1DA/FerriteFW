@@ -425,7 +425,7 @@ fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data, li
         _ => None,
     };
     let moving = s.course.is_some_and(|c| c.1 > 0);
-    if app.dirty(R_TOP, hash(&(s.call, s.sym, moving, where_))) {
+    if app.dirty(R_TOP, Mix::new().h(&s.call).any(&s.sym).h(&moving).h(&where_).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 20, 156, 102, BG, |lcd| {
             lcd.text4(8, 42, s.call.as_bytes(), &UI_15B, TEXT, BG);
             let mut t = Buf::<24>::new();
@@ -452,7 +452,7 @@ fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data, li
             }
         });
     }
-    if app.dirty(R_NOTE, hash(&where_.map(|w| w.1))) {
+    if app.dirty(R_NOTE, Mix::new().h(&where_.map(|w| w.1)).get()) {
         compass(lcd, 194, 71, 33, where_.map(|w| w.1));
     }
     app.table(lcd, &STATION, live, dev, s, None);

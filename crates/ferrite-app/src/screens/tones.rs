@@ -270,7 +270,7 @@ impl View for Tones {
         }
         for (i, (label, t)) in [("RX tone", rx), ("TX tone", tx)].into_iter().enumerate() {
             let f = self.row as usize == i;
-            if app.dirty(R_ROW + i, hash(&(page, t, f))) {
+            if app.dirty(R_ROW + i, Mix::new().h(&page).h(&t).h(&f).get()) {
                 let y = 46 + i as i32 * 36;
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
                 // 33 px: the 9 px capitals centre (DISP-19)
@@ -293,11 +293,11 @@ impl View for Tones {
         // TONE-2.1: the modes (◀▶) over the values in this one (the knob). Each drawn off screen, in one pass (DISP-25);
         // the value box reaches down to 212, where the second page's taller picker ends.
         let m = mode_of(t);
-        if app.dirty(R_INFO, hash(&(page, m))) {
+        if app.dirty(R_INFO, Mix::new().h(&page).h(&m).get()) {
             let names: [&[u8]; 4] = MODE_NAMES.map(|n| n.as_bytes());
             ferrite_ui::canvas::banded(lcd, 8, 122, 224, 17, BG, |lcd| w::chips_sel(lcd, 8, 122, 224, &names, Some(m as usize), BG));
         }
-        if app.dirty(R_SUB, hash(&(page, t))) {
+        if app.dirty(R_SUB, Mix::new().h(&page).h(&t).get()) {
             ferrite_ui::canvas::banded(lcd, 40, 140, 160, 72, BG, |lcd| {
                 if m == 0 {
                     w::field(lcd, 40, 160, 146, 200, 177, Align::Center, b"No tone", &UI_12, DIM, BG);
@@ -311,7 +311,7 @@ impl View for Tones {
         if self.nt > 0 && app.now.wrapping_sub(self.at) <= TYPE_MS {
             let _ = ufmt::uwrite!(typed, "Typed {}", self.typed);
         }
-        if app.dirty(R_NOTE, hash(&typed)) {
+        if app.dirty(R_NOTE, Mix::new().h(&typed).get()) {
             let s: &[u8] = if typed.is_empty() { b"885 is 88.5 Hz; any 60-260 Hz" } else { typed.as_bytes() };
             w::field(lcd, 8, 224, 216, 233, 229, Align::Center, s, &UI_12, if typed.is_empty() { DIM } else { TEXT }, BG);
         }
@@ -340,7 +340,7 @@ impl Tones {
             let (v, _) = ch_value(app, row);
             let label = if row == 2 { "End tone" } else { "Tail" };
             let name = if row == 2 { END_TONES[v as usize] } else { TAILS[v as usize] };
-            if app.dirty(R_ROW + i, hash(&(1u8, v, f))) {
+            if app.dirty(R_ROW + i, Mix::new().h(&1u8).h(&v).h(&f).get()) {
                 let y = 46 + i as i32 * 36;
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
                 ferrite_ui::canvas::banded(lcd, 6, y, 228, 33, BG, |lcd| {
@@ -356,10 +356,10 @@ impl Tones {
         }
         let (v, n) = ch_value(app, self.row);
         let end = self.row == 2;
-        if app.dirty(R_SUB, hash(&(1u8, self.row, v))) {
+        if app.dirty(R_SUB, Mix::new().h(&1u8).h(&self.row).h(&v).get()) {
             picker(lcd, 40, 122, 160, 5, 18, v as i32, n as i32, |i, b| b.set(if end { END_TONES[i as usize] } else { TAILS[i as usize] }.as_bytes()), BG);
         }
-        if app.dirty(R_NOTE, hash(&1u8)) {
+        if app.dirty(R_NOTE, Mix::new().h(&1u8).get()) {
             w::field(lcd, 8, 224, 216, 233, 229, Align::Center, b"Global: the radio's, MENU 0 8 8", &UI_12, DIM, BG);
         }
         app.help_box(lcd, 250, 46, b"This channel's end tone and tail elimination.", b"MENU 4");

@@ -1251,7 +1251,7 @@ impl View for Group {
 fn shown(app: &App, p: &[u8]) -> u32 {
     let mut b = Buf::<24>::new();
     let _ = wired(app, &Device::default(), p, &mut b);
-    hash(&b.as_bytes())
+    Mix::new().h(&b.as_bytes()).get()
 }
 
 /// MENU-22: steps the setting back the other way until it shows what it did before the run of changes (a
@@ -1323,7 +1323,7 @@ impl Group {
     }
 
     fn draw(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        app.new_page(lcd, hash(&(self.g, self.sub)));
+        app.new_page(lcd, Mix::new().h(&self.g).h(&self.sub).get());
         for i in 0..self.items().len() {
             let (name, v, dot, grey) = self.row(app, cx.dev, cx.store, i as u8);
             let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i as u8 == self.row, grey };

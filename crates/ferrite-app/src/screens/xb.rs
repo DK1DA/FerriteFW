@@ -334,7 +334,7 @@ impl View for Crossband {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let run = running(app);
-        if app.dirty(18, hash(&run)) {
+        if app.dirty(18, Mix::new().h(&run).get()) {
             lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
             app.drawn.hash[1..18].fill(0);
         }
@@ -427,7 +427,7 @@ fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
         let slot = if side == 0 { c.side1 } else { c.side2 };
         let foc = s.cell == side;
         let f = app.slot(slot).freq();
-        if app.dirty(2 + side as usize, hash(&(slot, foc, f, *app.slot(slot).cfg()))) {
+        if app.dirty(2 + side as usize, Mix::new().h(&slot).h(&foc).h(&f).any(app.slot(slot).cfg()).get()) {
             let mut label = Buf::<8>::new();
             let _ = uwrite!(label, "Side {}", side + 1);
             let mut last = Buf::<16>::new();
@@ -451,7 +451,7 @@ fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
     // XB-2's pre-flight checks, then the button.
     let mut out = [(Check::Ok, Buf::new()); 4];
     let fail = checks(app, batt, &mut out);
-    if app.dirty(10, hash(&out)) {
+    if app.dirty(10, Mix::new().any(&out).get()) {
         ferrite_ui::canvas::banded(lcd, 6, 187, 228, 74, BG, |lcd| {
             lcd.fill_r(6, 187, 228, 74, 3, SURFACE);
             for (i, (k, t)) in out.iter().enumerate() {
@@ -489,7 +489,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         let m = x.run_s / 60;
         let _ = uwrite!(t, "{}h {}m", m / 60, m % 60);
     }
-    if app.dirty(1, hash(&(x.state, t))) {
+    if app.dirty(1, Mix::new().h(&x.state).h(&t).get()) {
         let (border, fill) = if passing { (GREEN, rgb565(0x10, 0x22, 0x16)) } else { (LINE, SURFACE) };
         ferrite_ui::canvas::banded(lcd, 6, 25, 228, 22, BG, |lcd| {
             lcd.fill_r(6, 25, 228, 22, 2, fill);
@@ -518,7 +518,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         let is_in = passing && slot == inp;
         let is_out = passing && slot == outp;
         let key = (x.state, slot, if is_in { lit_in } else { 0 }, is_out && x.reduced);
-        if !app.dirty(2 + side as usize, hash(&key)) {
+        if !app.dirty(2 + side as usize, Mix::new().h(&key).get()) {
             continue;
         }
         let px = 6 + side as i32 * 124;
@@ -564,7 +564,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
             lcd.text4_rows(px + 6, base, p.as_bytes(), &UI_12, col, SURFACE, ly, ly + 12);
         }
     }
-    if app.dirty(4, hash(&(passing, x.state == 2))) {
+    if app.dirty(4, Mix::new().h(&passing).h(&(x.state == 2)).get()) {
         ferrite_ui::canvas::banded(lcd, 110, 75, 20, 14, BG, |lcd| {
             if passing {
                 parts::arrow(lcd, 112, 82, 16, if x.state == 1 { 3 } else { 2 }, GREEN);
@@ -591,7 +591,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     } else {
         line.set(b"No passes yet");
     }
-    if app.dirty(5, hash(&line)) {
+    if app.dirty(5, Mix::new().h(&line).get()) {
         ferrite_ui::canvas::banded(lcd, 0, 127, 240, 17, BG, |lcd| {
             if passing {
                 w::field(lcd, 8, 50, 127, 144, 140, Align::Left, b"Timeout", &UI_12, SUB, BG);
@@ -677,7 +677,7 @@ fn dir_label(lcd: &mut impl Panel, x: i32, base: i32, from: u8, to: u8, c: u16, 
 /// The last 30 minutes (XB-16): side 1 → 2 above the line, 2 → 1 below, each in the colour of the slot it was heard
 /// on; the current pass red.
 fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, x: &XbLive, s1: u8, s2: u8, passing: bool) {
-    if !app.dirty(region, hash(&(x.strip, passing, s1, s2))) {
+    if !app.dirty(region, Mix::new().h(&x.strip).h(&passing).h(&s1).h(&s2).get()) {
         return;
     }
     let (y, h) = (146, 60);

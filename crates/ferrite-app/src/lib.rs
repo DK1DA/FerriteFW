@@ -1313,7 +1313,7 @@ impl App {
             self.set_undo = None;
         }
         self.alert_tone();
-        if screens::shared::hash(&self.set.callsign) != self.cw_sent {
+        if screens::shared::Mix::new().h(&self.set.callsign).get() != self.cw_sent {
             self.send_tx_tones(); // VOX-12, XB-12: CW ID sends the callsign as it is now
         }
         self.vox_tick(live, now, store);
@@ -1686,7 +1686,7 @@ impl App {
     pub(crate) fn send_tx_tones(&mut self) {
         let s = &self.set;
         self.out.push(RadioCmd::TxTones { phase: s.tail_phase % 4, cw: s.cw_id % 3, sidetone: s.dtmf_sidetone });
-        self.cw_sent = screens::shared::hash(&s.callsign);
+        self.cw_sent = screens::shared::Mix::new().h(&s.callsign).get();
         let call = s.callsign.as_bytes();
         for chunk in 0..2u8 {
             let mut text = [0u8; 5];

@@ -223,7 +223,7 @@ impl View for Confirm {
             }
             Ask::Reset { .. } => {}
         }
-        if app.dirty(R_TOP, hash(&(self.ask, what, title))) {
+        if app.dirty(R_TOP, Mix::new().any(&self.ask).h(&what).h(&title).get()) {
             lcd.fill(0, 21, 240, 279, BG);
             let col = if matches!(self.ask, Ask::ToneTx(_) | Ask::CopyToVfo) { TEXT } else { AMBER };
             w::field(lcd, 12, 216, 36, 54, 50, Align::Left, title.as_bytes(), &UI_12B, col, BG);

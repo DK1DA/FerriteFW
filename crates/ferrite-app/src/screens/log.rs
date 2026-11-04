@@ -297,7 +297,7 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
     clock_text(cx.dev.clock_min, e.ago_s, &mut time);
     age_text(e.ago_s, &mut age);
     let top = Row2 { tag: e.src.name().as_bytes(), title: t.as_bytes(), big: e.src == Src::Aprs, right: time.as_bytes(), sub: e.src_text(), tag_w: 58, ..Row2::default() };
-    if app.dirty(R_TOP, hash(&top)) {
+    if app.dirty(R_TOP, Mix::new().any(&top).get()) {
         row2(lcd, 22, &top, w::Cue::default());
     }
     let mut rows: [(&str, Buf<40>); 7] = Default::default();
@@ -385,7 +385,7 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
     }
     // The message itself, wrapped, under the rows.
     let y = y + 6;
-    if app.dirty(R_NOTE, hash(&(body, y))) {
+    if app.dirty(R_NOTE, Mix::new().h(&body).h(&y).get()) {
         ferrite_ui::canvas::banded(lcd, 0, y - 6, 240, w::HINT_Y - y + 6, BG, |lcd| {
             wrap(lcd, 8, y, 224, w::HINT_Y - 2, body, TEXT);
         });

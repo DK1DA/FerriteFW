@@ -181,18 +181,18 @@ impl View for KeyTest {
                 }
             }
         }
-        if app.dirty(R_TOP, hash(&(name, line))) {
+        if app.dirty(R_TOP, Mix::new().h(&name).h(&line).get()) {
             w::field(lcd, 10, 220, 28, 54, 48, Align::Center, name.as_bytes(), &UI_15B, TEXT, BG);
             w::field(lcd, 10, 220, 58, 76, 72, Align::Center, line.as_bytes(), &UI_12, SUB, BG);
         }
         let now = self.key.and_then(cell).or(matches!(self.got, Got::KnobUp | Got::KnobDown).then_some(KNOB));
-        if app.dirty(R_ROW, hash(&(self.seen, now))) {
+        if app.dirty(R_ROW, Mix::new().h(&self.seen).h(&now).get()) {
             for (i, (label, _)) in MAP.iter().enumerate() {
                 draw_key(lcd, i, label, self.is_seen(i), now == Some(i));
             }
         }
         let count: u32 = self.seen.iter().map(|b| b.count_ones()).sum();
-        if app.dirty(R_HELP, hash(&count)) {
+        if app.dirty(R_HELP, Mix::new().h(&count).get()) {
             let mut t = Buf::<40>::new();
             let _ = uwrite!(t, "{} of {} keys seen", count, MAP.len());
             w::field(lcd, 10, 220, 222, 240, 236, Align::Center, t.as_bytes(), &UI_12, SUB, BG);

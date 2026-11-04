@@ -484,7 +484,7 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
             // a zone as the zones page shows it: chips and count, dimmed when empty (CHAN-27, CHAN-30)
             let r = super::zones::ZoneRow::of(app, store, i);
             let sel = i == cur.sel;
-            if app.dirty(R_ROW + row, hash(&(2u8, &r, sel))) {
+            if app.dirty(R_ROW + row, Mix::new().h(&2u8).any(&r).h(&sel).get()) {
                 super::zones::zone_row(lcd, LIST_Y + row as i32 * ROW1_H, ROW1_H, &r, sel, app.cue());
             }
             return;

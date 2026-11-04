@@ -82,7 +82,137 @@ impl Hasher for Fnv {
     }
 }
 
-pub(crate) fn hash<T: Hash>(t: &T) -> u32 {
+/// A region's hash mixed value by value (FNV-1a), one small path: `Mix::new().n(f).b(name).get()`. The generic
+/// [`hash`] of a tuple is made again at each call site for its field types; a direct mix is two instructions and a
+/// call a value. Numbers go in as u32 (`as u32` for bools, enums and small ints), text as bytes.
+#[derive(Clone, Copy)]
+pub(crate) struct Mix(u32);
+
+impl Mix {
+    pub(crate) const fn new() -> Mix {
+        Mix(2_166_136_261)
+    }
+    #[inline(never)]
+    pub(crate) fn b(self, s: &[u8]) -> Mix {
+        let mut h = self.0;
+        for &x in s {
+            h = (h ^ x as u32).wrapping_mul(16_777_619);
+        }
+        Mix(h.rotate_left(5) ^ s.len() as u32)
+    }
+    #[inline(never)]
+    pub(crate) fn n(self, v: u32) -> Mix {
+        let mut h = self.0;
+        for k in 0..4 {
+            h = (h ^ (v >> (8 * k)) & 0xFF).wrapping_mul(16_777_619);
+        }
+        Mix(h)
+    }
+    /// Any value that knows how it mixes ([`MixIn`]): numbers as u32, text as bytes.
+    #[inline(always)]
+    pub(crate) fn h<T: MixIn + ?Sized>(self, t: &T) -> Mix {
+        t.mix(self)
+    }
+    /// A value of a type with only `Hash` (made per type: for the few that aren't [`MixIn`]).
+    #[inline(never)]
+    pub(crate) fn any<T: Hash + ?Sized>(self, t: &T) -> Mix {
+        self.n(hash(t))
+    }
+    /// Never 0, which means "not drawn".
+    pub(crate) fn get(self) -> u32 {
+        self.0 | 1
+    }
+}
+
+/// How a value goes into a region's [`Mix`]: one call, inlined at the call site.
+pub(crate) trait MixIn {
+    fn mix(&self, m: Mix) -> Mix;
+}
+
+macro_rules! mix_num {
+    ($($t:ty),*) => {$(
+        impl MixIn for $t {
+            #[inline(always)]
+            fn mix(&self, m: Mix) -> Mix {
+                m.n(*self as u32)
+            }
+        }
+    )*};
+}
+mix_num!(u8, u16, u32, usize, i8, i16, i32, bool, char);
+
+impl MixIn for u64 {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        m.n(*self as u32).n((*self >> 32) as u32)
+    }
+}
+impl MixIn for i64 {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        (*self as u64).mix(m)
+    }
+}
+impl MixIn for [u8] {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        m.b(self)
+    }
+}
+impl MixIn for str {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        m.b(self.as_bytes())
+    }
+}
+impl<const N: usize> MixIn for Buf<N> {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        m.b(self.as_bytes())
+    }
+}
+impl<T: MixIn + ?Sized> MixIn for &T {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        (**self).mix(m)
+    }
+}
+impl<const N: usize> MixIn for crate::settings::Text<N> {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        m.b(self.as_bytes())
+    }
+}
+impl<T: MixIn, const N: usize> MixIn for [T; N] {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        self.iter().fold(m, |m, v| v.mix(m))
+    }
+}
+macro_rules! mix_tuple {
+    ($($n:ident $i:tt),*) => {
+        impl<$($n: MixIn),*> MixIn for ($($n,)*) {
+            #[inline(always)]
+            fn mix(&self, m: Mix) -> Mix {
+                m$(.h(&self.$i))*
+            }
+        }
+    };
+}
+mix_tuple!(A 0, B 1);
+mix_tuple!(A 0, B 1, C 2);
+mix_tuple!(A 0, B 1, C 2, D 3);
+impl<T: MixIn> MixIn for Option<T> {
+    #[inline(always)]
+    fn mix(&self, m: Mix) -> Mix {
+        match self {
+            Some(v) => v.mix(m.n(1)),
+            None => m.n(0),
+        }
+    }
+}
+
+pub(crate) fn hash<T: Hash + ?Sized>(t: &T) -> u32 {
     let mut h = Fnv(2_166_136_261);
     t.hash(&mut h);
     h.0 | 1 // never 0, which means "not drawn"
@@ -139,10 +269,10 @@ impl App {
     /// whose every row draws its own part of the cue (a [`super::table::Table`]) passes no rows: a row's change
     /// then redraws that row only, not the whole cue as well (Oct 13, 2026).
     pub(crate) fn scroll_cue(&mut self, lcd: &mut impl Panel, rows: (usize, usize), y: i32, h: i32, more: bool, top: u32, shown: u32, n: u32) {
-        let under = hash(&&self.drawn.hash[R_ROW + rows.0..(R_ROW + rows.0 + rows.1).min(R_PAGE)]);
+        let under = Mix::new().any(&self.drawn.hash[R_ROW + rows.0..(R_ROW + rows.0 + rows.1).min(R_PAGE)]).get();
         let prev = self.drawn.hash[R_SCROLL];
         // bit 0: the cue is on the screen
-        if !self.dirty(R_SCROLL, (hash(&(under, y, h, more, top, shown, n)) & !1) | more as u32) {
+        if !self.dirty(R_SCROLL, (Mix::new().h(&under).h(&y).h(&h).h(&more).h(&top).h(&shown).h(&n).get() & !1) | more as u32) {
             return;
         }
         if more {
@@ -161,7 +291,7 @@ impl App {
     /// A screen with pages (setup, About, a list and its detail): when the page changes, the content area is
     /// cleared and every region but the hint bar forgotten, as on a screen change. Returns true then.
     pub(crate) fn page<K: Hash>(&mut self, lcd: &mut impl Panel, key: K) -> bool {
-        if !self.dirty(R_PAGE, hash(&key) | 1) {
+        if !self.dirty(R_PAGE, Mix::new().any(&key).get() | 1) {
             return false;
         }
         lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
@@ -228,7 +358,7 @@ impl App {
 
     pub(crate) fn render_hint(&mut self, lcd: &mut impl Panel) {
         if let Some(t) = self.toast.filter(|t| !t.center) {
-            if self.dirty(R_HINT, hash(&(1u8, t.head, t.body, t.icon))) {
+            if self.dirty(R_HINT, Mix::new().h(&1u8).h(&t.head).h(&t.body).h(&t.icon).get()) {
                 w::toast(lcd, t.head.as_bytes(), t.body.as_bytes(), t.icon);
             }
             return;
@@ -237,35 +367,35 @@ impl App {
             return; // PWR-24.7: Low Power Mode's home draws its own band
         }
         let h = self.screen.hints(self);
-        if self.dirty(R_HINT, hash(&(0u8, h.as_slice()))) {
+        if self.dirty(R_HINT, Mix::new().h(&0u8).any(&h.as_slice()).get()) {
             w::hint_bar(lcd, h.as_slice());
         }
     }
 
     /// List row `i` (region R_ROW + i) at y, drawn when what it shows changed (MENU-12).
     pub(crate) fn list_row(&mut self, lcd: &mut impl Panel, i: usize, y: i32, h: i32, r: &Row) {
-        if self.dirty(R_ROW + i, hash(&(r.num, r.name, r.value, r.dot, r.selected, r.grey))) {
+        if self.dirty(R_ROW + i, Mix::new().h(&r.num).h(&r.name).h(&r.value).h(&r.dot).h(&r.selected).h(&r.grey).get()) {
             w::list_row(lcd, y, h, r, self.cue());
         }
     }
 
     /// Edit grid cell `i` (region R_ROW + i): label over value, focused or greyed (EDIT-3, EDIT-7).
     pub(crate) fn grid_cell(&mut self, lcd: &mut impl Panel, i: usize, x: i32, y: i32, w_: i32, h: i32, label: &[u8], value: &[u8], focused: bool, grey: bool) {
-        if self.dirty(R_ROW + i, hash(&(label, value, focused, grey))) {
+        if self.dirty(R_ROW + i, Mix::new().h(&label).h(&value).h(&focused).h(&grey).get()) {
             w::edit_cell(lcd, x, y, w_, h, label, value, focused, grey);
         }
     }
 
     /// The help box at the foot of a list: one line of help and the item's path (MENU-15).
     pub(crate) fn help_box(&mut self, lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
-        if self.dirty(R_HELP, hash(&(text, path))) {
+        if self.dirty(R_HELP, Mix::new().h(&text).h(&path).get()) {
             w::help_box(lcd, y, h, text, path);
         }
     }
 
     /// A message page (prompts, power off): a centred heading in `c`, an optional second line, wrapped text.
     pub(crate) fn message(&mut self, lcd: &mut impl Panel, head: &[u8], line: &[u8], text: &[u8], c: u16) {
-        if self.dirty(R_TOP, hash(&(head, line, text))) {
+        if self.dirty(R_TOP, Mix::new().h(&head).h(&line).h(&text).get()) {
             use ferrite_ui::assets::{UI_12, UI_15B};
             w::field(lcd, 10, 220, 60, 86, 80, Align::Center, head, &UI_15B, c, BG);
             w::field(lcd, 10, 220, 92, 116, 110, Align::Center, line, &UI_15B, TEXT, BG);

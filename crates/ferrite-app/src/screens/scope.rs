@@ -315,7 +315,7 @@ impl View for Scope {
         let (floor, pk) = floor_peak(&bars[..n]);
         let line = app.set.scope_line;
         // Header: band, centre; the MHz labels under the graph (SCOPE-2).
-        if app.dirty(1, hash(&(centre, n, step))) {
+        if app.dirty(1, Mix::new().h(&centre).h(&n).h(&step).get()) {
             w::field(lcd, 8, 80, 21, 39, 34, Align::Left, band_name(centre).as_bytes(), &UI_12, SUB, BG);
             let fq = w::freq3(centre);
             let fw = text4_width(fq.as_bytes(), &UI_12B);
@@ -352,7 +352,7 @@ impl View for Scope {
             let r = &bars[a..b];
             let has_m = (a..b).contains(&m).then_some(m);
             let has_l = heard.filter(|&i| (a as i32..b as i32).contains(&i));
-            if !app.dirty(2 + g, hash(&(r, floor, line, has_m, has_l, n))) {
+            if !app.dirty(2 + g, Mix::new().h(&r).h(&floor).h(&line).h(&has_m).h(&has_l).h(&n).get()) {
                 continue;
             }
             let x0 = g as i32 * 40;
@@ -395,7 +395,7 @@ impl View for Scope {
         }
         // Waterfall (0 3 2 5): one row per sweep, wrapping; the next row's place shows dark.
         let wf = app.set.scope_wf;
-        if app.dirty(10, hash(&(wf, wf.then_some(sweeps)))) {
+        if app.dirty(10, Mix::new().h(&wf).h(&wf.then_some(sweeps)).get()) {
             if wf {
                 let row = (sweeps as i32) % WF_ROWS;
                 let y = WF_Y + row * 3;
@@ -425,8 +425,8 @@ impl View for Scope {
                 None => p.push(b"none"),
             }
         }
-        let line = app.dirty(12, hash(&p));
-        if app.dirty(11, hash(&(label, f, st.as_bytes()))) {
+        let line = app.dirty(12, Mix::new().h(&p).get());
+        if app.dirty(11, Mix::new().h(&label).h(&f).h(&st.as_bytes()).get()) {
             // The box whole in bands, with the line under the marker (DISP-25).
             let y = BOX_Y;
             ferrite_ui::canvas::banded(lcd, 6, y, 228, 44, BG, |lcd| {
@@ -451,7 +451,7 @@ impl View for Scope {
             // "Mon" for Monitor: the whole word doesn't fit beside "60 bars" (SCOPE-2).
             t.push(match app.set.scope_trig % 3 { 1 => "Mon", i => SCOPE_TRIGGERS[i as usize] }.as_bytes());
         }
-        if app.dirty(13, hash(&t)) {
+        if app.dirty(13, Mix::new().h(&t).get()) {
             w::field(lcd, 8, 224, INFO_Y, INFO_Y + 17, INFO_Y + 13, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
         }
     }
@@ -509,7 +509,7 @@ pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32,
     if lcd.input_pending() {
         return;
     }
-    let Some(clear) = app.dirty_shape(region, hash(&(bars, centre)), true) else { return };
+    let Some(clear) = app.dirty_shape(region, Mix::new().h(&bars).h(&centre).get(), true) else { return };
     if clear {
         lcd.fill(0, y, 240, h + 18, BG);
         lcd.fill(X0, y + h, 224, 1, LINE);
@@ -537,7 +537,7 @@ pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32,
 /// dim frame, with no grid, bars or labels, so it doesn't look like a scope that is just quiet. Shares the strip's
 /// region, so either drawing replaces the other whole.
 pub fn strip_off(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32) {
-    if app.dirty_shape(region, hash(&(y, h)), false).is_none() {
+    if app.dirty_shape(region, Mix::new().h(&y).h(&h).get(), false).is_none() {
         return;
     }
     lcd.fill(0, y, 240, h + 18, BG);

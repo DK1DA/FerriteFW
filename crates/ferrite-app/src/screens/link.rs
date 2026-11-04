@@ -125,7 +125,7 @@ impl View for Link {
             LinkPage::Progress => {
                 let pct = dev.link.write_pct.unwrap_or(100);
                 app.message(lcd, b"Writing", b"from the web app", b"Keys are ignored while the web app writes. BACK cancels.", TEXT);
-                if app.dirty(R_NOTE, hash(&pct)) {
+                if app.dirty(R_NOTE, Mix::new().h(&pct).get()) {
                     let mut t = Buf::<8>::new();
                     let _ = uwrite!(t, "{} %", pct);
                     w::progress(lcd, 30, 210, 180, 6, pct, BLUE);

@@ -417,7 +417,7 @@ impl View for Transmit {
         }
         let mut t = Buf::<16>::new();
         mmss(secs, &mut t);
-        if app.dirty(2, hash(&t)) {
+        if app.dirty(2, Mix::new().h(&t).get()) {
             w::field(lcd, 160, 66, y + 2, y + 20, y + 15, Align::Right, t.as_bytes(), &UI_12B, WHITE, RED);
         }
         // Slot, VFO/channel and band; what it receives on.
@@ -441,7 +441,7 @@ impl View for Transmit {
         let mut r = Buf::<16>::new();
         r.push(b"RX ");
         r.push(w::freq3(rx).as_bytes());
-        if app.dirty(3, hash(&(head, r))) {
+        if app.dirty(3, Mix::new().h(&head).h(&r).get()) {
             if hf {
                 lcd.fill(15, y + 26, 14, 14, SURFACE);
             } else {
@@ -450,7 +450,7 @@ impl View for Transmit {
             w::field(lcd, 35, 110, y + 24, y + 42, y + 38, Align::Left, w::fit(head.as_bytes(), &UI_12, 108), &UI_12, SUB, SURFACE);
             w::field(lcd, 145, 80, y + 24, y + 42, y + 38, Align::Right, r.as_bytes(), &UI_12, SUB, SURFACE);
         }
-        if app.dirty(4, hash(&f)) {
+        if app.dirty(4, Mix::new().h(&f).get()) {
             w::freq(lcd, 15, 226, y + 77, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
         }
         // Mode, the tone sent (red), the power level name (TX-12).
@@ -463,7 +463,7 @@ impl View for Transmit {
             tone_text(c.sent_tone(), &mut tone);
         }
         let pw = power_name(app, s);
-        if app.dirty(5, hash(&(m, tone, pw))) {
+        if app.dirty(5, Mix::new().h(&m).h(&tone).h(&pw).get()) {
             // Fixed slots (HOME-4): the tone being sent is the red chip; power is pinned right, wide enough for
             // "No TX".
             let cy = y + 89;
@@ -477,13 +477,13 @@ impl View for Transmit {
         // Mic level (TX-12): how hard you are modulating; amber near full deviation. No power or drive
         // readout: the radio cannot measure output, and drive only ever reads ~100%.
         let mic = if live.tx.keyed && live.tx.slot == s { live.tx.mic } else { 0 };
-        if app.dirty(6, hash(&mic)) {
+        if app.dirty(6, Mix::new().h(&mic).get()) {
             w::field(lcd, 15, 40, y + 110, y + 127, y + 123, Align::Left, b"Mic", &UI_12, SUB, SURFACE);
             let lit = ((mic as u32 * 13 + 50) / 100) as u8;
             parts::segs(lcd, 56, y + 115, 13, lit, 8, 10, 8, if mic >= 90 { AMBER } else { GREEN }, SURFACE);
         }
         // Timeout: the bar fills to the limit; amber from the pre-alert (TX-30).
-        if app.dirty(7, hash(&secs)) {
+        if app.dirty(7, Mix::new().h(&secs).get()) {
             w::field(lcd, 15, 40, y + 127, y + 144, y + 140, Align::Left, b"TOT", &UI_12, SUB, SURFACE);
             let limit = app.set.tx_timeout_s();
             let c = if secs + PREALERT_S >= limit { AMBER } else { SUB };
@@ -497,7 +497,7 @@ impl View for Transmit {
         // TX-48: with the PA drive held at 0 (Dry TX) the row says so first; the battery
         // isn't under a real load then, so it keeps only its volts.
         let dry = app.dry_tx();
-        if app.dirty(8, hash(&(mv, dry))) {
+        if app.dirty(8, Mix::new().h(&mv).h(&dry).get()) {
             let mut b = Buf::<32>::new();
             let c = if cx.dev.battery_low { AMBER } else { SUB };
             if dry {
@@ -510,7 +510,7 @@ impl View for Transmit {
             }
         }
         // The other slots, one row each in their fixed places: watched ones pause while transmitting (TX-34).
-        if app.dirty(9, hash(&(s, app.watch))) {
+        if app.dirty(9, Mix::new().h(&s).h(&app.watch).get()) {
             for o in (0..SLOTS as u8).filter(|&o| o != s) {
                 let (by, bh) = place(s, o);
                 ferrite_ui::canvas::banded(lcd, 6, by, 228, bh, BG, |lcd| {
@@ -615,7 +615,7 @@ impl View for TxRefused {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
-        if !app.dirty(1, hash(&self)) {
+        if !app.dirty(1, Mix::new().any(&self).get()) {
             return;
         }
         lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
@@ -757,7 +757,7 @@ impl View for Emergency {
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         let (y, h) = (80, 120);
         let f = tx_freq(app, self.slot);
-        if app.dirty(1, hash(&f)) {
+        if app.dirty(1, Mix::new().h(&f).get()) {
             let mut a = Buf::<64>::new();
             if self.aprs {
                 // APRS-21.3: data only while C is the APRS slot.
@@ -772,7 +772,7 @@ impl View for Emergency {
         }
         let left = app.radio.t0.wrapping_sub(app.now).min(EMERGENCY_MS);
         let s = left.div_ceil(1000);
-        if app.dirty(2, hash(&(left / 100))) {
+        if app.dirty(2, Mix::new().h(&(left / 100)).get()) {
             parts::bar(lcd, 19, y + 100, 170, 6, left, EMERGENCY_MS, AMBER, SURFACE);
             let mut b = Buf::<8>::new();
             let _ = uwrite!(b, "{} s", s);

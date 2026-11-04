@@ -150,7 +150,7 @@ impl View for Fm {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        app.new_page(lcd, hash(&self.menu));
+        app.new_page(lcd, Mix::new().h(&self.menu).get());
         if self.menu {
             let mut vals = [Buf::<24>::new(); OPTIONS.len()];
             for (i, v) in vals.iter_mut().enumerate() {
@@ -169,7 +169,7 @@ impl View for Fm {
         let f = app.fm_freq();
         // BCR-27: the slot playing it, when one does.
         let title = title_text(app);
-        if app.dirty(R_FREQ, hash(&(f, stereo, title))) {
+        if app.dirty(R_FREQ, Mix::new().h(&f).h(&stereo).h(&title).get()) {
             w::field(lcd, 10, 150, 24, 42, 38, Align::Left, title.as_bytes(), &UI_12, SUB, BG);
             ferrite_ui::canvas::banded(lcd, 160, 24, 72, 18, BG, |lcd| {
                 if stereo {
@@ -189,7 +189,7 @@ impl View for Fm {
         // when there is no radio text. Without RDS, no empty box.
         let text = rds_text(&ps, &rt);
         let is_rt = !crate::bcast::trim(&rt).is_empty();
-        if app.dirty(R_INFO, hash(&text)) {
+        if app.dirty(R_INFO, Mix::new().h(&text).get()) {
             ferrite_ui::canvas::banded(lcd, 0, 108, 240, 80, BG, |lcd| {
                 if text.is_empty() {
                     w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
@@ -205,7 +205,7 @@ impl View for Fm {
         }
         // Signal and SNR.
         let lit = (rssi as u32 * w::METER_SEGS as u32 / 70).min(w::METER_SEGS as u32) as u8;
-        if app.dirty(R_SUB, hash(&(rssi, snr))) {
+        if app.dirty(R_SUB, Mix::new().h(&rssi).h(&snr).get()) {
             w::field(lcd, 14, 120, 194, 210, 206, Align::Left, b"Signal", &UI_12, SUB, BG);
             let mut t = Buf::<24>::new();
             let _ = uwrite!(t, "{} dBuV \u{b7} SNR {} dB", rssi, snr);
@@ -215,7 +215,7 @@ impl View for Fm {
         // Radio monitor (BCR-4): which slots still watch, and whether one is interrupting now.
         let (m, paused) = monitor_text(app);
         let c = if paused { AMBER } else { SUB };
-        if app.dirty(R_NOTE, hash(&(m, c))) {
+        if app.dirty(R_NOTE, Mix::new().h(&m).h(&c).get()) {
             w::field(lcd, 10, 220, 238, 256, 252, Align::Center, m.as_bytes(), &UI_12, c, BG);
         }
     }

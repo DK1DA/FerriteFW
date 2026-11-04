@@ -75,7 +75,7 @@ impl View for Coming {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         // One placeholder can open another (a group, then an item): the whole content area is redrawn.
-        if app.dirty(R_TOP, hash(&self.dest)) {
+        if app.dirty(R_TOP, Mix::new().any(&self.dest).get()) {
             lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
             let mut h = Buf::<32>::new();
             self.dest.heading(&mut h);
