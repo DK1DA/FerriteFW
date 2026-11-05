@@ -51,6 +51,9 @@ impl Frame {
 pub enum Heard {
     Frame(Frame),
     Fx25(uafsk::Fx25Block),
+    /// APRS-56: a packet heard but not decoded (bad FCS on every slicer) and the audio's peak (0-32767) then, for
+    /// the decode log; sent only for an AX.25 address field (not noise).
+    Miss(uafsk::Miss, u16),
 }
 
 /// Frames heard, to the UI task's APRS task: two deep (a second waits while the first is read; 672 B).
@@ -280,9 +283,14 @@ fn decim(listen: u8) -> Decim {
     Decim::new()
 }
 
-/// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
+/// Frames decoded and dropped (the UI hadn't taken the last two). APRS-56: with the frames that failed their FCS
+/// (an AX.25 address field: packets missed; none: noise between chance flags) and the FX.25 blocks the APRS task
+/// couldn't correct, counted since power-on for the readback's `decode` line.
 pub static FRAMES: AtomicU32 = AtomicU32::new(0);
 pub static DROPPED: AtomicU32 = AtomicU32::new(0);
+pub static MISSED: AtomicU32 = AtomicU32::new(0);
+pub static NOISE: AtomicU32 = AtomicU32::new(0);
+pub static FX25_FAILED: AtomicU32 = AtomicU32::new(0);
 
 
 #[embassy_executor::task]
@@ -299,6 +307,8 @@ pub async fn task() {
     let mut listen = 0u8;
     let mut stream = Stream::Off;
     let mut peak = 0i32;
+    // APRS-56: the audio's peak over the last 64-128 ms (two 32-half buckets), a missed packet's level
+    let mut lvl = (0u16, 0u16);
     let mut halves = 0u32;
     // TERM-44 (decision 315): the bench's receive level meter, on ADC1's 48 kHz samples ahead of `dec`
     let mut meter_on = false;
@@ -412,6 +422,10 @@ pub async fn task() {
                     AUDIO_CLIPS.fetch_add(clips, Relaxed);
                 }
                 peak = out[..n].iter().fold(peak, |p, &x| p.max((x as i32).abs()));
+                lvl.0 = out[..n].iter().fold(lvl.0, |p, &x| p.max(x.unsigned_abs()));
+                if halves.is_multiple_of(32) {
+                    lvl = (0, lvl.0);
+                }
                 if halves.is_multiple_of(PEAK_HALVES) {
                     AUDIO_PEAK.store(peak as u32, Relaxed);
                     peak = 0;
@@ -453,6 +467,13 @@ pub async fn task() {
                         if APRS_RX.try_send(Heard::Fx25(*b)).is_err() {
                             DROPPED.fetch_add(1, Relaxed);
                         }
+                    }
+                    Found::Miss(m) if m.addresses => {
+                        MISSED.fetch_add(1, Relaxed);
+                        let _ = APRS_RX.try_send(Heard::Miss(*m, lvl.0.max(lvl.1))); // only for the log: a full queue skips it
+                    }
+                    Found::Miss(_) => {
+                        NOISE.fetch_add(1, Relaxed);
                     }
                     Found::Page(m) => {
                         if PAGES.try_send(Page::from(m)).is_err() {

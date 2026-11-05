@@ -317,6 +317,8 @@ pub struct Settings {
     pub local: u8,
     /// SAT-22 (decision 341): the pass list's minimum elevation, an index into [`SAT_MIN_EL`]; 10° by default.
     pub sat_min_el: u8,
+    /// 0 5 9 8 Decode log (APRS-56): each packet heard but not decoded goes to the event log. Off by default.
+    pub decode_log: bool,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -533,6 +535,7 @@ impl Settings {
         aprs_share: 0,
         local: crate::local::DEFAULT_RANGE,
         sat_min_el: SAT_MIN_EL_START,
+        decode_log: false,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's

@@ -514,3 +514,74 @@ fn fx25_block_accessors() {
     let k = enc.mode().k as usize;
     assert_eq!(&b.block()[k..], &enc.block()[k..]);
 }
+
+/// A frame and what the demodulator made of it: frames decoded and misses (`take_miss` read after every sample).
+fn decode_misses(samples: &[i16], rate: u32) -> (Vec<Vec<u8>>, Vec<uafsk::Miss>) {
+    let (mut got, mut miss) = (Vec::new(), Vec::new());
+    let mut d = Box::new(Demodulator::<3>::new(Config::new(rate)));
+    for &x in samples.iter().chain(std::iter::repeat_n(&0, rate as usize / 10)) {
+        d.push(x, |f| got.push(f.to_vec()));
+        miss.extend(d.take_miss());
+    }
+    (got, miss)
+}
+
+/// Audio for `f` with three data bits flipped (each a 1 made 0) in its information field, all A's there: A's bits
+/// never run to five ones, so the stuffing and the frame's length stay and only the FCS fails.
+fn damaged(f: &[u8], rate: u32) -> Vec<i16> {
+    let cfg = TxConfig { rate_hz: rate, preamble: 20, postamble: 2, amp: 10000 };
+    let start = 20 * 8 + 24 * 8; // the preamble, then into the A's
+    let mut ones = 0;
+    let bits = uafsk::hdlc::Framer::new(f, 20, 2).enumerate().map(|(i, b)| {
+        if i >= start && b == 1 && ones < 3 && (i - start) % 40 < 8 {
+            ones += 1;
+            return 0;
+        }
+        b
+    });
+    Modulator::from_bits(bits, cfg).collect()
+}
+
+fn a_frame() -> Vec<u8> {
+    let mut f: Vec<u8> = b"APRS  ".iter().map(|c| c << 1).collect();
+    f.push(0x60);
+    f.extend(b"N0CALL".iter().map(|c| c << 1));
+    f.push(0x60 | 9 << 1);
+    f.extend(b"WIDE1 ".iter().map(|c| c << 1));
+    f.push(0x61 | 1 << 1);
+    f.extend([0x03, 0xF0]);
+    f.extend([b'A'; 60]);
+    f
+}
+
+/// APRS-56.1: a packet decoded is no miss; the same packet with a bad FCS is one miss (whatever the slicers did), with its
+/// addresses read back as TNC2 text.
+#[test]
+fn a_bad_fcs_is_one_miss() {
+    let f = a_frame();
+    let rate = 24000;
+    let cfg = TxConfig { rate_hz: rate, preamble: 20, postamble: 2, amp: 10000 };
+    let clean: Vec<i16> = Modulator::new(&f, cfg).collect();
+    let (got, miss) = decode_misses(&clean, rate);
+    assert_eq!((got, miss.len()), (vec![f.clone()], 0));
+
+    let (got, miss) = decode_misses(&damaged(&f, rate), rate);
+    assert!(got.is_empty(), "the damage must fail the FCS");
+    assert_eq!(miss.len(), 1, "{miss:?}");
+    let m = miss[0];
+    assert_eq!((m.len as usize, m.addresses, m.fx25), (f.len() + 2, true, false));
+    let mut h = Vec::new();
+    m.header(|c| h.push(c));
+    assert_eq!(String::from_utf8(h).unwrap(), "N0CALL-9>APRS,WIDE1-1");
+}
+
+/// APRS-56.1: noise alone: whatever falls between two chance flags, nothing reads as an AX.25 address field.
+#[test]
+fn noise_makes_no_packet_misses() {
+    let mut rng = Rng(7);
+    let rate = 24000;
+    let a: Vec<i16> = (0..rate * 20).map(|_| (3000.0 * rng.gauss()) as i16).collect();
+    let (got, miss) = decode_misses(&a, rate);
+    assert!(got.is_empty());
+    assert!(miss.iter().all(|m| !m.addresses), "{miss:?}");
+}

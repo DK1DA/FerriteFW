@@ -29,6 +29,9 @@ pub struct Deframer {
     /// The least confident symbols so far: (confidence, first data bit), sorted, unused = u16::MAX confidence.
     low: [(u16, u16); MAX_REPAIR],
     repaired: bool,
+    /// A frame that ended on a flag, aligned and long enough, but failed its FCS (and any repair): its length,
+    /// FCS included, until [`Deframer::take_bad`] (0: none).
+    bad: u16,
 }
 
 impl Deframer {
@@ -44,12 +47,21 @@ impl Deframer {
             pend: (u16::MAX, 0),
             low: [(u16::MAX, 0); MAX_REPAIR],
             repaired: false,
+            bad: 0,
         }
     }
 
     /// Try flipping up to `k` (0 to [`MAX_REPAIR`]) least confident symbols of a frame that fails its FCS.
     pub fn set_repair(&mut self, k: u8) {
         self.k = k.min(MAX_REPAIR as u8);
+    }
+
+    /// The frame that just failed its FCS (and any repair), FCS included, once: read it straight after the bit
+    /// that ended it (the next frame's bits overwrite it). For counting and logging what wasn't decoded.
+    #[inline(always)]
+    pub fn take_bad(&mut self) -> Option<&[u8]> {
+        let n = core::mem::take(&mut self.bad) as usize;
+        (n != 0).then(|| &self.buf[..n])
     }
 
     /// The last frame returned needed a repair.
@@ -198,6 +210,7 @@ impl Deframer {
         let mut good = done && crc16_x25_update(0xFFFF, &self.buf[..len]) == CRC16_X25_GOOD;
         self.repaired = done && !good && self.k > 0 && self.repair(len);
         good |= self.repaired;
+        self.bad = if done && !good { len as u16 } else { 0 };
         self.start();
         if good {
             let fcs = u16::from_le_bytes([self.buf[len - 2], self.buf[len - 1]]);

@@ -18,6 +18,10 @@
 //! transmission is an ordinary AX.25 frame too: the plain copy comes out of [`Demodulator::push`] first, and the
 //! block carries its FCS so the corrected copy is marked a duplicate.
 //!
+//! **Misses** ([`Demodulator::take_miss`]): a frame that ended on a flag but failed its FCS (and any repair) on
+//! every slicer that framed it, while no slicer decoded it, is reported once per packet as a [`Miss`], with its
+//! first bytes: what was heard but not decoded, for counting and logging.
+//!
 //! The type sets the cost: `Demodulator<S, C>` has `S` slicers (1 to 4; the fourth compares raw amplitudes) per chain and `C` chains (1 or 2). A
 //! second chain runs without the high-pass: a little better on flat (discriminator) audio, for about twice the RAM.
 
@@ -48,6 +52,60 @@ pub struct Fx25Frame<'a> {
     pub check: u8,
     /// The plain AX.25 deframer reported this frame already (it was intact): drop it, or count it as FX.25 heard.
     pub duplicate: bool,
+}
+
+/// Bytes of a [`Miss`] kept: the longest address field (10 addresses, 70 bytes), control and PID.
+pub const MISS_HEAD: usize = 72;
+
+/// A frame heard but not decoded ([`Demodulator::take_miss`]): every slicer that framed it failed its FCS, and
+/// none decoded it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Miss {
+    /// Bytes between the flags, FCS included.
+    pub len: u16,
+    /// The address field reads as AX.25 (2 to 10 callsigns): a packet that failed, not noise that happened to
+    /// fall between two flags.
+    pub addresses: bool,
+    /// An FX.25 tag came in with it: its FX.25 copy may still be recovered.
+    pub fx25: bool,
+    /// The first bytes (up to [`MISS_HEAD`]; `len` of them if shorter).
+    pub head: [u8; MISS_HEAD],
+}
+
+impl Miss {
+    /// The best guess at its addresses as TNC2 text, `SOURCE>DEST,PATH`, a `?` for each character that isn't a
+    /// callsign's (bit errors), at most 10 addresses (stops at the extension bit or the bytes kept).
+    pub fn header(&self, mut out: impl FnMut(u8)) {
+        fn put(a: &[u8], out: &mut impl FnMut(u8)) {
+            for c in a[..6].iter().map(|c| c >> 1).filter(|&c| c != b' ') {
+                out(if c.is_ascii_uppercase() || c.is_ascii_digit() { c } else { b'?' });
+            }
+            let ssid = a[6] >> 1 & 0x0F;
+            if ssid != 0 {
+                out(b'-');
+                if ssid >= 10 {
+                    out(b'1');
+                }
+                out(b'0' + ssid % 10);
+            }
+        }
+        let n = (self.len as usize).min(MISS_HEAD) / 7;
+        if n < 2 {
+            return;
+        }
+        put(&self.head[7..14], &mut out);
+        out(b'>');
+        put(&self.head[..7], &mut out);
+        let mut last = self.head[13] & 1 == 1;
+        for i in 2..n {
+            if last {
+                break;
+            }
+            out(b',');
+            put(&self.head[i * 7..i * 7 + 7], &mut out);
+            last = self.head[i * 7 + 6] & 1 == 1;
+        }
+    }
 }
 
 impl Fx25Block {
@@ -98,7 +156,17 @@ pub struct Demodulator<const S: usize = 3, const C: usize = 1> {
     skipped: u16,
     /// The one block buffer: collecting, or complete and waiting to be released.
     fx: Fx25Block,
+    /// When any slicer last decoded a frame (duplicates too): a failure near it is that packet's, not a miss.
+    good_at: u32,
+    /// A miss being gathered from the slicers ([`MISS_BITS`]), and when.
+    pend: Option<(Miss, u32)>,
+    /// A miss whose window has passed, for [`Demodulator::take_miss`].
+    ready: Option<Miss>,
 }
+
+/// The slicers frame the same packet within a few bits of each other: failures within this many bits are one
+/// packet, and a frame decoded within it cancels them.
+const MISS_BITS: u32 = 32;
 
 /// A lower slicer that finds the same tag within this many bits of the claim takes the block over.
 const TAKEOVER_BITS: u16 = 16;
@@ -125,6 +193,9 @@ impl<const S: usize, const C: usize> Demodulator<S, C> {
             owner: 0,
             skipped: 0,
             fx: Fx25Block { plain: None, rx: Collector::new() },
+            good_at: 0,
+            pend: None,
+            ready: None,
         }
     }
 
@@ -132,16 +203,30 @@ impl<const S: usize, const C: usize> Demodulator<S, C> {
     /// With FX.25 on, a block that has come in waits in [`Demodulator::pending_fx25`].
     pub fn push(&mut self, x: i16, mut found: impl FnMut(&[u8])) {
         self.age = self.age.wrapping_add(1);
-        let Demodulator { fsk, deframers, last_mark, last, age, fx_on, spb, hunters, owner, skipped, fx, .. } = self;
+        let window = MISS_BITS * self.spb as u32;
+        if matches!(self.pend, Some((_, at)) if self.age.wrapping_sub(at) > window) {
+            self.ready = self.pend.take().map(|(m, _)| m);
+        }
+        let Demodulator { fsk, deframers, last_mark, last, age, fx_on, spb, hunters, owner, skipped, fx, good_at, pend, .. } = self;
         fsk.push_soft(x, |i, mark, margin| {
             let (c, k) = (i / S, i % S);
             let bit = (mark == last_mark[c][k]) as u8;
             last_mark[c][k] = mark;
             if let Some((frame, fcs)) = deframers[c][k].push_soft(bit, margin.unsigned_abs()) {
+                *good_at = *age;
+                if matches!(*pend, Some((_, at)) if age.wrapping_sub(at) <= window) {
+                    *pend = None; // another slicer had it
+                }
                 let dup = matches!(*last, Some((f, at)) if f == fcs && age.wrapping_sub(at) < 2000);
                 if !dup {
                     *last = Some((fcs, *age));
                     found(frame);
+                }
+            }
+            if let Some(b) = deframers[c][k].take_bad() {
+                if age.wrapping_sub(*good_at) > window {
+                    let tagged = fx.rx.collecting().is_some() || fx.rx.mode().is_some();
+                    missed(b, tagged, *age, window, pend);
                 }
             }
             if *fx_on {
@@ -195,6 +280,12 @@ impl<const S: usize, const C: usize> Demodulator<S, C> {
         self.release_fx25();
     }
 
+    /// A frame heard but not decoded ([`Miss`]), once, about [`MISS_BITS`] bits after it ended. Read it every block
+    /// or so: a newer miss takes the place of one not read.
+    pub fn take_miss(&mut self) -> Option<Miss> {
+        self.ready.take()
+    }
+
     /// FX.25 tags skipped since the start because the block buffer was busy (a block waiting to be released, or
     /// another transmission's block being collected); each slicer that found the tag counts.
     pub fn fx25_skipped(&self) -> u16 {
@@ -222,6 +313,24 @@ fn claim(tag: Tag, i: u8, owner: &mut u8, skipped: &mut u16, fx: &mut Fx25Block)
         *owner = i;
     } else if !same {
         *skipped = skipped.wrapping_add(1);
+    }
+}
+
+/// A slicer's frame failed its FCS, with no frame decoded near it: one packet's failures gather into one miss, the
+/// likeliest packet kept (an AX.25 address field first, then the longest). Out of line: runs once per failure.
+#[cold]
+#[inline(never)]
+fn missed(b: &[u8], fx25: bool, age: u32, window: u32, pend: &mut Option<(Miss, u32)>) {
+    let mut m = Miss { len: b.len() as u16, addresses: crate::hdlc::ax25_addresses_ok(&b[..b.len() - 2]), fx25, head: [0; MISS_HEAD] };
+    let n = b.len().min(MISS_HEAD);
+    m.head[..n].copy_from_slice(&b[..n]);
+    match pend {
+        Some((p, at)) if age.wrapping_sub(*at) <= window => {
+            if (m.addresses, m.len) > (p.addresses, p.len) {
+                *p = Miss { fx25: m.fx25 || p.fx25, ..m };
+            }
+        }
+        _ => *pend = Some((m, age)),
     }
 }
 

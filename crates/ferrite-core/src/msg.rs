@@ -961,6 +961,10 @@ pub struct Device {
     /// the times one waited for room at the cable; then PA2's counts at a rail since power-on, the last second's
     /// peak (0-32767) and the stream's gain (Q8) (TERM-32.1, LINK-13.8): the readback's `audio` line, for the bench.
     pub audio: [u32; 6],
+    /// APRS-56: the packet decoder's counts since power-on: frames decoded, packets missed (an AX.25 address field
+    /// but a bad FCS on every slicer), noise (a bad FCS with no address field), FX.25 blocks not corrected, and
+    /// frames dropped (the queue to the APRS task full): the readback's `decode` line.
+    pub decode: [u32; 5],
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).

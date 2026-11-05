@@ -410,6 +410,19 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "gain", cx.dev.audio[5]);
         }
     }
+    // APRS-56: the packet decoder's counts (once it has heard anything): decoded, missed (bad FCS with an AX.25
+    // address field), noise, FX.25 not corrected, dropped.
+    let dc = cx.dev.decode;
+    if dc[..4].iter().any(|&n| n != 0) {
+        if let Some(l) = d.ln() {
+            l.push(b"decode");
+            kn(l, "frames", dc[0]);
+            kn(l, "missed", dc[1]);
+            kn(l, "noise", dc[2]);
+            kn(l, "fx25_failed", dc[3]);
+            kn(l, "dropped", dc[4]);
+        }
+    }
     if let Some(l) = d.ln() {
         let b = app.status_bar(cx.live, cx.dev);
         l.push(b"bar");

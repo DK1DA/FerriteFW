@@ -13,6 +13,6 @@ pub mod fsk;
 pub mod hdlc;
 pub mod modulate;
 
-pub use demod::{Demodulator, Fx25Block, Fx25Frame};
+pub use demod::{Demodulator, Fx25Block, Fx25Frame, Miss, MISS_HEAD};
 pub use ufx25;
 pub use modulate::{Modulator, TxConfig};

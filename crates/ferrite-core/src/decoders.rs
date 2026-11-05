@@ -30,6 +30,8 @@ pub enum Found<'a> {
     /// An FX.25 block, collected but not corrected (APRS-44): too slow for the DSP task, so the APRS task
     /// corrects it ([`uafsk::Fx25Block::decode`]).
     Fx25(&'a uafsk::Fx25Block),
+    /// A frame heard but not decoded (APRS-56): its FCS failed on every slicer.
+    Miss(&'a uafsk::Miss),
     Page(&'a upocsag::Message<'a>),
     Call(&'a udsc::Call<'a>),
 }
@@ -58,6 +60,9 @@ impl Decoder {
                 if let Some(b) = d.pending_fx25() {
                     found(Found::Fx25(b));
                     d.release_fx25();
+                }
+                if let Some(m) = d.take_miss() {
+                    found(Found::Miss(&m)); // a miss's window (32 bits) is longer than a block: one at most
                 }
             }
             Decoder::Pocsag(d) => block.iter().for_each(|&x| d.push(x, |m| found(Found::Page(m)))),

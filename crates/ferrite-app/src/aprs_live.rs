@@ -1426,6 +1426,25 @@ fn crc16(mut crc: u16, b: u8) -> u16 {
     crc
 }
 
+/// APRS-56: the event log's words for a packet heard but not decoded (0 5 9 8 on): the sender's best guess as
+/// the name (`?` for each character a bit error spoiled), and "Not decoded: 84 B, peak 35%, >APRS,WIDE1-1" (its
+/// length with the FCS, the audio's peak then as a share of full scale, its destination and path).
+pub fn miss_text(m: &ferrite_core::audio::uafsk::Miss, peak: u16, name: &mut Buf<20>, text: &mut Buf<64>) {
+    let mut hdr = Buf::<80>::new();
+    m.header(|c| hdr.push(&[c]));
+    let h = hdr.as_bytes();
+    let gt = h.iter().position(|&c| c == b'>').unwrap_or(h.len());
+    name.push(if gt == 0 { b"?" } else { &h[..gt] });
+    let _ = uwrite!(text, "Not decoded: {} B, peak {}%", m.len, peak as u32 * 100 / 32767);
+    if m.fx25 {
+        text.push(b", FX.25");
+    }
+    if gt < h.len() {
+        text.push(b", ");
+        text.push(&h[gt..]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2481,5 +2500,29 @@ mod tests {
         assert_eq!(num(7).as_bytes(), b"7");
         assert_eq!(num(42).as_bytes(), b"42");
         assert!(AprsLive::default().stations() == 0);
+    }
+
+    /// APRS-56.2: a missed packet's event-log words.
+    #[test]
+    fn miss_text_names_the_sender() {
+        use ferrite_core::audio::uafsk::{Miss, MISS_HEAD};
+        let mut head = [0u8; MISS_HEAD];
+        let addr = |s: &[u8; 6], ssid: u8, last: bool| -> [u8; 7] {
+            let mut a = [0u8; 7];
+            for (o, c) in a.iter_mut().zip(s) {
+                *o = c << 1;
+            }
+            a[6] = 0x60 | ssid << 1 | last as u8;
+            a
+        };
+        head[..7].copy_from_slice(&addr(b"APRS  ", 0, false));
+        head[7..14].copy_from_slice(&addr(b"VE7ABC", 9, false));
+        head[14..21].copy_from_slice(&addr(b"WIDE1 ", 1, true));
+        head[8] = b'#' << 1; // a bit error in the sender's second letter
+        let m = Miss { len: 84, addresses: true, fx25: false, head };
+        let (mut name, mut text) = (Buf::<20>::new(), Buf::<64>::new());
+        miss_text(&m, 16384, &mut name, &mut text);
+        assert_eq!(name.as_bytes(), b"V?7ABC-9");
+        assert_eq!(text.as_bytes(), &b"Not decoded: 84 B, peak 50%, >APRS,WIDE1-1"[..]);
     }
 }
