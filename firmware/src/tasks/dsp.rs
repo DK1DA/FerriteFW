@@ -291,6 +291,9 @@ pub static DROPPED: AtomicU32 = AtomicU32::new(0);
 pub static MISSED: AtomicU32 = AtomicU32::new(0);
 pub static NOISE: AtomicU32 = AtomicU32::new(0);
 pub static FX25_FAILED: AtomicU32 = AtomicU32::new(0);
+/// PWR-26.9.1: the last and the longest time from the APRS slot's squelch opening to the capture running, ms.
+pub static CAPTURE_MS: AtomicU32 = AtomicU32::new(0);
+pub static CAPTURE_MAX_MS: AtomicU32 = AtomicU32::new(0);
 
 
 #[embassy_executor::task]
@@ -316,7 +319,6 @@ pub async fn task() {
     let mut meter: Option<ferrite_core::rxmeter::Meter> = None;
     // PWR-26.9: the APRS slot's squelch (the Radio task's), and the halves left of the capture's tail once it shut
     let (mut sq, mut tail) = (false, 0u32);
-    #[cfg(feature = "bench")]
     let mut sq_at: Option<embassy_time::Instant> = None;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
@@ -347,7 +349,6 @@ pub async fn task() {
                         if sq && !open {
                             tail = ferrite_core::msg::SQ_TAIL_MS / HALF_MS;
                         }
-                        #[cfg(feature = "bench")]
                         if open && !sq {
                             sq_at = Some(embassy_time::Instant::now());
                         }
@@ -375,13 +376,12 @@ pub async fn task() {
                     adc::init();
                     dec = decim(listen);
                     audio::capture_start();
-                    // PWR-26.9: the bench's check that a capture starts well inside a packet's TX delay
-                    #[cfg(feature = "bench")]
+                    // PWR-26.9.1: how long after the squelch opened the capture started (the readback's `decode` line),
+                    // to check it lands well inside a packet's TX delay
                     if let Some(at) = sq_at.take() {
                         let ms = at.elapsed().as_millis() as u32;
-                        crate::bringup::linef(|l| {
-                            let _ = ufmt::uwrite!(l, "dsp: capture {} ms after the squelch opened", ms);
-                        });
+                        CAPTURE_MS.store(ms, Relaxed);
+                        CAPTURE_MAX_MS.fetch_max(ms, Relaxed);
                     }
                 } else if !want && capturing {
                     audio::capture_stop();

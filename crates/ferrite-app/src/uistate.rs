@@ -421,6 +421,8 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "noise", dc[2]);
             kn(l, "fx25_failed", dc[3]);
             kn(l, "dropped", dc[4]);
+            kn(l, "capture_ms", dc[5]); // PWR-26.9.1: squelch open to capture, last and longest
+            kn(l, "capture_max", dc[6]);
         }
     }
     if let Some(l) = d.ln() {
