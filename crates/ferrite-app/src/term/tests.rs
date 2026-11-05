@@ -606,7 +606,7 @@ fn frequencies() {
 /// pages or the plain command line, chosen at start by whether the template part is there, 16 more (decision 335);
 /// a typed value as long as an APRS message (67 characters, TERM-49) 44 more. Bench builds 32 more: their debug
 /// commands' kinds (a memory read's address and length, 20 bytes) and `bk dump`'s row of eight registers (16), less
-/// 4 of padding (they were never counted: the test ran without the bench feature only, Nov 4, 2026).
+/// 4 of padding (never counted: the release CI's bench test run would have failed, found Nov 4, 2026).
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
