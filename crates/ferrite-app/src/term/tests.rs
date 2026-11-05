@@ -604,12 +604,15 @@ fn frequencies() {
 /// numbers, 112 bytes; Oct 6, 2026) on top. The GGA answer added 16 bytes (Oct 13, 2026); 4,000 channels' marks
 /// 375 more (decision 333); `sat add`'s paste 64 more (a name and a TLE's line 1 as read, SAT-3; decision 340); the
 /// pages or the plain command line, chosen at start by whether the template part is there, 16 more (decision 335);
-/// a typed value as long as an APRS message (67 characters, TERM-49) 44 more.
+/// a typed value as long as an APRS message (67 characters, TERM-49) 44 more. Bench builds 32 more: their debug
+/// commands' kinds (a memory read's address and length, 20 bytes) and `bk dump`'s row of eight registers (16), less
+/// 4 of padding (they were never counted: the test ran without the bench feature only, Nov 4, 2026).
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375 + 64 + 16 + 44, "Term is {n} bytes");
+    let bench = if cfg!(feature = "bench") { 32 } else { 0 };
+    assert!(n <= 512 + 256 + 112 + 304 + 16 + 375 + 64 + 16 + 44 + bench, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----
