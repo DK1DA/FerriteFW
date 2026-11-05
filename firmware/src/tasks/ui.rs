@@ -198,6 +198,8 @@ const LPM_BOOST_MS: u32 = 3000;
 const FRAME_MIN_MS: u32 = 50;
 /// PWR-26.10: the live-change redraw cap at rest (24 MHz).
 const IDLE_FRAME_MS: u32 = 250;
+/// PWR-26.1: a key this recent raises the clock before its commands (and beep) go to the Radio task.
+const KEY_RAISE_MS: u32 = 300;
 
 #[embassy_executor::task]
 pub async fn task() {
@@ -775,6 +777,18 @@ pub async fn task() {
         if !(cfg!(feature = "bringup") && bringup::ON.load(Relaxed)) {
             aprs.poll(&mut app, store, &live, &dev, now_ms());
             decode.poll(&mut app, store, &live);
+        }
+        // PWR-26.1: a key just in raises the clock here, before its commands go: its beep, started by the Radio task
+        // at once, holds any switch until it ends (PWR-26.4), so the governor below found audio busy and the key's
+        // redraw ran at 24 MHz (HF mode's open about 800 ms on black, Nov 4, 2026). Not in Fixed (always the
+        // build's speed) and not while audio already runs.
+        if crate::hal::clock::is_low()
+            && crate::hal::clock::AUDIO_RAISES.load(Relaxed) // Dynamic, out of Low Power Mode
+            && now_ms().wrapping_sub(app.last_input()) < KEY_RAISE_MS
+            && !crate::hal::audio::busy()
+            && crate::hal::clock::set_tree(crate::hal::clock::NORMAL)
+        {
+            clock_high_at = now_ms();
         }
         // MODE-6: never waiting on the Radio task: what its channel has no room for waits in the App's queue (and
         // `held`), in order, and goes on the next turn (every 10 ms meanwhile).
