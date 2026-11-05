@@ -152,8 +152,17 @@ impl st7789::Bus8080 for Lcd {
     fn data(&mut self, data: &[u8]) {
         add_bytes(data.len() as u32);
         let r = nop_reps();
-        for &b in data {
-            byte(b, r)
+        // A constant 1 (120 MHz and below, nearly always) lets the strobe's nop loops fold away: with the count
+        // read at run time each byte paid a loop's counter and branch twice, 385 ns a byte against 240 (black,
+        // Nov 4, 2026: the slot switch's redraw 135-166 ms against Oct 23's 95-106)
+        if r <= 1 {
+            for &b in data {
+                byte(b, 1)
+            }
+        } else {
+            for &b in data {
+                byte(b, r)
+            }
         }
     }
     /// Straight from the pixels: copying them into a byte buffer first made a band's send about 0.4 us a byte
@@ -161,18 +170,32 @@ impl st7789::Bus8080 for Lcd {
     fn pixels(&mut self, px: &[u16]) {
         add_bytes(2 * px.len() as u32);
         let r = nop_reps();
-        for &c in px {
-            byte((c >> 8) as u8, r);
-            byte(c as u8, r);
+        if r <= 1 {
+            for &c in px {
+                byte((c >> 8) as u8, 1);
+                byte(c as u8, 1);
+            }
+        } else {
+            for &c in px {
+                byte((c >> 8) as u8, r);
+                byte(c as u8, r);
+            }
         }
     }
     fn repeat(&mut self, color: u16, count: u32) {
         let (hi, lo) = ((color >> 8) as u8, color as u8);
         add_bytes(count.wrapping_mul(2));
         let r = nop_reps();
-        for _ in 0..count {
-            byte(hi, r);
-            byte(lo, r);
+        if r <= 1 {
+            for _ in 0..count {
+                byte(hi, 1);
+                byte(lo, 1);
+            }
+        } else {
+            for _ in 0..count {
+                byte(hi, r);
+                byte(lo, r);
+            }
         }
     }
     fn reset(&mut self, active: bool) {
