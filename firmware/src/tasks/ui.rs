@@ -641,8 +641,8 @@ pub async fn task() {
             {
                 use crate::tasks::dsp::{AUDIO_CLIPS, AUDIO_DROPS, AUDIO_GAIN, AUDIO_MADE, AUDIO_PEAK, AUDIO_WAITS};
                 dev.audio = [AUDIO_MADE.load(Relaxed), AUDIO_DROPS.load(Relaxed), AUDIO_WAITS.load(Relaxed), AUDIO_CLIPS.load(Relaxed), AUDIO_PEAK.load(Relaxed), AUDIO_GAIN.load(Relaxed)];
-                use crate::tasks::dsp::{CAPTURE_MAX_MS, CAPTURE_MS, DROPPED, FRAMES, FX25_FAILED, MISSED, NOISE};
-                dev.decode = [FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed), CAPTURE_MS.load(Relaxed), CAPTURE_MAX_MS.load(Relaxed)]; // APRS-56, PWR-26.9.1
+                use crate::tasks::dsp::{CAPTURES, CAPTURE_MAX_MS, CAPTURE_MS, DROPPED, FRAMES, FX25_FAILED, HEARD, MISSED, NOISE};
+                dev.decode = [FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed), CAPTURE_MS.load(Relaxed), CAPTURE_MAX_MS.load(Relaxed), CAPTURES.load(Relaxed), HEARD.load(Relaxed)]; // APRS-56, PWR-26.9.1, APRS-56.4
             }
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)

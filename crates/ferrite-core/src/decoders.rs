@@ -49,6 +49,11 @@ impl Decoder {
         Decoder::Dsc(Dsc::new(uafsk::fsk::Config::new(RATE_HZ)))
     }
 
+    /// The AFSK demodulator's carrier detect: 1200-baud data heard now (APRS-56.4); false for the others.
+    pub fn busy(&self) -> bool {
+        matches!(self, Decoder::Afsk(d) if d.busy())
+    }
+
     /// One block of audio.
     pub fn push(&mut self, block: &[i16], mut found: impl FnMut(Found)) {
         match self {

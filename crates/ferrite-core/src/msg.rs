@@ -967,8 +967,9 @@ pub struct Device {
     /// APRS-56: the packet decoder's counts since power-on: frames decoded, packets missed (an AX.25 address field
     /// but a bad FCS on every slicer), noise (a bad FCS with no address field), FX.25 blocks not corrected, and
     /// frames dropped (the queue to the APRS task full); then the last and the longest time from the APRS slot's
-    /// squelch opening to the capture running, ms (PWR-26.9.1): the readback's `decode` line.
-    pub decode: [u32; 7],
+    /// squelch opening to the capture running, ms (PWR-26.9.1); then the AFSK captures started and the times the
+    /// demodulator heard 1200-baud data (APRS-56.4): the readback's `decode` line.
+    pub decode: [u32; 9],
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).

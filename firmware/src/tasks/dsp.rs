@@ -294,6 +294,11 @@ pub static FX25_FAILED: AtomicU32 = AtomicU32::new(0);
 /// PWR-26.9.1: the last and the longest time from the APRS slot's squelch opening to the capture running, ms.
 pub static CAPTURE_MS: AtomicU32 = AtomicU32::new(0);
 pub static CAPTURE_MAX_MS: AtomicU32 = AtomicU32::new(0);
+/// APRS-56.4: the receive path's later stages, counted since power-on: the AFSK capture starting on the APRS
+/// squelch, and the demodulator hearing 1200-baud data (each start of its carrier detect). With the squelch's
+/// opens (SQL-19.4), a packet lost shows where: no open, no capture, nothing heard, or heard but not framed.
+pub static CAPTURES: AtomicU32 = AtomicU32::new(0);
+pub static HEARD: AtomicU32 = AtomicU32::new(0);
 
 
 #[embassy_executor::task]
@@ -320,6 +325,7 @@ pub async fn task() {
     // PWR-26.9: the APRS slot's squelch (the Radio task's), and the halves left of the capture's tail once it shut
     let (mut sq, mut tail) = (false, 0u32);
     let mut sq_at: Option<embassy_time::Instant> = None;
+    let mut heard = false; // APRS-56.4: the demodulator's carrier detect at the last block
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
         #[cfg(all(feature = "tx", feature = "bench"))]
@@ -376,6 +382,9 @@ pub async fn task() {
                     adc::init();
                     dec = decim(listen);
                     audio::capture_start();
+                    if running == DecoderKind::Afsk {
+                        CAPTURES.fetch_add(1, Relaxed);
+                    }
                     // PWR-26.9.1: how long after the squelch opened the capture started (the readback's `decode` line),
                     // to check it lands well inside a packet's TX delay
                     if let Some(at) = sq_at.take() {
@@ -495,6 +504,11 @@ pub async fn task() {
                     }
                     Found::Call(_) => {} // DSC: roadmap 6c
                 });
+                let busy = slot.busy();
+                if busy && !heard {
+                    HEARD.fetch_add(1, Relaxed); // APRS-56.4
+                }
+                heard = busy;
             }
             Either4::Fourth(None) => {} // a stop with nothing playing
             #[cfg(not(all(feature = "tx", feature = "bench")))]

@@ -413,7 +413,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
     // APRS-56: the packet decoder's counts (once it has heard anything): decoded, missed (bad FCS with an AX.25
     // address field), noise, FX.25 not corrected, dropped.
     let dc = cx.dev.decode;
-    if dc[..4].iter().any(|&n| n != 0) {
+    if dc[..4].iter().chain(&dc[7..]).any(|&n| n != 0) {
         if let Some(l) = d.ln() {
             l.push(b"decode");
             kn(l, "frames", dc[0]);
@@ -423,6 +423,8 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "dropped", dc[4]);
             kn(l, "capture_ms", dc[5]); // PWR-26.9.1: squelch open to capture, last and longest
             kn(l, "capture_max", dc[6]);
+            kn(l, "captures", dc[7]); // APRS-56.4: the path's later stages
+            kn(l, "heard", dc[8]);
         }
     }
     if let Some(l) = d.ln() {
