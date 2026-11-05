@@ -426,6 +426,11 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "captures", dc[7]); // APRS-56.4: the path's later stages
             kn(l, "heard", dc[8]);
             kn(l, "late", dc[9]); // capture halves the DSP task took too late: audio lost
+            kn(l, "wake_max_us", dc[10]); // a half's wait for the DSP task, and the task's work on it (2 ms each)
+            kn(l, "work_max_us", dc[11]);
+            kn(l, "radio_max_us", dc[12]); // the executors that preempt it: one run each, longest
+            kn(l, "input_max_us", dc[13]);
+            kn(l, "long_runs", dc[14]);
         }
     }
     if let Some(l) = d.ln() {

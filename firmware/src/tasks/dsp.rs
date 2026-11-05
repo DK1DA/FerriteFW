@@ -299,6 +299,10 @@ pub static CAPTURE_MAX_MS: AtomicU32 = AtomicU32::new(0);
 /// opens (SQL-19.4), a packet lost shows where: no open, no capture, nothing heard, or heard but not framed.
 pub static CAPTURES: AtomicU32 = AtomicU32::new(0);
 pub static HEARD: AtomicU32 = AtomicU32::new(0);
+/// APRS-56.4: the longest a capture half waited for the DSP task after its interrupt, and the longest the task
+/// spent on one, us since power-on: a half is 2 ms, so their sum over that loses audio (`late`).
+pub static WAKE_MAX_US: AtomicU32 = AtomicU32::new(0);
+pub static WORK_MAX_US: AtomicU32 = AtomicU32::new(0);
 
 
 #[embassy_executor::task]
@@ -399,6 +403,9 @@ pub async fn task() {
             }
             Either4::First(DspCmd::Beep { .. }) => {} // beeps are the BK4829's (SND-11)
             Either4::Second(half) => {
+                let t0 = crate::hal::time::cycles();
+                let mhz = crate::hal::clock::mhz().max(1);
+                WAKE_MAX_US.fetch_max(t0.wrapping_sub(crate::hal::audio::ADC_AT.load(Relaxed)) / mhz, Relaxed);
                 // PWR-26.4: a capture that started at 24 MHz (the governor didn't answer in time) gets the build's
                 // speed: stopped, the speed asked for, started again; looked at every 10 s.
                 halves = halves.wrapping_add(1);
@@ -509,6 +516,7 @@ pub async fn task() {
                     HEARD.fetch_add(1, Relaxed); // APRS-56.4
                 }
                 heard = busy;
+                WORK_MAX_US.fetch_max(crate::hal::time::cycles().wrapping_sub(t0) / mhz, Relaxed);
             }
             Either4::Fourth(None) => {} // a stop with nothing playing
             #[cfg(not(all(feature = "tx", feature = "bench")))]

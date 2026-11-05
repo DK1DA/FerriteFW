@@ -5,8 +5,9 @@
 //!
 //! | Executor | Priority | Tasks |
 //! | --- | --- | --- |
-//! | interrupt, IRQ 56 | 5 (highest of the three) | Radio |
-//! | interrupt, IRQ 57 | 6 | DSP, input sampler |
+//! | interrupt, IRQ 59 | 5 (highest of the three) | input sampler |
+//! | interrupt, IRQ 57 | 6 | DSP |
+//! | interrupt, IRQ 56 | 7 | Radio |
 //! | thread (WFE when idle) | lowest | UI, Link, Storage, GPS |
 //!
 //! Above them: UART receive (3) and the time driver (4). Any fault, stray interrupt or panic ends in
@@ -78,10 +79,14 @@ const IRQ_INPUT: u16 = 59; // DMA2 channels 4 and 5, never clocked
 // NVIC priorities (lower is more urgent): UART receive 3 (hal::uart), time driver 4, then the executors. The
 // input sampler has its own, above the Radio task: a scan keeps the Radio task busy most of the time (each
 // BK4829 register write is about 250 us at stock's bus speed), and on the radio that starved the keys (Oct 12, 2026).
+// The DSP task above the Radio task (APRS-56.4, decision 357): a capture half is 2 ms, and the Radio task's runs
+// (a tick's register reads, a retune: up to 8 ms) lost audio under it, about 4 halves a second while capturing,
+// enough to break one packet in six on the bench (Nov 4, 2026). The DSP's own work is under 1 ms a half; the bus
+// is the MCU's clock, so a stretched edge is harmless.
 const PRIO_TIME: u8 = 4;
 const PRIO_INPUT: u8 = 5;
-const PRIO_RADIO: u8 = 6;
-const PRIO_DSP: u8 = 7;
+const PRIO_DSP: u8 = 6;
+const PRIO_RADIO: u8 = 7;
 
 type Vector = unsafe extern "C" fn();
 
@@ -143,23 +148,40 @@ static INPUT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 pub static IRQ_CYCLES: AtomicU32 = AtomicU32::new(0);
 
 #[inline(always)]
-fn counted(f: impl FnOnce()) {
+fn counted(f: impl FnOnce(), max_us: &AtomicU32) {
     let c0 = hal::time::cycles();
     f();
-    IRQ_CYCLES.fetch_add(hal::time::cycles().wrapping_sub(c0), Relaxed);
+    let c = hal::time::cycles().wrapping_sub(c0);
+    IRQ_CYCLES.fetch_add(c, Relaxed);
+    // only while capturing: a run then holds the DSP task off its halves
+    if hal::audio::CAPTURING.load(Relaxed) {
+        let us = c / hal::clock::mhz().max(1);
+        max_us.fetch_max(us, Relaxed);
+        if us > 1_500 && !core::ptr::eq(max_us, &DSP_RUN_MAX_US) {
+            LONG_RUNS.fetch_add(1, Relaxed);
+        }
+    }
 }
+
+/// APRS-56.4: the longest one run of the Radio and the input executors while the ADC captures, us since power-on,
+/// and how many ran over 1.5 ms: the measure that moved the DSP task above the Radio task (decision 357); a run of
+/// the input executor (above the DSP) longer than a capture half (2 ms) would still lose audio.
+pub static LONG_RUNS: AtomicU32 = AtomicU32::new(0);
+pub static RADIO_RUN_MAX_US: AtomicU32 = AtomicU32::new(0);
+pub static INPUT_RUN_MAX_US: AtomicU32 = AtomicU32::new(0);
+static DSP_RUN_MAX_US: AtomicU32 = AtomicU32::new(0);
 
 extern "C" fn radio_irq() {
     // SAFETY: the executor's own interrupt handler, the only place it is polled.
-    counted(|| unsafe { RADIO_EXECUTOR.on_interrupt() })
+    counted(|| unsafe { RADIO_EXECUTOR.on_interrupt() }, &RADIO_RUN_MAX_US)
 }
 extern "C" fn dsp_irq() {
     // SAFETY: as above.
-    counted(|| unsafe { DSP_EXECUTOR.on_interrupt() })
+    counted(|| unsafe { DSP_EXECUTOR.on_interrupt() }, &DSP_RUN_MAX_US)
 }
 extern "C" fn input_irq() {
     // SAFETY: as above.
-    counted(|| unsafe { INPUT_EXECUTOR.on_interrupt() })
+    counted(|| unsafe { INPUT_EXECUTOR.on_interrupt() }, &INPUT_RUN_MAX_US)
 }
 
 // With panic=immediate-abort a panic is an undefined instruction, so it arrives here as a HardFault.

@@ -19,7 +19,7 @@
 use super::gpio::{pin, Mode, Pin, GPIOA, GPIOC};
 use super::regs::*;
 use super::{clock, irq, modify, rd, wr};
-use core::sync::atomic::{AtomicU16, AtomicU32, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering::Relaxed};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
 use embassy_sync::signal::Signal;
 use ferrite_core::audio::{ADC_HZ, BLOCK_DAC, BLOCK_IN, DAC_HZ};
@@ -99,6 +99,10 @@ pub static DAC_HALF: Signal<M, u8> = Signal::new();
 /// Halves the DSP task didn't take in time (it was busy): a capture overrun, a block of audio lost (APRS-56.4: the
 /// readback's `decode` line, `late`).
 pub static ADC_LATE: AtomicU32 = AtomicU32::new(0);
+/// The cycle count when the last capture half was announced: the DSP task's wake-up delay (APRS-56.4).
+pub static ADC_AT: AtomicU32 = AtomicU32::new(0);
+/// The capture runs (between [`capture_start`] and [`capture_stop`]).
+pub static CAPTURING: AtomicBool = AtomicBool::new(false);
 
 /// A timer's reload for `hz` from its clock (TMR4 and TMR6 are on APB1; with APB1 /2 they run at twice it, 120 MHz;
 /// stock's 9599.2 Hz is 120 MHz / 12501). Fits 16 bits down to 1.9 kHz.
@@ -109,6 +113,7 @@ fn reload(hz: u32) -> u32 {
 /// Capture on: PA2 analog, TMR4 at the ADC rate, ADC1 on its trigger, DMA1 channel 1 circular. ADC1 must have
 /// been through [`super::adc::init`].
 pub fn capture_start() {
+    CAPTURING.store(true, Relaxed);
     pin(GPIOA, 2).config(Mode::Analog);
     modify(CRM_AHBEN, 0, CRM_AHB_DMA1);
     modify(CRM_APB1EN, 0, CRM_APB1_TMR4);
@@ -141,6 +146,7 @@ pub fn capture_start() {
 
 /// Capture off: the timer stopped, ADC1 back to software triggers, DMA off.
 pub fn capture_stop() {
+    CAPTURING.store(false, Relaxed);
     wr(TMR4 + TMR_CTRL1, 0);
     irq::disable(IRQ_ADC_DMA);
     modify(ch(DMA1, 1) + CH_CTRL, DMA_EN, 0);
@@ -157,6 +163,7 @@ pub fn adc_isr() {
     if ADC_HALF.signaled() {
         ADC_LATE.fetch_add(1, Relaxed);
     }
+    ADC_AT.store(super::time::cycles(), Relaxed);
     ADC_HALF.signal(if sts & half_flag(1) != 0 { 0 } else { 1 });
 }
 
