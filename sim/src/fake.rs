@@ -771,7 +771,7 @@ pub fn device_at(secs: u64) -> Device {
         cpu_pct: Some(6),
         cpu_speeds: [None; 3],
         audio: [0; 6],
-        decode: [0; 9],
+        decode: [0; 10],
         spkmic: false,
         tx_built: true, // the fake radio transmits (into nothing)
         bench: cfg!(feature = "bench"),

@@ -425,6 +425,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "capture_max", dc[6]);
             kn(l, "captures", dc[7]); // APRS-56.4: the path's later stages
             kn(l, "heard", dc[8]);
+            kn(l, "late", dc[9]); // capture halves the DSP task took too late: audio lost
         }
     }
     if let Some(l) = d.ln() {

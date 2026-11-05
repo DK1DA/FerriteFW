@@ -19,7 +19,7 @@
 use super::gpio::{pin, Mode, Pin, GPIOA, GPIOC};
 use super::regs::*;
 use super::{clock, irq, modify, rd, wr};
-use core::sync::atomic::{AtomicU16, AtomicU8, Ordering::Relaxed};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering::Relaxed};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
 use embassy_sync::signal::Signal;
 use ferrite_core::audio::{ADC_HZ, BLOCK_DAC, BLOCK_IN, DAC_HZ};
@@ -96,8 +96,9 @@ pub static DAC_BUF: [AtomicU16; 2 * BLOCK_DAC] = [const { AtomicU16::new(0) }; 2
 /// Which half is ready (0 first, 1 second): captured, or played and free to refill.
 pub static ADC_HALF: Signal<M, u8> = Signal::new();
 pub static DAC_HALF: Signal<M, u8> = Signal::new();
-/// Halves the DSP task didn't take in time (it was busy): a capture overrun, counted for the bench.
-pub static ADC_LATE: AtomicU8 = AtomicU8::new(0);
+/// Halves the DSP task didn't take in time (it was busy): a capture overrun, a block of audio lost (APRS-56.4: the
+/// readback's `decode` line, `late`).
+pub static ADC_LATE: AtomicU32 = AtomicU32::new(0);
 
 /// A timer's reload for `hz` from its clock (TMR4 and TMR6 are on APB1; with APB1 /2 they run at twice it, 120 MHz;
 /// stock's 9599.2 Hz is 120 MHz / 12501). Fits 16 bits down to 1.9 kHz.
