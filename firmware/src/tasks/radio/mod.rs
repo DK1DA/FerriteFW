@@ -215,7 +215,7 @@ struct Radio {
     /// PWR-26.9: the APRS slot's squelch as the DSP task last heard it ([`DspCmd::Squelch`]).
     aprs_open_sent: bool,
     ssb_at: SsbAt,
-    /// TERM-29.2 (a bench test): slots received on the other band's chip (`bk swap`); 0 outside the bench builds.
+    /// TERM-29.4 (a bench test): slots received on the other band's chip (`bk swap`); 0 outside the bench builds.
     swap: u8,
     sq_key: [Option<(u8, Freq10)>; 2],
     /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:

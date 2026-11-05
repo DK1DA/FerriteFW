@@ -32,7 +32,7 @@ impl Radio {
             DebugReq::RxAf(set) => self.rxaf_ask(set),
             DebugReq::RxIf(set) => self.rxif_ask(set),
             DebugReq::Hold(set) => self.hold_ask(set),
-            // TERM-29.2: a slot on the other band's chip (the fox-hunt measurement); every slot retunes on a change
+            // TERM-29.4: a slot on the other band's chip (the fox-hunt measurement); every slot retunes on a change
             DebugReq::Swap(set) => {
                 if let Some(m) = set.filter(|&m| m != self.swap) {
                     self.swap = m;

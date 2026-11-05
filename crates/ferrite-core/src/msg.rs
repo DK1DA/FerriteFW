@@ -522,7 +522,7 @@ pub enum DebugReq {
     /// with [`DebugAns::Hold`].
     Hold(Option<Option<(u8, u16)>>),
     #[cfg(feature = "bench")]
-    /// TERM-29.2 (a bench test, the fox-hunt measurement): the slots received on the other band's chip, set
+    /// TERM-29.4 (a bench test, the fox-hunt measurement): the slots received on the other band's chip, set
     /// (`Some(mask)`, 0 none) or only asked (`None`). RAM only. Answered with [`DebugAns::Swap`].
     Swap(Option<u8>),
     #[cfg(feature = "bench")]
@@ -686,7 +686,7 @@ pub enum DebugAns {
     /// TERM-42.3: the registers held ([`HOLDS`] slots; register 0 an empty one).
     Hold([(u8, u16); HOLDS]),
     #[cfg(feature = "bench")]
-    /// TERM-29.2: the slots on the other band's chip now.
+    /// TERM-29.4: the slots on the other band's chip now.
     Swap(u8),
     #[cfg(feature = "bench")]
     /// TERM-45: what the tone-generator 4FSK run did.

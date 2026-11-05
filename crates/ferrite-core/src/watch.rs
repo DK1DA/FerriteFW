@@ -103,7 +103,7 @@ pub struct Cfg {
     /// [`LOOK_MS`] looks, the priority slot's turn after each look on a chip they share. Off: Voice first
     /// (WATCH-17.2's turns).
     pub first: bool,
-    /// TERM-29.2 (a bench test, the fox-hunt measurement): slots received on the other band's chip, a bit each.
+    /// TERM-29.4 (a bench test, the fox-hunt measurement): slots received on the other band's chip, a bit each.
     pub swap: u8,
 }
 
@@ -565,7 +565,7 @@ mod tests {
         assert_eq!(k.take(false), Turns { n: [1, 0, 0], ms: [100, 0, 0] });
     }
 
-    /// TERM-29.2 (the fox-hunt measurement): a slot in `swap` is put on the other band's chip: A's 2 m on chip 1,
+    /// TERM-29.4 (the fox-hunt measurement): a slot in `swap` is put on the other band's chip: A's 2 m on chip 1,
     /// so B (70 cm) and A share it while C (airband) has chip 0 alone.
     #[test]
     fn swap_puts_a_slot_on_the_other_chip() {

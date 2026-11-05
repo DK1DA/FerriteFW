@@ -1435,7 +1435,7 @@ fn debug_bk_rxif_and_meter() {
         r.cmd(cmd);
         assert_eq!(r.serve(4, regs), vec![DebugReq::Hold(want)], "{cmd}");
     }
-    // TERM-29.2: `bk swap` (the fox-hunt measurement): a slot on the other band's chip, off, or asked
+    // TERM-29.4: `bk swap` (the fox-hunt measurement): a slot on the other band's chip, off, or asked
     for (cmd, want) in [("bk swap", None), ("bk swap b", Some(0b010)), ("bk swap off", Some(0))] {
         r.send(b"\r");
         r.cmd(cmd);

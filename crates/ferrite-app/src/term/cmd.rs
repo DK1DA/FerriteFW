@@ -1991,7 +1991,7 @@ fn rxif(t: &mut Toks) -> Result<Done, No> {
     Ok(Done::Debug(Job::new(Kind::RxIf(set))))
 }
 
-/// `bk swap [A|B|C|off]` (TERM-29.2, a bench test): the slot received on the other band's chip, to measure how much
+/// `bk swap [A|B|C|off]` (TERM-29.4, a bench test): the slot received on the other band's chip, to measure how much
 /// a signal drops there (a fox hunt's attenuation without taking the antenna off); `bk swap off` ends it; alone it
 /// says which. RAM only. `rx both` keeps both bands' receive paths powered meanwhile.
 #[cfg(feature = "bench")]

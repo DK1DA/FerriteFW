@@ -93,7 +93,7 @@ pub enum Kind {
     /// `bk hold [REG VALUE|off]`: registers held after every FM tune (TERM-42.3).
     Hold(Option<Option<(u8, u16)>>),
     #[cfg(feature = "bench")]
-    /// `bk swap [A|B|C|off]`: slots received on the other band's chip (TERM-29.2).
+    /// `bk swap [A|B|C|off]`: slots received on the other band's chip (TERM-29.4).
     Swap(Option<u8>),
     #[cfg(feature = "bench")]
     /// `synthfsk ...`: 4FSK from the keyed chip's tone generator (TERM-45).
