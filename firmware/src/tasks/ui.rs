@@ -196,6 +196,8 @@ const LPM_BOOST_MS: u32 = 3000;
 
 /// LINK-38: the shortest gap between two redraws driven by live changes alone (20 a second).
 const FRAME_MIN_MS: u32 = 50;
+/// PWR-26.10: the live-change redraw cap at rest (24 MHz).
+const IDLE_FRAME_MS: u32 = 250;
 
 #[embassy_executor::task]
 pub async fn task() {
@@ -937,6 +939,10 @@ pub async fn task() {
         // PWR-24.5: Low Power Mode redraws live changes once a second (keys and the knob still at once).
         let keys_wait = frame_min != FRAME_MIN_MS; // only the bench's cap holds keys back too (TERM-40)
         let frame_min = if app.low_power() { frame_min.max(LPM_FRAME_MS) } else { frame_min };
+        // PWR-26.10: at rest (24 MHz) live changes alone redraw at most every IDLE_FRAME_MS: a level jittering by a
+        // dB woke a whole-screen check 5-6 times a second, 25 ms each with nothing to send (14 % of the CPU, black,
+        // Nov 4, 2026); keys and the knob raise the clock and draw at once
+        let frame_min = if crate::hal::clock::is_low() { frame_min.max(IDLE_FRAME_MS) } else { frame_min };
         let asleep = panel_asleep;
         let draw = !asleep && (urgent && !keys_wait || since >= frame_min);
         let (c0, b0, i0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed), crate::IRQ_CYCLES.load(Relaxed));
