@@ -2782,3 +2782,20 @@ pub fn slot_line<S: ChannelStore>(app: &App, st: &S, s: u8, out: &mut Line) {
         out.push(b" scanning");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// SAT-3: a TLE's catalogue number, five digits or alpha-5 (a letter for the ten-thousands, I and O unused).
+    #[test]
+    fn tle_catalogue_numbers() {
+        let l1 = |id: &str| std::format!("1 {id}U 02058C   26304.82911449");
+        assert_eq!(super::tle_id(l1("27607").as_bytes()), Some(27_607));
+        assert_eq!(super::tle_id(l1("A0001").as_bytes()), Some(100_001));
+        assert_eq!(super::tle_id(l1("J0001").as_bytes()), Some(180_001));
+        assert_eq!(super::tle_id(l1("P0001").as_bytes()), Some(230_001));
+        assert_eq!(super::tle_id(l1("Z9999").as_bytes()), Some(339_999));
+        assert_eq!(super::tle_id(l1("I0001").as_bytes()), None, "I isn't used");
+        assert_eq!(super::tle_id(l1("O0001").as_bytes()), None, "nor O");
+        assert_eq!(super::tle_id(b"1 "), None, "too short");
+    }
+}
