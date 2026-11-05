@@ -93,6 +93,9 @@ pub enum Kind {
     /// `bk hold [REG VALUE|off]`: registers held after every FM tune (TERM-42.3).
     Hold(Option<Option<(u8, u16)>>),
     #[cfg(feature = "bench")]
+    /// `bk swap [A|B|C|off]`: slots received on the other band's chip (TERM-29.2).
+    Swap(Option<u8>),
+    #[cfg(feature = "bench")]
     /// `synthfsk ...`: 4FSK from the keyed chip's tone generator (TERM-45).
     SynthFsk(ferrite_core::synthfsk::Cfg),
     #[cfg(feature = "bench")]
@@ -199,6 +202,8 @@ impl Job {
             Kind::RxIf(set) => DebugReq::RxIf(set),
             #[cfg(feature = "bench")]
             Kind::Hold(set) => DebugReq::Hold(set),
+            #[cfg(feature = "bench")]
+            Kind::Swap(set) => DebugReq::Swap(set),
             #[cfg(feature = "bench")]
             Kind::SynthFsk(c) => DebugReq::SynthFsk(c),
             #[cfg(feature = "bench")]
@@ -457,6 +462,18 @@ impl Job {
                     PinMode::PullDown => "input, pull-down",
                 };
                 put!(out, "  pin {} {}: reads {} (until the radio's next path step sets it)", PINS[which as usize % PINS.len()], m, high as u8);
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Swap(_), DebugAns::Swap(m)) => {
+                out.push(b"  bk swap:");
+                for s in 0..3u8 {
+                    if m & 1 << s != 0 {
+                        out.push(&[b' ', b'A' + s]);
+                    }
+                }
+                out.push(if m != 0 { &b" on the other band's chip; bk swap off ends it"[..] } else { b" none" });
                 self.st = St::Over;
                 Step::Line
             }

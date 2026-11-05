@@ -32,6 +32,14 @@ impl Radio {
             DebugReq::RxAf(set) => self.rxaf_ask(set),
             DebugReq::RxIf(set) => self.rxif_ask(set),
             DebugReq::Hold(set) => self.hold_ask(set),
+            // TERM-29.2: a slot on the other band's chip (the fox-hunt measurement); every slot retunes on a change
+            DebugReq::Swap(set) => {
+                if let Some(m) = set.filter(|&m| m != self.swap) {
+                    self.swap = m;
+                    (0..SLOTS as u8).for_each(|s| self.retune(s));
+                }
+                DebugAns::Swap(self.swap)
+            }
             // TERM-44 (decision 315): the DSP task runs the meter; the answer is its last report (zeroed here on a
             // start, so a stale one never shows)
             DebugReq::Meter(set) => {

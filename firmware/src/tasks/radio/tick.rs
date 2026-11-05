@@ -286,7 +286,7 @@ impl Radio {
         }
         // 3. The watch turn, on the frequencies the scans just stepped to.
         let asleep = if self.save.asleep() { !self.kept() } else { 0 };
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep | self.user_off, held: self.monitor, prio: self.kept(), aprs: self.aprs_slots, scan: self.range_scans(), first: watch::aprs_first() };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep | self.user_off, held: self.monitor, prio: self.kept(), aprs: self.aprs_slots, scan: self.range_scans(), first: watch::aprs_first(), swap: self.swap };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
         self.live.dropped = out.dropped;

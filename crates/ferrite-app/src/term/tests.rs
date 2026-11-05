@@ -1344,6 +1344,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Hold(set) => DebugAns::Hold([set.flatten().unwrap_or((0, 0)), (0, 0), (0, 0), (0, 0)]),
         #[cfg(feature = "bench")]
+        DebugReq::Swap(set) => DebugAns::Swap(set.unwrap_or(0)),
+        #[cfg(feature = "bench")]
         DebugReq::Meter(set) => {
             let mut r = ferrite_core::rxmeter::Report { on: set != Some(false), windows: 31, ..ferrite_core::rxmeter::Report::OFF };
             r.db10[13] = -123;
@@ -1433,6 +1435,20 @@ fn debug_bk_rxif_and_meter() {
         r.cmd(cmd);
         assert_eq!(r.serve(4, regs), vec![DebugReq::Hold(want)], "{cmd}");
     }
+    // TERM-29.2: `bk swap` (the fox-hunt measurement): a slot on the other band's chip, off, or asked
+    for (cmd, want) in [("bk swap", None), ("bk swap b", Some(0b010)), ("bk swap off", Some(0))] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::Swap(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("bk swap A");
+    r.serve(4, regs);
+    assert!(r.raw().contains("bk swap: A on the other band's chip"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bk swap D");
+    assert!(r.bottom().contains("bk swap [A|B|C|off]"), "{}", r.bottom());
+    assert!(!super::cmd::writes(b"bk swap") && super::cmd::writes(b"bk swap a"));
     r.send(b"\r");
     r.cmd("bk hold 28 0040");
     r.serve(4, regs);

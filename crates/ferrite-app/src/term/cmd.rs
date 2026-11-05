@@ -1588,7 +1588,7 @@ pub fn writes(line: &[u8]) -> bool {
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
-    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf") || same(w, b"rxif") || same(w, b"hold")));
+    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf") || same(w, b"rxif") || same(w, b"hold") || same(w, b"swap")));
     let shows = shows || same(c, b"fsk") && rest == 0; // TERM-43: `fsk` alone shows the counts
     let shows = shows || same(c, b"meter") && rest == 0; // TERM-44: `meter` alone shows the bins
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
@@ -1933,6 +1933,7 @@ fn bk(t: &mut Toks) -> Result<Done, No> {
         w if same(w, b"rxaf") => return rxaf(t),
         w if same(w, b"rxif") => return rxif(t),
         w if same(w, b"hold") => return hold(t),
+        w if same(w, b"swap") => return swap(t),
         _ => return Err(t.say_t(USAGE)),
     };
     let w = t.word_t(USAGE)?;
@@ -1988,6 +1989,27 @@ fn rxif(t: &mut Toks) -> Result<Done, No> {
         return Err(t.say_t(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::RxIf(set))))
+}
+
+/// `bk swap [A|B|C|off]` (TERM-29.2, a bench test): the slot received on the other band's chip, to measure how much
+/// a signal drops there (a fox hunt's attenuation without taking the antenna off); `bk swap off` ends it; alone it
+/// says which. RAM only. `rx both` keeps both bands' receive paths powered meanwhile.
+#[cfg(feature = "bench")]
+fn swap(t: &mut Toks) -> Result<Done, No> {
+    const USAGE: Txt = txt!("bk swap [A|B|C|off]: the slot on the other band's chip, a bench test");
+    let set = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"off") => Some(0),
+        Some(Tok::Word(w)) => match w {
+            [c @ (b'A'..=b'C' | b'a'..=b'c')] => Some(1 << (c.to_ascii_uppercase() - b'A')),
+            _ => return Err(t.say_t(USAGE)),
+        },
+        _ => return Err(t.say_t(USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(t.say_t(USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Swap(set))))
 }
 
 #[cfg(feature = "bench")]

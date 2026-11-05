@@ -522,6 +522,10 @@ pub enum DebugReq {
     /// with [`DebugAns::Hold`].
     Hold(Option<Option<(u8, u16)>>),
     #[cfg(feature = "bench")]
+    /// TERM-29.2 (a bench test, the fox-hunt measurement): the slots received on the other band's chip, set
+    /// (`Some(mask)`, 0 none) or only asked (`None`). RAM only. Answered with [`DebugAns::Swap`].
+    Swap(Option<u8>),
+    #[cfg(feature = "bench")]
     /// TERM-45 (decision 318, a bench test): 4FSK from the keyed chip's tone generator, the mic off; the Radio task
     /// runs it at once (Dry TX on, keyed only). Answered with [`DebugAns::SynthFsk`].
     SynthFsk(crate::synthfsk::Cfg),
@@ -681,6 +685,9 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-42.3: the registers held ([`HOLDS`] slots; register 0 an empty one).
     Hold([(u8, u16); HOLDS]),
+    #[cfg(feature = "bench")]
+    /// TERM-29.2: the slots on the other band's chip now.
+    Swap(u8),
     #[cfg(feature = "bench")]
     /// TERM-45: what the tone-generator 4FSK run did.
     SynthFsk(crate::synthfsk::Report),

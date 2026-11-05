@@ -215,6 +215,8 @@ struct Radio {
     /// PWR-26.9: the APRS slot's squelch as the DSP task last heard it ([`DspCmd::Squelch`]).
     aprs_open_sent: bool,
     ssb_at: SsbAt,
+    /// TERM-29.2 (a bench test): slots received on the other band's chip (`bk swap`); 0 outside the bench builds.
+    swap: u8,
     sq_key: [Option<(u8, Freq10)>; 2],
     /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:
     /// stock's 7); None after a sleep or a scope start, so the next look or tick writes it.
@@ -748,6 +750,7 @@ pub async fn task() {
         aprs_sq: [ferrite_core::aprssq::AprsSq::NEW; 2],
         aprs_open_sent: false,
         ssb_at: None,
+        swap: 0,
         sq_key: [None; 2],
         open_fast: [None; 2],
         data_rx: [None; 2],

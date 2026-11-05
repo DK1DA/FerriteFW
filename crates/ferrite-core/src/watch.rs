@@ -103,6 +103,8 @@ pub struct Cfg {
     /// [`LOOK_MS`] looks, the priority slot's turn after each look on a chip they share. Off: Voice first
     /// (WATCH-17.2's turns).
     pub first: bool,
+    /// TERM-29.2 (a bench test, the fox-hunt measurement): slots received on the other band's chip, a bit each.
+    pub swap: u8,
 }
 
 /// What to do now.
@@ -269,7 +271,7 @@ impl Watch {
         for n in 0..2u8 {
             // SQL-14, WATCH-3.2: a latched monitor holds its slot open for the turn, as stock's squelch 0 never hops.
             let open = self.open | c.held & set;
-            let on_chip = |s: u8| listen & 1 << s != 0 && band(c.freq[s as usize]).1 == n;
+            let on_chip = |s: u8| listen & 1 << s != 0 && band(c.freq[s as usize]).1 ^ (c.swap >> s & 1) == n;
             // SCAN-21 (decision 189): a chip with a scanning slot stays on it; only a priority slot (APRS-21.1)
             // still takes its turns there.
             // Only the active slot's scan: a watched slot's scan keeps taking turns, never the active slot's chip.
@@ -529,7 +531,7 @@ mod tests {
     /// none; the difference of two reads gives the same means, and a reset keeps the turn in progress whole.
     #[test]
     fn turn_clock_times_the_turns() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(146) + 55_000, mhz(147), mhz(446) + 10_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(146) + 55_000, mhz(147), mhz(446) + 10_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 };
         let (mut w, mut clock) = (Watch::new(), TurnClock::new());
         let mut run = |from: u32, to: u32, clock: &mut TurnClock| {
             for t in (from..to).step_by(10) {
@@ -563,9 +565,31 @@ mod tests {
         assert_eq!(k.take(false), Turns { n: [1, 0, 0], ms: [100, 0, 0] });
     }
 
+    /// TERM-29.2 (the fox-hunt measurement): a slot in `swap` is put on the other band's chip: A's 2 m on chip 1,
+    /// so B (70 cm) and A share it while C (airband) has chip 0 alone.
+    #[test]
+    fn swap_puts_a_slot_on_the_other_chip() {
+        let mut w = Watch::new();
+        let out = w.turn(0, &cfg(), [false; 2], [true; 2], false);
+        assert!(out.chip[0] == Some(0) || out.chip[0] == Some(2), "2 m and airband on chip 0: {:?}", out.chip);
+        let c = Cfg { swap: 0b001, ..cfg() };
+        let mut seen = [[false; 3]; 2];
+        for t in (0..4_000).step_by(100) {
+            let out = w.turn(t, &c, [false; 2], [true; 2], false);
+            for n in 0..2 {
+                if let Some(s) = out.chip[n] {
+                    seen[n][s as usize] = true;
+                }
+            }
+        }
+        assert!(seen[1][0], "A on chip 1");
+        assert!(!seen[0][0], "never on chip 0");
+        assert!(seen[0][2] && seen[1][1], "C on chip 0, B on chip 1");
+    }
+
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
-        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false }
+        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 }
     }
 
     /// APRS-21.4: after our own data frame the APRS slot keeps the shared chip and the path (held) for
@@ -632,7 +656,7 @@ mod tests {
     #[test]
     fn band_crossing_takes_the_other_chip_at_once() {
         let mut w = Watch::new();
-        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
+        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 };
         assert_eq!(w.tick(0, &c, [false; 2], false).chip, [Some(0), None]);
         c.freq[0] = mhz(446) + 47_500;
         assert_eq!(w.tick(10, &c, [false; 2], false).chip, [None, Some(0)], "70 cm: chip 1 in the same turn");
@@ -868,7 +892,7 @@ mod tests {
     /// alternates the receive path, and A's squelch reads open throughout, also while chip 1 has the path.
     #[test]
     fn muted_slot_stays_open_across_the_hop() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         let mut paths = [0u32; 2];
@@ -893,7 +917,7 @@ mod tests {
     /// Muted each hop.
     #[test]
     fn muted_slot_stays_open_through_the_chips_reacquire() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let (mut path, mut got) = (None, 0u32);
         for t in (0..3_000u32).step_by(10) {
@@ -916,7 +940,7 @@ mod tests {
     /// the path stays on A's chip and B (the other chip) is never listened to, so it is never heard.
     #[test]
     fn monitored_active_slot_holds_the_path() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001, prio: 0, aprs: 0, scan: 0, first: false };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         for t in (0..2_000u32).step_by(10) {
@@ -1006,7 +1030,7 @@ mod sim {
     }
 
     fn aprs(set: u8, prio: u8) -> Cfg {
-        Cfg { set, active: 0, freq: [A2M, B70, APRS], muted: 0, off: 0, held: 0, prio, aprs: 0, scan: 0, first: false }
+        Cfg { set, active: 0, freq: [A2M, B70, APRS], muted: 0, off: 0, held: 0, prio, aprs: 0, scan: 0, first: false, swap: 0 }
     }
 
     /// Decision 181's cause, and APRS-29 (beacons alone give C no priority): C without priority, sharing chip 0 with
@@ -1235,7 +1259,7 @@ mod sim {
             (sc.fast, sc.resume) = (true, Resume::Drop);
             sc.start(0, 0);
             let (mut w, mut hop) = (Watch::new(), Hop::new());
-            let mut c = Cfg { set, active: 0, freq: [mhz(144), mhz(446) + 47_500, mhz(144) + 39_000], muted: 0, off: 0, held: 0, prio, aprs: 0, scan, first: false };
+            let mut c = Cfg { set, active: 0, freq: [mhz(144), mhz(446) + 47_500, mhz(144) + 39_000], muted: 0, off: 0, held: 0, prio, aprs: 0, scan, first: false, swap: 0 };
             let (mut started, mut ticked, mut steps, mut b, mut cturns) = (0u64, 0u64, 0u32, 0u32, 0u32);
             let (mut path, mut last_c) = (None, None);
             while ticked < 10_000 {

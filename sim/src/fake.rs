@@ -680,7 +680,7 @@ impl FakeRadio {
             }
             _ => 0,
         };
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off: off | self.slot_off, held: self.monitor, prio: self.prio, aprs: self.aprs_slot, scan: (0..3).filter(|&i| self.scans[i].running() && self.scans[i].fast).fold(0, |m, i| m | 1 << i) , first: watch::aprs_first() };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off: off | self.slot_off, held: self.monitor, prio: self.prio, aprs: self.aprs_slot, scan: (0..3).filter(|&i| self.scans[i].running() && self.scans[i].fast).fold(0, |m, i| m | 1 << i) , first: watch::aprs_first(), swap: 0 };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
         // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet; a muted broadcast slot
         // never plays (HOME-15).
@@ -904,7 +904,7 @@ impl FakeRadio {
             DebugReq::Mic(_) => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; ferrite_core::vox::MIC_SAMPLES], 32_000)),
             // TERM-42 - TERM-46: register overrides, the meter, FSK tests and the audio pins act on real chips and pins
             #[cfg(feature = "bench")]
-            DebugReq::RxAf(_) | DebugReq::RxIf(_) | DebugReq::Hold(_) | DebugReq::Meter(_) | DebugReq::Fsk(_) | DebugReq::SynthFsk(_) | DebugReq::Pin { .. } => {
+            DebugReq::RxAf(_) | DebugReq::RxIf(_) | DebugReq::Hold(_) | DebugReq::Swap(_) | DebugReq::Meter(_) | DebugReq::Fsk(_) | DebugReq::SynthFsk(_) | DebugReq::Pin { .. } => {
                 DebugAns::Refused("a bench test of the radio's chips and pins: not in the simulator")
             }
         }
