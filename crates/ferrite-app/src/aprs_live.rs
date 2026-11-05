@@ -1428,10 +1428,13 @@ fn crc16(mut crc: u16, b: u8) -> u16 {
 
 /// APRS-56: the event log's words for a packet heard but not decoded (0 5 9 8 on): the sender's best guess as
 /// the name (`?` for each character a bit error spoiled), and "Not decoded: 84 B, peak 35%, >APRS,WIDE1-1" (its
-/// length with the FCS, the audio's peak then as a share of full scale, its destination and path).
+/// length with the FCS, the audio's peak then as a share of full scale, its destination and path). Without an
+/// address field (its start lost, APRS-56.2) the name is `?` and the text ends ", start lost".
 pub fn miss_text(m: &ferrite_core::audio::uafsk::Miss, peak: u16, name: &mut Buf<20>, text: &mut Buf<64>) {
     let mut hdr = Buf::<80>::new();
-    m.header(|c| hdr.push(&[c]));
+    if m.addresses {
+        m.header(|c| hdr.push(&[c]));
+    }
     let h = hdr.as_bytes();
     let gt = h.iter().position(|&c| c == b'>').unwrap_or(h.len());
     name.push(if gt == 0 { b"?" } else { &h[..gt] });
@@ -1442,6 +1445,9 @@ pub fn miss_text(m: &ferrite_core::audio::uafsk::Miss, peak: u16, name: &mut Buf
     if gt < h.len() {
         text.push(b", ");
         text.push(&h[gt..]);
+    }
+    if !m.addresses {
+        text.push(b", start lost");
     }
 }
 
@@ -2524,5 +2530,10 @@ mod tests {
         miss_text(&m, 16384, &mut name, &mut text);
         assert_eq!(name.as_bytes(), b"V?7ABC-9");
         assert_eq!(text.as_bytes(), &b"Not decoded: 84 B, peak 50%, >APRS,WIDE1-1"[..]);
+        // the start lost: no address field to read
+        let m = Miss { len: 41, addresses: false, fx25: false, head };
+        let (mut name, mut text) = (Buf::<20>::new(), Buf::<64>::new());
+        miss_text(&m, 9831, &mut name, &mut text);
+        assert_eq!((name.as_bytes(), text.as_bytes()), (&b"?"[..], &b"Not decoded: 41 B, peak 30%, start lost"[..]));
     }
 }

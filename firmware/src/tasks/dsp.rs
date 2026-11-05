@@ -52,7 +52,7 @@ pub enum Heard {
     Frame(Frame),
     Fx25(uafsk::Fx25Block),
     /// APRS-56: a packet heard but not decoded (bad FCS on every slicer) and the audio's peak (0-32767) then, for
-    /// the decode log; sent only for an AX.25 address field (not noise).
+    /// the decode log.
     Miss(uafsk::Miss, u16),
 }
 
@@ -482,12 +482,11 @@ pub async fn task() {
                             DROPPED.fetch_add(1, Relaxed);
                         }
                     }
-                    Found::Miss(m) if m.addresses => {
-                        MISSED.fetch_add(1, Relaxed);
+                    Found::Miss(m) => {
+                        // APRS-56.1: an AX.25 address field, a packet missed; none, a packet whose start was lost (or
+                        // chance flags in noise): counted apart, both logged (0 5 9 8; rare, Alex, Nov 4)
+                        if m.addresses { &MISSED } else { &NOISE }.fetch_add(1, Relaxed);
                         let _ = APRS_RX.try_send(Heard::Miss(*m, lvl.0.max(lvl.1))); // only for the log: a full queue skips it
-                    }
-                    Found::Miss(_) => {
-                        NOISE.fetch_add(1, Relaxed);
                     }
                     Found::Page(m) => {
                         if PAGES.try_send(Page::from(m)).is_err() {
