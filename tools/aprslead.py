@@ -28,7 +28,7 @@ def kiss(cmd, data):
     return bytes(out + bytes([FEND]))
 
 
-STAGES = ("sq_opens", "sq_short", "sq_spikes", "sq_settle", "captures", "heard", "frames", "noise", "missed")
+STAGES = ("sq_opens", "sq_short", "sq_spikes", "sq_settle", "captures", "heard", "late", "frames", "noise", "missed")
 
 
 def counters(port):
