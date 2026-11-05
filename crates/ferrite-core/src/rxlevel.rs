@@ -25,7 +25,11 @@ pub const PEAK_HI: i32 = 23_000;
 /// The gain rises only while peaks stay under this (about -6 dB): the release's ceiling.
 pub const PEAK_LO: i32 = 16_000;
 
-/// The stream's automatic gain: Q8, updated once a chunk (the DSP task's 2 ms half, 48 samples at 24 kHz).
+/// The samples [`Agc::chunk`] takes at a time: 2 ms at 24 kHz (the DSP task's capture half until decision 358; it
+/// now cuts its 8 ms halves into these, so the release keeps its rate).
+pub const CHUNK: usize = 48;
+
+/// The stream's automatic gain: Q8, updated once a chunk ([`CHUNK`] samples).
 ///
 /// - Attack: before a chunk is scaled, the gain drops at once so its peak stays under [`PEAK_HI`] (it looks at the
 ///   chunk first, so nothing it passes clips).

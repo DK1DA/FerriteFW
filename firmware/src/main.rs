@@ -79,7 +79,7 @@ const IRQ_INPUT: u16 = 59; // DMA2 channels 4 and 5, never clocked
 // NVIC priorities (lower is more urgent): UART receive 3 (hal::uart), time driver 4, then the executors. The
 // input sampler has its own, above the Radio task: a scan keeps the Radio task busy most of the time (each
 // BK4829 register write is about 250 us at stock's bus speed), and on the radio that starved the keys (Oct 12, 2026).
-// The DSP task above the Radio task (APRS-56.4, decision 357): a capture half is 2 ms, and the Radio task's runs
+// The DSP task above the Radio task (APRS-56.4, decision 357): a capture half was 2 ms (8 ms since decision 358), and the Radio task's runs
 // (a tick's register reads, a retune: up to 8 ms) lost audio under it, about 4 halves a second while capturing,
 // enough to break one packet in six on the bench (Nov 4, 2026). The DSP's own work is under 1 ms a half; the bus
 // is the MCU's clock, so a stretched edge is harmless.
@@ -165,7 +165,7 @@ fn counted(f: impl FnOnce(), max_us: &AtomicU32) {
 
 /// APRS-56.4: the longest one run of the Radio and the input executors while the ADC captures, us since power-on,
 /// and how many ran over 1.5 ms: the measure that moved the DSP task above the Radio task (decision 357); a run of
-/// the input executor (above the DSP) longer than a capture half (2 ms) would still lose audio.
+/// the input executor (above the DSP) longer than a capture half (8 ms) would still lose audio.
 pub static LONG_RUNS: AtomicU32 = AtomicU32::new(0);
 pub static RADIO_RUN_MAX_US: AtomicU32 = AtomicU32::new(0);
 pub static INPUT_RUN_MAX_US: AtomicU32 = AtomicU32::new(0);

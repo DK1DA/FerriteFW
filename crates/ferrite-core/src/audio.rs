@@ -29,9 +29,10 @@ pub const AFSK_AMP: i16 = 3_900;
 /// (`AFSK_AMP`), High about 3.5 kHz. A named static: the DSP task reads it, so it sits in fast flash (slowcheck).
 pub static AFSK_AMPS: [i16; 3] = [3_250, AFSK_AMP, 4_550];
 
-/// Each half of the ADC's DMA buffer: 2 ms at 48 kHz. The DSP task gets 500 blocks a second of
-/// [`BLOCK_OUT`] decoder samples.
-pub const BLOCK_IN: usize = 96;
+/// Each half of the ADC's DMA buffer: 8 ms at 48 kHz (decision 358; 2 ms until Nov 4, 2026). The DSP task gets 125
+/// blocks a second of [`BLOCK_OUT`] decoder samples, and has a whole half to take each before the DMA writes over
+/// it: the longer half rides out anything holding the task off (APRS-56.4's `late`).
+pub const BLOCK_IN: usize = 384;
 pub const BLOCK_OUT: usize = BLOCK_IN / DECIM;
 /// Each half of the DAC's DMA buffer: 2.7 ms at 48 kHz.
 pub const BLOCK_DAC: usize = 128;

@@ -1,7 +1,7 @@
 //! DSP: audio from ADC1 (PA2, the BK4829s' EARO) through the 4:1 step into the one decoder slot, and AFSK out
-//! of DAC1 (APRS-1, APRS-14; roadmap 2f, 5b, 5c). Runs on the second interrupt executor, below Radio.
+//! of DAC1 (APRS-1, APRS-14; roadmap 2f, 5b, 5c). Runs on its own interrupt executor, above the Radio task's (decision 357).
 //!
-//! - **Receive:** while a decoder runs, the capture runs ([`hal::audio`]); each 2 ms half goes through
+//! - **Receive:** while a decoder runs, the capture runs ([`hal::audio`]); each 8 ms half goes through
 //!   [`Decim`] to the slot. An AFSK frame with a good CRC goes to the UI task's APRS task through [`APRS_RX`], a
 //!   page to the UI task through [`PAGES`].
 //! - **One slot, two wanting it (DEC-18):** the APRS task asks for AFSK, the UI task for the pager decoder; APRS
@@ -47,7 +47,7 @@ impl Frame {
 }
 
 /// What the decoder heard, for the APRS task: a frame, or an FX.25 block for it to correct (APRS-44: 0.27 to 1.03
-/// M instructions, 3 to 13 ms at 120 MHz, too long for this task's 2 ms halves).
+/// M instructions, 3 to 13 ms at 120 MHz, too long for this task's 8 ms halves).
 pub enum Heard {
     Frame(Frame),
     Fx25(uafsk::Fx25Block),
@@ -65,10 +65,10 @@ pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 /// seamlessly) or to stop (None, at the release), and the equaliser its samples go through (TERM-33.16).
 #[cfg(all(feature = "tx", feature = "bench"))]
 pub static TXTEST: Signal<M, Option<(ferrite_core::txtest::Gen, ferrite_core::txeq::Eq)>> = Signal::new();
-/// One capture half, ms (the 2 ms blocks [`audio::ADC_HALF`] marks).
-const HALF_MS: u32 = 2;
-/// PWR-26.4: how often (in 2 ms capture halves) a capture running at 24 MHz asks again for the build's speed.
-const RECHECK_HALVES: u32 = 5_000;
+/// One capture half, ms (the blocks [`audio::ADC_HALF`] marks: 8 ms, decision 358).
+const HALF_MS: u32 = BLOCK_IN as u32 * 1_000 / ferrite_core::audio::ADC_HZ;
+/// PWR-26.4: how often (in capture halves: 10 s) a capture running at 24 MHz asks again for the build's speed.
+const RECHECK_HALVES: u32 = 10_000 / HALF_MS;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
 /// LINK-13.4: blocks made; dropped (the queue below full: the cable's ring had no room for 128 ms); and the times
@@ -81,8 +81,10 @@ pub static AUDIO_WAITS: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_CLIPS: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_PEAK: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_GAIN: AtomicU32 = AtomicU32::new(ferrite_core::rxlevel::UNITY as u32);
-/// The peak's window, in 2 ms capture halves: one second.
-const PEAK_HALVES: u32 = 500;
+/// The peak's window, in capture halves: one second.
+const PEAK_HALVES: u32 = 1_000 / HALF_MS;
+/// The miss log's level buckets (`lvl`), in capture halves: 64 ms each.
+const LVL_HALVES: u32 = 64 / HALF_MS;
 /// Decision 290: blocks waiting for room in `TERM_OUT`, at most this many (128 ms of 16 ms blocks, decision 330),
 /// each with what it was heard from.
 const AUDIO_QUEUE: usize = 8;
@@ -300,7 +302,7 @@ pub static CAPTURE_MAX_MS: AtomicU32 = AtomicU32::new(0);
 pub static CAPTURES: AtomicU32 = AtomicU32::new(0);
 pub static HEARD: AtomicU32 = AtomicU32::new(0);
 /// APRS-56.4: the longest a capture half waited for the DSP task after its interrupt, and the longest the task
-/// spent on one, us since power-on: a half is 2 ms, so their sum over that loses audio (`late`).
+/// spent on one, us since power-on: a half is 8 ms, so their sum over that loses audio (`late`).
 pub static WAKE_MAX_US: AtomicU32 = AtomicU32::new(0);
 pub static WORK_MAX_US: AtomicU32 = AtomicU32::new(0);
 
@@ -453,7 +455,7 @@ pub async fn task() {
                 }
                 peak = out[..n].iter().fold(peak, |p, &x| p.max((x as i32).abs()));
                 lvl.0 = out[..n].iter().fold(lvl.0, |p, &x| p.max(x.unsigned_abs()));
-                if halves.is_multiple_of(32) {
+                if halves.is_multiple_of(LVL_HALVES) {
                     lvl = (0, lvl.0);
                 }
                 if halves.is_multiple_of(PEAK_HALVES) {
@@ -466,7 +468,10 @@ pub async fn task() {
                         // LINK-13.8: scaled for the PC only, held while nothing is heard
                         let open = ferrite_core::rxaudio::unpack_source(crate::chan::AUDIO_SRC.load(Relaxed)).1 & ferrite_core::rxaudio::SQ_OPEN != 0;
                         let mut y = out;
-                        agc.chunk(&mut y[..n], open);
+                        // the AGC's steps are per 2 ms chunk (its release rate), whatever the half
+                        for c in y[..n].chunks_mut(ferrite_core::rxlevel::CHUNK) {
+                            agc.chunk(c, open);
+                        }
                         AUDIO_GAIN.store(agc.gain() as u32, Relaxed);
                         let mut made = false;
                         for &x in &y[..n] {
