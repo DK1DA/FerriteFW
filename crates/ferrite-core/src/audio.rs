@@ -63,6 +63,9 @@ pub struct Decim {
     phase: u8,
     /// The running mean (DC), Q16 of an ADC count: a one-pole average over 2,048 samples (43 ms).
     dc_q16: i32,
+    /// APRS-56.6: the first sample seeds the mean (a fresh capture's DC isn't mid-scale: from 2048 the mean took
+    /// 100 ms and more to settle, a packet's flags under its step).
+    primed: bool,
     /// [`TAPS`], or [`WIDE_TAPS`] for the data path.
     taps: &'static [i32; N_TAPS],
 }
@@ -75,7 +78,7 @@ impl Default for Decim {
 
 impl Decim {
     pub const fn new() -> Self {
-        Decim { hist: [0; N_TAPS], at: 0, phase: 0, dc_q16: 2048 << 16, taps: &TAPS }
+        Decim { hist: [0; N_TAPS], at: 0, phase: 0, dc_q16: 2048 << 16, primed: false, taps: &TAPS }
     }
 
     /// The data path (decision 316): flat to 8 kHz, for fast data modes and the bench's raw stream.
@@ -88,6 +91,9 @@ impl Decim {
     #[inline]
     pub fn push(&mut self, adc: u16, mut out: impl FnMut(i16)) {
         let x = (adc as i32) << 16;
+        if !self.primed {
+            (self.dc_q16, self.primed) = (x, true);
+        }
         self.dc_q16 += (x - self.dc_q16) >> 11;
         let s = ((x - self.dc_q16) >> 12).clamp(-32768, 32767) as i16;
         self.hist[self.at as usize] = s;
@@ -172,6 +178,18 @@ mod tests {
     use super::*;
     extern crate std;
     use std::vec::Vec;
+
+    /// APRS-56.6: a capture starting on a level away from mid-scale has no DC step: the first outputs are near 0,
+    /// not the offset decaying over 100 ms.
+    #[test]
+    fn a_fresh_capture_starts_without_a_dc_step() {
+        let mut d = Decim::new();
+        let mut out = Vec::new();
+        for _ in 0..96 {
+            d.push(1700, |x| out.push(x));
+        }
+        assert!(out.iter().all(|&x| x.abs() < 100), "{:?}", &out[..8]);
+    }
 
     /// A tone through the decimator: its level after the filter, in Q15 of the input's.
     fn gain(hz: f64) -> f64 {
