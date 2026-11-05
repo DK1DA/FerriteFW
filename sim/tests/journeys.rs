@@ -294,17 +294,17 @@ fn gps_position_and_status() {
 #[test]
 fn hf_mode() {
     let mut r = Radio::new();
-    r.run("menu 0 3 4; expect screen \"HF mode\"; expect text \"Loading SSB patch\"; wait 3s");
+    r.run("menu 0 3 3; expect screen \"HF mode\"; expect text \"Loading SSB patch\"; wait 3s");
     r.expect_text("31 m").expect_text("SI4732").expect_text("9.580");
     r.run("hold 3; wait 3s");
     assert_ne!(r.sim.app().settings().hf.freq, 958_000, "seek moved");
 }
 
-/// MENU 0 3 1 is FM broadcast's settings (BCR-1, decision 352: a slot in the band is the receiver).
+/// MENU 0 2 6 is FM broadcast's settings (BCR-1, decision 352: a slot in the band is the receiver).
 #[test]
 fn fm_broadcast() {
     let mut r = Radio::new();
-    r.run("menu 0 3 1; expect text \"Step\"; expect text \"Sleep timer\"");
+    r.run("menu 0 2 6; expect text \"Step\"; expect text \"Sleep timer\"");
 }
 
 /// Hold # locks the keypad and offers * and 0; locked, OK does nothing; hold # unlocks; * in the popup's time locks

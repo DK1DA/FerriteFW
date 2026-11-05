@@ -19,10 +19,10 @@ def hf_line(u):
 
 
 def hf_open(t):
-    """MENU 0 3 4, past the SSB patch's load (HF-3): the readback's `hf freq=...` line."""
+    """MENU 0 3 3, past the SSB patch's load (HF-3): the readback's `hf freq=...` line."""
     t.home()
-    u = t.keys("MENU 0 3 4")
-    t.eq(u.id, "Hf", "MENU 0 3 4")
+    u = t.keys("MENU 0 3 3")
+    t.eq(u.id, "Hf", "MENU 0 3 3")
     return t.wait(lambda u: "freq" in hf_line(u), timeout=20, what="HF mode loaded (the SSB patch streamed in)")
 
 
@@ -233,7 +233,7 @@ def hf_patch_load_back_cancels(t):
     t.need(patch == "Installed", f"no SSB patch to load ({patch!r}): nothing streams in")
     t.home()
     t.keys("MENU 0 3")
-    u = t.keys("4", settle=0.05)
+    u = t.keys("3", settle=0.05)
     t.check("loading" in hf_line(u), "the patch loading, with its progress", u.lines)
     u = t.keys("BACK")
     t.eq((u.id, u.title), ("Group", "Tools"), "BACK during the load: back one level")
@@ -351,8 +351,8 @@ def mode_screens_stop_the_broadcast(t):
         t.cmd(f"slot A vfo {'98.1' if t.sim else '100.1'}")
         u = t.wait(lambda u: u.state.get("mode") == "fm" and u.state.get("fm") == 1, timeout=5,
                    what="the broadcast slot plays")
-        for keys, want in (("1:long", "scope"), ("MENU 0 3 6", "tone"), ("MENU 0 3 3", "counter"),
-                           ("MENU 0 3 4", "hf")):
+        for keys, want in (("1:long", "scope"), ("MENU 0 3 5", "tone"), ("MENU 0 3 2", "counter"),
+                           ("MENU 0 3 3", "hf")):
             t.home()
             u = t.keys(keys, settle=0.5)
             u = t.wait(lambda u: u.state.get("mode") == want, timeout=5, what=f"{keys}: {want} runs")
@@ -392,14 +392,14 @@ def sleep_timer_ends_the_fm_screen_only(t):
     past it until tuned out. Radio only: half an hour of wall clock, which the simulator would spend the same way;
     the host test (ferrite-app tests::bcast::sleep_timer_leaves_a_broadcast_slot_playing) runs it on the simulated
     clock."""
-    u = t.keys("MENU 0 3 1 4")
-    t.eq(u.sel["name"], "Sleep timer", "MENU 0 3 1 4")
+    u = t.keys("MENU 0 2 6 4")
+    t.eq(u.sel["name"], "Sleep timer", "MENU 0 2 6 4")
     t.knob(1)
-    shortest = t.get("0 3 1 4")
+    shortest = t.get("0 2 6 4")
     t.note(f"sleep timer {shortest}")
     mins = float(shortest.split()[0])
     t.home()
-    u = t.keys("MENU 0 3 1")
+    u = t.keys("MENU 0 2 6")
     t.eq(u.id, "Fm", "the FM screen")
     u = t.wait(lambda u: u.id == "Home", timeout=mins * 60 + 10, what="the sleep timer ends the FM screen",
                every=2.0)
@@ -424,7 +424,7 @@ def scope_line(u):
 def scope_leaves_other_path_points_blank(t):
     """A sweep across 64 MHz (or 300 MHz) leaves the points needing the other relay state (or chip) blank: from
     63.9 MHz at 25 kHz, the 26 bars past 64 MHz; the relay (PC4, bench builds) doesn't move."""
-    t.need(t.get("0 3 2 1") == "60" and t.get("0 3 2 2") == "25 kHz", "the scope's default 60 bars of 25 kHz")
+    t.need(t.get("0 3 1 1") == "60" and t.get("0 3 1 2") == "25 kHz", "the scope's default 60 bars of 25 kHz")
     stopped = t.stop_scans()
     try:
         for f, need_blank in (("63.9", 26), ("299.9", 26)):
@@ -493,8 +493,8 @@ def crossband_start_checks(t):
     1.25 m the band plan allows it."""
     t.cmd("slot A vfo 145.495 offset -0.6")
     t.cmd("slot B vfo 446.475 offset off")
-    u = t.keys("MENU 0 3 5")
-    t.eq(u.id, "Crossband", "MENU 0 3 5")
+    u = t.keys("MENU 0 3 4")
+    t.eq(u.id, "Crossband", "MENU 0 3 4")
     rows = {r["name"]: r["value"] for r in u.rows}
     t.need(rows.get("Side 1", "").startswith("A ") and rows.get("Side 2", "").startswith("B "),
            f"crossband's sides are A and B here ({rows.get('Side 1')}, {rows.get('Side 2')})")
@@ -505,14 +505,14 @@ def crossband_start_checks(t):
             "checked (144.895 would be checked too, and both are in the band plan)", checks)
     t.home()
     t.cmd("slot A vfo 160.000 offset off")
-    u = t.keys("MENU 0 3 5")
+    u = t.keys("MENU 0 3 4")
     checks = xb_checks(u)
     t.check(["fail", '"Side 1 can\'t transmit there"'] in checks, "side 1 on 160.000 MHz: refused, naming it", checks)
     u = t.keys("HASH")
     t.eq(u.state["mode"], "off", "# starts nothing")
     t.home()
     t.cmd("slot A vfo 222.000 offset off")
-    u = t.keys("MENU 0 3 5")
+    u = t.keys("MENU 0 3 4")
     t.note(f"222.000 MHz: {xb_checks(u)}")
 
 
@@ -596,7 +596,7 @@ def hf_patch_streams_on_each_entry(t):
         for i in range(2):
             t.home()
             t.keys("MENU 0 3")
-            u = t.keys("4", settle=0.05)
+            u = t.keys("3", settle=0.05)
             t.check("loading" in hf_line(u), f"entry {i + 1}: the patch streams in", u.lines)
             t.wait(lambda u: "freq" in hf_line(u), timeout=20, what="loaded")
         seen = []

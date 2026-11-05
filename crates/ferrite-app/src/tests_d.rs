@@ -274,13 +274,13 @@ fn fm_broadcast() {
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "tuned out: it stops");
 }
 
-/// HF-1 to HF-8, HF-13, HF-24, HF-28, SBAR-18: MENU 0 3 4 enters HF mode; the status bar says HF without
+/// HF-1 to HF-8, HF-13, HF-24, HF-28, SBAR-18: MENU 0 3 3 enters HF mode; the status bar says HF without
 /// TW/DW; everything pauses until BACK; PTT refuses on the SI4732; a frequency held 10 s joins the recent list.
 #[test]
 fn hf_mode() {
     let mut t = T::new();
     t.app.set.region = 1; // US: SAME on
-    menu0(&mut t, &[3, 4]);
+    menu0(&mut t, &[3, 3]);
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: true, .. })));
     let mut fb = FrameBuffer::new();
     t.render(&mut fb);
@@ -323,7 +323,7 @@ fn hf_seek() {
     use ferrite_core::msg::ModeLive;
     let seeks = |t: &mut T| t.cmds().into_iter().filter(|c| matches!(c, RadioCmd::HfSeek { .. })).collect::<Vec<_>>();
     let mut t = T::new();
-    menu0(&mut t, &[3, 4]);
+    menu0(&mut t, &[3, 3]);
     seeks(&mut t);
     let start = t.app.set.hf.freq;
     t.hold(Key::Digit(3));
@@ -482,11 +482,11 @@ fn same_location_codes() {
     assert!(t.app.same_alert(&h, 2, 16_255_000), "no codes: every warning");
 }
 
-/// Crossband has its menu number: MENU 0 3 5 (Tools) opens the crossband repeater.
+/// Crossband has its menu number: MENU 0 3 4 (Tools) opens the crossband repeater.
 #[test]
 fn crossband_from_the_menu() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 5]);
+    menu0(&mut t, &[3, 4]);
     assert!(matches!(t.app.screen(), Screen::Crossband(_)), "{}", t.app.screen().name());
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: the Tools list");
@@ -530,7 +530,7 @@ fn event_hooks_open_their_screens() {
 #[test]
 fn hf_bands_remember_their_vfo() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 4]); // 31 m, 9.580 MHz AM
+    menu0(&mut t, &[3, 3]); // 31 m, 9.580 MHz AM
     let start = t.app.set.hf.freq;
     t.tap(Key::Up);
     t.tap(Key::Up);
@@ -549,7 +549,7 @@ fn hf_bands_remember_their_vfo() {
     assert_eq!(t.app.set.hf.freq, f25);
     // In the settings: the band VFOs survive leaving HF mode.
     t.tap(Key::Exit);
-    menu0(&mut t, &[3, 4]);
+    menu0(&mut t, &[3, 3]);
     assert_eq!(t.app.set.hf.freq, f25);
     t.hold(Key::Side(1));
     assert_eq!(t.app.set.hf.freq, f31);

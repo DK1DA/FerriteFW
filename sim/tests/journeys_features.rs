@@ -175,7 +175,7 @@ fn broadcast() {
 #[test]
 fn hf_options() {
     let mut r = Radio::new();
-    r.run("menu 0 3 4; wait 8s; expect screen \"HF mode\"");
+    r.run("menu 0 3 3; wait 8s; expect screen \"HF mode\"");
     r.run("hold OK; expect text \"Step\"; expect text \"Bandwidth\"; expect text \"AGC\"; expect text \"Recent list\"");
     assert!(!r.text().contains("LNA") && !r.text().contains("Fine tune"), "HF-35: hidden until SSB");
 }

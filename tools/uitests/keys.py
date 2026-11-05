@@ -6,7 +6,7 @@ from .core import test
 # Screens to walk for the hint bar and the status bar's name (keys from home).
 WALK = ["MENU", "MENU 0", "MENU 0 1", "MENU 0 7", "MENU 0 7 5", "MENU 0 9 1", "MENU 0 0", "MENU 0 9 8",
         "MENU 0 9 8 RIGHT", "MENU 0 9 8 RIGHT RIGHT", "MENU 0 9 8 RIGHT RIGHT RIGHT", "MENU 0 9 1 3", "1 4",
-        "SLOT:long", "MENU 0 3 1", "MENU 0 3 5", "MENU 0 6 6 MENU", "MENU 4 MENU", "MENU MENU", "9:long",
+        "SLOT:long", "MENU 0 2 6", "MENU 0 3 4", "MENU 0 6 6 MENU", "MENU 4 MENU", "MENU MENU", "9:long",
         "1:long", "SIDE2:long", "VM:long"]
 
 

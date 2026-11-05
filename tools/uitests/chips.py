@@ -380,7 +380,7 @@ def modes_never_move_the_relay(t):
             t.home()
             time.sleep(0.4)
             t.eq(t.pin("PC4"), want, f"{f}: PC4 {want} at home")
-            for keys in ("MENU 0 3 3", "1:long"):
+            for keys in ("MENU 0 3 2", "1:long"):
                 t.home()
                 t.keys(keys, settle=0.5)
                 seen = {t.pin("PC4") for _ in range(6)}
@@ -576,7 +576,7 @@ def rx_both_selects(t):
         ok, out = t.cmd_err("rx both")
         t.check(not ok or "relay" in out.lower(), "an HF slot active: refused, saying why", out)
         t.cmd(f"slot A vfo {QUIET_VHF}")
-        t.keys("MENU 0 3 4")
+        t.keys("MENU 0 3 3")
         t.wait(lambda u: "freq" in (u["hf"] or {}), timeout=20, what="HF mode")
         ok, out = t.cmd_err("rx both")
         t.check(not ok or "hf" in out.lower(), "HF mode: refused, saying why", out)

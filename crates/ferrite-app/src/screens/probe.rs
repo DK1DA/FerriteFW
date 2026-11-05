@@ -1,12 +1,12 @@
 //! Tone search and the frequency counter (manual chapter 22; no mock-ups). Both run on the Radio task and
 //! report through `ModeLive::Probe`.
 //!
-//! Tone search (MENU 0 3 6): the active slot's frequency and signal, the tone found or "searching"
+//! Tone search (MENU 0 3 5): the active slot's frequency and signal, the tone found or "searching"
 //! with the time, the last hits (TSRCH-2). OK sets the RX tone, then asks before setting TX too (TSRCH-4); on a
 //! channel the tone is loaded into the slot, not saved to the channel, and # saves it there (TSRCH-9). BACK leaves the tones as they
 //! were (TSRCH-5).
 //!
-//! Counter (MENU 0 3 3): the strongest nearby transmitter's frequency and level, a hold, the last hits
+//! Counter (MENU 0 3 2): the strongest nearby transmitter's frequency and level, a hold, the last hits
 //! (TSRCH-6); OK copies the frequency to the active slot's VFO (TSRCH-7). It only receives (TSRCH-8). It counts
 //! 64–1300 MHz on both BK4829s without moving the relay (TSRCH-10); # holds the reading while it keeps listening
 //! (TSRCH-11).
@@ -99,7 +99,7 @@ pub struct ToneSearch {
     pub ask_tx: bool,
 }
 
-/// MENU 0 3 6 (TSRCH-1): search on the active slot.
+/// MENU 0 3 5 (TSRCH-1): search on the active slot.
 pub fn open_tone(app: &mut App) -> Screen {
     let slot = app.active; // MODE-2: the reconciler starts the search on it
     app.radio.t0 = app.now;
@@ -283,7 +283,7 @@ pub fn countable(f: Freq10) -> bool {
     (mhz(64)..=mhz(1300)).contains(&f) && !(mhz(630) + 1..mhz(756)).contains(&f)
 }
 
-/// MENU 0 3 3 (TSRCH-6).
+/// MENU 0 3 2 (TSRCH-6).
 pub fn open_counter(app: &mut App) -> Screen {
     app.radio.clear_hits(); // MODE-2: the reconciler starts the counter
     Screen::Counter(Counter { hold: false, held: 0, held_rssi: 0 })

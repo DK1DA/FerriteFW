@@ -12,7 +12,7 @@ use ferrite_sim::simcore::Event;
 fn tone_search_applies_rx_then_asks() {
     let mut r = Radio::new();
     let tx0 = r.sim.app().slot(0).cfg().tx_tone;
-    r.run("menu 0 3 6; wait 6s; expect text \"Found\"; expect text \"100.0\"; press OK");
+    r.run("menu 0 3 5; wait 6s; expect text \"Found\"; expect text \"100.0\"; press OK");
     r.expect_text("Set the TX tone too");
     assert_eq!(r.sim.app().slot(0).cfg().rx_tone, 1000, "RX tone applied");
     r.press(Key::Exit).wait(300);
@@ -31,7 +31,7 @@ fn course_stopped_when_still() {
 #[test]
 fn hf_channels() {
     let mut r = Radio::new();
-    r.run("menu 0 3 4; wait 9s; expect screen \"HF mode\"; expect text \"9.580\"");
+    r.run("menu 0 3 3; wait 9s; expect screen \"HF mode\"; expect text \"9.580\"");
     r.run("hold 9; expect text \"Save this HF frequency\"; expect text \"CH 005\"; press OK; wait 500ms");
     r.home();
     r.press(Key::VfoMem).wait(300); // A to channel mode
@@ -63,7 +63,7 @@ fn no_ssb_patch() {
     let mut r = Radio::new();
     r.sim.device_mut().selftest.ssb_patch = false;
     r.run("menu 0 9; expect text \"SSB patch Not installed\"");
-    r.run("menu 0 3 4; wait 3s; expect screen \"HF mode\"");
+    r.run("menu 0 3 3; wait 3s; expect screen \"HF mode\"");
     for _ in 0..4 {
         r.press(Key::Side(2)); // HF-12: SIDE2 the mode (decision 349)
         // the recent line may name an earlier frequency's mode; the badge and SIDE2's row may not

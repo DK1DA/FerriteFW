@@ -113,7 +113,7 @@ fn settings_rows_open_pages() {
     r.send(b"462");
     assert_eq!(r.term.page(), Page::Gps);
     let mut r = Rig::main();
-    r.send(b"433"); // 0 3 3: the frequency counter, a page on the radio
+    r.send(b"433"); // 0 3 2: the frequency counter, a page on the radio
     assert_eq!(r.term.page(), Page::Settings);
     assert!(r.vt.has("open it there"), "{}", r.vt.text());
 }

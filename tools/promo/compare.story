@@ -18,7 +18,7 @@ title: A repeater that times out
 layout: left
 left: Stock: a crossband repeat has no timeout, so a stuck carrier keeps the transmitter keyed.
 right: Ferrite: a timeout on every pass, a duty limit, and the last 30 minutes of activity on screen.
-setup: home; menu 0 3 5; press HASH; wait 18s
+setup: home; menu 0 3 4; press HASH; wait 18s
 script:
   wait 8s
 ---

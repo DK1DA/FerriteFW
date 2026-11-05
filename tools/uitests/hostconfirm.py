@@ -248,7 +248,7 @@ def si_inputs_on_each_receiver(t):
         # only on leaving broadcast): 0/0 before any broadcast since power-on, 1/0 after.
         first = (t.pin("PA7"), t.pin("PC5"))
         t.check(first in ((1, 0), (0, 0)), "home on 2 m: PA7/PC5 1/0 (0/0 before the SI4732's first use)", first)
-        t.keys("MENU 0 3 1")
+        t.keys("MENU 0 2 6")
         time.sleep(1.0)
         t.eq((t.pin("PA7"), t.pin("PC5")), (0, 0), "FM broadcast: PA7/PC5 0/0")
         t.home()

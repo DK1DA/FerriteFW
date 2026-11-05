@@ -372,7 +372,7 @@ const SI_VOLUME: u8 = 56;
 
 /// The band scope sweeping (SCOPE-4, SCOPE-5): one chip, its audio off, one point per wait. As stock (V0.27
 /// 0x08023808 / 0x080235E8): the frequency (REG_38/39), REG_30 0x0200 then 0xBFF1 (the VCO recalibration), the
-/// dwell, then REG_67. Stock dwells about 10 ms a point (its 10 ms tick); the dwell is 0 3 2 3's.
+/// dwell, then REG_67. Stock dwells about 10 ms a point (its 10 ms tick); the dwell is 0 3 1 3's.
 struct ScopeRun {
     chip: u8,
     centre: Freq10,
@@ -675,7 +675,7 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd, opts: SiOpts) -> R
 
 /// BCR-32, HF-35 (decision 292): the receive settings for the mode the SI4732 runs in. FM: de-emphasis by region
 /// (50 us outside the US and Canada), the channel filter automatic (the Si4732's default forces it wide), the seek
-/// band and spacing by region and step, the AGC or a fixed gain (0 3 1 2). AM: HF mode's bandwidth and AGC, and
+/// band and spacing by region and step, the AGC or a fixed gain (0 2 6 2). AM: HF mode's bandwidth and AGC, and
 /// stock's AVC max gain (0x7800) with soft mute off (chapter 20a).
 fn si_apply(si: &mut Si4732<SiBus>, o: SiOpts) -> Result<(), si4732::Error> {
     use si4732::prop;

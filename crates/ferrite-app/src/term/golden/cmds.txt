@@ -652,15 +652,15 @@
   | set 0 1 6 4 Start                 # Return to
   | set 0 2 4 Name                    # Channel display
   | set 0 2 5 50 km                   # Local zone
-  | set 0 3 1 1 100 kHz               # Step
-  | set 0 3 1 2 Auto                  # AGC
-  | set 0 3 1 3 On                    # Radio monitor
-  | set 0 3 1 4 Off                   # Sleep timer
-  | set 0 3 2 1 60                    # Bars
-  | set 0 3 2 2 25 kHz                # Step
-  | set 0 3 2 3 10.0 ms               # Sweep speed
-  | set 0 3 2 4 Off                   # Trigger
-  | set 0 3 2 5 Off                   # Waterfall row
+  | set 0 2 6 1 100 kHz               # Step
+  | set 0 2 6 2 Auto                  # AGC
+  | set 0 2 6 3 On                    # Radio monitor
+  | set 0 2 6 4 Off                   # Sleep timer
+  | set 0 3 1 1 60                    # Bars
+  | set 0 3 1 2 25 kHz                # Step
+  | set 0 3 1 3 10.0 ms               # Sweep speed
+  | set 0 3 1 4 Off                   # Trigger
+  | set 0 3 1 5 Off                   # Waterfall row
   | set 0 4 2 1 Off                   # Decode
   | set 0 4 2 2 439.987               # Frequency
   | set 0 4 2 3 None                  # Capcode filter
@@ -910,15 +910,15 @@
   | set 0 1 6 4 Start                 # Return to
   | set 0 2 4 Name                    # Channel display
   | set 0 2 5 50 km                   # Local zone
-  | set 0 3 1 1 100 kHz               # Step
-  | set 0 3 1 2 Auto                  # AGC
-  | set 0 3 1 3 On                    # Radio monitor
-  | set 0 3 1 4 Off                   # Sleep timer
-  | set 0 3 2 1 60                    # Bars
-  | set 0 3 2 2 25 kHz                # Step
-  | set 0 3 2 3 10.0 ms               # Sweep speed
-  | set 0 3 2 4 Off                   # Trigger
-  | set 0 3 2 5 Off                   # Waterfall row
+  | set 0 2 6 1 100 kHz               # Step
+  | set 0 2 6 2 Auto                  # AGC
+  | set 0 2 6 3 On                    # Radio monitor
+  | set 0 2 6 4 Off                   # Sleep timer
+  | set 0 3 1 1 60                    # Bars
+  | set 0 3 1 2 25 kHz                # Step
+  | set 0 3 1 3 10.0 ms               # Sweep speed
+  | set 0 3 1 4 Off                   # Trigger
+  | set 0 3 1 5 Off                   # Waterfall row
   | set 0 4 2 1 Off                   # Decode
   | set 0 4 2 2 439.987               # Frequency
   | set 0 4 2 3 None                  # Capcode filter

@@ -81,7 +81,7 @@ pub const TZ_DEFAULT: u8 = 14;
 const _: () = assert!(TIME_ZONES[TZ_DEFAULT as usize] == 0);
 
 pub const CLOCKS: [&str; 2] = ["24 h", "12 h"];
-/// 0 3 1 2, FM AGC: 0 is Auto, 1-10 fixed gain (0-36 dB in 4 dB steps).
+/// 0 2 6 2, FM AGC: 0 is Auto, 1-10 fixed gain (0-36 dB in 4 dB steps).
 pub const AGC_MAX: u8 = 10;
 pub const UNITS: [&str; 3] = ["Metric", "Imperial", "Nautical"];
 pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
@@ -104,7 +104,7 @@ pub const APRS_SHARE: [&str; 2] = ["APRS first", "A\u{b7}B first"];
 pub const SAT_MIN_EL: [u8; 5] = [0, 5, 10, 15, 20];
 pub const SAT_MIN_EL_START: u8 = 2;
 
-/// FM broadcast step (0 3 1 1) in 10 kHz units, and its names.
+/// FM broadcast step (0 2 6 1) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,7 +169,7 @@ pub struct Settings {
     pub mic_gain: u8,
     /// 0 8 1 (TX-30): the transmit timeout in 30 s steps, 1-20 (30-600 s; stock's TOT counts 30 s too).
     pub tx_timeout: u8,
-    /// 0 3 1 4 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
+    /// 0 2 6 4 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
     pub fm_sleep: u8,
     /// 0 7 4 2 (DISP-16, DISP-23): the screen's brightness, 1-10, and night red's own level (the item sets the one
     /// for the theme in use).
@@ -183,7 +183,7 @@ pub struct Settings {
     /// MCU temperature offset (SBAR-21) until decision 112 dropped it. Never read; whatever an older record left
     /// there has no effect.
     pub spare_temp: u8,
-    /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
+    /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 2 6).
     pub fm_freq: u16,
     pub fm_step: u8,
     pub fm_agc: u8,
@@ -204,7 +204,7 @@ pub struct Settings {
     pub fixed_alt: i16,
     /// 0 4 5 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
     pub same_codes: [u32; SAME_CODES],
-    /// Band scope (0 3 2): bars (an index into [`SCOPE_BAR_COUNTS`]), step (into the tuning step list), dwell
+    /// Band scope (0 3 1): bars (an index into [`SCOPE_BAR_COUNTS`]), step (into the tuning step list), dwell
     /// per point in 0.1 ms (1-40), trigger action ([`SCOPE_TRIGGERS`]), the trigger line (0 none, 1-9: hold a
     /// digit on the scope), the waterfall row, and the scope's mode (FM, NFM, AM: \* on the scope).
     pub scope_bars: u8,
@@ -345,7 +345,7 @@ pub const CW_ID_MODES: [&str; 3] = ["Off", "Every 10 min", "On unkey"];
 /// 0 8 8 1's values (TONE-16).
 /// 0 8 2 3's VOX tails, in 100 ms (VOX-5: 2 s by default, as nicFW's VOX Tail).
 pub const VOX_TAILS: [u8; 6] = [5, 10, 15, 20, 30, 50];
-/// 0 3 1 4's sleep times in minutes (BCR-5: off, 15-120 min).
+/// 0 2 6 4's sleep times in minutes (BCR-5: off, 15-120 min).
 pub const SLEEP_TIMES: [u8; 7] = [0, 15, 30, 45, 60, 90, 120];
 pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
 
@@ -398,9 +398,9 @@ impl Lock {
 }
 
 
-/// 0 3 2 1's values (SCOPE-9).
+/// 0 3 1 1's values (SCOPE-9).
 pub const SCOPE_BAR_COUNTS: [u8; 4] = [30, 60, 120, 240];
-/// 0 3 2 4's values (SCOPE-10).
+/// 0 3 1 4's values (SCOPE-10).
 pub const SCOPE_TRIGGERS: [&str; 3] = ["Off", "Monitor", "Log"];
 
 /// 0 6 3's values.
@@ -536,7 +536,7 @@ impl Settings {
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
-    /// settings write). FM AGC (0 3 1 2) is 0-10 and the clock (0 6 6) 0-1; the menu multiplies both in a u8,
+    /// settings write). FM AGC (0 2 6 2) is 0-10 and the clock (0 6 6) 0-1; the menu multiplies both in a u8,
     /// which overflowed on a bad record (found in the settings table refactor). Most other list
     /// settings are read modulo their list and need nothing here.
     pub fn sanitize(&mut self) {

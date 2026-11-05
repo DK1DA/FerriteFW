@@ -1,4 +1,4 @@
-//! Satellite mode (MENU 0 3 7; manual chapter 28a, SAT-1 to SAT-20; mock-ups
+//! Satellite mode (MENU 0 3 6; manual chapter 28a, SAT-1 to SAT-20; mock-ups
 //! https://claude.ai/artifact/ScfAxNJLH8UHkU5tHd18zh): the pass list (B22), the pass page before the rise and
 //! overhead, keyed up (B23), and the pointing page (B24). While it is open (or under the screen up) the
 //! satellite mode runs on the Radio task ([`super::activity::Mode::Sat`]): both chips, the downlink retuned each
@@ -63,7 +63,7 @@ impl SatScr {
     }
 }
 
-/// MENU 0 3 7 (SAT-1): the pass list; refused while transmitting or repeating, as HF mode.
+/// MENU 0 3 6 (SAT-1): the pass list; refused while transmitting or repeating, as HF mode.
 pub fn open(app: &mut App) -> Screen {
     if app.radio.keyed.is_some() || app.radio.mode == super::activity::Mode::Xb {
         app.show_toast(b"Satellites", if app.radio.keyed.is_some() { b"not keyed" } else { b"stop repeater first" }, false);

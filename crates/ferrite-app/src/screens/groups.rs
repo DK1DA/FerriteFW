@@ -82,15 +82,15 @@ const G1: [Entry; 6] = [
     Entry(concat!("Skip list|Empty|", txtc!("Frequencies * skipped in this scan."))),
     Entry(concat!("Advanced||", txtc!("Pause time, direction, scan inputs, return to."))),
 ];
-const G2: [Entry; 5] = [
+const G2: [Entry; 6] = [
     Entry(concat!("Browse||", txtc!("Zones, all channels, nearby, recent."))),
     Entry(concat!("Add repeater||", txtc!("Frequency, shift, tone, name."))),
     Entry(concat!("Zones||", txtc!("Name, scan options, priority channels."))),
     Entry(concat!("Channel display|Name|", txtc!("Name, number or frequency on home."))),
     Entry(concat!("Local zone|50 km|", txtc!("A zone of the channels within this range of you, nearest first. Needs a GPS fix or the fixed position (0 6 9)."))),
+    Entry(concat!("FM broadcast||", txtc!("Step, AGC, radio monitor, sleep timer."))),
 ];
-const G3: [Entry; 7] = [
-    Entry(concat!("FM broadcast||", txtc!("Listen now; hold MENU there for its settings."))),
+const G3: [Entry; 6] = [
     Entry(concat!("Band scope|60 bars|", txtc!("Bars, step, speed, trigger, waterfall."))),
     Entry(concat!("Frequency counter||", txtc!("Find a nearby transmitter's frequency."))),
     Entry(concat!("HF mode||", txtc!("Below 64 MHz. Everything else pauses."))),
@@ -173,13 +173,13 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry(concat!("Scan inputs|Off|", txtc!("Also a channel's TX frequency."))),
         Entry(concat!("Return to|Start|", txtc!("Where a stopped scan returns."))),
     ]),
-    ((3, 1), &[
+    ((2, 6), &[
         Entry(concat!("Step|100 kHz|", txtc!("Tuning step."))),
         Entry(concat!("AGC|Auto|", txtc!("Auto, or a fixed gain: 1 the most, 10 the least."))),
         Entry(concat!("Radio monitor|On|", txtc!("A slot opening interrupts the broadcast."))),
         Entry(concat!("Sleep timer|Off|", txtc!("End the broadcast after a time."))),
     ]),
-    ((3, 2), &[
+    ((3, 1), &[
         Entry(concat!("Bars|60|", txtc!("Bars across; span is bars x step."))),
         Entry(concat!("Step|25 kHz|", txtc!("Distance between bars."))),
         Entry(concat!("Sweep speed|1 ms|", txtc!("Time on each point."))),
@@ -454,15 +454,15 @@ static SETTINGS: [Setting; 95 + cfg!(feature = "bench") as usize] = [
     field!([1, 6, 4], scan_return_hit: bool, Kind::Flip(&["Start", "Last hit"]), Nothing),
     field!([2, 4, 0], ch_display: u8, Kind::Pick(&crate::settings::CHANNEL_DISPLAY), Nothing),
     field!([2, 5, 0], local: u8, Kind::Pick(&crate::local::RANGES), Nothing), // CHAN-34
-    field!([3, 1, 1], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), SiOpts),
-    field!([3, 1, 2], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), SiOpts),
-    field!([3, 1, 3], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([3, 1, 4], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
-    field!([3, 2, 1], scope_bars: u8, Kind::Round(SCOPE_BAR_COUNTS.len() as u8, bars_text), Nothing),
-    field!([3, 2, 2], scope_step: u8, Kind::Round(crate::slot::STEPS.len() as u8, scope_step_text), Nothing),
-    field!([3, 2, 3], special),
-    field!([3, 2, 4], scope_trig: u8, Kind::Pick(&SCOPE_TRIGGERS), Nothing),
-    field!([3, 2, 5], scope_wf: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([2, 6, 1], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), SiOpts),
+    field!([2, 6, 2], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), SiOpts),
+    field!([2, 6, 3], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([2, 6, 4], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
+    field!([3, 1, 1], scope_bars: u8, Kind::Round(SCOPE_BAR_COUNTS.len() as u8, bars_text), Nothing),
+    field!([3, 1, 2], scope_step: u8, Kind::Round(crate::slot::STEPS.len() as u8, scope_step_text), Nothing),
+    field!([3, 1, 3], special),
+    field!([3, 1, 4], scope_trig: u8, Kind::Pick(&SCOPE_TRIGGERS), Nothing),
+    field!([3, 1, 5], scope_wf: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 2, 1], pocsag_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 2, 2], special),
     field!([4, 2, 3], special),
@@ -766,7 +766,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(VERSION.as_bytes());
             false
         }
-        [3, 2, 3] => {
+        [3, 1, 3] => {
             let d = s.scope_dwell.clamp(1, 100);
             let _ = uwrite!(b, "{}.{} ms", d / 10, d % 10);
             s.scope_dwell != 100
@@ -985,7 +985,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             app.region_steps(); // VFO-18
         }
         // 0.1 ms steps up to 1 ms, then 1 ms steps to 10 ms (stock's dwell, the default).
-        [3, 2, 3] => {
+        [3, 1, 3] => {
             let v = s.scope_dwell.clamp(1, 100) as i32;
             let step = if v + d > 10 && v >= 10 { 10 } else { 1 };
             s.scope_dwell = (v + d * step).clamp(1, 100) as u8;
@@ -1104,7 +1104,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [8, 8, 4] => s.extend_tx = false,
         [8, 8, 5] if !app.remote_in => app.set_dry_tx(false), // TX-48: # by the radio's own keys only
         [8, 8, 5] => {}
-        [3, 2, 3] => s.scope_dwell = d.scope_dwell,
+        [3, 1, 3] => s.scope_dwell = d.scope_dwell,
         [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
         [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
         [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: crate::aprs::SSID_DEFAULT, ..app.aprs_cfg() }),

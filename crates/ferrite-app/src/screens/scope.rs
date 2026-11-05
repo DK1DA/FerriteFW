@@ -1,7 +1,7 @@
 //! Band scope (manual chapter 21, SCOPE-1 to SCOPE-13; Scope mock-up), after nicFW's: a muted sweep on the
 //! active slot's chip, bars above the noise floor, centre on the strongest, listen to the marker or the
 //! strongest, and a trigger line that listens or logs. ◀▶ move the marker, the knob moves the centre, digits
-//! type it, OK tunes the active slot to the marker, MENU opens the scope options (MENU 0 3 2).
+//! type it, OK tunes the active slot to the marker, MENU opens the scope options (MENU 0 3 1).
 //!
 //! Bars are redrawn 40 px at a time when their levels change (SCOPE-7). The waterfall keeps no history in
 //! RAM (SCOPE-6): each sweep paints one row into a 12-row band that wraps, a dark line marking the newest.
@@ -61,17 +61,17 @@ pub struct Scope {
     pub since: u16,
 }
 
-/// Bars in a sweep (0 3 2 1, SCOPE-9).
+/// Bars in a sweep (0 3 1 1, SCOPE-9).
 pub fn bars_n(app: &App) -> usize {
     SCOPE_BAR_COUNTS[app.set.scope_bars as usize % SCOPE_BAR_COUNTS.len()] as usize
 }
 
-/// The step between bars (0 3 2 2), 10 Hz units.
+/// The step between bars (0 3 1 2), 10 Hz units.
 pub fn step_of(app: &App) -> u16 {
     STEPS[app.set.scope_step as usize % STEPS.len()].0 as u16
 }
 
-/// Hold 1 on home, MENU 0 3 2 6 (SCOPE-1): the scope around the active slot's frequency.
+/// Hold 1 on home, MENU 0 3 1 6 (SCOPE-1): the scope around the active slot's frequency.
 pub fn open(app: &mut App) -> Screen {
     let f = app.slot(app.active).freq();
     app.radio.centre = f; // MODE-2: the reconciler starts the sweep here
@@ -393,7 +393,7 @@ impl View for Scope {
                 }
             });
         }
-        // Waterfall (0 3 2 5): one row per sweep, wrapping; the next row's place shows dark.
+        // Waterfall (0 3 1 5): one row per sweep, wrapping; the next row's place shows dark.
         let wf = app.set.scope_wf;
         if app.dirty(10, Mix::new().h(&wf).h(&wf.then_some(sweeps)).get()) {
             if wf {

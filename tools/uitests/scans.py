@@ -85,7 +85,7 @@ def range_scan_fast_pass_rate(t):
 
 @test("SCOPE-10", needs=("fm-station",), pages=("Group", "Home", "Scope"))
 def scope_trigger_monitor_and_log(t):
-    """The trigger over the broadcast band's strong carriers: Monitor (0 3 2 4) listens to the strongest bar once it
+    """The trigger over the broadcast band's strong carriers: Monitor (0 3 1 4) listens to the strongest bar once it
     has been over the line 3 sweeps running (`listen=3`), and goes back to sweeping when its squelch closes; Log
     marks it without stopping (until the event log's store is built, its toast is the record: "Over the line")."""
     stopped = t.stop_scans()
@@ -95,7 +95,7 @@ def scope_trigger_monitor_and_log(t):
         t.cmd("slot A active")
         for trig in ("Monitor", "Log"):
             t.home()
-            u = t.keys("MENU 0 3 2 4")
+            u = t.keys("MENU 0 3 1 4")
             for _ in range(3):
                 if u.sel["value"] == trig:
                     break

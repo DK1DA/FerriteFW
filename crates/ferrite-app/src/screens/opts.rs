@@ -143,7 +143,7 @@ const GPS: [Opt; 3] = [
     ("Waypoints", Act::Open(Dest::Waypoints), txt!("Distance and bearing to each")),
     ("GPS settings", Act::Open(Dest::Group(6)), txt!("On or off, format, units, time zone")),
 ];
-const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), txt!("Bars, step, speed, trigger, waterfall"))];
+const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 1)), txt!("Bars, step, speed, trigger, waterfall"))];
 /// APRS-17.7 (decision 257): the one APRS list, the same from the APRS slot (OK or hold MENU on home) and from the
 /// heard list (hold MENU). OK on the APRS slot opens it on its "Heard" row (APRS mode, KISS) or its "Beacon now"
 /// row (beacons alone hold C); a digit opens a row that opens a screen (MENU-25), so OK 1 reads the messages.

@@ -1455,7 +1455,7 @@ def selftest_sim(a, tr):
         diff = tr.uitest.dump_diff(dump0, dump1)
         check("the simulator's dump is the same after (channels, zone, settings, slots put back)", not diff, diff[:6])
         check("no restore notes", not notes, notes)
-        # The crossband fixture against the simulator's own firmware code: the start page by MENU 0 3 5, its grid by
+        # The crossband fixture against the simulator's own firmware code: the start page by MENU 0 3 4, its grid by
         # the cells and the knob, `xb start` and its readback, SIDE1 held, a remote key stopping it, the grid put back.
         from tworadio_tests import crossband as trx
         dump0 = rx.cmd("dump")

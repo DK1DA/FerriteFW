@@ -52,11 +52,11 @@ def off_step_is_tuned_as_typed(t):
 
 @test("VFO-14", "VFO-21", pages=("Entry", "Home"))
 def entry_ranges(t):
-    """Below 18 MHz: "< 18 MHz: HF mode, MENU 0 3 4"; 630-756 and above 1300 MHz refused with the range;
+    """Below 18 MHz: "< 18 MHz: HF mode, MENU 0 3 3"; 630-756 and above 1300 MHz refused with the range;
     18, 630, 756 and 1300 MHz accepted."""
     tune(t)
     u = t.keys("1 0 STAR 5 MENU")
-    t.check(u.toast and u.toast["head"] == "< 18 MHz" and "MENU 0 3 4" in u.toast["body"], "10.5 MHz", u.toast)
+    t.check(u.toast and u.toast["head"] == "< 18 MHz" and "MENU 0 3 3" in u.toast["body"], "10.5 MHz", u.toast)
     tune(t)
     u = t.keys("7 0 0 MENU")
     t.check(u.toast and u.toast["head"] == "Can't tune" and "756-1300" in u.toast["body"], "7 0 0: refused", u.toast)

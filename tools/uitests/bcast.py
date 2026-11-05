@@ -83,9 +83,9 @@ def broadcast_ignores_watch_and_drops_relay_slots(t):
 
 @test("BCR-25", pages=("Home",))
 def knob_tunes_and_arrows_seek_the_broadcast_card(t):
-    """On the broadcast card the knob and ▲▼ tune by the FM step (0 3 1 1) and ◀▶ seek, the station found taken
+    """On the broadcast card the knob and ▲▼ tune by the FM step (0 2 6 1) and ◀▶ seek, the station found taken
     into the VFO."""
-    step = t.get("0 3 1 1")
+    step = t.get("0 2 6 1")
     t.need(step.endswith("kHz"), f"FM step {step!r}")
     khz = float(step.split()[0])
     t.cmd("slot A vfo 98.5")

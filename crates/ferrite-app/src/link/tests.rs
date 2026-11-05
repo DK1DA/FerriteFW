@@ -1212,7 +1212,7 @@ fn xb_command_starts_and_stops_the_repeater() {
 #[test]
 fn remote_keys_start_and_stop_the_repeater() {
     let mut pc = Pc::tx();
-    pc.keys("MENU 0 3 5");
+    pc.keys("MENU 0 3 4");
     assert!(matches!(pc.app.screen(), Screen::Crossband(_)));
     pc.keys("#");
     assert!(pc.xb_running(), "{}", pc.ui());

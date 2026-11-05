@@ -89,7 +89,7 @@ DEFAULTS = {
     "beacon_now_keys": "MENU 0 5 1 MENU:long",  # the heard list's options (MENU-25): row 1 is Beacon now
     "tx_delay_tol_ms": 60,
     "aprs_spacing_s": 30.0,
-    "hf_keys": "MENU 0 3 4",  # opens HF mode (HF-2)
+    "hf_keys": "MENU 0 3 3",  # opens HF mode (HF-2)
     "hf_tune_keys": "4 0 STAR 0 0 0 MENU",  # in HF mode: 40.000 MHz (chip 1's range, outside the band plan: HF-23)
     "bcast_mhz": 100.1,
     "watch_resume_s": 30.0,

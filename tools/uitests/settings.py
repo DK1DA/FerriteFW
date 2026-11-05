@@ -71,7 +71,7 @@ def walk(t, paths):
             via.append(f"{path} {name} (typed)")
             continue
         if u.id != "Group":
-            # A tool's own settings (0 3 1 x, FM broadcast): its number opens the tool; hold MENU there has them.
+            # A tool's own settings (0 2 6 x, FM broadcast): its number opens the tool; hold MENU there has them.
             t.check(u.id in ("Fm", "Scope", "Hf"), f"{path} {name}: a group or its tool's screen", u.id)
             via.append(f"{path} {name} ({u.id})")
             continue

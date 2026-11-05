@@ -63,10 +63,10 @@ def value_num(v):
 # ---- the start page ----
 
 def page(t):
-    """The start page from home (MENU 0 3 5), the repeater not running."""
+    """The start page from home (MENU 0 3 4), the repeater not running."""
     t.rx.home()
-    u = t.rx.keys("MENU 0 3 5")
-    t.check(u.id == "Crossband" and xb(u).get("running") == 0, "the crossband start page (MENU 0 3 5)",
+    u = t.rx.keys("MENU 0 3 4")
+    t.check(u.id == "Crossband" and xb(u).get("running") == 0, "the crossband start page (MENU 0 3 4)",
             f"{u.id} {xb(u)}")
     return u
 

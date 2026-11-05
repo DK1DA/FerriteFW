@@ -926,7 +926,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
 /// Knob or ▲▼ on home: a step in VFO mode (NAV-2), a channel in channel mode (NAV-1); big with SIDE2 (NAV-3).
 fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
     let a = app.active as usize;
-    // BCR-25: a VFO in the broadcast band steps by the FM step (0 3 1 1)
+    // BCR-25: a VFO in the broadcast band steps by the FM step (0 2 6 1)
     let fm_step = (!big && app.in_bcast_band(a as u8)).then(|| crate::settings::FM_STEPS[app.set.fm_step as usize % 3].0 as i32 * 1000);
     if app.slots[a].on_channel() {
         let (z, pos) = (app.slots[a].zone, app.slots[a].pos);

@@ -150,7 +150,7 @@ def one_measurement_per_carrier(t):
 
 @test("TSRCH-3", part=("TSRCH-2",), keyups=(4, 4, 4), idle=10)
 def tone_search_finds_the_tone(t):
-    """Tone search (MENU 0 3 6) on A at 145.495; the other radio sends 88.5 there: the screen's result (the
+    """Tone search (MENU 0 3 5) on A at 145.495; the other radio sends 88.5 there: the screen's result (the
     readback's `tsearch found=`) reads "T 88.5" within 3 s of the carrier, with no RX tone on the slot and with
     one (T 100.0, which the search must not just repeat); 67.0 and 250.3, the table's ends (decision 177's scale);
     then D023N. The receiving session (Oct 15, 2026) found
@@ -160,8 +160,8 @@ def tone_search_finds_the_tone(t):
                                ("off", "250.3", "T 250.3"), ("off", "D023N", "D023N")):
         rx_vfo(t, "A", VHF, tone=rxtone, active=True)
         t.rx.home()
-        u = t.rx.keys("MENU 0 3 6")
-        t.need(u.id == "ToneSearch", f"MENU 0 3 6 isn't tone search: {u.id}")
+        u = t.rx.keys("MENU 0 3 5")
+        t.need(u.id == "ToneSearch", f"MENU 0 3 5 isn't tone search: {u.id}")
         t.eq((u["tsearch"] or {}).get("found"), "", f"rx tone {rxtone}: searching before the carrier")
         tx_on(t, VHF, sent)
         with t.key(4, f"{sent} into tone search (rx tone {rxtone})"):

@@ -1666,7 +1666,7 @@ impl App {
         self.send_si_opts();
     }
 
-    /// BCR-32, HF-35 (decision 292): the SI4732's receive settings to the Radio task: FM's AGC (0 3 1 2) and
+    /// BCR-32, HF-35 (decision 292): the SI4732's receive settings to the Radio task: FM's AGC (0 2 6 2) and
     /// seek step, HF mode's AGC and AM bandwidth, and what the region decides (FM de-emphasis and band, MW spacing).
     pub(crate) fn send_si_opts(&mut self) {
         use ferrite_core::msg::SiOpts;

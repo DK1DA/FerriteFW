@@ -75,7 +75,7 @@ impl App {
         }
     }
 
-    /// The Radio task's mute mask: the quick mutes (HOME-15), and with radio monitor off (0 3 1 3, BCR-4) every
+    /// The Radio task's mute mask: the quick mutes (HOME-15), and with radio monitor off (0 2 6 3, BCR-4) every
     /// slot but the broadcast one while it plays, so none of them takes the speaker from it (they still receive,
     /// light the LED and decode).
     pub(crate) fn radio_mute(&self) -> u8 {

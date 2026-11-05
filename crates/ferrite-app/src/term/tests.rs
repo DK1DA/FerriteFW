@@ -765,7 +765,7 @@ fn command_line_set_and_get() {
     r.poll();
     assert!(!r.term.cmd);
     // Third-level numbers and values with spaces.
-    r.cmd("set 0 3 1 1 200 kHz");
+    r.cmd("set 0 2 6 1 200 kHz");
     assert_eq!(r.app.set.fm_step, 2);
     r.cmd("set 0 1 1 off");
     assert_eq!(r.app.watch, 0);

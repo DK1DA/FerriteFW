@@ -8,11 +8,11 @@ from .core import test
 
 @test("BCR-1", pages=("Group",))
 def fm_broadcast_settings(t):
-    """MENU 0 3 1 is FM broadcast's settings (decision 352: no FM screen; a slot in the band is the receiver):
+    """MENU 0 2 6 is FM broadcast's settings (decision 352: no FM screen; a slot in the band is the receiver):
     step, AGC, radio monitor, sleep timer; BACK leaves and the slots are as they were."""
     before = [t.slot(L) for L in "AB"]
-    u = t.keys("MENU 0 3 1")
-    t.eq(u.names()[:4], ["Step", "AGC", "Radio monitor", "Sleep timer"], "MENU 0 3 1")
+    u = t.keys("MENU 0 2 6")
+    t.eq(u.names()[:4], ["Step", "AGC", "Radio monitor", "Sleep timer"], "MENU 0 2 6")
     t.keys("BACK")
     t.eq([t.slot(L) for L in "AB"], before, "slots A and B unchanged")
 
@@ -46,10 +46,10 @@ def side2_starts_and_stops_a_scan(t):
 
 @test("XB-2", "XB-3", pages=("Crossband", "Group"))
 def crossband_start_page(t):
-    """MENU 0 3 5: the crossband repeater's start page (knob changes, # starts, BACK leaves); nothing starts
+    """MENU 0 3 4: the crossband repeater's start page (knob changes, # starts, BACK leaves); nothing starts
     by opening it."""
-    u = t.keys("MENU 0 3 5")
-    t.eq(u.id, "Crossband", "MENU 0 3 5")
+    u = t.keys("MENU 0 3 4")
+    t.eq(u.id, "Crossband", "MENU 0 3 4")
     t.eq(u.hint("#"), "Start", "# starts")
     t.eq(u.state["keyed"], "-", "nothing transmits")
     u = t.keys("BACK")

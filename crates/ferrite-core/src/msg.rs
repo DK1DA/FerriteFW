@@ -123,7 +123,7 @@ pub enum RadioCmd {
     /// Band scope sweep around a centre at a step (10 Hz units), with the last [`RadioCmd::ScopeCfg`]; off when
     /// `on` is false (SCOPE-4). The active slot's chip sweeps with its audio off.
     Sweep { centre: Freq10, step: u16, on: bool },
-    /// The band scope's points per sweep and dwell per point in 0.1 ms (SCOPE-9, 0 3 2 3); sent before a sweep.
+    /// The band scope's points per sweep and dwell per point in 0.1 ms (SCOPE-9, 0 3 1 3); sent before a sweep.
     /// Apart from [`RadioCmd::Sweep`] so a command stays 8 bytes. `strip`: the sweep is home's strip, which keeps
     /// looking at the active slot's own frequency and holds there on a carrier (MODE-5, decision 115).
     ScopeCfg { bars: u8, dwell: u8, strip: bool },
@@ -823,7 +823,7 @@ pub enum ModeLive {
 /// The SI4732's receive settings from the UI (BCR-32, HF-35; decision 292), packed to keep [`RadioCmd`] small.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SiOpts {
-    /// FM broadcast's AGC (0 3 1 2): 0 automatic, 1-10 a fixed gain, 1 the most.
+    /// FM broadcast's AGC (0 2 6 2): 0 automatic, 1-10 a fixed gain, 1 the most.
     pub fm_agc: u8,
     /// HF mode's AGC (the same scale) on the SI4732's AM.
     pub am_agc: u8,

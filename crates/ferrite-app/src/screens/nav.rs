@@ -25,7 +25,7 @@
 //! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
 //! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Crossband is MENU 0 3 5 (Tools); the mailbox is the Status page's last row. The screens an event opens
+//! Crossband is MENU 0 3 4 (Tools); the mailbox is the Status page's last row. The screens an event opens
 //! have App hooks the firmware (and the simulator's keys) call: [`App::power_off`], [`App::battery_empty`],
 //! [`App::ssb_patch_found`], [`App::link_write_progress`] and
 //! [`App::link_write_done`], [`App::same_alert`].
@@ -98,19 +98,19 @@ pub enum Dest {
     Emergency,
     /// B9: the scan screen.
     Scan,
-    /// B10: band scope (hold 1, MENU 0 3 2 6).
+    /// B10: band scope (hold 1, MENU 0 3 1 6).
     BandScope,
-    /// B12, B13: HF mode (MENU 0 3 4 only).
+    /// B12, B13: HF mode (MENU 0 3 3 only).
     HfMode,
-    /// B14: tone search (MENU 0 3 6).
+    /// B14: tone search (MENU 0 3 5).
     ToneSearch,
-    /// B22-B24: satellite mode (MENU 0 3 7).
+    /// B22-B24: satellite mode (MENU 0 3 6).
     Satellites,
-    /// B15: frequency counter (MENU 0 3 3).
+    /// B15: frequency counter (MENU 0 3 2).
     Counter,
     /// B17: an alert (SAME, DSC distress).
     Alert,
-    /// B18-B20: crossband repeater (MENU 0 3 5).
+    /// B18-B20: crossband repeater (MENU 0 3 4).
     Crossband,
     /// B21: squelch from home (SIDE1 + knob); a toast for now.
     Squelch,
@@ -322,14 +322,14 @@ pub const MENU0: [(&[u8], Dest); 53] = [
     (&[2, 1], Dest::Browse),
     (&[2, 2], Dest::AddRepeater),
     (&[2, 3], Dest::Zones),
-    (&[3, 1], Dest::Sub(3, 1)), // BCR-1 (decision 352): FM broadcast's settings; a slot in the band is the receiver
-    (&[3, 2], Dest::Sub(3, 2)),
-    (&[3, 2, 6], Dest::BandScope),
-    (&[3, 3], Dest::Counter),
-    (&[3, 4], Dest::HfMode),
-    (&[3, 5], Dest::Crossband),
-    (&[3, 6], Dest::ToneSearch),
-    (&[3, 7], Dest::Satellites), // SAT-1
+    (&[2, 6], Dest::Sub(2, 6)), // BCR-1 (decision 352): FM broadcast's settings; a slot in the band is the receiver
+    (&[3, 1], Dest::Sub(3, 1)),
+    (&[3, 1, 6], Dest::BandScope),
+    (&[3, 2], Dest::Counter),
+    (&[3, 3], Dest::HfMode),
+    (&[3, 4], Dest::Crossband),
+    (&[3, 5], Dest::ToneSearch),
+    (&[3, 6], Dest::Satellites), // SAT-1
     (&[4, 1], Dest::EventLog),
     (&[4, 2], Dest::Sub(4, 2)),
     (&[4, 5], Dest::Sub(4, 5)),

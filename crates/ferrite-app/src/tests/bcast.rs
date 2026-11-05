@@ -139,7 +139,7 @@ fn rds_text_rule() {
     assert_eq!(rds_text(b"CBC R1  ", &full).len(), 64, "all 64 characters");
 }
 
-/// BCR-25: on home the knob tunes a broadcast VFO by the FM step (0 3 1 1) and ◀▶ seek; the station sought is
+/// BCR-25: on home the knob tunes a broadcast VFO by the FM step (0 2 6 1) and ◀▶ seek; the station sought is
 /// taken into the slot as it lands.
 #[test]
 fn knob_steps_and_seek() {
@@ -166,16 +166,16 @@ fn knob_steps_and_seek() {
     assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_650))), "not tuned again");
 }
 
-/// BCR-1, BCR-25 (decision 352): MENU 0 3 1 is the broadcast's settings, not a screen; 0 3 1 1 the step, which
+/// BCR-1, BCR-25 (decision 352): MENU 0 2 6 is the broadcast's settings, not a screen; 0 2 6 1 the step, which
 /// the broadcast slot tunes by.
 #[test]
 fn fm_settings_group_not_a_screen() {
     let mut t = ready();
     tune(&mut t, 0, FM1005);
-    menu0(&mut t, &[3, 1]);
+    menu0(&mut t, &[2, 6]);
     assert!(matches!(t.app.screen(), Screen::Group(_)), "{:?}", t.app.screen());
     assert_eq!(t.app.radio.mode, Mode::Fm, "the slot still plays");
-    menu0(&mut t, &[3, 1, 1]);
+    menu0(&mut t, &[2, 6, 1]);
     t.knob(1);
     assert_eq!(t.app.set.fm_step, 2);
     t.hold(Key::Exit);
@@ -212,7 +212,7 @@ fn out_of_range_agc_and_clock_do_not_overflow() {
     let mut t = ready();
     t.app.set.fm_agc = 200;
     t.app.set.clock = 200;
-    menu0(&mut t, &[3, 1, 2]);
+    menu0(&mut t, &[2, 6, 2]);
     t.knob(1);
     assert!(t.app.set.fm_agc <= crate::settings::AGC_MAX, "{}", t.app.set.fm_agc);
     menu0(&mut t, &[6, 6]);
@@ -343,7 +343,7 @@ fn lease_drop_restarts_both() {
 #[test]
 fn sleep_timer_mutes_the_broadcast_slot() {
     let mut t = ready();
-    crate::screens::groups::change(&mut t.app, &[3, 1, 4], 1); // 15 min
+    crate::screens::groups::change(&mut t.app, &[2, 6, 4], 1); // 15 min
     tune(&mut t, 0, FM1005);
     t.wait(14 * 60_000);
     assert_eq!(t.app.mute & 1, 0, "still playing at 14 min");
@@ -354,7 +354,7 @@ fn sleep_timer_mutes_the_broadcast_slot() {
     assert_eq!(t.app.bcast_slot(), Some(0), "the slot is still the broadcast slot")
 }
 
-/// BCR-4: radio monitor off (0 3 1 3) mutes every slot but the broadcast one while it plays, so none takes the
+/// BCR-4: radio monitor off (0 2 6 3) mutes every slot but the broadcast one while it plays, so none takes the
 /// speaker from it; on again, or the broadcast over, they are heard again. The quick mutes (HOME-15) stay as set.
 #[test]
 fn radio_monitor_off_keeps_the_slots_quiet() {

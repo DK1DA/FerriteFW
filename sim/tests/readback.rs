@@ -35,7 +35,7 @@ fn drawn(r: &mut Radio, s: &str) {
 #[test]
 fn hf_mode_readback() {
     let mut r = Radio::new();
-    r.menu("0 3 4").wait(200);
+    r.menu("0 3 3").wait(200);
     assert!(line(&r, "hf").contains("loading="), "the patch loading first");
     r.wait(4000);
     let l = line(&r, "hf");
@@ -90,7 +90,7 @@ fn scope_readback_counts_blank_bars() {
 #[test]
 fn crossband_start_readback() {
     let mut r = Radio::new();
-    r.menu("0 3 5").wait(300);
+    r.menu("0 3 4").wait(300);
     let rb = r.sim.readback();
     assert!(rb.contains("xb running=0 cell=0"), "{rb}");
     let checks: Vec<&str> = rb.lines().filter(|l| l.starts_with("check ")).collect();

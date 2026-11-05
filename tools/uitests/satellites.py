@@ -17,8 +17,8 @@ def sat_line(u):
 
 def open_list(t):
     t.home()
-    u = t.keys("MENU 0 3 7")
-    t.eq(u.id, "SatList", "MENU 0 3 7 opens the pass list (SAT-1)")
+    u = t.keys("MENU 0 3 6")
+    t.eq(u.id, "SatList", "MENU 0 3 6 opens the pass list (SAT-1)")
     t.need(sat_line(u).get("state") not in ("no-sats", "no-clock", "no-position"), f"satellite mode can't predict here: {sat_line(u).get('state')}")
     return u
 
@@ -30,7 +30,7 @@ def ready(t):
 
 @test("SAT-1", "SAT-14", pages=("SatList", "Group"))
 def satellite_mode_takes_and_gives_back(t):
-    """MENU 0 3 7 opens the pass list with satellite mode running (both chips: watch and scans pause); BACK leaves
+    """MENU 0 3 6 opens the pass list with satellite mode running (both chips: watch and scans pause); BACK leaves
     it and normal receive comes back."""
     u = open_list(t)
     t.eq(u.title, "Passes", "the status bar's name")

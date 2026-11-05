@@ -155,7 +155,7 @@ fn greyed_settings_say_why() {
 #[test]
 fn hf_memory_written_on_leaving_not_while_tuning() {
     let mut r = Radio::new();
-    r.run("menu 0 3 4; wait 9s; expect screen \"HF mode\"");
+    r.run("menu 0 3 3; wait 9s; expect screen \"HF mode\"");
     let _ = r.sim.flash_changed();
     r.knob(5).wait(3000);
     assert!(!r.sim.flash_changed(), "no flash write while tuning");

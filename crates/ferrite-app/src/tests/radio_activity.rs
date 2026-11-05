@@ -493,11 +493,11 @@ fn tone_search_on_a_channel_is_not_saved() {
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"loaded, not saved"));
 }
 
-/// TSRCH-6, TSRCH-7: MENU 0 3 3; OK copies to the VFO.
+/// TSRCH-6, TSRCH-7: MENU 0 3 2; OK copies to the VFO.
 #[test]
 fn frequency_counter() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 3]);
+    menu0(&mut t, &[3, 2]);
     assert!(matches!(t.app.screen(), Screen::Counter(_)));
     assert!(t.cmds().contains(&RadioCmd::Counter(true)));
     t.live.mode = ModeLive::Probe { freq: mhz(147) + 15_000, rssi: -40, tone: 0 };
@@ -513,7 +513,7 @@ fn frequency_counter() {
 #[test]
 fn counter_range_and_hold() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 3]);
+    menu0(&mut t, &[3, 2]);
     for f in [mhz(28) + 40_000, mhz(700), mhz(1_400)] {
         t.live.mode = ModeLive::Probe { freq: f, rssi: -40, tone: 0 };
         t.wait(100);
@@ -566,7 +566,7 @@ fn squelch_screen_while_side1_is_held() {
 fn hf_mode() {
     let mut t = ready();
     t.app.set_region(Some(Region::Us), false);
-    menu0(&mut t, &[3, 4]);
+    menu0(&mut t, &[3, 3]);
     assert!(matches!(t.app.screen(), Screen::Hf(_)));
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: true, .. })));
     let mut fb = FrameBuffer::new();
@@ -616,7 +616,7 @@ fn star_enters_split_tx_and_hf() {
     // HF mode: 7 * 074 * tunes 7.074 MHz
     t.app.set_region(Some(Region::Us), false);
     t.app.go_home();
-    menu0(&mut t, &[3, 4]);
+    menu0(&mut t, &[3, 3]);
     t.wait(100);
     assert!(matches!(t.app.screen(), Screen::Hf(h) if h.loaded), "{:?}", t.app.screen());
     for k in [Key::Digit(7), Key::Star, Key::Star, Key::Digit(0), Key::Digit(7), Key::Digit(4), Key::Star] {
@@ -2103,7 +2103,7 @@ fn tone_search_readback() {
 #[test]
 fn counter_readback() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 3]);
+    menu0(&mut t, &[3, 2]);
     t.wait(100);
     assert!(line_of(&t, "counter ").starts_with("counter freq=0.00000 s=\"\" meter=0"), "{}", line_of(&t, "counter "));
     t.live.mode = ModeLive::Probe { freq: mhz(147) + 15_000, rssi: -60, tone: 0 };

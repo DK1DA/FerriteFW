@@ -88,7 +88,7 @@ title: Crossband repeater
 layout: left
 left: Two bands, one radio: what's heard on A goes out on B, and back.
 right: Live: who's passing, the timeout, and the last 30 minutes of activity both ways.
-setup: press BACK; home; menu 0 3 5; press HASH; wait 18s
+setup: press BACK; home; menu 0 3 4; press HASH; wait 18s
 script:
   wait 9s
 ---
@@ -153,7 +153,7 @@ title: Shortwave on a handheld
 layout: right
 left: The broadcast receiver doubles as an HF receiver: AM on long wave, medium wave and shortwave.
 right: Its own tuning screen, with the signal and the station's band at a glance.
-setup: press BACK; home; menu 0 3 4; wait 2700ms; type 9580; press OK; wait 3000ms
+setup: press BACK; home; menu 0 3 3; wait 2700ms; type 9580; press OK; wait 3000ms
 script:
   wait 1200ms
   knob 3

@@ -206,13 +206,13 @@ pub fn run(scale: u32) {
     s.save("key-test");
     s.home();
 
-    // FM broadcast's settings (MENU 0 3 1; decision 352: a slot in the band is the receiver).
-    s.menu0(&[3, 1]);
+    // FM broadcast's settings (MENU 0 2 6; decision 352: a slot in the band is the receiver).
+    s.menu0(&[2, 6]);
     s.save("fm-menu");
     s.home();
 
     // HF mode: the patch loading, the screen, its options, the recent list; and the Status page meanwhile.
-    s.menu0(&[3, 4]);
+    s.menu0(&[3, 3]);
     s.run(700); // the fake radio streams the patch in about 2 s
     s.save("hf-loading");
     s.run(2000);
