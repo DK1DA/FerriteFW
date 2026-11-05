@@ -316,6 +316,8 @@ pub async fn task() {
     let mut meter: Option<ferrite_core::rxmeter::Meter> = None;
     // PWR-26.9: the APRS slot's squelch (the Radio task's), and the halves left of the capture's tail once it shut
     let (mut sq, mut tail) = (false, 0u32);
+    #[cfg(feature = "bench")]
+    let mut sq_at: Option<embassy_time::Instant> = None;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
         #[cfg(all(feature = "tx", feature = "bench"))]
@@ -345,6 +347,10 @@ pub async fn task() {
                         if sq && !open {
                             tail = ferrite_core::msg::SQ_TAIL_MS / HALF_MS;
                         }
+                        #[cfg(feature = "bench")]
+                        if open && !sq {
+                            sq_at = Some(embassy_time::Instant::now());
+                        }
                         sq = open;
                     }
                     _ => {}
@@ -369,6 +375,14 @@ pub async fn task() {
                     adc::init();
                     dec = decim(listen);
                     audio::capture_start();
+                    // PWR-26.9: the bench's check that a capture starts well inside a packet's TX delay
+                    #[cfg(feature = "bench")]
+                    if let Some(at) = sq_at.take() {
+                        let ms = at.elapsed().as_millis() as u32;
+                        crate::bringup::linef(|l| {
+                            let _ = ufmt::uwrite!(l, "dsp: capture {} ms after the squelch opened", ms);
+                        });
+                    }
                 } else if !want && capturing {
                     audio::capture_stop();
                 }
@@ -503,11 +517,21 @@ pub async fn task() {
                     audio::capture_stop();
                 }
                 play(&frame).await;
-                if capturing {
+                // PWR-26.9.1: a digipeater's copy comes back before the squelch's open reaches here (Alex, Nov 4,
+                // clear: the speaker broke squelch on the echo, nothing framed): capture now, whatever the squelch.
+                if running == DecoderKind::Afsk {
+                    tail = tail.max(ferrite_core::msg::AFTER_TX_MS / HALF_MS);
+                }
+                let want = capturing || running == DecoderKind::Afsk;
+                if want {
                     clock::for_audio().await;
+                    if !capturing {
+                        adc::init();
+                    }
                     dec = decim(listen);
                     audio::capture_start();
                 }
+                capturing = want;
                 AFSK_DONE.signal(true);
                 crate::chan::TERM_WAKE.signal(()); // the UI task's APRS unkeys now, not at its next 20 ms pass
             }

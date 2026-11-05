@@ -2000,10 +2000,7 @@ fn swap(t: &mut Toks) -> Result<Done, No> {
     let set = match t.next()? {
         None => None,
         Some(Tok::Word(w)) if same(w, b"off") => Some(0),
-        Some(Tok::Word(w)) => match w {
-            [c @ (b'A'..=b'C' | b'a'..=b'c')] => Some(1 << (c.to_ascii_uppercase() - b'A')),
-            _ => return Err(t.say_t(USAGE)),
-        },
+        Some(Tok::Word([c @ (b'A'..=b'C' | b'a'..=b'c')])) => Some(1 << (c.to_ascii_uppercase() - b'A')),
         _ => return Err(t.say_t(USAGE)),
     };
     if t.next()?.is_some() {

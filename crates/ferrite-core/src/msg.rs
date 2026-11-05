@@ -304,6 +304,9 @@ pub enum DspCmd {
 
 /// PWR-26.9: how long the AFSK capture runs on after the APRS slot's squelch closes (the frame's last flags).
 pub const SQ_TAIL_MS: u32 = 300;
+/// PWR-26.9.1: after our own AFSK transmission the capture runs this long whatever the squelch says, so a
+/// digipeater's copy (a second or two later, while the chip settles from the key-up) is heard from its first flag.
+pub const AFTER_TX_MS: u32 = 5000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecoderKind {
