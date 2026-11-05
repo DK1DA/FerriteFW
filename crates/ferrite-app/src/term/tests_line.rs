@@ -84,3 +84,51 @@ fn command_line_only() {
     assert!(s.contains("Ferrite terminal closed"), "{s:?}");
     assert!(!r.term.on());
 }
+
+/// TERM-12, SAT-3, TERM-35 (coverage of the command line's edges): `sat` with nothing held, `sat del` and its usage,
+/// `sat add` taking a TLE with an alpha-5 catalogue number and refusing a CSV line that isn't OMM; `get` with every
+/// setting at its default; `quick` with too much; `knob` past 20 and while keyed; `slot` naming a scan.
+#[cfg(feature = "line-cmds")]
+#[test]
+fn command_line_edges() {
+    let mut r = Rig::new();
+    r.send(b"\r");
+    for (line, want) in [
+        ("sat del 5", "No satellite at 5"),
+        ("sat del", "sat del N"),
+        ("sat frob", "sat lists them"),
+        ("quick 1 hello there extra", "quick"),
+        ("knob 30", "knob"),
+    ] {
+        let s = r.send(std::format!("{line}\r").as_bytes());
+        assert!(s.contains(want), "{line}: {s:?}");
+    }
+    // SAT-3: a CSV line that isn't OMM is refused with its reason; a TLE with an alpha-5 catalogue number (A0001 is
+    // 100001) parses and goes to the store (the RAM sample has none: busy, paste again)
+    let s = r.send(b"sat add\r");
+    assert!(s.contains("Paste satellites"), "{s:?}");
+    let s = r.send(b"foo,bar,baz\r");
+    assert!(s.contains("not OMM CSV"), "{s:?}");
+    let s = r.send(b"ALPHA TEST\r1 A0001U 02058C   26304.82911449  .00000904  00000+0  12403-3 0  9994\r2 A0001  64.5527  66.1378 0068979 237.1936 122.2515 14.83296838284726\r");
+    assert!(s.contains("busy: paste it again") && !s.contains("catalogue number"), "{s:?}");
+    let s = r.send(b"end\r");
+    assert!(s.contains("Done: 4 lines read, 0 applied, 2 refused."), "{s:?}");
+    // TERM-12: get lists the settings away from their defaults, and says when there are none
+    let s = r.send(b"get\r");
+    assert!(s.contains("All settings are at their defaults."), "{s:?}");
+    r.send(b"set 0 7 7 2 Off\r");
+    let s = r.send(b"get\r");
+    assert!(s.contains("set 0 7 7 2 Off"), "{s:?}");
+    // LINK-19: a remote knob step while keyed is refused with the reason
+    r.app.radio.keyed = Some(0);
+    let s = r.send(b"knob +2\r");
+    assert!(s.contains("knob: transmitting"), "{s:?}");
+    r.app.radio.keyed = None;
+    // TERM-12: a channel's name as name=WORD
+    let s = r.send(b"ch 1 name=Club\r");
+    assert!(s.contains("Channel 1 saved"), "{s:?}");
+    // TERM-35: slot names a scan
+    r.app.scan_mask = 1;
+    let s = r.send(b"slot A\r");
+    assert!(s.contains(" scanning"), "{s:?}");
+}

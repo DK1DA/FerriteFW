@@ -740,7 +740,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             if s.lpm == 2 && app.low_power() {
                 b.push(b": on");
             }
-            s.lpm != 0
+            s.lpm != crate::settings::Settings::DEFAULT.lpm // Auto (2) since Oct 21, 2026: it showed as changed
         }
         [8, 6] | [8, 6, 1] => {
             b.set(if s.callsign.is_empty() { b"Empty".as_slice() } else { s.callsign.as_bytes() });

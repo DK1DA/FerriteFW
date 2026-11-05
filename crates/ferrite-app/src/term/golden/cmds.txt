@@ -100,7 +100,7 @@
 > get
   writes false
   list Changed
-  | set 0 7 7 2 Auto                  # Low Power Mode
+  | All settings are at their defaults.
 > get 0 7 1
   writes false
   = 0 7 1 Theme: Dark
