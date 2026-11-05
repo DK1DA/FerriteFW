@@ -893,6 +893,7 @@ pub async fn task() {
         // (`scan::tick_wake`, decision 165: a due time the tick didn't move woke it every 1 ms and hung the radio).
         let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.sat.is_some() || r.fm.is_some() || r.seek.is_some()).then(|| {
             let period = if r.busy() { TICK_MS } else { POLL_MS };
+            crate::tasks::dsp::TICK_PERIOD_MS.store(period as u32, core::sync::atomic::Ordering::Relaxed); // APRS-56.4
             ferrite_core::scan::tick_wake(started, ticked, period, r.scan_due(now_ms()))
         });
         if let Some(t) = tick_at {

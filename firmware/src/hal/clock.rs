@@ -251,6 +251,15 @@ pub async fn for_audio() {
     AUDIO_WAITING.fetch_sub(1, Relaxed);
 }
 
+/// Decision 360: between a redraw's bands (`ferrite_ui::canvas`'s hook, the UI task in thread mode with nothing
+/// mid-transfer, as [`set_low`] needs): an audio task waiting in [`for_audio`] gets the build's speed now, not after
+/// the redraw (at 24 MHz 100 ms and more, a packet's flags gone). The governor keeps it (its audio reason).
+pub fn raise_for_audio() {
+    if AUDIO_WAITING.load(Relaxed) != 0 && is_low() && AUDIO_RAISES.load(Relaxed) && !super::audio::busy() {
+        set_tree(NORMAL);
+    }
+}
+
 /// PWR-26.4: [`for_audio`]'s longest wait: the UI task turns at least every 250 ms, a redraw at 24 MHz included.
 pub const AUDIO_WAIT_MS: u64 = 500;
 

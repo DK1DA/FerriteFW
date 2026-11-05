@@ -431,6 +431,9 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "radio_max_us", dc[12]); // the executors that preempt it: one run each, longest
             kn(l, "input_max_us", dc[13]);
             kn(l, "long_runs", dc[14]);
+            kn(l, "sq_lag_ms", dc[15]); // the last capture's timeline: squelch lag, the tick then, first data
+            kn(l, "tick_ms", dc[16]);
+            kn(l, "first_data_ms", dc[17]);
         }
     }
     if let Some(l) = d.ln() {

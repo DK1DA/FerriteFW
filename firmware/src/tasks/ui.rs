@@ -204,6 +204,7 @@ const KEY_RAISE_MS: u32 = 300;
 #[embassy_executor::task]
 pub async fn task() {
     ferrite_ui::prof::set_clock(crate::hal::time::cycles); // bench builds: the drawing profile
+    ferrite_ui::canvas::set_band_hook(crate::hal::clock::raise_for_audio); // decision 360
     let mut lcd = Screen::new();
     // Start-up as awaited steps (up to 150 ms each), then black, then the panel on.
     for &s in st7789::STARTUP {
@@ -641,8 +642,8 @@ pub async fn task() {
             {
                 use crate::tasks::dsp::{AUDIO_CLIPS, AUDIO_DROPS, AUDIO_GAIN, AUDIO_MADE, AUDIO_PEAK, AUDIO_WAITS};
                 dev.audio = [AUDIO_MADE.load(Relaxed), AUDIO_DROPS.load(Relaxed), AUDIO_WAITS.load(Relaxed), AUDIO_CLIPS.load(Relaxed), AUDIO_PEAK.load(Relaxed), AUDIO_GAIN.load(Relaxed)];
-                use crate::tasks::dsp::{CAPTURES, CAPTURE_MAX_MS, CAPTURE_MS, DROPPED, FRAMES, FX25_FAILED, HEARD, MISSED, NOISE, WAKE_MAX_US, WORK_MAX_US};
-                dev.decode = [FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed), CAPTURE_MS.load(Relaxed), CAPTURE_MAX_MS.load(Relaxed), CAPTURES.load(Relaxed), HEARD.load(Relaxed), crate::hal::audio::ADC_LATE.load(Relaxed), WAKE_MAX_US.load(Relaxed), WORK_MAX_US.load(Relaxed), crate::RADIO_RUN_MAX_US.load(Relaxed), crate::INPUT_RUN_MAX_US.load(Relaxed), crate::LONG_RUNS.load(Relaxed)]; // APRS-56, PWR-26.9.1, APRS-56.4
+                use crate::tasks::dsp::{CAPTURES, CAPTURE_MAX_MS, CAPTURE_MS, DROPPED, FRAMES, FX25_FAILED, FIRST_DATA_MS, HEARD, MISSED, NOISE, SQ_LAG_MS, TICK_PERIOD_MS, WAKE_MAX_US, WORK_MAX_US};
+                dev.decode = [FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed), CAPTURE_MS.load(Relaxed), CAPTURE_MAX_MS.load(Relaxed), CAPTURES.load(Relaxed), HEARD.load(Relaxed), crate::hal::audio::ADC_LATE.load(Relaxed), WAKE_MAX_US.load(Relaxed), WORK_MAX_US.load(Relaxed), crate::RADIO_RUN_MAX_US.load(Relaxed), crate::INPUT_RUN_MAX_US.load(Relaxed), crate::LONG_RUNS.load(Relaxed), SQ_LAG_MS.load(Relaxed), TICK_PERIOD_MS.load(Relaxed), FIRST_DATA_MS.load(Relaxed)]; // APRS-56, PWR-26.9.1, APRS-56.4
             }
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)

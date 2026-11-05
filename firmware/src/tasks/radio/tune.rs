@@ -282,7 +282,9 @@ impl Radio {
         // TERM-43: the FSK modem test reads its FIFO every tick (8 words fill in 53 ms at 2400 baud).
         #[cfg(feature = "bench")]
         let xb = xb || self.fsk.is_some();
-        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || self.scope.is_some() || self.seek.is_some() || xb
+        // APRS-56.5: the APRS slot's squelch read every tick (10 ms), not every poll (50 ms): a packet's flags may last
+        // only 100 ms
+        set.count_ones() > 1 || self.aprs_slots != 0 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || self.scope.is_some() || self.seek.is_some() || xb
     }
 
     /// A slot's setting from the UI; the chip it is on retunes on the next tick.

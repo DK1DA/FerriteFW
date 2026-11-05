@@ -67,8 +67,6 @@ pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 pub static TXTEST: Signal<M, Option<(ferrite_core::txtest::Gen, ferrite_core::txeq::Eq)>> = Signal::new();
 /// One capture half, ms (the blocks [`audio::ADC_HALF`] marks: 8 ms, decision 358).
 const HALF_MS: u32 = BLOCK_IN as u32 * 1_000 / ferrite_core::audio::ADC_HZ;
-/// PWR-26.4: how often (in capture halves: 10 s) a capture running at 24 MHz asks again for the build's speed.
-const RECHECK_HALVES: u32 = 10_000 / HALF_MS;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
 /// LINK-13.4: blocks made; dropped (the queue below full: the cable's ring had no room for 128 ms); and the times
@@ -81,6 +79,8 @@ pub static AUDIO_WAITS: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_CLIPS: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_PEAK: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_GAIN: AtomicU32 = AtomicU32::new(ferrite_core::rxlevel::UNITY as u32);
+/// PWR-26.4: how often (in capture halves: 10 s) a capture running at 24 MHz asks again for the build's speed.
+const RECHECK_HALVES: u32 = 10_000 / HALF_MS;
 /// The peak's window, in capture halves: one second.
 const PEAK_HALVES: u32 = 1_000 / HALF_MS;
 /// The miss log's level buckets (`lvl`), in capture halves: 64 ms each.
@@ -304,6 +304,60 @@ pub static HEARD: AtomicU32 = AtomicU32::new(0);
 /// APRS-56.4: the longest a capture half waited for the DSP task after its interrupt, and the longest the task
 /// spent on one, us since power-on: a half is 8 ms, so their sum over that loses audio (`late`).
 pub static WAKE_MAX_US: AtomicU32 = AtomicU32::new(0);
+/// APRS-56.4, the last capture's timeline: the APRS squelch's lag (its first open reading to the slot opening, ms:
+/// the Radio task's), the Radio task's tick period then (10 or 50 ms: a reading can be that late), and the time
+/// from the capture starting to the demodulator first hearing data (ms; 0 when it already heard data in the
+/// first half: the capture began inside the preamble or later).
+pub static SQ_LAG_MS: AtomicU32 = AtomicU32::new(0);
+pub static TICK_PERIOD_MS: AtomicU32 = AtomicU32::new(0);
+pub static FIRST_DATA_MS: AtomicU32 = AtomicU32::new(0);
+
+/// Decoder samples through the slot's decoder: what it finds to the APRS task, the pager's to the UI task, and the
+/// demodulator's carrier detect counted (APRS-56.4). `level`: the miss log's peak; `since_cap`: decoder samples since
+/// the capture began, until data is first heard. Out of line: the live path, the backlog and the drain share it.
+#[inline(never)]
+fn feed(slot: &mut Decoder, x: &[i16], level: u16, heard: &mut bool, since_cap: &mut Option<u32>) {
+    slot.push(x, |f| match f {
+        Found::Frame(b) => {
+            FRAMES.fetch_add(1, Relaxed);
+            let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, fx25: 0, level: 1, b: [0; FRAME_MAX] };
+            fr.b[..fr.len as usize].copy_from_slice(&b[..fr.len as usize]);
+            if APRS_RX.try_send(Heard::Frame(fr)).is_err() {
+                DROPPED.fetch_add(1, Relaxed);
+            }
+        }
+        Found::Fx25(b) => {
+            if APRS_RX.try_send(Heard::Fx25(*b)).is_err() {
+                DROPPED.fetch_add(1, Relaxed);
+            }
+        }
+        Found::Miss(m) => {
+            // APRS-56.1: an AX.25 address field, a packet missed; none, a packet whose start was lost (or chance
+            // flags in noise): counted apart, both logged (0 5 9 8; rare, Alex, Nov 4)
+            if m.addresses { &MISSED } else { &NOISE }.fetch_add(1, Relaxed);
+            let _ = APRS_RX.try_send(Heard::Miss(*m, level)); // only for the log: a full queue skips it
+        }
+        Found::Page(m) => {
+            if PAGES.try_send(Page::from(m)).is_err() {
+                DROPPED.fetch_add(1, Relaxed);
+            }
+        }
+        Found::Call(_) => {} // DSC: roadmap 6c
+    });
+    let at = since_cap.map(|s| s * 1_000 / ferrite_core::decoders::RATE_HZ);
+    if let Some(s) = since_cap {
+        *s += x.len() as u32;
+    }
+    let busy = slot.busy();
+    if busy && !*heard {
+        HEARD.fetch_add(1, Relaxed); // APRS-56.4
+        if let Some(ms) = at {
+            FIRST_DATA_MS.store(ms, Relaxed); // the start of the chunk it was heard in
+            *since_cap = None;
+        }
+    }
+    *heard = busy;
+}
 pub static WORK_MAX_US: AtomicU32 = AtomicU32::new(0);
 
 
@@ -332,6 +386,7 @@ pub async fn task() {
     let (mut sq, mut tail) = (false, 0u32);
     let mut sq_at: Option<embassy_time::Instant> = None;
     let mut heard = false; // APRS-56.4: the demodulator's carrier detect at the last block
+    let mut since_cap: Option<u32> = None; // APRS-56.4: decoder samples since the capture began, until data is heard
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
         #[cfg(all(feature = "tx", feature = "bench"))]
@@ -390,6 +445,7 @@ pub async fn task() {
                     audio::capture_start();
                     if running == DecoderKind::Afsk {
                         CAPTURES.fetch_add(1, Relaxed);
+                        since_cap = Some(0);
                     }
                     // PWR-26.9.1: how long after the squelch opened the capture started (the readback's `decode` line),
                     // to check it lands well inside a packet's TX delay
@@ -489,38 +545,7 @@ pub async fn task() {
                     #[cfg(feature = "bench")]
                     Stream::Raw(r) => r.chunk(&out[..n]),
                 }
-                slot.push(&out[..n], |f| match f {
-                    Found::Frame(b) => {
-                        FRAMES.fetch_add(1, Relaxed);
-                        let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, fx25: 0, level: 1, b: [0; FRAME_MAX] };
-                        fr.b[..fr.len as usize].copy_from_slice(&b[..fr.len as usize]);
-                        if APRS_RX.try_send(Heard::Frame(fr)).is_err() {
-                            DROPPED.fetch_add(1, Relaxed);
-                        }
-                    }
-                    Found::Fx25(b) => {
-                        if APRS_RX.try_send(Heard::Fx25(*b)).is_err() {
-                            DROPPED.fetch_add(1, Relaxed);
-                        }
-                    }
-                    Found::Miss(m) => {
-                        // APRS-56.1: an AX.25 address field, a packet missed; none, a packet whose start was lost (or
-                        // chance flags in noise): counted apart, both logged (0 5 9 8; rare, Alex, Nov 4)
-                        if m.addresses { &MISSED } else { &NOISE }.fetch_add(1, Relaxed);
-                        let _ = APRS_RX.try_send(Heard::Miss(*m, lvl.0.max(lvl.1))); // only for the log: a full queue skips it
-                    }
-                    Found::Page(m) => {
-                        if PAGES.try_send(Page::from(m)).is_err() {
-                            DROPPED.fetch_add(1, Relaxed);
-                        }
-                    }
-                    Found::Call(_) => {} // DSC: roadmap 6c
-                });
-                let busy = slot.busy();
-                if busy && !heard {
-                    HEARD.fetch_add(1, Relaxed); // APRS-56.4
-                }
-                heard = busy;
+                feed(&mut slot, &out[..n], lvl.0.max(lvl.1), &mut heard, &mut since_cap);
                 WORK_MAX_US.fetch_max(crate::hal::time::cycles().wrapping_sub(t0) / mhz, Relaxed);
             }
             Either4::Fourth(None) => {} // a stop with nothing playing

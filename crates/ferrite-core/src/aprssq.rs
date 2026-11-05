@@ -34,16 +34,26 @@ pub struct AprsSq {
     open_at: Option<u32>,
     /// The chip read open at the last tick (a new open edge counts once).
     chip_was: bool,
+    /// When the run of open readings that opened the slot began (APRS-56.4).
+    seen_at: u32,
+    /// The last open's lag: from the first tick that read the chip open to the slot opening, ms (APRS-56.4).
+    pub lag_ms: u32,
     pub counts: Counts,
 }
 
 impl AprsSq {
-    pub const NEW: AprsSq = AprsSq { tuned_at: 0, run: 0, open_at: None, chip_was: false, counts: Counts { opens: 0, short: 0, spikes: 0, settle: 0 } };
+    pub const NEW: AprsSq = AprsSq { tuned_at: 0, run: 0, open_at: None, chip_was: false, seen_at: 0, lag_ms: 0, counts: Counts { opens: 0, short: 0, spikes: 0, settle: 0 } };
 
     /// The chip was retuned (or the slot came to it) at `now`: closed, settling.
     pub fn retuned(&mut self, now: u32) {
-        let c = self.counts;
-        *self = AprsSq { tuned_at: now, counts: c, ..Default::default() };
+        let (c, lag_ms) = (self.counts, self.lag_ms);
+        *self = AprsSq { tuned_at: now, counts: c, lag_ms, ..Default::default() };
+    }
+
+    /// APRS-56.5: the chip read open on this tick's run of readings but the slot isn't open yet (fewer than
+    /// [`OPEN_TICKS`]): the capture starts here, a tick ahead of the slot (a spike costs one capture's tail).
+    pub fn arming(&self) -> bool {
+        self.run > 0 && self.open_at.is_none()
     }
 
     /// A tick with the chip's decision `chip_open`: the slot open or not, and how long an open that just closed
@@ -76,11 +86,14 @@ impl AprsSq {
             self.run = 0;
             return (false, None);
         }
+        if self.run == 0 {
+            self.seen_at = now;
+        }
         self.run = self.run.saturating_add(1);
         if self.run < OPEN_TICKS {
             return (false, None);
         }
-        (self.open_at, self.run) = (Some(now), 0);
+        (self.open_at, self.run, self.lag_ms) = (Some(now), 0, now.wrapping_sub(self.seen_at));
         c.opens = c.opens.saturating_add(1);
         (true, None)
     }
@@ -101,6 +114,39 @@ mod tests {
         s.retuned(0);
         assert_eq!(run(&mut s, 100, &[true, false, true, true, true]), [false, false, false, true, true]);
         assert_eq!((s.counts.spikes, s.counts.opens), (1, 1));
+    }
+
+    /// APRS-56.4: the lag is from the first open reading of the run that opened the slot (a spike before it
+    /// doesn't count): one tick at 10 ms, five at 50.
+    #[test]
+    fn lag_from_the_runs_first_reading() {
+        let mut s = AprsSq::default();
+        s.retuned(0);
+        run(&mut s, 100, &[true, false, true, true]);
+        assert_eq!(s.lag_ms, 10);
+        let mut s = AprsSq::default();
+        s.retuned(0);
+        for (i, c) in [false, true, true].iter().enumerate() {
+            s.step(100 + i as u32 * 50, *c);
+        }
+        assert_eq!(s.lag_ms, 50);
+    }
+
+    /// APRS-56.5: arming on the first open reading, not while settling, and no longer once the slot is open.
+    #[test]
+    fn arms_on_the_first_reading() {
+        let mut s = AprsSq::default();
+        s.retuned(0);
+        s.step(10, true);
+        assert!(!s.arming(), "settling");
+        s.step(100, true);
+        assert!(s.arming());
+        s.step(110, true);
+        assert!(!s.arming(), "open now");
+        s.step(120, false);
+        s.step(130, true);
+        s.step(140, false);
+        assert!(!s.arming(), "a spike ended");
     }
 
     /// SQL-19.2: inside the settle window after a retune the chip's opens are ignored and counted.

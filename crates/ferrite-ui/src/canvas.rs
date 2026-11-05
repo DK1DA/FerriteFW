@@ -589,6 +589,25 @@ fn band_rec(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, bg: u16, rec: &
     bands(lcd, &mut buf, x, y, w, h, bg, Src::Rec(rec));
 }
 
+/// Decision 360: run after each band reaches the panel (between transfers, in the drawing task): the firmware's
+/// quick clock raise for an audio capture waiting on it, which a redraw at 24 MHz (100 ms and more) held off.
+static BAND_HOOK: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// Decision 360: [`BAND_HOOK`]'s function, set once at start-up.
+pub fn set_band_hook(f: fn()) {
+    BAND_HOOK.store(f as usize, core::sync::atomic::Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn band_hook() {
+    let f = BAND_HOOK.load(core::sync::atomic::Ordering::Relaxed);
+    if f != 0 {
+        // SAFETY: only `set_band_hook` stores here, and only a `fn()`'s address.
+        let f: fn() = unsafe { core::mem::transmute::<usize, fn()>(f) };
+        f();
+    }
+}
+
 /// The region in bands of `px`, each sent to `lcd` once; on the host a last pass for the text hints.
 #[allow(clippy::too_many_arguments)]
 fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg: u16, mut src: Src) {
@@ -618,6 +637,7 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
         lcd.window(x, by, x + w - 1, by + bh - 1);
         lcd.push_buf(&px[..n]);
         crate::prof::add(crate::prof::PUSH, t0);
+        band_hook();
         by += bh;
     }
     crate::prof::add(crate::prof::BANDS, tb);

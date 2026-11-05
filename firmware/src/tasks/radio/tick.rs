@@ -201,6 +201,7 @@ impl Radio {
                 // SQL-19: the APRS slot over the chip's decision: no spikes, nothing while the retune settles
                 None if aprs => {
                     let (o, _ended) = self.aprs_sq[n as usize].step(now, st.squelch_open);
+                    crate::tasks::dsp::SQ_LAG_MS.store(self.aprs_sq[n as usize].lag_ms, core::sync::atomic::Ordering::Relaxed); // APRS-56.4
                     #[cfg(feature = "bench")]
                     if let Some(ms) = _ended {
                         log(b"aprs sq open ms ", ms);
@@ -241,7 +242,8 @@ impl Radio {
         for n in 0..2u8 {
             let Some((s, _)) = self.tuned[n as usize] else { continue };
             if self.aprs_slots & 1 << s != 0 {
-                aprs_open |= if listening == Some(n) { sq[n as usize] } else { self.kept() & 1 << s != 0 && self.chip(n).status().squelch_open };
+                // APRS-56.5: the capture from the chip's first open reading, a tick before the slot opens
+                aprs_open |= if listening == Some(n) { sq[n as usize] || self.aprs_sq[n as usize].arming() } else { self.kept() & 1 << s != 0 && self.chip(n).status().squelch_open };
             }
         }
         if aprs_open != self.aprs_open_sent && crate::chan::DSP.try_send(ferrite_core::msg::DspCmd::Squelch(aprs_open)).is_ok() {
@@ -337,7 +339,12 @@ impl Radio {
         // APRS-21.1, APRS-16: a priority slot holding its chip for a packet with nothing on the speaker (muted, or
         // another slot's tone) still sends its audio to the decoder (EARO, PA2); the speaker stays off. Not beside a
         // broadcast, whose audio shares the speaker's path.
-        let decode_chip = audio_chip.or(out.hold.filter(|_| self.si.mode().is_none()));
+        // APRS-56.5: and the APRS slot's chip from its first open reading, before the slot opens (the capture starts
+        // then too): muted until the watch picked it, the decoder lost a packet's first 40-50 ms of flags.
+        let aprs_arming = (0..2u8).find(|&n| {
+            listening == Some(n) && self.tuned[n as usize].is_some_and(|(s, _)| self.aprs_slots & 1 << s != 0) && (sq[n as usize] || self.aprs_sq[n as usize].arming())
+        });
+        let decode_chip = audio_chip.or(out.hold).or(aprs_arming).filter(|_| self.si.mode().is_none() || audio_chip.is_some());
         for n in 0..2u8 {
             if self.tuned[n as usize].is_some() {
                 // TERM-42.1: a bench `bk rxaf` route (its top nibble) in place of the normal one
