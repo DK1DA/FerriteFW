@@ -143,6 +143,9 @@ fn nop_reps() -> u32 {
     crate::hal::clock::tree().lcd_nops()
 }
 
+// The trees' fastest is 240 MHz (`clock::TOP`): the strobe's count is 1 or 2, each a constant in the byte loops.
+const _: () = assert!(crate::hal::clock::TOP.lcd_nops() <= 2 && crate::hal::clock::NORMAL.lcd_nops() <= 2);
+
 impl st7789::Bus8080 for Lcd {
     fn command(&mut self, cmd: u8) {
         LCD_DC.clr();
@@ -152,16 +155,16 @@ impl st7789::Bus8080 for Lcd {
     fn data(&mut self, data: &[u8]) {
         add_bytes(data.len() as u32);
         let r = nop_reps();
-        // A constant 1 (120 MHz and below, nearly always) lets the strobe's nop loops fold away: with the count
-        // read at run time each byte paid a loop's counter and branch twice, 385 ns a byte against 240 (black,
-        // Nov 4, 2026: the slot switch's redraw 135-166 ms against Oct 23's 95-106)
+        // The count as a constant (1 at 120 MHz and below, 2 at 240, the fastest tree: `lcd_nops`) lets the
+        // strobe's nop loops fold away: read at run time each byte paid a loop's counter and branch twice, 385 ns
+        // a byte against 240 (black, Nov 4, 2026: the slot switch's redraw 135-166 ms against Oct 23's 95-106)
         if r <= 1 {
             for &b in data {
                 byte(b, 1)
             }
         } else {
             for &b in data {
-                byte(b, r)
+                byte(b, 2)
             }
         }
     }
@@ -177,8 +180,8 @@ impl st7789::Bus8080 for Lcd {
             }
         } else {
             for &c in px {
-                byte((c >> 8) as u8, r);
-                byte(c as u8, r);
+                byte((c >> 8) as u8, 2);
+                byte(c as u8, 2);
             }
         }
     }
@@ -193,8 +196,8 @@ impl st7789::Bus8080 for Lcd {
             }
         } else {
             for _ in 0..count {
-                byte(hi, r);
-                byte(lo, r);
+                byte(hi, 2);
+                byte(lo, 2);
             }
         }
     }
