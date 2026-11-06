@@ -101,6 +101,7 @@ fn step(s: Step, to: Tree) {
             modify(CRM_CFG, CRM_CFG_SCLKSEL_MASK, 1);
             while rd(CRM_CFG) & CRM_CFG_SCLKSTS_MASK != 1 << 2 {}
         }
+        Step::ApbUndivided => modify(CRM_CFG, APB_MASK, 0),
         Step::PllOff => modify(CRM_CTRL, CRM_CTRL_PLLEN, 0),
         Step::ApbDividers => modify(CRM_CFG, APB_MASK, to.apb_cfg()),
         Step::PllConfig => wr(CRM_CFG, rd(CRM_CFG) & PLL_CLEAR | to.pll_cfg()),
@@ -108,6 +109,9 @@ fn step(s: Step, to: Tree) {
             modify(CRM_CTRL, 0, CRM_CTRL_PLLEN);
             let mut n = 0u32;
             while rd(CRM_CTRL) & CRM_CTRL_PLLSTBL == 0 {
+                // Decision 362: the lock takes most of a switch's 660 us, interrupts off: the ports' bytes taken
+                // as they come (a UART holds one).
+                super::uart::poll_rx();
                 n += 1;
                 if n == PLL_POLLS {
                     panic!("PLL did not lock");
@@ -206,8 +210,8 @@ fn switch(seen: u16, from: Tree, to: Tree) -> bool {
         return false;
     };
     // A task in an interrupt may have written to a port since `set_low`'s flush (the cable log): at most a byte
-    // or two still going out.
-    super::uart::flush_all();
+    // or two still going out, the bytes coming in taken meanwhile (decision 362).
+    super::uart::flush_all_rx();
     // The cycle counter runs at the old speed until SYSCLK is the crystal, at 8 MHz until it is the PLL again,
     // then at the new speed: each part counted at its own rate.
     let (mut c1, mut c2) = (c0, c0);
@@ -215,6 +219,8 @@ fn switch(seen: u16, from: Tree, to: Tree) -> bool {
         step(s, to);
         match s {
             Step::SysclkHext => c1 = super::time::cycles(),
+            // Decision 362: the ports at their rates from the crystal until the PLL is back.
+            Step::ApbUndivided => super::uart::retime(ferrite_core::clocktree::CRYSTAL),
             Step::SysclkPll => c2 = super::time::cycles(),
             _ => {}
         }

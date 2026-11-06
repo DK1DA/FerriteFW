@@ -19,6 +19,9 @@ const LOW_APB1_HZ: u32 = 24_000_000;
 pub const CABLE_MAX_BAUD: u32 = 921_600;
 /// Low Power Mode's speed (PWR-24.9): PLL x3.
 pub const LOW: Tree = Tree::new(3);
+/// The middle of a switch: SYSCLK from the crystal, the APBs undivided ([`Step::ApbUndivided`]). Only its UART
+/// divisors are used (decision 362: the ports keep receiving while the PLL locks).
+pub const CRYSTAL: Tree = Tree::new(1);
 
 /// One clock tree: SYSCLK = HEXT x `mult` through the PLL.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,9 +166,13 @@ pub enum Step {
     AutoStepOn,
     /// SYSCLK from the crystal (8 MHz), waiting until the switch shows in SCLKSTS.
     SysclkHext,
+    /// Both APBs undivided while SYSCLK is the crystal ([`CRYSTAL`]), so the UARTs run from 8 MHz whichever way
+    /// the switch goes (decision 362).
+    ApbUndivided,
     /// PLL off.
     PllOff,
-    /// The target's APB dividers (set at 8 MHz, so no bus ever runs over its limit).
+    /// The target's APB dividers (set at 8 MHz just before SYSCLK goes back to the PLL, so no bus ever runs over
+    /// its limit).
     ApbDividers,
     /// The target's PLL multiplier and range.
     PllConfig,
@@ -178,14 +185,15 @@ pub enum Step {
 }
 
 /// The register steps of a switch to any speed (either way).
-pub const fn switch_steps() -> [Step; 8] {
+pub const fn switch_steps() -> [Step; 9] {
     [
         Step::AutoStepOn,
         Step::SysclkHext,
+        Step::ApbUndivided,
         Step::PllOff,
-        Step::ApbDividers,
         Step::PllConfig,
         Step::PllOnWait,
+        Step::ApbDividers,
         Step::SysclkPll,
         Step::AutoStepOff,
     ]
@@ -421,23 +429,25 @@ mod tests {
 
     /// PWR-24.9: the switch's order: the automatic step on around both SYSCLK changes, off the PLL before it goes
     /// off, the dividers and multiplier set while it is off and SYSCLK is the crystal, the PLL stable before SYSCLK
-    /// goes back to it.
+    /// goes back to it. PWR-26.2.1 (decision 362): the APBs undivided for the whole crystal part, the target's dividers last.
     #[test]
     fn switch_order() {
         let s = switch_steps();
         let at = |x: Step| s.iter().position(|&y| y == x).unwrap();
         assert_eq!(s[0], Step::AutoStepOn);
-        assert_eq!(s[7], Step::AutoStepOff);
+        assert_eq!(s[8], Step::AutoStepOff);
         assert!(at(Step::AutoStepOn) < at(Step::SysclkHext));
         assert!(at(Step::SysclkHext) < at(Step::PllOff));
         assert!(at(Step::PllOff) < at(Step::PllConfig));
-        assert!(at(Step::PllOff) < at(Step::ApbDividers));
+        assert!(at(Step::SysclkHext) < at(Step::ApbUndivided));
+        assert!(at(Step::ApbUndivided) < at(Step::PllOnWait));
+        assert!(at(Step::PllOnWait) < at(Step::ApbDividers));
         assert!(at(Step::ApbDividers) < at(Step::SysclkPll));
         assert!(at(Step::PllConfig) < at(Step::PllOnWait));
         assert!(at(Step::PllOnWait) < at(Step::SysclkPll));
         assert!(at(Step::AutoStepOn) < at(Step::SysclkPll));
         assert!(at(Step::SysclkPll) < at(Step::AutoStepOff));
-        assert_eq!(s.len(), 8);
+        assert_eq!(s.len(), 9);
     }
 
     /// PWR-24.9: time across switches: whole ticks added, the rest carried, so 50 round trips leave the tick less

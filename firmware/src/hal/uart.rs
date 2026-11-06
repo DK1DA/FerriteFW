@@ -95,12 +95,37 @@ pub fn flush_all() {
     }
 }
 
-/// PWR-24.9: each port that is on at its rate from the new tree (interrupts are off; nothing is being sent:
-/// [`flush_all`] came first). A byte arriving across the switch may be lost.
+/// [`flush_all`] for a speed switch, interrupts off: the bytes coming in meanwhile taken as the interrupt would
+/// (decision 362).
+pub(super) fn flush_all_rx() {
+    for u in &HW {
+        if rd(u.base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
+            while rd(u.base + USART_STS) & USART_STS_TDC == 0 {
+                poll_rx();
+            }
+        }
+    }
+}
+
+/// Decision 362: each port's waiting byte taken, as its interrupt would, while a speed switch holds interrupts off.
+pub(super) fn poll_rx() {
+    for (id, u) in HW.iter().enumerate() {
+        if rd(u.base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
+            take_rx(id, u.base, rd(u.base + USART_STS));
+        }
+    }
+}
+
+/// PWR-24.9: each port that is on at its rate from tree `t` (interrupts are off; nothing is being sent:
+/// [`flush_all_rx`] came first). Decision 362: also at the switch's start, from the crystal ([`CRYSTAL`]), so a
+/// byte arriving while the PLL locks comes in whole; a rate the crystal can't reach (the cable's 921600) keeps
+/// its divisor, and a byte then may be lost.
+///
+/// [`CRYSTAL`]: ferrite_core::clocktree::CRYSTAL
 pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
     for (id, u) in HW.iter().enumerate() {
         let baud = RATE[id].load(Relaxed);
-        if baud != 0 && rd(u.base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
+        if baud != 0 && (t != ferrite_core::clocktree::CRYSTAL || t.baud_ok(baud)) && rd(u.base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
             // Written with the port on: turning it off for this could pull the TX pin low (a break on the cable).
             wr(u.base + USART_BAUDR, t.baudr(baud));
         }
@@ -265,6 +290,12 @@ pub fn isr(id: usize) {
         }
         }
     }
+    take_rx(id, base, sts);
+}
+
+/// The receive half of [`isr`]: a byte (or a line error) in the port, into its ring.
+#[inline(always)]
+fn take_rx(id: usize, base: u32, sts: u32) {
     if sts & (USART_STS_RDBF | USART_STS_ERR) != 0 {
         let b = rd(base + USART_DT) as u8; // STS then DT read clears the flags
         if sts & USART_STS_ERR != 0 {

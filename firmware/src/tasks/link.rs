@@ -222,7 +222,13 @@ pub async fn task() {
     let mut quiet = false;
     // The cable log's Bluetooth counters: when last looked at, and what they were.
     let mut bt_log = (Instant::now(), uart::stats(UART_BT));
+    // Decision 362: the clock switches when last looked at.
+    let mut switches = crate::hal::clock::SWITCHES.load(Relaxed);
     loop {
+        // A framing error that came with a speed switch is the switch's byte, not the other end's rate: neither port
+        // moves for it (LINK-11.1, LINK-25.2).
+        let switched = crate::hal::clock::SWITCHES.load(Relaxed) != switches;
+        switches = crate::hal::clock::SWITCHES.load(Relaxed);
         if spkmic() != quiet {
             quiet = !quiet;
             cable_quiet(quiet);
@@ -289,7 +295,7 @@ pub async fn task() {
         let f = uart::errors(UART_CPS).0;
         if f != framing {
             framing = f;
-            if CABLE_BAUD.load(Relaxed) != BAUD {
+            if !switched && CABLE_BAUD.load(Relaxed) != BAUD {
                 uart::init(UART_CPS, BAUD);
                 if quiet {
                     uart::tx_pin_quiet(UART_CPS);
@@ -333,7 +339,7 @@ pub async fn task() {
             let f = uart::errors(UART_BT).0;
             if f != bt_framing {
                 bt_framing = f;
-                if bt_swapped.elapsed() >= Duration::from_millis(BT_SWAP_MS) {
+                if !switched && bt_swapped.elapsed() >= Duration::from_millis(BT_SWAP_MS) {
                     BT_RATE.store(bt_other_rate(uart::rate(UART_BT)), Relaxed);
                     bt_probation = None;
                     bt_swapped = Instant::now();
