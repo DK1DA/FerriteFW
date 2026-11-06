@@ -807,7 +807,7 @@ fn blocked(p: &[u8]) -> bool {
     matches!(p, [9, 3] | [9, 3, 1] | [8, 8, 4] | [8, 8, 5] | [9, 4])
 }
 
-/// "0.1.0" from "v0.1.0".
+/// "0.8.0" from "v0.8.0".
 fn version() -> &'static [u8] {
     VERSION.strip_prefix('v').unwrap_or(VERSION).as_bytes()
 }

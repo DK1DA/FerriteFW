@@ -236,7 +236,7 @@ def bt_terminal_and_link(t):
         t.keys("SIDE2")
         t.home()  # the scan goes on; home's card shows where it is
     try:
-        want = ("Ferrite 0.1.0", "bluetooth", "Press Enter for the menu")
+        want = ("Ferrite 0.8.0", "bluetooth", "Press Enter for the menu")
         head = bt_until(raw, b"\x03\r", want)  # the top line names the port; the banner under it (TERM-11, TERM-20)
         t.check(all(w in head for w in want), "Enter on Bluetooth: the terminal's top line and banner", head[-300:])
         steps = set()

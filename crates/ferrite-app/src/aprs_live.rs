@@ -1296,7 +1296,7 @@ fn position_with(f: &Fix, cfg: &AprsCfg, comment: &[u8], info: &mut [u8], dest: 
     Some(n)
 }
 
-/// APRS-33: our status report, `>Ferrite v0.1.0` (no status text is set on the radio).
+/// APRS-33: our status report, `>Ferrite v0.8.0` (no status text is set on the radio).
 fn status_info(info: &mut [u8]) -> Option<usize> {
     let v = ferrite_core::VERSION.as_bytes();
     let n = 9 + v.len();
