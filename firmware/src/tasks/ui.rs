@@ -461,8 +461,13 @@ pub async fn task() {
         0 => {}
         r => {
             app.notice(b"Radio restarted", if r == crate::restart::HANG { b"after a hang" } else { b"after a fault" });
+            let n = crate::restart::IN_A_ROW.load(Relaxed);
             crate::bringup::linef(|l| {
-                let _ = ufmt::uwrite!(l, "restart: after a {} (pc 0x{:x}), {} in a row", if r == crate::restart::HANG { "hang" } else { "fault" }, r, crate::restart::IN_A_ROW.load(Relaxed));
+                let _ = if r == crate::restart::HANG {
+                    ufmt::uwrite!(l, "restart: after a hang, {} in a row", n)
+                } else {
+                    ufmt::uwrite!(l, "restart: after a fault (pc 0x{:x}), {} in a row", r, n)
+                };
             });
         }
     }
