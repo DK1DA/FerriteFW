@@ -21,6 +21,13 @@
 #[path = "../../firmware/src/board.rs"]
 mod board;
 mod bringup;
+/// The firmware's restart after a fault (SAFE-8.1) isn't the reader's: a fault stops it in the safe state, as
+/// every fault did before decision 364, so a backup never carries on after one.
+mod restart {
+    pub fn fault(_pc: Option<u32>) -> bool {
+        false
+    }
+}
 #[allow(dead_code)]
 #[path = "../../firmware/src/bus.rs"]
 mod bus;

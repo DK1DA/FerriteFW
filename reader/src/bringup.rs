@@ -1,5 +1,6 @@
 //! The fault path's report (firmware/src/board.rs calls it after the safe state): straight to the cable, polled.
-pub fn fault(pc: Option<u32>) {
+//! The reader never restarts after a fault ([`crate::restart`]), so `_restarting` is always false.
+pub fn fault(pc: Option<u32>, _restarting: bool) {
     let uart = crate::report::UART_CPS;
     crate::hal::uart::write(uart, b"\r\n*** FAULT: safe state, red LED, stopped");
     if let Some(pc) = pc {
