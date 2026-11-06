@@ -121,9 +121,12 @@ SECTIONS
   .slow_text : ALIGN(4)
   {
     __sslow_text = .;
-    *(.text.*11ferrite_app*);
-    *(.text.*10ferrite_ui*);
-    *(.text.*13ferrite_store*);
+    /* `?*` after each crate, as for uaprs below: a core generic made in a crate ends in its name (the crate suffix),
+     * and LLVM's function merging can hand that one copy to fast callers. Without it the Linux build put
+     * `RangeInclusive::contains` (made in ferrite_app) here, under the Radio and DSP tasks (CI, Nov 6). */
+    *(.text.*11ferrite_app?*);
+    *(.text.*10ferrite_ui?*);
+    *(.text.*13ferrite_store?*);
     *(.text.*7ferrite5tasks2ui*);
     /* The APRS task (run by the UI task) and the APRS library it parses and builds frames with; the modem
      * (uafsk) stays fast: the DSP task runs it. `5uaprs?*`, not `5uaprs*`: a core generic made for uaprs ends in
