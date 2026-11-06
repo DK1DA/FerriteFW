@@ -90,11 +90,6 @@ pub static GPS_SEND: Signal<M, (u8, u16, bool)> = Signal::new();
 #[cfg(feature = "bench")]
 pub static GPS_ANS: Signal<M, ferrite_core::msg::DebugAns> = Signal::new();
 
-/// GPS-38: the radio's clock as the UI task keeps it (GPS-23): UTC seconds and the milliseconds since boot they were
-/// true at, None while it isn't set; the GPS task reads it for the module's start aid.
-pub static CLOCK: embassy_sync::blocking_mutex::Mutex<M, core::cell::Cell<Option<(u32, u32)>>> =
-    embassy_sync::blocking_mutex::Mutex::new(core::cell::Cell::new(None));
-
 /// [`GGA`]'s contents.
 pub struct GgaCopy {
     pub data: [u8; GGA_MAX],

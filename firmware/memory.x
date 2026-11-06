@@ -143,8 +143,6 @@ SECTIONS
     *(.text.*12ferrite_core3sat*);
     *(.text.*7ferrite3sat*);
     *(.text.*8gpspower*);
-    /* GPS-38: the start aid (AID-INI), once a module power-up */
-    *(.text.*6gpsaid*);
     *(.text.*7ferrite5debug3gga*);
     /* Helpers only the UI task uses: the SSB patch check's SHA-256, `str` search (entry::commit) and UTF-8
      * checks, the frequency formatter. */

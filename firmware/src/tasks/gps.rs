@@ -18,9 +18,6 @@
 //! - **The terminal's bench test (TERM-36, `ferrite_core::gpspower::GpsBench`; a bench build's, TERM-38):** `gps nmea off|on`, `gps standby
 //!   N [quiet]`, `gps query N`; from NMEA off or a standby until NMEA is on and the standby over, the manager is held
 //!   (nothing of its sent, no power cycle) and nothing else goes to the module during a standby.
-//! - **The start aid (GPS-38, [`ferrite_core::gpsaid`]):** once the module is heard after each power-up (Auto, GPS-4,
-//!   a power cycle), a CASIC AID-INI with the last fix this task saw (RAM only: none after a restart) and, when the
-//!   radio's clock is set ([`crate::chan::CLOCK`]), GPS time; never the fixed position. No last fix, nothing.
 //! - **Parsing:** [`ferrite_core::gps::Nmea`] (about 260 B, here only). The fix goes to [`POSITION`] for the UI
 //!   and the APRS task at most twice a second and whenever it changes state; the satellites go to [`SKY`] once
 //!   a second for the sky plot.
@@ -38,7 +35,6 @@ use core::sync::atomic::Ordering::Relaxed;
 use embassy_time::{Instant, Timer};
 use ferrite_app::gpsdata::GpsCfg;
 use ferrite_core::gps::Nmea;
-use ferrite_core::gpsaid::{aid_ini, AidFix, AID_LEN};
 #[cfg(feature = "bench")]
 use ferrite_core::gpspower::GpsBench;
 use ferrite_core::gpspower::{casic, set_off, shown, GpsDemand, GpsManager, GpsOut, GpsPhase, NmeaSet, Stray, CASIC_MAX, CAS_NMEA, CAS_STANDBY, POKE};
@@ -164,31 +160,6 @@ fn manage(mgr: &mut GpsManager, nmea: &mut Nmea, phase: &mut GpsPhase, now: u32,
     (out, woke)
 }
 
-/// GPS-38: the start aid (AID-INI) for the last fix, with GPS time when the radio's clock is set; nothing without
-/// a fix. A bench build's cable log has a line for it ("gps: aid 49.09 -122.68 time").
-#[inline(never)] // in .slow_text (memory.x): once a module power-up
-fn send_aid(fix: Option<AidFix>, now: u32) {
-    let utc = crate::chan::CLOCK.lock(|c| c.get()).map(|(u, at)| {
-        let e = now.wrapping_sub(at);
-        (u.wrapping_add(e / 1000), e % 1000)
-    });
-    let mut b = [0u8; AID_LEN];
-    let (Some(n), Some(f)) = (aid_ini(fix, utc, &mut b), fix) else {
-        crate::bringup::line(b"gps: no aid (no fix since the radio started)");
-        return;
-    };
-    uart::write(UART_GPS, &b[..n]);
-    // Degrees to two decimals, truncated (about 1 km).
-    let deg = |v: i32| {
-        let h = v / 100_000;
-        (if h < 0 { "-" } else { "" }, h.unsigned_abs() / 100, h.unsigned_abs() % 100 / 10, h.unsigned_abs() % 10)
-    };
-    let ((sa, ia, ta, ua), (so, io, to, uo)) = (deg(f.lat), deg(f.lon));
-    crate::bringup::linef(|l| {
-        let _ = ufmt::uwrite!(l, "gps: aid {}{}.{}{} {}{}.{}{} {}", sa, ia, ta, ua, so, io, to, uo, if utc.is_some() { "time" } else { "no time" });
-    });
-}
-
 /// TERM-30: the GGA sentence just parsed, with its `$`, into [`crate::chan::GGA`] for the terminal's `gps`.
 #[inline(never)] // in .slow_text (memory.x): once a second, never from an interrupt
 fn keep_gga(nmea: &Nmea, now: u32) {
@@ -220,9 +191,6 @@ pub async fn task() {
     let mut set = NmeaSet::new();
     let (mut fix_at, mut sky_at) = (0u32, 0u32);
     let mut last_state = (false, 0u8);
-    // GPS-38: the last fix (kept through the module's power-offs and GPS off, gone at a restart) and an aid due
-    // since the last power-up.
-    let (mut last_fix, mut aid_due): (Option<AidFix>, bool) = (None, false);
     #[cfg(feature = "bench")]
     let mut query: Option<Query> = None;
     #[cfg(feature = "bench")]
@@ -288,7 +256,6 @@ pub async fn task() {
             }
             GPS_PWR_N.write(!want);
             mgr.powered(now, want);
-            aid_due = want;
             crate::bringup::line(if want { b"gps: power on" } else { b"gps: power off" });
             (sentences, bytes, log_at) = (0, 0, now);
             if !want {
@@ -331,12 +298,6 @@ pub async fn task() {
         // GPS-34: Ferrite's NMEA set once the module is heard after a power-up or wake, and the sky variant as the
         // position or satellites page opens and closes; not while keyed (GPS-32: the next look), nor while the bench
         // holds the module.
-        // GPS-38: the start aid once the module is heard after a power-up (it takes commands then), before the
-        // NMEA set; not while keyed (GPS-32) nor while the bench holds the module.
-        if powered && !held && aid_due && mgr.awake() && !keyed {
-            aid_due = false;
-            send_aid(last_fix, now);
-        }
         if powered && !held {
             if let Some(sky) = set.step(now, demand.sky, mgr.awake(), keyed) {
                 send_casic(CAS_NMEA, 1 + sky as u16);
@@ -412,9 +373,6 @@ pub async fn task() {
             if ignored {
                 // Decision 143: NMEA still coming 2 s into a standby; the plan holds to its end all the same.
                 crate::bringup::line(b"gps: standby ignored: NMEA still coming");
-            }
-            if let Some(a) = AidFix::from_fix(&f) {
-                last_fix = Some(a);
             }
             let state = (f.has_fix(), f.fix);
             if state != last_state || now.wrapping_sub(fix_at) >= PUBLISH_MS {
@@ -511,7 +469,6 @@ impl GpsUi {
             }
         }
         let utc = self.clock.map(|(u, at)| u.wrapping_add(now.wrapping_sub(at) / 1000));
-        crate::chan::CLOCK.lock(|c| c.set(self.clock)); // GPS-38: for the module's start aid
         // SAT-5: satellite mode's clock (GPS time, else by hand: "time ±1 min") and observer (the fix, else the
         // fixed position).
         let by_gps = set.clock_gps && g.utc_now().is_some();

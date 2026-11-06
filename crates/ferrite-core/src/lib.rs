@@ -26,7 +26,6 @@ pub mod dtmfrx;
 pub mod fskbench;
 pub mod freq;
 pub mod gps;
-pub mod gpsaid;
 pub mod gpspower;
 pub mod keys;
 pub mod layout;
