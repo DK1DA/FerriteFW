@@ -21,6 +21,7 @@ pub mod time;
 pub mod time_driver;
 pub mod tone;
 pub mod uart;
+pub mod wdt;
 
 // SAFETY (all four): only called with the address of a memory-mapped peripheral or core register (the
 // constants in regs.rs); a volatile access there cannot alias any Rust object.

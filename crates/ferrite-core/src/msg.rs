@@ -480,6 +480,10 @@ pub enum DebugReq {
     /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
     /// crossband repeater runs.
     RxBoth(Option<bool>),
+    #[cfg(feature = "bench")]
+    /// SAFE-8.1 (decision 364, a bench test): the Radio task faults (`true`, an undefined instruction) or hangs with
+    /// interrupts on (`false`, a spin above thread mode), to watch the restart. Never answered.
+    Crash(bool),
     /// TERM-30: the GPS module's last GGA sentence as received, answered where the terminal runs.
     Gga,
     #[cfg(feature = "bench")]
@@ -972,6 +976,9 @@ pub struct Device {
     /// longest run of the Radio and input executors above it while capturing, us, and their runs over 1.5 ms; the last
     /// capture's squelch lag, tick period and first data, ms (APRS-56.4): the readback's `decode` line.
     pub decode: [u32; 18],
+    /// SAFE-8.2 (decision 364): what this start follows: 0 an ordinary start, 1 a hang (the watchdog), else the
+    /// fault's address (the high bit set when unknown); and the restarts in a row. The readback's `restart` line.
+    pub restart: [u32; 2],
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).

@@ -47,9 +47,9 @@ pub fn hex(b: &mut Buf<96>, v: u32) {
 /// From the fault path (interrupts off, safe state done): straight to the UART, polled; nothing if the cable's
 /// UART was never started. Plain byte arrays and fast code only (tools/slowcheck.py); the text itself may sit in
 /// the slow flash (memory.x), which is only slower to read.
-pub fn fault(pc: Option<u32>) {
+pub fn fault(pc: Option<u32>, restarting: bool) {
     let uart = crate::report::UART_CPS;
-    crate::hal::uart::write(uart, b"\r\n*** FAULT: safe state, red LED, stopped");
+    crate::hal::uart::write(uart, if restarting { &b"\r\n*** FAULT: safe state, red LED, restarting"[..] } else { b"\r\n*** FAULT: safe state, red LED, stopped (restarted 3 times in a row)" });
     if let Some(pc) = pc {
         let mut h = *b"; pc 0x00000000";
         for i in 0..8 {

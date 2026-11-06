@@ -47,6 +47,7 @@
   |   bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)
   |   bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)
   |   rx both   rx one       bench test: VHF and UHF receive selects both on, or one
+  |   crash fault|hang       bench test: the radio restarts and says so (SAFE-8.1)
   |   bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)
   |   gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)
   |   gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set
@@ -105,6 +106,7 @@
   |   bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)
   |   bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)
   |   rx both   rx one       bench test: VHF and UHF receive selects both on, or one
+  |   crash fault|hang       bench test: the radio restarts and says so (SAFE-8.1)
   |   bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)
   |   gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)
   |   gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set
@@ -163,6 +165,7 @@
   |   bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)
   |   bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)
   |   rx both   rx one       bench test: VHF and UHF receive selects both on, or one
+  |   crash fault|hang       bench test: the radio restarts and says so (SAFE-8.1)
   |   bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)
   |   gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)
   |   gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set

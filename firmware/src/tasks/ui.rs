@@ -456,6 +456,16 @@ pub async fn task() {
     if cfg!(all(feature = "tx", feature = "bench")) {
         app.dry_at_boot(); // TX-48.1: the bench build starts every power-on with Dry TX on
     }
+    // SAFE-8.2 (decision 364): a start after a fault or a hang says so, on the screen and the cable log.
+    match crate::restart::RESTARTED.load(Relaxed) {
+        0 => {}
+        r => {
+            app.notice(b"Radio restarted", if r == crate::restart::HANG { b"after a hang" } else { b"after a fault" });
+            crate::bringup::linef(|l| {
+                let _ = ufmt::uwrite!(l, "restart: after a {} (pc 0x{:x}), {} in a row", if r == crate::restart::HANG { "hang" } else { "fault" }, r, crate::restart::IN_A_ROW.load(Relaxed));
+            });
+        }
+    }
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
     let mut dev = Device { tx_built: cfg!(feature = "tx"), bench: cfg!(feature = "bench"), battery_pct: 100, ..Default::default() };
     dev.ram_statics = crate::hal::sys::statics(); // SELF-9.2
@@ -638,6 +648,7 @@ pub async fn task() {
             if listen != listening && crate::chan::DSP.try_send(ferrite_core::msg::DspCmd::Audio(listen)).is_ok() {
                 listening = listen;
             }
+            dev.restart = [crate::restart::RESTARTED.load(Relaxed), crate::restart::IN_A_ROW.load(Relaxed)]; // SAFE-8.2
             // Decision 290: the DSP task frames and sends the audio itself; here only its counters, for the readback.
             {
                 use crate::tasks::dsp::{AUDIO_CLIPS, AUDIO_DROPS, AUDIO_GAIN, AUDIO_MADE, AUDIO_PEAK, AUDIO_WAITS};

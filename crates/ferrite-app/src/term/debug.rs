@@ -58,6 +58,9 @@ pub enum Kind {
     #[cfg(feature = "bench")]
     /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
     RxBoth(Option<bool>),
+    #[cfg(feature = "bench")]
+    /// `crash fault`, `crash hang`: SAFE-8.1's restart, on purpose.
+    Crash(bool),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
     Gga,
     #[cfg(feature = "bench")]
@@ -181,6 +184,8 @@ impl Job {
             Kind::Linkz => DebugReq::Linkz,
             #[cfg(feature = "bench")]
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
+            #[cfg(feature = "bench")]
+            Kind::Crash(f) => DebugReq::Crash(f),
             Kind::Gga => DebugReq::Gga,
             #[cfg(feature = "bench")]
             Kind::Gps { id, arg, quiet } => DebugReq::Gps { id, arg, quiet },

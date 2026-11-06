@@ -179,17 +179,38 @@ pub fn init() {
 }
 
 /// Any fault, stray interrupt or panic: interrupts off first so nothing else runs, then the safe state,
-/// red LED on, stop.
+/// red LED on, and a restart (SAFE-8.1), or a stop after too many in a row.
 pub fn fault() -> ! {
     fault_at(None)
 }
 
-/// [`fault`], with the faulting address when known (a HardFault's stacked PC): the bring-up build prints it on
-/// the cable after the safe state and the LED.
+/// [`fault`], with the faulting address when known (a HardFault's stacked PC): printed on the cable after the
+/// safe state and the LED, and kept for the next start to report (SAFE-8.2).
 pub fn fault_at(pc: Option<u32>) -> ! {
     cortex_m::interrupt::disable();
     safe_state();
     LED_RED.output(LED_ACTIVE_HIGH, Mode::OutPp);
-    crate::bringup::fault(pc);
-    loop {}
+    let again = crate::restart::fault(pc);
+    crate::bringup::fault(pc, again);
+    if again {
+        crate::hal::uart::flush(crate::report::UART_CPS); // the line out before the reset
+        sys::reboot();
+    }
+    stop()
+}
+
+/// SAFE-8.1: one restart too many in a row, found at start-up: the safe state, the red LED, stopped.
+pub fn stopped() -> ! {
+    cortex_m::interrupt::disable();
+    safe_state();
+    LED_RED.output(LED_ACTIVE_HIGH, Mode::OutPp);
+    crate::bringup::fault(None, false);
+    stop()
+}
+
+/// Stopped for good (a power cycle starts again): the watchdog, if running, kept fed so it doesn't restart it.
+fn stop() -> ! {
+    loop {
+        crate::hal::wdt::feed();
+    }
 }

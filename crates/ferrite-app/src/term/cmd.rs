@@ -1673,6 +1673,8 @@ const CMDS: &[(&str, C)] = &[
     ("rx", C::Bench(8)),
     #[cfg(feature = "bench")]
     ("lcd", C::Bench(9)),
+    #[cfg(feature = "bench")]
+    ("crash", C::Bench(10)),
     ("load", C::Load),
     ("sat", C::Sat),
     ("clear", C::Clear),
@@ -1732,7 +1734,7 @@ fn line_run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, loading: bool,
         #[cfg(feature = "bench")]
         C::Job(j) => Ok(Done::Debug(Job::new([Kind::Gpio, Kind::Mic(false), Kind::Mic(true)][j as usize]))),
         #[cfg(feature = "bench")]
-        C::Bench(b) => [txtest, bk, fsk, meter, synthfsk, pin, si, bt, rx, lcd][b as usize](t),
+        C::Bench(b) => [txtest, bk, fsk, meter, synthfsk, pin, si, bt, rx, lcd, crash][b as usize](t),
         C::Load => Ok(Done::Load),
         C::Sat => sat(st, t, loading),
         C::Clear => clear(app, st, t),
@@ -1879,7 +1881,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 15] = ["pin", "mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter", "synthfsk"];
+pub const BENCH_ONLY: [&str; 16] = ["pin", "mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd", "fsk", "meter", "synthfsk", "crash"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
@@ -2367,6 +2369,22 @@ fn rx(t: &mut Toks) -> Result<Done, No> {
     Ok(Done::Debug(Job::new(Kind::RxBoth(on))))
 }
 
+/// SAFE-8.1 (decision 364, a bench test): `crash fault` or `crash hang` in the Radio task, to watch the radio
+/// restart and the next start report it.
+#[cfg(feature = "bench")]
+fn crash(t: &mut Toks) -> Result<Done, No> {
+    const USAGE: Txt = txt!("crash fault or crash hang: the radio restarts (a bench test of SAFE-8.1)");
+    let f = match t.next()? {
+        Some(Tok::Word(w)) if same(w, b"fault") => true,
+        Some(Tok::Word(w)) if same(w, b"hang") => false,
+        _ => return Err(t.say_t(USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(t.say_t(USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Crash(f))))
+}
+
 /// TERM-30, TERM-38: a user build's `gps`, the last GGA; the module's CASIC sends (TERM-36) are a bench build's.
 #[cfg(not(feature = "bench"))]
 fn gps(t: &mut Toks) -> Result<Done, No> {
@@ -2683,7 +2701,7 @@ static HELP: [Txt; 22] = [
 ];
 /// TERM-38: the bench commands' help in a bench build, or where they are in a user build.
 #[cfg(feature = "bench")]
-static HELP_BENCH: [Txt; 33] = [
+static HELP_BENCH: [Txt; 34] = [
     txt!(""),
     txt!("Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):"),
     txt!("  mem 20000000 64        bytes of MCU memory (flash, RAM)"),
@@ -2696,6 +2714,7 @@ static HELP_BENCH: [Txt; 33] = [
     txt!("  bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)"),
     txt!("  bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)"),
     txt!("  rx both   rx one       bench test: VHF and UHF receive selects both on, or one"),
+    txt!("  crash fault|hang       bench test: the radio restarts and says so (SAFE-8.1)"),
     txt!("  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)"),
     txt!("  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)"),
     txt!("  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set"),

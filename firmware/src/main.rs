@@ -24,6 +24,7 @@ mod display;
 #[allow(dead_code)] // the prototype's HAL, carried over whole; not every part has a user yet
 mod hal;
 mod report;
+mod restart;
 #[allow(dead_code)]
 mod ring;
 mod sat;
@@ -211,6 +212,10 @@ pub static IDLE_LOW_US: AtomicU32 = AtomicU32::new(0);
 #[entry]
 fn main() -> ! {
     board::init();
+    // SAFE-8.1: a restart after a fault or a hang is noted for the UI task; one too many in a row stops here.
+    if !restart::at_start(hal::sys::reset_cause()) {
+        board::stopped();
+    }
     hal::time::us_init();
     // Transmit (in the tx build) also needs the expected MCU; receive runs regardless.
     let _mcu_ok = hal::sys::idcode() == chipid::EXPECTED_PID;
@@ -243,9 +248,17 @@ fn run_thread_executor(init: impl FnOnce(Spawner)) -> ! {
     let executor: &'static raw::Executor =
         cortex_m::singleton!(: raw::Executor = raw::Executor::new(THREAD_CONTEXT)).unwrap();
     init(executor.spawner());
+    // SAFE-8 (decision 364): the watchdog from here, fed after every poll; SAFE-8.1's count cleared after a minute.
+    hal::wdt::start();
+    let mut settled = false;
     loop {
         // SAFETY: polled only here and never re-entered (the pender only sets the event register).
         unsafe { executor.poll() };
+        hal::wdt::feed();
+        if !settled && embassy_time::Instant::now().as_millis() >= restart::SETTLED_MS {
+            restart::settled();
+            settled = true;
+        }
         cortex_m::interrupt::disable();
         let t0 = hal::time::us16();
         cortex_m::asm::wfe(); // returns at once if a task was woken since the poll

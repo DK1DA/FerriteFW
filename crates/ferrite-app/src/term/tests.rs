@@ -1326,6 +1326,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
         #[cfg(feature = "bench")]
+        DebugReq::Crash(_) => unreachable!("never answered: the radio restarts"),
+        #[cfg(feature = "bench")]
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
         #[cfg(feature = "bench")]
         DebugReq::Save(c) => DebugAns::Save { cycle: c.flatten(), level: Some((300, 500)), asleep: false },
@@ -1636,6 +1638,25 @@ fn gga_heights() {
     assert_eq!(h(b"GNGGA,1,,,,,1,09,0.9,5.,M,x,M,,"), (Some(50), None));
     assert_eq!(h(b"GNGGA,1,,,,,1,09,0.9,.,M,-,M"), (None, None));
     assert_eq!(h(b"GNGGA,1"), (None, None));
+}
+
+#[cfg(feature = "bench")]
+/// SAFE-8.1 (decision 364): `crash fault` and `crash hang` ask the Radio task to fault or hang; anything else is
+/// refused here, nothing sent.
+#[test]
+fn debug_crash() {
+    let mut r = Rig::main();
+    r.cmd("crash fault");
+    assert_eq!(r.term.debug_req(), Some(DebugReq::Crash(true)));
+    let mut r = Rig::main();
+    r.cmd("CRASH hang");
+    assert_eq!(r.term.debug_req(), Some(DebugReq::Crash(false)));
+    for c in ["crash", "crash now", "crash fault 2"] {
+        let mut r = Rig::main();
+        r.cmd(c);
+        assert_eq!(r.term.debug_req(), None, "{c}");
+        assert!(r.raw().contains("crash fault or crash hang"), "{c}: {}", r.raw());
+    }
 }
 
 #[cfg(feature = "bench")]
@@ -2193,12 +2214,12 @@ fn debug_no_answer_and_stop() {
 #[test]
 fn user_build_refuses_bench_commands() {
     let mut r = Rig::main();
-    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "meter", "meter on", "synthfsk cal 1000 0 0", "pin pa15 0", "pin pc9 u", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5"] {
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "meter", "meter on", "synthfsk cal 1000 0 0", "pin pa15 0", "pin pc9 u", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5", "crash fault", "crash hang"] {
         r.cmd(c);
         assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
     }
-    assert_eq!(super::cmd::BENCH_ONLY.len(), 15);
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 16);
     r.cmd("gps");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
     r.send(b"\r");

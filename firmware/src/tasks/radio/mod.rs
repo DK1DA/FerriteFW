@@ -987,6 +987,11 @@ pub async fn task() {
             Either4::Third(d) => {
                 let a = match d {
                     DebugReq::RxBoth(on) => r.rx_both(on).await,
+                    // SAFE-8.1: the bench's restart test; neither returns
+                    DebugReq::Crash(true) => cortex_m::asm::udf(),
+                    DebugReq::Crash(false) => loop {
+                        core::hint::spin_loop();
+                    },
                     // TERM-41 (the power bench): Battery Save's cycle overridden or back to the level; activity.
                     DebugReq::Save(set) => {
                         if let Some(c) = set {

@@ -439,6 +439,19 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             }
         }
     }
+    // SAFE-8.2: this start followed a fault (its address) or a hang, and the restarts in a row.
+    if cx.dev.restart[0] != 0 {
+        if let Some(l) = d.ln() {
+            l.push(b"restart");
+            if cx.dev.restart[0] == 1 {
+                l.push(b" after=hang");
+            } else {
+                l.push(b" after=fault");
+                let _ = uwrite!(l, " pc=0x{:x}", cx.dev.restart[0]);
+            }
+            kn(l, "in_a_row", cx.dev.restart[1]);
+        }
+    }
     if let Some(l) = d.ln() {
         let b = app.status_bar(cx.live, cx.dev);
         l.push(b"bar");
