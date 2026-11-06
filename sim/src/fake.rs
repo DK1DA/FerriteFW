@@ -900,6 +900,9 @@ impl FakeRadio {
             // WATCH-17.1: the simulator's turns aren't the chips' (it has none to retune).
             DebugReq::Turns { .. } => DebugAns::Refused("the simulator has no chips to time: bk turns is the radio's"),
             #[cfg(feature = "bench")]
+            // SAFE-8.1: the fault and the watchdog's restart are the radio's.
+            DebugReq::Crash(_) => DebugAns::Refused("the simulator doesn't crash: crash is the radio's"),
+            #[cfg(feature = "bench")]
             // TERM-40, TERM-41: the power bench's switches are the radio's.
             DebugReq::Save(_) | DebugReq::Lcd(_) => DebugAns::Refused("the power bench's switches are the radio's"),
             #[cfg(feature = "bench")]
