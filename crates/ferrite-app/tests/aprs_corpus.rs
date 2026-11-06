@@ -1,5 +1,5 @@
 //! The radio's APRS receive path on recorded audio: the WA8LMF TNC Test CD (fetched into udigimodes with its
-//! `tools/fetch_aprs_testdata.sh`; never redistributed, so this test is ignored when it isn't there). The audio
+//! `../testdata/tools/fetch-wa8lmf.sh`; never redistributed, so this test is ignored when it isn't there). The audio
 //! goes the way PA2's does on the radio: 48 kHz, 12-bit ADC counts around mid-scale (`audio::Decim`), the 2:1
 //! step, the decoder slot's AFSK demodulator at 24 kHz (decision 240), then the APRS task's parser and heard list. Run with
 //! `cargo test --release -p ferrite-app --test aprs_corpus -- --ignored --nocapture`.
@@ -10,7 +10,7 @@ use ferrite_core::audio::{Decim, ADC_HZ};
 use ferrite_core::decoders::{Decoder, Found};
 
 fn testdata(rel: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../udigimodes/testdata").join(rel)
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../testdata").join(rel)
 }
 
 fn read_wav(path: &std::path::Path) -> Option<(Vec<i16>, u32)> {

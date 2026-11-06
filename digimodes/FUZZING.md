@@ -16,7 +16,7 @@ The fuzz targets live in `ferrite/fuzz/`, a workspace of its own. They are not p
 ## Seeds
 
 - `tools/fuzz.sh seeds` rebuilds the corpora (the first run does it on its own).
-- They come from the TNC2 test packets: `digimodes/uaprs/tests/spec_packets.txt`, and when present `udigimodes/testdata/aprs/*.hex` (the WA8LMF CD and the APRS suite) and `testdata/fx25/msgs.txt`.
+- They come from the TNC2 test packets: `digimodes/uaprs/tests/spec_packets.txt`, and when present `../testdata/aprs/*.hex` (the WA8LMF CD and the APRS suite) and `../testdata/fx25/msgs.txt`.
 - `fuzz/src/bin/seeds.rs` turns each packet into every target's format: AX.25 bytes, KISS, HDLC bits, FX.25 blocks and bit streams, and AFSK audio at 24 kHz.
 
 ## Targets

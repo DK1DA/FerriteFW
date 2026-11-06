@@ -8,14 +8,14 @@
 //! REG_2B says), so those variants end with that wall (fourth-order, 3.1 kHz). Ignored: it needs udigimodes' test
 //! audio (never redistributed). Run with
 //! `cargo test --release -p ferrite-app --test rxaf_study -- --ignored --nocapture` (about 90 s; from a worktree, set
-//! `TESTDATA` to udigimodes/testdata's absolute path).
+//! `TESTDATA` to the testdata checkout's absolute path).
 
 use ferrite_core::audio::ADC_HZ;
 use std::f64::consts::PI;
 
 /// udigimodes' test audio beside the checkout, or at `TESTDATA` (a worktree elsewhere).
 fn testdata(rel: &str) -> std::path::PathBuf {
-    std::env::var_os("TESTDATA").map_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../udigimodes/testdata"), Into::into).join(rel)
+    std::env::var_os("TESTDATA").map_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../testdata"), Into::into).join(rel)
 }
 
 fn read_wav(path: &std::path::Path) -> Option<(Vec<i16>, u32)> {

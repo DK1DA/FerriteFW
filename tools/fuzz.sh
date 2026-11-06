@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 OUT="$ROOT/target/fuzz"
 TARGETS="aprs_parse ax25_frame kiss fx25_block fx25_bits hdlc_bits afsk_audio aprs_live"
-TESTDATA="$ROOT/../udigimodes/testdata"
+TESTDATA="$ROOT/../testdata"
 
 seeds() {
     set -- "$ROOT/digimodes/uaprs/tests/spec_packets.txt"

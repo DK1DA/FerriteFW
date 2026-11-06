@@ -10,7 +10,7 @@ use udsc::Receiver;
 use uafsk::fsk::Config;
 
 fn dir() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/dsc"))
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../testdata/dsc"))
 }
 
 fn read_wav(name: &str) -> Vec<i16> {

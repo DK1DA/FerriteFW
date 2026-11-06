@@ -1,4 +1,4 @@
-//! Measurement on real recordings, against multimon-ng. Needs `tools/fetch_pocsag_testdata.sh`.
+//! Measurement on real recordings, against multimon-ng. Needs the testdata repo (`../testdata/pocsag`).
 //!
 //! `cargo test --release -p upocsag --test report -- --ignored --nocapture`
 
@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use upocsag::{Message, Receiver};
 
-const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/pocsag");
+const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../testdata/pocsag");
 const FILES: [&str; 7] =
     ["commons_512", "sigid_512", "sigid_1200", "sigid_2400", "sigid_1200_variant", "sigid_148", "sigid_sound"];
 
 fn read_wav(path: &Path) -> (Vec<i16>, u32) {
-    let d = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e} (run tools/fetch_pocsag_testdata.sh)", path.display()));
+    let d = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e} (clone the testdata repo beside ferrite)", path.display()));
     let mut i = 12;
     let (mut rate, mut data) = (0, Vec::new());
     while i + 8 <= d.len() {

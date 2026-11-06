@@ -1,7 +1,7 @@
 #!/bin/zsh
 # meterrun.sh NAME [REG=VAL ...]: route 9 + 5A20, bk hold each REG=VAL, meter a sweep12; prints the low end against 1 kHz.
 S=${BENCH_OUT:-/tmp/bench-blade}; mkdir -p $S
-cd /Users/infamy/Code/rt950pro/ferrite
+cd /Users/infamy/Code/ferritefw/ferrite
 L() { ../.venv/bin/python tools/ferrite_link.py ${PORT:-$(ls /dev/cu.usbserial-* | head -1)} "$@"; }
 n=$1; shift
 L term "bk rxaf 9700" >/dev/null 2>&1; L term "bk rxif 5a20" >/dev/null 2>&1; L term "bk hold off" >/dev/null 2>&1
@@ -13,7 +13,7 @@ ssh infamy@192.168.7.162 "bladeRF-cli -e 'set frequency tx $f; set samplerate tx
 L term "meter off" >/dev/null 2>&1
 L term "meter" 2>&1 | tail -6 > $S/m-$n.txt
 r=$(for x in 28 73 7E; do L term "bk 1 $x" | tail -1 | awk '{print $2"="$4}'; done | tr '\n' ' ')
-/Users/infamy/Code/rt950pro/.venv/bin/python -I -c "
+/Users/infamy/Code/ferritefw/.venv/bin/python -I -c "
 import re,sys
 t=open('$S/m-$n.txt').read(); v=dict((int(a),float(b)) for a,b in re.findall(r'(\d+)\s+(-?\d+\.\d)',t.split('\n',1)[1]))
 r=v[1000]; print('%-10s'%'$n', ' '.join('%d:%+.1f'%(f,v[f]-r) for f in (50,80,100,125,160,200,250,315,400,500,630,800,4000,8000)), ' [$r]')"

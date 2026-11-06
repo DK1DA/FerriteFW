@@ -219,7 +219,7 @@ fn hostile_packets_do_not_panic() {
     // overflow checks in debug builds, so arithmetic overflow fails here too.
     let mut seeds: Vec<Vec<u8>> = Vec::new();
     for set in ["wa8lmf", "suite", "spec"] {
-        let path = format!("{}/../../testdata/aprs/{set}.hex", env!("CARGO_MANIFEST_DIR"));
+        let path = format!("{}/../../../testdata/aprs/{set}.hex", env!("CARGO_MANIFEST_DIR"));
         if let Ok(t) = std::fs::read_to_string(path) {
             seeds.extend(t.lines().map(|l| (0..l.len() / 2).map(|i| u8::from_str_radix(&l[2 * i..2 * i + 2], 16).unwrap()).collect()));
         }

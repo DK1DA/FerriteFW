@@ -1,7 +1,7 @@
 //! The pager decoder through the radio's receive path (DEC-4, roadmap 6b): audio as ADC1 samples PA2 (48 kHz,
 //! 12-bit counts around mid-scale), [`Decim`]'s 4:1 step, then the decoder slot's POCSAG receiver at 12 kHz and
 //! [`Page`]. A synthetic transmission always runs; the recordings in udigimodes (fetched with its
-//! `tools/fetch_pocsag_testdata.sh`, never redistributed) run with
+//! the testdata repo (`../testdata/pocsag`), never redistributed) run with
 //! `cargo test --release -p ferrite-core --test pocsag_path -- --ignored --nocapture`.
 
 use ferrite_core::audio::{Decim, ADC_HZ, BLOCK_IN, BLOCK_OUT};
@@ -77,7 +77,7 @@ fn synthetic_pages_at_every_rate() {
 }
 
 fn testdata(rel: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../udigimodes/testdata/pocsag").join(rel)
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../testdata/pocsag").join(rel)
 }
 
 fn read_wav(path: &Path) -> Option<(Vec<i16>, u32)> {

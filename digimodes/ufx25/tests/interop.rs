@@ -167,7 +167,7 @@ impl Rng {
 fn dire_wolf_to_us() {
     let msgs = 4; // FX.25 frames in msgs.txt that fit a block of every size (the fifth is too long for 32 and 64)
     for name in ["fx16", "fx32", "fx64", "fx1"] {
-        let (s, rate) = read_wav(&repo(&format!("testdata/fx25/{name}.wav")));
+        let (s, rate) = read_wav(&repo(&format!("../testdata/fx25/{name}.wav")));
         let r = decode(&s, rate);
         println!("{name}: {} FX.25 frames (corrected {:?}), {} plain AX.25", r.fx25.len(), r.fx25.iter().map(|f| f.1).collect::<Vec<_>>(), r.plain.len());
         assert!(r.fx25.len() >= msgs, "{name}");
@@ -199,8 +199,8 @@ fn dire_wolf_to_us() {
     // gen_packets -n 100: the built-in frame 100 times with rising noise. Dire Wolf's atest decodes 44, 42 and 41
     // of them (16, 32, 64 check bytes; see the README).
     for name in ["noise16", "noise32", "noise64"] {
-        let Ok(_) = std::fs::metadata(repo(&format!("testdata/fx25/{name}.wav"))) else { continue };
-        let (s, rate) = read_wav(&repo(&format!("testdata/fx25/{name}.wav")));
+        let Ok(_) = std::fs::metadata(repo(&format!("../testdata/fx25/{name}.wav"))) else { continue };
+        let (s, rate) = read_wav(&repo(&format!("../testdata/fx25/{name}.wav")));
         let r = decode(&s, rate);
         let fixed = r.fx25.iter().filter(|f| f.1 > 0).count();
         let both: usize = r.plain.len() + r.fx25.iter().filter(|(f, _)| !r.plain.contains(f)).count();
@@ -233,7 +233,7 @@ fn dire_wolf_to_us() {
 #[ignore]
 fn write_wavs() {
     let rate = 12_000;
-    let dir = repo("testdata/fx25/ours");
+    let dir = repo("../testdata/fx25/ours");
     std::fs::create_dir_all(&dir).unwrap();
     let gap = |out: &mut Vec<i16>| out.extend(std::iter::repeat_n(0, rate as usize / 2));
     let mut rng = Rng(0x1357_9BDF);

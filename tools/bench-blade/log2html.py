@@ -1,5 +1,5 @@
 import re, html
-md = open('/Users/infamy/Code/rt950pro/docs/research/bk4829-bench-log.md').read()
+md = open('/Users/infamy/Code/ferritefw/docs/research/bk4829-bench-log.md').read()
 page = '/private/tmp/claude-501/-Users-infamy-Code-rt950pro/6e3a761c-8ad1-4445-8144-aa17805e9947/scratchpad/audio-limits.html'
 def inline(t):
     t = html.escape(t, quote=False)

@@ -5,7 +5,7 @@ committed results are in [`bench/results/uafsk.json`](../../../bench/results/uaf
 
 ## Test data
 
-The WA8LMF TNC Test CD (`tools/fetch_aprs_testdata.sh`):
+The WA8LMF TNC Test CD (`../testdata/tools/fetch-wa8lmf.sh`):
 - **Track 1**: 40 minutes of APRS traffic on 144.39 MHz, flat audio (discriminator).
 - **Track 2**: the same traffic, de-emphasised, as from a receiver's speaker.
 

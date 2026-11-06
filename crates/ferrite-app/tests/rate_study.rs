@@ -7,7 +7,7 @@
 use ferrite_core::audio::ADC_HZ;
 
 fn testdata(rel: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../udigimodes/testdata").join(rel)
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../testdata").join(rel)
 }
 
 fn read_wav(path: &std::path::Path) -> Option<(Vec<i16>, u32)> {

@@ -9,7 +9,7 @@ use uaprs::ax25::Tnc2;
 use uaprs::parse::{Format, MessageKind, Packet, Position, Weather};
 use uaprs::parse;
 
-const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/aprs");
+const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../testdata/aprs");
 
 /// FAP writes bytes as JSON strings, one character per byte.
 fn bytes(v: &Value) -> Option<Vec<u8>> {
