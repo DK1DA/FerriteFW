@@ -135,7 +135,7 @@ impl Aprs {
                 Heard::Frame(ref f) => (f.bytes(), None),
                 // APRS-56: heard, not decoded; logged only with 0 5 9 8 on, read (no badge: a diagnosis, not news)
                 Heard::Miss(m, peak) => {
-                    if app.settings().decode_log {
+                    if app.settings().decode_log && ferrite_app::aprs_live::miss_logged(&m) {
                         let mut e = log_event(app.aprs_freq(), b"", b"");
                         ferrite_app::aprs_live::miss_text(&m, peak, &mut e.name, &mut e.text);
                         e.unread = false;

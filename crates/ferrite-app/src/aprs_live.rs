@@ -1428,8 +1428,8 @@ fn crc16(mut crc: u16, b: u8) -> u16 {
 
 /// APRS-56: the event log's words for a packet heard but not decoded (0 5 9 8 on): the sender's best guess as
 /// the name (`?` for each character a bit error spoiled), and "Not decoded: 84 B, peak 35%, >APRS,WIDE1-1" (its
-/// length with the FCS, the audio's peak then as a share of full scale, its destination and path). Without an
-/// address field (its start lost, APRS-56.2) the name is `?` and the text ends ", start lost".
+/// length with the FCS, the audio's peak then as a share of full scale, its destination and path). Only a miss
+/// with an address field is logged ([`miss_logged`]).
 pub fn miss_text(m: &ferrite_core::audio::uafsk::Miss, peak: u16, name: &mut Buf<20>, text: &mut Buf<64>) {
     let mut hdr = Buf::<80>::new();
     if m.addresses {
@@ -1446,9 +1446,12 @@ pub fn miss_text(m: &ferrite_core::audio::uafsk::Miss, peak: u16, name: &mut Buf
         text.push(b", ");
         text.push(&h[gt..]);
     }
-    if !m.addresses {
-        text.push(b", start lost");
-    }
+}
+
+/// APRS-56.2 (decision 366): a miss goes to the event log only with an AX.25 address field; one without (chance
+/// flags in noise, far more often than a packet's lost start) is counted as noise alone.
+pub fn miss_logged(m: &ferrite_core::audio::uafsk::Miss) -> bool {
+    m.addresses
 }
 
 #[cfg(test)]
@@ -2530,10 +2533,8 @@ mod tests {
         miss_text(&m, 16384, &mut name, &mut text);
         assert_eq!(name.as_bytes(), b"V?7ABC-9");
         assert_eq!(text.as_bytes(), &b"Not decoded: 84 B, peak 50%, >APRS,WIDE1-1"[..]);
-        // the start lost: no address field to read
-        let m = Miss { len: 41, addresses: false, fx25: false, head };
-        let (mut name, mut text) = (Buf::<20>::new(), Buf::<64>::new());
-        miss_text(&m, 9831, &mut name, &mut text);
-        assert_eq!((name.as_bytes(), text.as_bytes()), (&b"?"[..], &b"Not decoded: 41 B, peak 30%, start lost"[..]));
+        assert!(miss_logged(&m));
+        // no address field to read: noise, not logged
+        assert!(!miss_logged(&Miss { len: 21, addresses: false, fx25: false, head }));
     }
 }
