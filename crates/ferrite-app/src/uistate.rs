@@ -421,19 +421,22 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             kn(l, "noise", dc[2]);
             kn(l, "fx25_failed", dc[3]);
             kn(l, "dropped", dc[4]);
-            kn(l, "capture_ms", dc[5]); // PWR-26.9.1: squelch open to capture, last and longest
-            kn(l, "capture_max", dc[6]);
-            kn(l, "captures", dc[7]); // APRS-56.4: the path's later stages
-            kn(l, "heard", dc[8]);
-            kn(l, "late", dc[9]); // capture halves the DSP task took too late: audio lost
-            kn(l, "wake_max_us", dc[10]); // a half's wait for the DSP task, and the task's work on it (2 ms each)
-            kn(l, "work_max_us", dc[11]);
-            kn(l, "radio_max_us", dc[12]); // the executors that preempt it: one run each, longest
-            kn(l, "input_max_us", dc[13]);
-            kn(l, "long_runs", dc[14]);
-            kn(l, "sq_lag_ms", dc[15]); // the last capture's timeline: squelch lag, the tick then, first data
-            kn(l, "tick_ms", dc[16]);
-            kn(l, "first_data_ms", dc[17]);
+            // APRS-56.4: bench builds only (decision 363); a tx build leaves them 0 and they aren't printed
+            if dc[5..].iter().any(|&n| n != 0) {
+                kn(l, "capture_ms", dc[5]); // PWR-26.9.1: squelch open to capture, last and longest
+                kn(l, "capture_max", dc[6]);
+                kn(l, "captures", dc[7]); // APRS-56.4: the path's later stages
+                kn(l, "heard", dc[8]);
+                kn(l, "late", dc[9]); // capture halves the DSP task took too late: audio lost
+                kn(l, "wake_max_us", dc[10]); // a half's wait for the DSP task, and the task's work on it (8 ms halves)
+                kn(l, "work_max_us", dc[11]);
+                kn(l, "radio_max_us", dc[12]); // the executors that preempt it: one run each, longest
+                kn(l, "input_max_us", dc[13]);
+                kn(l, "long_runs", dc[14]);
+                kn(l, "sq_lag_ms", dc[15]); // the last capture's timeline: squelch lag, the tick then, first data
+                kn(l, "tick_ms", dc[16]);
+                kn(l, "first_data_ms", dc[17]);
+            }
         }
     }
     if let Some(l) = d.ln() {

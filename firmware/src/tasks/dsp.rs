@@ -303,6 +303,7 @@ pub static CAPTURES: AtomicU32 = AtomicU32::new(0);
 pub static HEARD: AtomicU32 = AtomicU32::new(0);
 /// APRS-56.4: the longest a capture half waited for the DSP task after its interrupt, and the longest the task
 /// spent on one, us since power-on: a half is 8 ms, so their sum over that loses audio (`late`).
+#[cfg(feature = "bench")]
 pub static WAKE_MAX_US: AtomicU32 = AtomicU32::new(0);
 /// APRS-56.4, the last capture's timeline: the APRS squelch's lag (its first open reading to the slot opening, ms:
 /// the Radio task's), the Radio task's tick period then (10 or 50 ms: a reading can be that late), and the time
@@ -358,6 +359,7 @@ fn feed(slot: &mut Decoder, x: &[i16], level: u16, heard: &mut bool, since_cap: 
     }
     *heard = busy;
 }
+#[cfg(feature = "bench")]
 pub static WORK_MAX_US: AtomicU32 = AtomicU32::new(0);
 
 
@@ -461,8 +463,10 @@ pub async fn task() {
             }
             Either4::First(DspCmd::Beep { .. }) => {} // beeps are the BK4829's (SND-11)
             Either4::Second(half) => {
-                let t0 = crate::hal::time::cycles();
-                let mhz = crate::hal::clock::mhz().max(1);
+                // APRS-56.4: the half's wake and work times, bench builds only (decision 363)
+                #[cfg(feature = "bench")]
+                let (t0, mhz) = (crate::hal::time::cycles(), crate::hal::clock::mhz().max(1));
+                #[cfg(feature = "bench")]
                 WAKE_MAX_US.fetch_max(t0.wrapping_sub(crate::hal::audio::ADC_AT.load(Relaxed)) / mhz, Relaxed);
                 // PWR-26.4: a capture that started at 24 MHz (the governor didn't answer in time) gets the build's
                 // speed: stopped, the speed asked for, started again; looked at every 10 s.
@@ -546,6 +550,7 @@ pub async fn task() {
                     Stream::Raw(r) => r.chunk(&out[..n]),
                 }
                 feed(&mut slot, &out[..n], lvl.0.max(lvl.1), &mut heard, &mut since_cap);
+                #[cfg(feature = "bench")]
                 WORK_MAX_US.fetch_max(crate::hal::time::cycles().wrapping_sub(t0) / mhz, Relaxed);
             }
             Either4::Fourth(None) => {} // a stop with nothing playing

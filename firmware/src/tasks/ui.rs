@@ -642,8 +642,18 @@ pub async fn task() {
             {
                 use crate::tasks::dsp::{AUDIO_CLIPS, AUDIO_DROPS, AUDIO_GAIN, AUDIO_MADE, AUDIO_PEAK, AUDIO_WAITS};
                 dev.audio = [AUDIO_MADE.load(Relaxed), AUDIO_DROPS.load(Relaxed), AUDIO_WAITS.load(Relaxed), AUDIO_CLIPS.load(Relaxed), AUDIO_PEAK.load(Relaxed), AUDIO_GAIN.load(Relaxed)];
-                use crate::tasks::dsp::{CAPTURES, CAPTURE_MAX_MS, CAPTURE_MS, DROPPED, FRAMES, FX25_FAILED, FIRST_DATA_MS, HEARD, MISSED, NOISE, SQ_LAG_MS, TICK_PERIOD_MS, WAKE_MAX_US, WORK_MAX_US};
-                dev.decode = [FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed), CAPTURE_MS.load(Relaxed), CAPTURE_MAX_MS.load(Relaxed), CAPTURES.load(Relaxed), HEARD.load(Relaxed), crate::hal::audio::ADC_LATE.load(Relaxed), WAKE_MAX_US.load(Relaxed), WORK_MAX_US.load(Relaxed), crate::RADIO_RUN_MAX_US.load(Relaxed), crate::INPUT_RUN_MAX_US.load(Relaxed), crate::LONG_RUNS.load(Relaxed), SQ_LAG_MS.load(Relaxed), TICK_PERIOD_MS.load(Relaxed), FIRST_DATA_MS.load(Relaxed)]; // APRS-56, PWR-26.9.1, APRS-56.4
+                use crate::tasks::dsp::{DROPPED, FRAMES, FX25_FAILED, MISSED, NOISE};
+                // APRS-56.1's counts in every build; APRS-56.4's stages and timings in bench builds (decision 363)
+                #[cfg(not(feature = "bench"))]
+                {
+                    dev.decode[..5].copy_from_slice(&[FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed)]);
+                }
+                #[cfg(feature = "bench")]
+                use crate::tasks::dsp::{CAPTURES, CAPTURE_MAX_MS, CAPTURE_MS, FIRST_DATA_MS, HEARD, SQ_LAG_MS, TICK_PERIOD_MS, WAKE_MAX_US, WORK_MAX_US};
+                #[cfg(feature = "bench")]
+                {
+                    dev.decode = [FRAMES.load(Relaxed), MISSED.load(Relaxed), NOISE.load(Relaxed), FX25_FAILED.load(Relaxed), DROPPED.load(Relaxed), CAPTURE_MS.load(Relaxed), CAPTURE_MAX_MS.load(Relaxed), CAPTURES.load(Relaxed), HEARD.load(Relaxed), crate::hal::audio::ADC_LATE.load(Relaxed), WAKE_MAX_US.load(Relaxed), WORK_MAX_US.load(Relaxed), crate::RADIO_RUN_MAX_US.load(Relaxed), crate::INPUT_RUN_MAX_US.load(Relaxed), crate::LONG_RUNS.load(Relaxed), SQ_LAG_MS.load(Relaxed), TICK_PERIOD_MS.load(Relaxed), FIRST_DATA_MS.load(Relaxed)]; // APRS-56, PWR-26.9.1, APRS-56.4
+                }
             }
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)

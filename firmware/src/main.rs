@@ -153,7 +153,10 @@ fn counted(f: impl FnOnce(), max_us: &AtomicU32) {
     f();
     let c = hal::time::cycles().wrapping_sub(c0);
     IRQ_CYCLES.fetch_add(c, Relaxed);
-    // only while capturing: a run then holds the DSP task off its halves
+    // APRS-56.4 (bench builds, decision 363): only while capturing: a run then holds the DSP task off its halves
+    #[cfg(not(feature = "bench"))]
+    let _ = max_us;
+    #[cfg(feature = "bench")]
     if hal::audio::CAPTURING.load(Relaxed) {
         let us = c / hal::clock::mhz().max(1);
         max_us.fetch_max(us, Relaxed);
