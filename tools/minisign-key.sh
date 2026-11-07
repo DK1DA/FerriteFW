@@ -8,6 +8,8 @@ out=$1
 [ -n "${MINISIGN_KEY:-}" ] || { echo "minisign-key: MINISIGN_KEY is empty" >&2; exit 1; }
 flat=$(printf '%s' "$MINISIGN_KEY" | tr -d ' \t\r\n')
 b64=$(printf '%s' "$flat" | grep -oE 'RW[A-Za-z0-9+/]{100,}={0,2}' | tail -1 || true)
+# The trailing "=" is easily lost copying the line: put the padding back (base64 comes in fours).
+while [ $(( ${#b64} % 4 )) -ne 0 ]; do b64="$b64="; done
 # A secret key's base64 is 212 characters (158 bytes); a public key's is 56.
 echo "minisign-key: secret ${#MINISIGN_KEY} chars, ${#flat} without whitespace, key line ${#b64} chars (212 expected)"
 [ ${#b64} -eq 212 ] || { echo "minisign-key: no secret key's base64 in MINISIGN_KEY" >&2; exit 1; }
