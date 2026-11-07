@@ -1,0 +1,24 @@
+name: sign-check
+# By hand only: checks the MINISIGN_KEY secret in about a minute (release.yml's Sign step runs after 15 minutes of
+# tests): rebuilds the key file, signs a test file and verifies it against the public key in the repo.
+on:
+  workflow_dispatch:
+
+jobs:
+  sign-check:
+    runs-on: docker
+    container:
+      image: node:20-bookworm
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+      - name: Sign a test file
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+        run: |
+          apt-get update -q && apt-get install -y -q --no-install-recommends minisign
+          key=$(mktemp)
+          tools/minisign-key.sh "$key"
+          echo "sign-check $(git rev-parse --short HEAD)" > test.txt
+          minisign -S -s "$key" -t "sign-check" -m test.txt
+          rm "$key"
+          minisign -Vm test.txt -p minisign.pub
