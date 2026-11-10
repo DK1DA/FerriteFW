@@ -98,3 +98,18 @@ fn hf_mode_pauses() {
     has(&status(&mut t, 10), "HF mode");
     has(&status(&mut t, 18), "Paused: HF mode");
 }
+
+/// SBAR-14: the Beacon row names the beacon's mode as 0 5 6 1 does: Off, Manual, Every N min, Smart (it read
+/// "Off" whatever the mode until 0.8.2).
+#[test]
+fn beacon_row_follows_the_mode() {
+    let mut t = open();
+    let rows: std::vec::Vec<&str> = super::super::status::row_names().collect();
+    let row = rows.iter().position(|n| *n == "Beacon").expect("a Beacon row") as u8;
+    for (mode, want) in [(0u8, "Off"), (1, "Manual"), (5, "Every 10 min"), (crate::aprs::SMART as u8, "Smart")] {
+        let c = crate::aprs::AprsCfg { beacon: mode, ..t.app.aprs_cfg() };
+        t.app.set_aprs(c);
+        let s = status(&mut t, row);
+        has(&s, want);
+    }
+}

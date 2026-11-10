@@ -38,6 +38,12 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
     TEXT
 }
 
+/// The rows' names in order (tests).
+#[cfg(test)]
+pub(crate) fn row_names() -> impl Iterator<Item = &'static str> {
+    ROWS.iter().map(|r| r.0)
+}
+
 /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
 const ROWS: [(&str, Val<()>); 20] = [
     // SBAR-14: why transmit is locked, if it is (BOOT-11).
@@ -106,7 +112,15 @@ const ROWS: [(&str, Val<()>); 20] = [
         b.set(b"None");
         TEXT
     }),
-    ("Beacon", |c, b| if paused(c, b) { AMBER } else { on_off(b, false) }),
+    // SBAR-14: the beacon's mode as 0 5 6 1 names it ("Off", "Manual", "Every 10 min", "Smart"); it said "Off"
+    // whatever the mode until 0.8.2 (a stub from before beacons were built).
+    ("Beacon", |c, b| {
+        if paused(c, b) {
+            return AMBER;
+        }
+        c.app.beacon_mode_text(b);
+        TEXT
+    }),
     ("Battery Save", |c, b| {
         if c.app.low_power() {
             b.set(b"Low Power Mode"); // PWR-24.6: its own cycle in place of the level
