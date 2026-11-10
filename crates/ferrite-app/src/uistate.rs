@@ -1402,6 +1402,7 @@ pub fn id(s: Screen) -> &'static str {
         Screen::Recall(_) => "Recall",
         Screen::PosEntry(_) => "PosEntry",
         Screen::SameCodes(_) => "SameCodes",
+        Screen::AutoReply(_) => "AutoReply",
         Screen::Dtmf(_) => "Dtmf",
         Screen::Sat(s) => screens::sat::page_id(&s),
     }

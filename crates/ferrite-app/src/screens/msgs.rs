@@ -300,6 +300,8 @@ const PCASES: [&str; 3] = ["Abc", "ABC", "abc"];
 /// Compose's text is the draft's, unless a quick message is being edited (TEXT-7) or the comment (APRS-50).
 const DRAFT: u8 = 255;
 const COMMENT: u8 = 254;
+/// APRS-57: auto reply's text (0 5 9 9).
+const REPLY: u8 = 253;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Compose {
@@ -385,9 +387,24 @@ impl Compose {
         self.edit == COMMENT
     }
 
+    /// APRS-57: auto reply's text in the editor (0 5 9 9).
+    pub fn reply_edit() -> Self {
+        Compose { field: 1, edit: REPLY, ..Compose::new() }
+    }
+
+    fn reply_on(self) -> bool {
+        self.edit == REPLY
+    }
+
     /// The text's limit: 67 characters (TEXT-5), the comment's 40 (APRS-50).
     fn max(self) -> usize {
-        if self.comment_on() { crate::aprs::COMMENT_LEN } else { TEXT_MAX }
+        if self.comment_on() {
+            crate::aprs::COMMENT_LEN
+        } else if self.reply_on() {
+            crate::aprs::REPLY_TEXT_LEN
+        } else {
+            TEXT_MAX
+        }
     }
 }
 
@@ -420,6 +437,8 @@ pub(crate) fn quick_text(store: &impl ChannelStore, i: usize) -> Buf<67> {
 fn full_of(app: &App, store: &impl ChannelStore, s: Compose) -> Buf<67> {
     if s.comment_on() {
         Buf::from(app.aprs_cfg().comment_text())
+    } else if s.reply_on() {
+        Buf::from(app.aprs_cfg().reply_text())
     } else if s.quick_edit_on() {
         quick_text(store, s.edit as usize)
     } else {
@@ -441,6 +460,8 @@ fn put_text(app: &mut App, store: &impl ChannelStore, s: Compose, head: Buf<67>)
     let data = store.data();
     if s.comment_on() {
         app.set_aprs_comment(t.as_bytes());
+    } else if s.reply_on() {
+        app.set_aprs_reply_text(t.as_bytes());
     } else if s.quick_edit_on() {
         data.request(Op::Quick(s.edit, Some(t)));
     } else {
@@ -510,6 +531,8 @@ fn refuse_full(app: &mut App, s: Compose) {
     app.beep_refused();
     if s.comment_on() {
         app.show_toast("40 characters".as_bytes(), "the comment limit".as_bytes(), false);
+    } else if s.reply_on() {
+        app.show_toast("45 characters".as_bytes(), "the reply limit".as_bytes(), false);
     } else {
         app.show_toast("67 characters".as_bytes(), "the APRS limit".as_bytes(), false);
     }
@@ -711,6 +734,8 @@ impl View for Compose {
     fn name(self) -> &'static str {
         if self.comment_on() {
             "Comment"
+        } else if self.reply_on() {
+            "Auto reply text"
         } else if self.quick_edit_on() {
             "Quick message"
         } else {
@@ -726,6 +751,8 @@ impl View for Compose {
     fn title(self, _: &App, b: &mut Buf<10>) {
         b.set(if self.comment_on() {
             b"Comment"
+        } else if self.reply_on() {
+            b"Reply"
         } else if self.quick_edit_on() {
             b"Quick"
         } else {
@@ -868,6 +895,12 @@ impl View for Compose {
                 let gone = app.aprs_cfg().comment_text().is_empty();
                 return app.show_toast("Comment".as_bytes(), if gone { b"cleared" } else { b"kept" }, false);
             }
+            // APRS-57: the reply as typed; an empty one sends none
+            (Key::Menu, Short) if s.reply_on() => {
+                app.back();
+                let gone = app.aprs_cfg().reply_text().is_empty();
+                return app.show_toast("Auto reply".as_bytes(), if gone { b"cleared" } else { b"kept" }, false);
+            }
             (Key::Menu, Short) if s.quick_edit_on() => {
                 app.back();
                 return app.show_toast("Quick message".as_bytes(), b"kept", false);
@@ -929,11 +962,19 @@ impl View for Compose {
                     let mut b = Buf::<40>::new();
                     if self.comment_on() {
                         b.push(b"Beacon comment"); // APRS-50
+                    } else if self.reply_on() {
+                        b.push(b"Auto reply"); // APRS-57
                     } else {
                         let _ = uwrite!(b, "Quick message {}", self.edit + 1);
                     }
                     lcd.text4(8, 36, b.as_bytes(), &UI_12B, TEXT, BG);
-                    let sub = if self.comment_on() { "After every position report" } else { "# in the list: the factory text again" };
+                    let sub = if self.comment_on() {
+                        "After every position report"
+                    } else if self.reply_on() {
+                        "Sent to who messages you"
+                    } else {
+                        "# in the list: the factory text again"
+                    };
                     lcd.text4(8, 56, sub.as_bytes(), &UI_12, SUB, BG);
                 });
             } else {

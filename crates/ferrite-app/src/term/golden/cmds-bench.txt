@@ -783,6 +783,7 @@
   | set 0 5 9 6 On                    # Mute speaker
   | set 0 5 9 7 APRS first            # Shared VHF
   | set 0 5 9 8 Off                   # Decode log
+  | set 0 5 9 9 Off                   # Auto reply
   | set 0 6 1 Auto                    # GPS
   | set 0 6 3 DDM                     # Coordinate format
   | set 0 6 4 Metric                  # Units
@@ -1043,6 +1044,7 @@
   | set 0 5 9 6 On                    # Mute speaker
   | set 0 5 9 7 APRS first            # Shared VHF
   | set 0 5 9 8 Off                   # Decode log
+  | set 0 5 9 9 Off                   # Auto reply
   | set 0 6 1 Auto                    # GPS
   | set 0 6 3 DDM                     # Coordinate format
   | set 0 6 4 Metric                  # Units

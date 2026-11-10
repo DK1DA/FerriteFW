@@ -225,6 +225,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry(concat!("Mute speaker|On|", txtc!("Mute packets on the speaker."))),
         Entry(concat!("Shared VHF|APRS first|", txtc!("When A or B shares C's VHF chip: APRS first gives C long turns and A and B short looks; A·B first gives A and B their usual turns, and C misses more packets."))),
         Entry(concat!("Decode log|Off|", txtc!("Packets heard but not decoded (bad checksum) go to the event log, with the sender's best guess. For finding missed packets."))),
+        Entry(concat!("Auto reply|Off|", txtc!("Answer messages while you're away: who, after how long, and what. OK opens it."))),
     ]),
     ((7, 3), &[
         Entry(concat!("S-meter|Bars|", txtc!("Bars or dBm."))),
@@ -445,7 +446,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 96 + cfg!(feature = "bench") as usize] = [
+static SETTINGS: [Setting; 97 + cfg!(feature = "bench") as usize] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -494,6 +495,7 @@ static SETTINGS: [Setting; 96 + cfg!(feature = "bench") as usize] = [
     field!([5, 9, 6], aprs_mute: bool, Kind::Flip(&ON_OFF), AprsMute), // APRS-2
     field!([5, 9, 7], aprs_share: u8, Kind::Pick(&crate::settings::APRS_SHARE), Nothing), // WATCH-17.3
     field!([5, 9, 8], decode_log: bool, Kind::Flip(&ON_OFF), Nothing), // APRS-56
+    field!([5, 9, 9], special), // APRS-57: auto reply's page
     // GPS-1: Off, Auto, On in menu order (stored 0, 2, 1: the old on/off byte reads as it was, GPS-1.4)
     Setting {
         path: [6, 1, 0],
@@ -810,6 +812,12 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if c.custom_text().is_empty() { b"None".as_slice() } else { c.custom_text() });
             !c.custom_text().is_empty()
         }
+        // APRS-57: on or off; its settings are on its page
+        [5, 9, 9] => {
+            let on = app.aprs_cfg().reply_on();
+            b.set(if on { b"On" } else { b"Off" });
+            on
+        }
         [5, 7] | [5, 7, 1] => {
             pick(b, &ON_OFF, app.aprs_cfg().digi_on() as u8);
             app.aprs_cfg().digi_on()
@@ -1052,6 +1060,8 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             let i = cycle(app.aprs_cfg().fx25_index(), d, crate::aprs::FX25_CHECKS.len());
             app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_CHECKS[i as usize], ..app.aprs_cfg() })
         }
+        // APRS-57: the knob turns auto reply on and off; OK opens its page
+        [5, 9, 9] => app.set_aprs(crate::aprs::AprsCfg { reply: app.aprs_cfg().reply ^ 1, ..app.aprs_cfg() }),
         // 6.25 kHz steps across the VHF and UHF pager bands.
         [4, 2, 2] => s.pocsag_freq = (s.pocsag_freq as i64 + d as i64 * 625).clamp(13_600_000, 52_000_000) as ferrite_core::freq::Freq10,
         [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
@@ -1131,6 +1141,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 9, 3] => app.set_aprs(crate::aprs::AprsCfg { txdelay: crate::aprs::TXDELAY_DEFAULT, ..app.aprs_cfg() }),
         [5, 9, 4] => app.set_aprs(crate::aprs::AprsCfg { tx_level: 1, ..app.aprs_cfg() }),
         [5, 9, 5] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
+        [5, 9, 9] => app.set_aprs(crate::aprs::AprsCfg { reply: app.aprs_cfg().reply & !1, ..app.aprs_cfg() }), // APRS-57: off, the rest kept
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
         // # forgets the custom path; a path set to it goes back to the default (APRS-26)

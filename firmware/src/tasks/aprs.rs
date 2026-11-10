@@ -204,6 +204,14 @@ impl Aprs {
                 extra.changed();
             }
         }
+        // APRS-57: the auto reply, once its delay is up: one of our messages, stored and tried as any (APRS-13);
+        // none without room for it (APRS-13.3) or a callsign to send as (APRS-8).
+        if let Some(to) = extra.aprs.reply_now(now_s) {
+            let cfg = extra.cfg();
+            if !me.is_empty() && extra.aprs.room() && store.message_in(false, to.as_bytes(), cfg.reply_text(), 0) {
+                extra.aprs.send(to.as_bytes(), cfg.reply_text());
+            }
+        }
         match &self.tx {
             // APRS-10.1: APRS mode or beacons turned off (or Low Power Mode, or KISS) while it waited: dropped,
             // never keyed on C's own channel.

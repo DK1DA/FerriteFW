@@ -9,7 +9,7 @@
 //!
 //! Frames are the AX.25 bytes without the FCS, as `uafsk`'s demodulator gives them and its modulator takes them.
 
-use crate::aprs::{beacon_due, retry_wait, AprsCfg, LastBeacon, HEARD_MAX, INFO_MAX, TRIES};
+use crate::aprs::{REPLY_HOLD_S, beacon_due, retry_wait, AprsCfg, LastBeacon, HEARD_MAX, INFO_MAX, TRIES};
 use crate::data::{Beacon, Fix, MsgState, Pos, Station, Sym, AGO_UNKNOWN};
 use core::cell::Cell;
 use ferrite_core::freq::Freq10;
@@ -379,6 +379,9 @@ fn padded(b: &[u8; 10]) -> &[u8] {
     &b[..b.iter().position(|&c| c == 0).unwrap_or(10)]
 }
 
+/// APRS-57.2: the stations remembered as replied to (the oldest forgotten for a new one).
+const REPLIED: usize = 8;
+
 /// The APRS task's state: the heard list ([`HEARD_MAX`] stations of about 40 bytes, and the details of the
 /// [`DET`] heard most recently, APRS-4.5), our messages and acks, the digipeater's waiting frame.
 pub struct AprsLive {
@@ -401,6 +404,10 @@ pub struct AprsLive {
     digi_at: Cell<u32>,
     last_digi: Cell<Option<u32>>,
     last_auto: Cell<Option<u32>>,
+    /// APRS-57: the auto reply waiting (to whom, the second it goes), and the stations replied to lately (when).
+    reply_due: Cell<Option<(Buf<10>, u32)>>,
+    replied: [Cell<Option<(Buf<10>, u32)>>; REPLIED],
+    replied_at: Cell<u8>,
     beacon_last: Cell<Option<LastBeacon>>,
     beacon_now: Cell<bool>,
     /// APRS-27: a beacon owed after a voice transmission (kept to APRS-9's spacing, unlike "beacon now").
@@ -448,6 +455,9 @@ impl AprsLive {
             digi_at: Cell::new(0),
             last_digi: Cell::new(None),
             last_auto: Cell::new(None),
+            reply_due: Cell::new(None),
+            replied: [const { Cell::new(None) }; REPLIED],
+            replied_at: Cell::new(0),
             beacon_last: Cell::new(None),
             beacon_now: Cell::new(false),
             after_voice: Cell::new(false),
@@ -593,6 +603,7 @@ impl AprsLive {
     pub fn clear(&self) {
         self.clear_heard();
         self.clear_out();
+        self.reply_due.set(None); // APRS-57
         self.beacon_now.set(false);
         self.waiting.set(false);
         self.acks.iter().for_each(|a| a.set(None));
@@ -793,6 +804,9 @@ impl AprsLive {
                 rx.changed = true;
                 if my.is_some_and(|me| Address::from_text(m.addressee).is_some_and(|a| a.same(&me))) {
                     self.to_us(&call, m, &f, dupe, now_s, &mut rx);
+                    if rx.inbound.is_some() {
+                        self.auto_reply(&call, me, now_s, cfg); // APRS-57
+                    }
                 }
             }
             Ok(Packet::Other { kind: b'?', data }) => {
@@ -808,6 +822,38 @@ impl AprsLive {
             }
         }
         rx
+    }
+
+    /// APRS-57: a new message to us from `from`: the auto reply is set to go after its delay when it is on, has a
+    /// text, the pattern takes `from`, and `from` isn't ourselves (any SSID), a service (APRS-39) or a station
+    /// replied to in the last [`REPLY_HOLD_S`] (APRS-57.2: two radios replying to each other stop at one each).
+    /// One waits at a time: a second station in the delay gets none.
+    fn auto_reply(&self, from: &Buf<10>, me: &[u8], now_s: u32, cfg: &AprsCfg) {
+        let base = |c: &[u8]| -> Buf<10> { Buf::from(c.split(|&b| b == b'-').next().unwrap_or(c)) };
+        let ok = cfg.reply_on()
+            && !cfg.reply_text().is_empty()
+            && cfg.reply_matches(from.as_bytes())
+            && !base(from.as_bytes()).as_bytes().eq_ignore_ascii_case(base(me).as_bytes())
+            && crate::screens::contacts::service(from.as_bytes()).is_none()
+            && self.reply_due.get().is_none()
+            && !self.replied.iter().any(|r| r.get().is_some_and(|(c, at)| c == *from && now_s.wrapping_sub(at) < REPLY_HOLD_S));
+        if ok {
+            self.reply_due.set(Some((*from, now_s.wrapping_add(cfg.reply_delay_s() as u32))));
+        }
+    }
+
+    /// APRS-57: the station the auto reply goes to now, once its delay is up (the caller sends it as one of our
+    /// messages, APRS-13): marked replied to, so it gets no other for [`REPLY_HOLD_S`].
+    pub fn reply_now(&self, now_s: u32) -> Option<Buf<10>> {
+        let (to, at) = self.reply_due.get()?;
+        if (now_s.wrapping_sub(at) as i32) < 0 {
+            return None;
+        }
+        self.reply_due.set(None);
+        let i = self.replied_at.get() as usize % REPLIED;
+        self.replied[i].set(Some((to, now_s)));
+        self.replied_at.set(((i + 1) % REPLIED) as u8);
+        Some(to)
     }
 
     fn to_us(&self, from: &Buf<10>, m: parse::Message, f: &Frame, dupe: bool, now_s: u32, rx: &mut Rx) {
@@ -1711,6 +1757,82 @@ mod tests {
             assert_eq!(w.poll(t, true, 0), Clear::Wait, "busy at {t}");
         }
         assert_eq!(w.poll(15_000, true, 0), Clear::GiveUp, "busy for 5 s: not sent");
+    }
+
+    /// APRS-57 on, everyone, 10 s, with a reply.
+    fn reply_cfg(to: &[u8]) -> AprsCfg {
+        let mut c = AprsCfg { reply: 1, ..AprsCfg::DEFAULT };
+        c.reply_to = [0; crate::aprs::REPLY_TO_LEN];
+        c.reply_to[..to.len()].copy_from_slice(to);
+        c.reply_text[..14].copy_from_slice(b"Away, back 5pm");
+        c
+    }
+
+    /// APRS-57, APRS-57.2: a message to us gets the auto reply after its delay (10 s), once; the same station again
+    /// within 30 minutes gets none (two radios replying to each other stop there), after them it does again.
+    #[test]
+    fn auto_reply_after_its_delay_once_per_station() {
+        let a = AprsLive::new();
+        let cfg = reply_cfg(b"*");
+        let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ-7 :On my way{12");
+        assert!(a.receive(&f[..n], 100, b"VE3XYZ-7", &cfg).inbound.is_some());
+        assert_eq!(a.reply_now(109), None, "not before its delay");
+        assert_eq!(a.reply_now(110).unwrap().as_bytes(), b"VE3KPW-9");
+        assert_eq!(a.reply_now(111), None, "once");
+        let (g, m) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ-7 :Thanks{13");
+        assert!(a.receive(&g[..m], 200, b"VE3XYZ-7", &cfg).inbound.is_some());
+        assert_eq!(a.reply_now(300), None, "the same station within 30 minutes: none");
+        let (h, k) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ-7 :Hello again{14");
+        assert!(a.receive(&h[..k], 110 + REPLY_HOLD_S, b"VE3XYZ-7", &cfg).inbound.is_some());
+        assert!(a.reply_now(120 + REPLY_HOLD_S).is_some(), "after 30 minutes, again");
+    }
+
+    /// APRS-57: no reply when it is off or has no text, to a station the pattern doesn't take, to ourselves on
+    /// another SSID, to a service (APRS-39), or to an ack; the delay follows the setting (bits 4-5: 2 min).
+    #[test]
+    fn auto_reply_only_where_it_should() {
+        let to_us = |a: &AprsLive, from: &[u8], at: u32, cfg: &AprsCfg| {
+            let (f, n) = frame(from, b"APRS", &[], b":VE3XYZ-7 :Ping{77");
+            a.receive(&f[..n], at, b"VE3XYZ-7", cfg);
+        };
+        let a = AprsLive::new();
+        to_us(&a, b"VE3KPW-9", 100, &AprsCfg::DEFAULT);
+        assert_eq!(a.reply_now(1000), None, "off");
+        let mut empty = reply_cfg(b"*");
+        empty.reply_text = [0; crate::aprs::REPLY_TEXT_LEN];
+        to_us(&a, b"VE3KPW-9", 100, &empty);
+        assert_eq!(a.reply_now(1000), None, "no text");
+        let a = AprsLive::new();
+        let ve7 = reply_cfg(b"VE7*");
+        to_us(&a, b"VE3KPW-9", 100, &ve7);
+        assert_eq!(a.reply_now(1000), None, "VE7* doesn't take VE3KPW-9");
+        to_us(&a, b"VE7ABC-9", 2000, &ve7);
+        assert!(a.reply_now(2010).is_some(), "VE7* takes VE7ABC-9");
+        let a = AprsLive::new();
+        to_us(&a, b"VE3XYZ-9", 100, &reply_cfg(b"*"));
+        assert_eq!(a.reply_now(1000), None, "ourselves on another SSID");
+        to_us(&a, b"WXBOT", 100, &reply_cfg(b"*"));
+        assert_eq!(a.reply_now(1000), None, "a service");
+        let a = AprsLive::new();
+        let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ-7 :ack77");
+        a.receive(&f[..n], 100, b"VE3XYZ-7", &reply_cfg(b"*"));
+        assert_eq!(a.reply_now(1000), None, "an ack");
+        let a = AprsLive::new();
+        let slow = AprsCfg { reply: 0x31, ..reply_cfg(b"*") };
+        to_us(&a, b"VE3KPW-9", 100, &slow);
+        assert_eq!((a.reply_now(219), a.reply_now(220).map(|c| c.len())), (None, Some(8)), "2 min");
+    }
+
+    /// APRS-57.1: the pattern: `*` (or nothing) everyone, `X*` every callsign starting X, else one exactly (SSID 0
+    /// written or not), whatever the case.
+    #[test]
+    fn auto_reply_patterns() {
+        use crate::aprs::reply_pattern as m;
+        assert!(m(b"*", b"VE3KPW-9") && m(b"", b"VE3KPW-9"));
+        assert!(m(b"VE3*", b"VE3KPW-9") && !m(b"VE3*", b"VA3KPW"));
+        assert!(m(b"VE3KPW*", b"VE3KPW") && m(b"VE3KPW*", b"VE3KPW-15"));
+        assert!(m(b"VE3KPW-9", b"VE3KPW-9") && !m(b"VE3KPW-9", b"VE3KPW-7") && !m(b"VE3KPW", b"VE3KPW-9"));
+        assert!(m(b"VE3KPW", b"VE3KPW-0") && m(b"VE3KPW-0", b"VE3KPW") && m(b"ve3kpw", b"VE3KPW"));
     }
 
     #[test]
