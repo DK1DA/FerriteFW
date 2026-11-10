@@ -42,6 +42,49 @@ pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
     (y, h(s))
 }
 
+/// A box over home went (the quick menu, HOME-17; a shortcut's popup, HOME-8): in the cards layout (HOME-3's
+/// Watch) the gaps it covered go back to the background, and the cards it covered are marked new, so the render
+/// that follows draws each whole, recorded once and replayed into its own bands (DISP-29), straight from the box
+/// to home (DISP-25). Only what the box covered is drawn again (Nov 9, 2026: the quick menu's repaint ran the whole
+/// of home once per band, about 12 passes; a popup's cleared the box and redrew every region). False in the other
+/// layouts: the caller repaints its own way.
+pub(crate) fn uncover(app: &mut App, lcd: &mut impl Panel, (x, y, bw, bh): (i32, i32, i32, i32)) -> bool {
+    if app.home_layout() != 0 {
+        return false;
+    }
+    let a = app.active;
+    let mut above = y; // the box's rows not yet covered by a card or a gap
+    for s in 0..SLOTS as u8 {
+        let (cy, ch) = card(s, a);
+        // the gap above this card, inside the box: the background it was before the box
+        let (g0, g1) = (above.max(y), cy.min(y + bh));
+        if g1 > g0 {
+            lcd.fill(x, g0, bw, g1 - g0, BG);
+        }
+        if cy < y + bh && cy + ch > y {
+            // drawn whole by the render that follows: its geometry and every part of it unknown
+            let p = s as usize;
+            app.drawn.card[p] = 0;
+            app.drawn.meter[p] = None;
+            for r in [R_FRAME, R_HEAD, R_FREQ, R_INFO, R_SUB] {
+                app.drawn.hash[r + p] = 0;
+            }
+        }
+        above = above.max(cy + ch);
+    }
+    if above < y + bh {
+        lcd.fill(x, above, bw, y + bh - above, BG); // below the last card
+    }
+    // the sides of the cards (x 0-5 and 234-239) inside the box: background too
+    for (sx, sw) in [(0, 6), (234, 6)] {
+        let (l, r) = (x.max(sx), (x + bw).min(sx + sw));
+        if r > l {
+            lcd.fill(l, y, r - l, bh, BG);
+        }
+    }
+    true
+}
+
 /// What a card shows: a slot's own (0), the APRS card (1, APRS-17), the broadcast card (2, BCR-26) or an off
 /// slot's (3, HOME-15.2). A change redraws the card whole.
 pub(crate) fn card_kind(app: &App, s: u8) -> u8 {

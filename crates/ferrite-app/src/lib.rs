@@ -257,6 +257,9 @@ pub(crate) struct Drawn {
     pub popup_gone: bool,
     /// The quick menu's box just went (HOME-17): its rectangle is drawn again from the screen under it.
     pub qmenu_gone: bool,
+    /// HOME-8: the shortcut popup on home as last drawn (its text's hash; 0 none): while it is up home waits under
+    /// it, and the popup is drawn again only when its text changes (DISP-25).
+    pub popup: u32,
 }
 
 /// [`App::alert`]'s bits.
@@ -534,7 +537,7 @@ impl App {
             back: [None; BACK_DEPTH],
             near: screens::zones::NearCache::NONE,
             local: local::Local::OFF,
-            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false },
+            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false, popup: 0 },
             radio: screens::activity::RadioUi::new(),
             set,
             alert_info: alert,
