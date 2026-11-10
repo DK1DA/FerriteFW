@@ -419,6 +419,7 @@ impl App {
             self.drawn.hash = [0; shared::REGIONS];
             self.drawn.meter = [None; SLOTS];
             self.drawn.screen = Some(id);
+            self.drawn.popup = 0; // a popup went with the content too
             qmenu::unseen(self); // the quick menu's box went with the content: drawn again whole over the screen
         }
         self.note_device(dev);
@@ -432,6 +433,17 @@ impl App {
             self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
         let popup_gone = self.drawn.popup_gone;
+        if popup_gone {
+            self.drawn.popup = 0;
+        }
+        // HOME-8: a shortcut's popup on home, already on the screen: home waits under it as under the quick menu
+        // (it redrew under the popup every frame and the popup over it again, 24 KB each, Nov 9, 2026); the first
+        // frame draws home first, so what the shortcut changed shows at once.
+        let popup_frozen = !cleared
+            && !popup_gone
+            && self.screen == Screen::Home
+            && self.drawn.popup != 0
+            && self.toast.is_some_and(|t| t.center);
         if popup_gone && !cleared && self.screen == Screen::Home && home::uncover(self, lcd, w::POPUP_BOX) {
             // HOME-8: the popup went from home's cards: only the cards under it are drawn again (DISP-25)
             self.drawn.popup_gone = false;
@@ -463,7 +475,7 @@ impl App {
                 lcd.fill(x, y, 240, h, BG);
                 self.screen.render(self, &mut ferrite_ui::canvas::direct(lcd), &cx);
             }
-        } else if popup_gone || !qmenu::frozen(self) {
+        } else if popup_gone || !(qmenu::frozen(self) || popup_frozen) {
             // through a band that passes straight on, so each screen's drawing is compiled once (as `fresh`'s)
             self.screen.render(self, &mut ferrite_ui::canvas::direct(lcd), &cx);
         }
@@ -471,7 +483,15 @@ impl App {
         qmenu::draw(self, lcd);
         // A shortcut's popup sits over the screen: drawn after it every time, as the screen may have drawn under it.
         if let Some(t) = self.toast.filter(|t| t.center) {
-            w::popup(lcd, t.head.as_bytes(), t.body.as_bytes());
+            let h = shared::Mix::new().b(t.head.as_bytes()).b(t.body.as_bytes()).get() | 1;
+            // on home: once, then only when its text changes (home waits under it); elsewhere every time, as the
+            // screen may have drawn under it
+            if self.screen != Screen::Home || self.drawn.popup != h || !popup_frozen {
+                w::popup(lcd, t.head.as_bytes(), t.body.as_bytes());
+            }
+            self.drawn.popup = if self.screen == Screen::Home { h } else { 0 };
+        } else {
+            self.drawn.popup = 0;
         }
     }
 }

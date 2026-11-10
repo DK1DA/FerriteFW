@@ -494,6 +494,12 @@ fn a_shortcut_popup_goes_straight_to_home() {
         t.hold(Key::Digit(2)); // TX power: a popup for 1.2 s
         t.render(&mut fb);
         assert!(t.app.toast.is_some_and(|x| x.center));
+        // HOME-8: receiving on A while the popup is up: home waits under it and the popup isn't drawn again
+        t.live.slots[0] = SlotLive { freq: t.freq(), squelch_open: true, rssi: -85, ..Default::default() };
+        t.wait(200);
+        fb.begin_pass();
+        t.render(&mut fb);
+        assert_eq!(fb.end_pass(false).changed, 0, "layout {layout}: home waits under the popup");
         t.wait(crate::POPUP_MS + 100);
         assert!(t.app.toast.is_none(), "layout {layout}: the popup timed out");
         fb.begin_pass();

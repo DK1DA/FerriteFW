@@ -158,8 +158,9 @@ fn ram_is_small() {
     // satellite mode (chapter 28a: the source's pointer, 16 on the PC and 8 on the radio, and the App's own clock,
     // observer, alarm, open pass and what the Radio task was sent, 72), 96 with padding, to 1856; the Radio task's
     // queue 16 to 32 commands (MODE-6.5: the power-on burst with APRS mode and C muted is 17), 128, to 1984; when the
-    // broadcast slot took the broadcast, for the sleep timer (BCR-5, decision 352: 4 bytes), 8 with padding, to 1992
-    assert!(n <= 1992, "App is {n} bytes");
+    // broadcast slot took the broadcast, for the sleep timer (BCR-5, decision 352: 4 bytes), 8 with padding, to 1992;
+    // the shortcut popup as last drawn on home, so home waits under it (HOME-8: 4 bytes), 8 with padding, to 2000
+    assert!(n <= 2000, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
