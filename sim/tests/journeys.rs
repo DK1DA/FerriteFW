@@ -21,7 +21,7 @@ fn first_run_setup() {
     r.expect_screen("Setup").expect_text("1 of 8").expect_text("Welcome to Ferrite");
     r.run("press OK; expect text \"2 of 8\"; expect text \"Your callsign\"");
     r.run("press OK; expect text \"3 of 8\"; expect text \"United States\"; expect text \"Other\"");
-    r.run("press DOWN; press OK; expect text \"4 of 8\"");
+    r.run("press OK; expect text \"4 of 8\""); // Canada: first in the list
     for page in 5..=8 {
         r.press(Key::Menu);
         r.expect_text(&format!("{page} of 8"));

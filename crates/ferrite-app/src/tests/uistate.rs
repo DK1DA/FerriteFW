@@ -235,7 +235,7 @@ fn setup_pages_read_back() {
         t.tap(Key::Menu);
     }
     let v = ui(&t);
-    assert!(v.iter().any(|l| l == r#"row 0 "Canada" """#), "{v:#?}");
+    assert!(v.iter().any(|l| l == r#"row 0 "Canada" "" sel"#), "{v:#?}");
     assert!(v.iter().any(|l| l == r#"row 0 "Extend TX" "Off""#), "{v:#?}");
     for _ in 0..5 {
         t.tap(Key::Menu);

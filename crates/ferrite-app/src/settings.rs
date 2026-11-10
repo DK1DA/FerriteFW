@@ -70,6 +70,20 @@ impl<const N: usize> Text<N> {
 pub const REGION_LIST: [&str; 8] =
     ["United States", "Canada", "United Kingdom", "Europe", "Australia", "New Zealand", "Japan", "Other"];
 
+/// The regions as the lists show them: Canada first, then by name, Other last (Alex, Nov 9, 2026). Each entry is
+/// the stored value (1 + its index in [`REGION_LIST`]), so the order changes nothing saved.
+pub const REGION_ORDER: [u8; 8] = [2, 5, 4, 7, 6, 3, 1, 8];
+
+/// The stored region shown at `row` of the lists ([`REGION_ORDER`]).
+pub fn region_at(row: u8) -> u8 {
+    REGION_ORDER[row as usize % REGION_ORDER.len()]
+}
+
+/// The list row of a stored region (1-8); 0 for one not set.
+pub fn region_row(region: u8) -> u8 {
+    REGION_ORDER.iter().position(|&r| r == region).unwrap_or(0) as u8
+}
+
 /// Time zones (0 6 5), in quarter hours: UTC-12 to +14 with the 30 and 45 minute offsets in use.
 pub const TIME_ZONES: [i8; 38] = [
     -48, -44, -40, -38, -36, -32, -28, -24, -20, -16, -14, -12, -8, -4, 0, 4, 8, 12, 14, 16, 18, 20, 22, 23, 24,

@@ -31,13 +31,13 @@ fn setup_runs_and_writes_settings() {
     menu0(&mut t, &[9, 7, 1]);
     assert!(matches!(t.app.screen(), Screen::Setup(Setup { page: 0, .. })));
     t.tap(Key::Menu); // page 2: callsign
-    // V A 7 F E R with multi-tap: 8 8 8 (V), 2 (A), * 7 * (digit), 3 3 3 (F), 3 3 (E), 7 7 7 (R)
+    // V A 7 F E R with multi-tap: 8 8 8 (V), 2 (A), # 7 # (digit), 3 3 3 (F), 3 3 (E), 7 7 7 (R)
     for k in [8, 8, 8, 2] {
         t.tap(Key::Digit(k));
     }
-    t.tap(Key::Star);
+    t.tap(Key::Hash);
     t.tap(Key::Digit(7));
-    t.tap(Key::Star);
+    t.tap(Key::Hash);
     t.tap(Key::Digit(3));
     t.tap(Key::Digit(3));
     t.tap(Key::Digit(3));
@@ -56,7 +56,8 @@ fn setup_runs_and_writes_settings() {
     t.tap(Key::Digit(7));
     t.tap(Key::Menu); // page 3: region
     assert_eq!(t.app.settings().region_name(), "Not set", "nothing is chosen for you (SETUP-3)");
-    t.tap(Key::Down); // Canada
+    t.tap(Key::Down); // Australia
+    t.tap(Key::Up); // Canada, first in the list
     assert_eq!(t.app.settings().region_name(), "Not set", "moving doesn't choose");
     t.tap(Key::Menu); // OK chooses it and goes on
     assert_eq!(t.app.settings().region_name(), "Canada");
@@ -97,7 +98,7 @@ fn setup_at_first_boot() {
         t.tap(Key::Menu); // OK, OK, OK... (SETUP-3)
     }
     assert_eq!(t.app.screen(), Screen::Home);
-    assert_eq!(t.app.settings().region_name(), "United States", "the pre-selected region");
+    assert_eq!(t.app.settings().region_name(), "Canada", "the pre-selected region: the list's first");
     assert!(!t.app.settings().extend_tx);
 }
 
@@ -598,24 +599,25 @@ fn owner_card_from_setup_to_boot() {
         t.tap(Key::Menu); // callsign, region, owner card
     }
     assert!(matches!(t.app.screen(), Screen::Setup(Setup { page: 3, .. })), "page 4: the owner card");
-    t.tap(Key::Star); // abc
+    t.tap(Key::Hash); // abc
     t.tap(Key::Digit(2));
     t.wait(1100);
     t.tap(Key::Digit(2));
     t.tap(Key::Digit(2));
     t.tap(Key::Down);
-    t.tap(Key::Star); // 123
+    t.tap(Key::Hash); // 123
     for d in [5, 5, 5] {
         t.tap(Key::Digit(d));
     }
     t.tap(Key::Down);
-    t.tap(Key::Star); // ABC
+    t.tap(Key::Hash); // ABC
     for _ in 0..4 {
         t.tap(Key::Digit(1)); // . - / @
     }
     let o = t.app.settings().owner;
     assert_eq!((o[0].as_bytes(), o[1].as_bytes(), o[2].as_bytes()), (&b"ab"[..], &b"555"[..], &b"@"[..]));
     assert!(t.app.settings().boot_owner().is_none(), "the logo until 0 7 3 3 says otherwise");
+    t.tap(Key::Menu); // on to the time page: # is the letters' mode where you type (KEY-12)
     t.tap(Key::Hash); // skip the rest of setup
     t.tap(Key::Menu);
 

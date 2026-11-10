@@ -983,7 +983,12 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             s.theme = cycle(s.theme, d, THEMES.len());
         }
         [9, 4] => {
-            s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1;
+            // In the lists' order (Canada first, then by name): the stored values stay as they were.
+            s.region = if s.region == 0 {
+                crate::settings::region_at(if d > 0 { 0 } else { REGION_LIST.len() as u8 - 1 })
+            } else {
+                crate::settings::region_at(cycle(crate::settings::region_row(s.region), d, REGION_LIST.len()))
+            };
             app.region_steps(); // VFO-18
         }
         // 0.1 ms steps up to 1 ms, then 1 ms steps to 10 ms (stock's dwell, the default).

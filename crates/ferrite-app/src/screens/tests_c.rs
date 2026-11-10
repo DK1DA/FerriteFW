@@ -719,10 +719,10 @@ fn predictive_words() {
     t.draw();
     assert_eq!(text(&t), "", "the word in progress isn't in the draft yet");
     t.app.knob(2, t.t, &t.s); // good, GD (its short form), home
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "Home ");
     keys(&mut t, "my");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "Home my ");
 }
 
@@ -734,9 +734,9 @@ fn cursor_edits_mid_text() {
     compose_to(&mut t);
     keys(&mut t, "home");
     t.app.knob(2, t.t, &t.s);
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     keys(&mut t, "my");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "Home my ");
     for _ in 0..3 {
         t.tap(Key::Left);
@@ -744,7 +744,7 @@ fn cursor_edits_mid_text() {
     // before "my ": digits (hold) and a space go in there
     t.hold(Key::Digit(7));
     t.hold(Key::Digit(3));
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "Home 73 my ");
     t.tap(Key::Exit); // BACK deletes before the cursor
     assert_eq!(text(&t), "Home 73my ");
@@ -772,10 +772,10 @@ fn predictive_short_forms() {
     compose_to(&mut t);
     keys(&mut t, "received");
     t.app.knob(1, t.t, &t.s);
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "QSL ");
     keys(&mut t, "qth");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "QSL QTH ");
 }
 
@@ -786,17 +786,17 @@ fn predictive_phrase_short_forms() {
     compose_to(&mut t);
     for w in ["see", "you"] {
         keys(&mut t, w);
-        t.tap(Key::Hash);
+        t.tap(Key::Star);
     }
     assert_eq!(text(&t), "See you ");
     keys(&mut t, "later");
     t.app.knob(1, t.t, &t.s); // later, CUL
     t.draw();
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "CUL ");
     keys(&mut t, "later");
     t.app.knob(1, t.t, &t.s);
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "CUL later ", "no phrase before it: later is the only candidate");
 }
 
@@ -829,7 +829,7 @@ fn predictive_marks_digits_and_switch() {
     assert_eq!(text(&t), "Ok.");
     t.tap(Key::Digit(1));
     assert_eq!(text(&t), "Ok,");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     t.hold(Key::Digit(7));
     t.hold(Key::Digit(3));
     assert_eq!(text(&t), "Ok, 73");
@@ -855,7 +855,7 @@ fn predictive_limit() {
     t.tap(Key::Digit(6)); // a third key would pass 67
     assert_eq!(t.app.text.as_bytes(), b"65");
     assert!(t.cmds().iter().any(refused), "refused with a beep");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t).len(), 67);
 }
 
@@ -876,27 +876,27 @@ fn hint_keys(t: &T) -> std::vec::Vec<(&'static str, &'static str)> {
     t.app.screen().hints(&t.app).as_slice().to_vec()
 }
 
-/// TEXT-6.1, TEXT-11.1: # ("Write" in the hint bar) puts the quick list away for an empty editor; the knob
+/// TEXT-6.1, TEXT-11.1: * ("Write" in the hint bar) puts the quick list away for an empty editor; the knob
 /// brings it back; a letter key also puts it away, and it stays away when the text is deleted again.
 #[test]
 fn quick_list_put_away() {
     let mut t = T::new();
     compose_to(&mut t);
     t.draw();
-    assert!(hint_keys(&t).contains(&("#", "Write")), "{:?}", hint_keys(&t));
-    t.tap(Key::Hash);
+    assert!(hint_keys(&t).contains(&("*", "Write")), "{:?}", hint_keys(&t));
+    t.tap(Key::Star);
     t.draw();
-    assert_eq!(text(&t), "", "# on the list adds no space");
+    assert_eq!(text(&t), "", "* on the list adds no space");
     assert!(hint_keys(&t).contains(&("1", "Mark")), "the editor's hints: {:?}", hint_keys(&t));
     t.tap(Key::Menu);
     assert_eq!(text(&t), "", "OK puts no quick message in");
     assert_eq!(t.name(), "Compose message", "and sends nothing");
     t.app.knob(1, t.t, &t.s);
     t.draw();
-    assert!(hint_keys(&t).contains(&("#", "Write")), "the knob brings the list back");
+    assert!(hint_keys(&t).contains(&("*", "Write")), "the knob brings the list back");
     // a letter key starts the message and puts the list away; deleting it all leaves an empty editor
     keys(&mut t, "ok");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(text(&t), "Ok ");
     for _ in 0..3 {
         t.tap(Key::Exit);
@@ -955,7 +955,7 @@ fn quick_messages_edited() {
     t.tap(Key::Exit);
     t.tap(Key::Exit); // "73" deleted
     keys(&mut t, "home");
-    t.tap(Key::Hash);
+    t.tap(Key::Star); // the space (KEY-12)
     t.tap(Key::Menu);
     assert_eq!(t.name(), "Quick messages");
     assert_eq!(t.s.quick(0).unwrap().as_bytes(), b"Good ");
@@ -973,7 +973,7 @@ fn beacon_comment_edited() {
     }
     assert_eq!(t.name(), "Comment");
     keys(&mut t, "home");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     t.tap(Key::Menu);
     assert_ne!(t.name(), "Comment", "OK keeps it");
     assert_eq!(t.app.aprs_cfg().comment_text(), b"Good ");
@@ -1121,7 +1121,7 @@ fn waypoint_from_grid_square() {
     t.wait(1100);
     t.tap(Key::Digit(6));
     t.tap(Key::Digit(6)); // N
-    t.tap(Key::Star); // digits
+    t.tap(Key::Hash); // digits
     t.tap(Key::Digit(3));
     t.tap(Key::Digit(1));
     assert_eq!(t.app.text.as_bytes(), b"FN31");

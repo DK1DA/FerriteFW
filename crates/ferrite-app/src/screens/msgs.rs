@@ -1,6 +1,6 @@
 //! APRS messages (MENU 0 5 2; manual chapter 25, APRS-6, APRS-8, APRS-13): the inbox and sent together,
 //! newest first, sent ones with their state (C5); one message (C6); and compose (A16), typed with multi-tap
-//! (KEY-12: digits, * case and digits, # space, BACK deletes). The draft lives with the APRS task's outgoing
+//! (KEY-12: digits, # case and digits, * space, BACK deletes). The draft lives with the APRS task's outgoing
 //! message ([`crate::data::Draft`]), so typing costs the App no buffer. Nothing sends without a callsign
 //! (APRS-8).
 
@@ -305,7 +305,7 @@ const COMMENT: u8 = 254;
 pub struct Compose {
     /// 0 the recipient, 1 the text.
     pub field: u8,
-    /// Multi-tap: 0 lower case, 1 capitals, 2 digits (* cycles).
+    /// Multi-tap: 0 lower case, 1 capitals, 2 digits (# cycles).
     pub case: u8,
     /// The last multi-tap key (its digit + 1, 0 none), how often it was tapped, and when (ms / 64).
     pub key: u8,
@@ -333,7 +333,7 @@ pub struct Compose {
 
 const LISTED: u8 = 1;
 const SVC: u8 = 2;
-/// The quick list put away (TEXT-6.1): # ("Write") or any key that types; the knob on an empty message brings it back.
+/// The quick list put away (TEXT-6.1): * ("Write") or any key that types; the knob on an empty message brings it back.
 const WRITE: u8 = 4;
 
 /// Not decided yet: the first key or draw puts the cursor on the text when the draft has a recipient.
@@ -594,10 +594,10 @@ impl Compose {
                 }
                 s.pcase = next_case(t.as_bytes(), s.pcase);
             }
-            // # (and 0): the word, then a space
-            // TEXT-6.1: # on the quick list puts it away for an empty editor
-            (Key::Hash, Short) if quick_list => {}
-            (Key::Hash | Key::Digit(0), Short) => {
+            // * (marked _, and 0): the word, then a space (KEY-12)
+            // TEXT-6.1: * on the quick list puts it away for an empty editor
+            (Key::Star, Short) if quick_list => {}
+            (Key::Star | Key::Digit(0), Short) => {
                 if !accept(app, &mut s, &mut t) {
                     return true;
                 }
@@ -607,7 +607,7 @@ impl Compose {
                 s.punct = 0;
                 s.pcase = next_case(t.as_bytes(), s.pcase);
             }
-            (Key::Star, Short) => s.pcase = (s.pcase + 1) % 3,
+            (Key::Hash, Short) => s.pcase = (s.pcase + 1) % 3, // # (marked ^): case
             (Key::Up | Key::Down, Short | Repeat) if !keys.is_empty() || quick_list => {
                 let d = if e.key == Key::Up { -1 } else { 1 };
                 return self.pred_knob(app, d, store);
@@ -633,7 +633,7 @@ impl Compose {
             }
             _ => return false,
         }
-        // TEXT-6.1: whatever typed (or # on the list) puts the quick list away until the knob brings it back
+        // TEXT-6.1: whatever typed (or * on the list) puts the quick list away until the knob brings it back
         s.list |= WRITE;
         put_text(app, store, s, t);
         app.screen = Screen::Compose(s);
@@ -831,11 +831,11 @@ impl View for Compose {
             }
             // APRS-17.8: V/M sends a beacon; the draft stays as it is
             (Key::VfoMem, Short) => return super::opts::beacon_now(app, store),
-            (Key::Star, Short) => {
+            (Key::Hash, Short) => {
                 s.case = (s.case + 1) % 3;
                 s.key = 0;
             }
-            (Key::Hash, Short) if !to && cur.len() < max => {
+            (Key::Star, Short) if !to && cur.len() < max => {
                 cur.push(b" ");
                 s.key = 0;
             }
@@ -1035,15 +1035,15 @@ impl View for Compose {
                 }
                 // TEXT-11.1: how to write your own, and the keys the hint bar has no room for
                 let help: &[u8] = if quick_list {
-                    b"# or a letter: write your own"
+                    b"* or a letter: write your own"
                 } else if pred && self.field == 1 && full.is_empty() && !self.quick_edit_on() {
                     b"Knob: the quick messages again"
                 } else if pred && self.field == 1 && !keys.is_empty() {
                     b"1 mark   hold a digit: digit"
                 } else if pred && self.field == 1 {
-                    b"# space   hold a digit: digit"
+                    b"* space   hold a digit: digit"
                 } else {
-                    b"1 . , ? ! ' / - @ :   # space"
+                    b"1 . , ? ! ' / - @ :   * space"
                 };
                 lcd.text4(8, y + 55, help, &UI_12, DIM, BG);
             });
@@ -1055,17 +1055,17 @@ impl View for Compose {
         if self.field == 0 && self.list & LISTED != 0 {
             Hints::new(&[("Knob", "Pick"), ("OK", "Use"), (ARROWS_LR, "Group")]) // APRS-38
         } else if self.field == 0 {
-            Hints::new(&[("OK", "Next"), ("*", "Case"), ("BACK", "Delete")])
+            Hints::new(&[("OK", "Next"), ("#", "Case"), ("BACK", "Delete")])
         } else if pred && !app.text.is_empty() {
-            Hints::new(&[("Knob", "Word"), ("#", "Space"), ("Hold *", "Spell")]) // TEXT-11
+            Hints::new(&[("Knob", "Word"), ("*", "Space"), ("Hold *", "Spell")]) // TEXT-11
         } else if pred && self.list & LISTED != 0 {
-            Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("#", "Write")]) // TEXT-6.1
+            Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("*", "Write")]) // TEXT-6.1
         } else if self.quick_edit_on() {
             Hints::new(&[("OK", "Keep"), ("Hold *", if pred { "Spell" } else { "Words" }), ("BACK", "Delete")])
         } else if pred {
             Hints::new(&[("OK", "Send"), ("1", "Mark"), ("Hold *", "Spell")]) // TEXT-11.1
         } else {
-            Hints::new(&[("OK", "Send"), ("*", "Case"), ("Hold *", "Words")])
+            Hints::new(&[("OK", "Send"), ("#", "Case"), ("Hold *", "Words")])
         }
     }
 }

@@ -114,10 +114,10 @@ fn multitap_keys() {
     t.app.set.predictive = false;
     compose(&mut t, b"VE3KPW-9", b"");
     t.tap(Key::Digit(2)); // a
-    t.tap(Key::Star); // capitals
+    t.tap(Key::Hash); // capitals
     t.tap(Key::Digit(3)); // D
-    t.tap(Key::Hash);
-    t.tap(Key::Star); // digits
+    t.tap(Key::Star);
+    t.tap(Key::Hash); // digits
     t.tap(Key::Digit(7));
     assert_eq!(draft(&t), "aD 7");
     t.reads("compose");
@@ -137,7 +137,7 @@ fn multitap_keys() {
     let mut d = t.s.draft();
     d.text.set(&[b'x'; 67]);
     t.s.request(Op::Draft(d));
-    t.tap(Key::Hash); // no room: nothing
+    t.tap(Key::Star); // no room: nothing
     t.tap(Key::Digit(2));
     assert_eq!(t.toast(), "67 characters / the APRS limit");
     assert_eq!(draft(&t).len(), 67);
@@ -160,7 +160,7 @@ fn vm_in_compose_is_a_beacon() {
 fn predictive_case_pick_and_ok() {
     let mut t = T::new();
     compose(&mut t, b"VE3KPW-9", b"");
-    t.tap(Key::Star); // Capital -> CAPS
+    t.tap(Key::Hash); // Capital -> CAPS
     for k in [4, 6, 6, 3] {
         t.tap(Key::Digit(k)); // home / good / gone...
     }

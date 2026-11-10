@@ -170,10 +170,10 @@ impl Text {
         if self.mode == 3 && self.to.kind() == Kind::Name { 4 } else { self.mode }
     }
 
-    /// The mode * goes to: KEY-12's case and symbols; a callsign has capitals and digits only (SETUP-12).
+    /// The mode # goes to: KEY-12's case and symbols; a callsign has capitals and digits only (SETUP-12).
     fn next_mode(self) -> u8 {
         if self.to.kind() == Kind::Digits {
-            return 2; // digits only: * changes nothing
+            return 2; // digits only: # changes nothing
         }
         match (self.to.callsign(), self.mode) {
             (true, 0) => 2,
@@ -254,12 +254,13 @@ impl View for Text {
             (Key::Digit(d), Press::Short) => {
                 (s.last, s.at) = tap(&mut app.text, max, s.keys(), d, s.last, s.at, app.now);
             }
-            (Key::Star, Press::Short) => {
-                // KEY-12: case and symbols; a callsign has capitals and digits only (SETUP-12).
+            (Key::Hash, Press::Short) => {
+                // KEY-12: # (marked ^) case and symbols; a callsign has capitals and digits only (SETUP-12).
                 s.mode = self.next_mode();
                 s.last = 0;
             }
-            (Key::Hash, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Name | Kind::Path) => {
+            // KEY-12: * (marked _) the space; a path's comma.
+            (Key::Star, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Name | Kind::Path) => {
                 if app.text.len() < max {
                     app.text.push(if self.to.kind() == Kind::Path { b"," } else { b" " });
                 }
@@ -303,9 +304,10 @@ impl View for Text {
             let (star, hash_): (&[u8], &[u8]) = if self.to.kind() == Kind::Digits {
                 (b"", b"")
             } else if self.to.callsign() {
-                (if m == 0 { b"digits" } else { b"letters" }, if self.to.kind() == Kind::Path { b"comma" } else { b"" })
+                // KEY-12: * (marked _) the space or a path's comma, # (marked ^) the letters' mode.
+                (if self.to.kind() == Kind::Path { b"comma" } else { b"" }, if m == 0 { b"digits" } else { b"letters" })
             } else {
-                (MODES[self.next_mode() as usize].as_bytes(), b"space")
+                (b"space", MODES[self.next_mode() as usize].as_bytes())
             };
             keypad(lcd, 104, |d| legend(m, d), star, hash_);
             let tip = if self.to == TextFor::Clock {
@@ -313,11 +315,11 @@ impl View for Text {
             } else if self.to == TextFor::Capcode {
                 txt!("The capcode's digits. Empty keeps every capcode.")
             } else if self.to == TextFor::AprsPath {
-                txt!("Like WIDE1-1,WIDE2-1: up to 2 entries, # between.")
+                txt!("Like WIDE1-1,WIDE2-1: up to 2 entries, * between.")
             } else if self.to.callsign() {
                 txt!("Tap a key again for its next letter. Capitals only.")
             } else {
-                txt!("Tap a key again for its next letter; * changes case.")
+                txt!("Tap a key again for its next letter; # changes case, * is a space.")
             };
             para(lcd, 8, 206, 224, 2, 17, crate::text::load(tip).as_bytes(), &UI_12, SUB, BG);
         }
@@ -328,7 +330,7 @@ impl View for Text {
         if self.to.kind() == Kind::Digits {
             return Hints::new(&[("OK", "Keep"), back]);
         }
-        Hints::new(&[("*", MODES[self.next_mode() as usize]), ("OK", "Keep"), back])
+        Hints::new(&[("#", MODES[self.next_mode() as usize]), ("OK", "Keep"), back])
     }
 }
 

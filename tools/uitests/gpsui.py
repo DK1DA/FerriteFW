@@ -162,7 +162,7 @@ def compose_stops_at_67(t):
     try:
         n = n0
         while n < 65:
-            u = t.keys("2 HASH", settle=0.05)
+            u = t.keys("2 STAR", settle=0.05)  # * takes the word and adds a space (KEY-12)
             n = int(u["compose"]["count"].split("/")[0])
         # Different keys from here: in multi-tap (the radio may be left there, TEXT-10) the same key again within
         # a second changes the last letter (KEY-12) and adds nothing, so a second "2" was never refused.

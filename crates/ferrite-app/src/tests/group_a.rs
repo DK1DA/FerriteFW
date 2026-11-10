@@ -397,10 +397,10 @@ fn text_entry_names_a_channel() {
     }
     t.digits("44"); // H
     t.wait(1100);
-    t.tap(Key::Star); // lower case
+    t.tap(Key::Hash); // lower case
     t.digits("444"); // i
-    t.tap(Key::Hash); // space
-    t.tap(Key::Star); // 123
+    t.tap(Key::Star); // space
+    t.tap(Key::Hash); // 123
     t.digits("2");
     assert_eq!(t.app.text.as_bytes(), b"Hi 2");
     t.tap(Key::Exit);
@@ -419,7 +419,7 @@ fn text_entry_callsign_and_save_name() {
     let mut t = T::new();
     t.app.open(Dest::Text(TextFor::Callsign));
     t.digits("2"); // A
-    t.tap(Key::Star); // digits
+    t.tap(Key::Hash); // digits
     t.digits("7");
     t.tap(Key::Menu);
     assert_eq!(t.app.callsign(), b"A7");
@@ -836,7 +836,7 @@ fn text_cursor_edits_a_name() {
     t.tap(Key::Left);
     t.digits("22"); // B, before C
     assert_eq!(t.app.text.as_bytes(), b"ABC");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(t.app.text.as_bytes(), b"AB C");
     t.tap(Key::Exit);
     t.tap(Key::Exit);

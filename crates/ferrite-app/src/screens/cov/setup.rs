@@ -44,10 +44,13 @@ fn every_page_draws_its_heading() {
     assert_eq!(Screen::Setup(s).mockup(), None, "no page past the summary");
 }
 
-/// SETUP-4: the hint bar says Next/Previous/Skip, Start on the summary, Done for a page on its own.
+/// SETUP-4, KEY-12: the hint bar says Next/Previous/Skip (Mode where you type: # is the letters' mode there),
+/// Start on the summary, Done for a page on its own.
 #[test]
 fn hints_follow_the_page() {
     let mut t = at(1);
+    t.reads("hints \"OK\" \"Next\" \"BACK\" \"Previous\" \"#\" \"Mode\"");
+    t.tap(Key::Menu);
     t.reads("hints \"OK\" \"Next\" \"BACK\" \"Previous\" \"#\" \"Skip\"");
     t.tap(Key::Hash);
     t.reads("hints \"OK\" \"Start\" \"BACK\" \"Previous\"");
@@ -77,15 +80,15 @@ fn back_on_the_first_page_leaves() {
 fn callsign_tips() {
     let mut t = at(1);
     t.shows("digits type");
-    t.tap(Key::Star); // digits
-    t.shows("digits \u{b7} * letters");
+    t.tap(Key::Hash); // digits
+    t.shows("digits \u{b7} # letters");
     for d in [1, 2, 3, 4, 5, 6, 7] {
         t.tap(Key::Digit(d));
     }
     assert_eq!(t.app.callsign(), b"1234567");
     t.shows("over 6 characters: no APRS");
     assert!(t.px(170, 190, ferrite_ui::gfx::AMBER) > 20, "the warning is amber");
-    t.tap(Key::Star); // letters again
+    t.tap(Key::Hash); // letters again
     t.tap(Key::Left);
     assert_eq!(t.app.callsign(), b"123456");
     // 1 cycles / and 1 for a callsign, 0 only 0
@@ -106,7 +109,7 @@ fn region_page_rows_and_extend_tx() {
     t.knob(1);
     t.knob(-1);
     t.tap(Key::Right);
-    t.reads("\"Canada\" \"\" sel");
+    t.reads("\"Australia\" \"\" sel");
     assert_eq!(t.app.settings().region_name(), "Not set");
     t.tap(Key::Up);
     t.tap(Key::Up);
@@ -126,8 +129,8 @@ fn region_page_rows_and_extend_tx() {
     t.tap(Key::Left); // warned once: straight off
     assert!(!t.app.settings().extend_tx);
     assert!(matches!(t.screen(), Screen::Setup(_)));
-    t.tap(Key::Down); // wraps to the first region
-    t.reads("\"United States\" \"\" sel");
+    t.tap(Key::Down); // wraps to the first region: Canada (Canada first, then by name)
+    t.reads("\"Canada\" \"\" sel");
 }
 
 /// SETUP-3: the region page opened on its own (as an editor) chooses and returns.
@@ -139,41 +142,63 @@ fn region_page_alone_returns() {
     t.draw();
     t.tap(Key::Down);
     t.tap(Key::Menu);
-    assert_eq!(t.app.settings().region_name(), "Canada");
+    assert_eq!(t.app.settings().region_name(), "Australia", "Canada, then by name");
     assert_eq!(t.screen(), Screen::Home);
 }
 
-/// SETUP-11: the owner card's fields take letters in ABC, abc and 123 modes (* changes); \u{25c0} deletes; up and
-/// down move between the three fields.
+/// SETUP-11, KEY-12: the owner card's fields take letters in ABC, abc and 123 modes (# changes, marked ^), * is
+/// the space (marked _); 1 cycles its marks (. - / @) so an e-mail address can be typed; \u{25c0} deletes; up
+/// and down move between the three fields.
 #[test]
 fn owner_card_typing() {
     let mut t = at(3);
-    t.shows("ABC \u{b7} * changes");
+    t.reads("hints \"OK\" \"Next\" \"BACK\" \"Previous\" \"#\" \"Mode\"");
+    t.shows("ABC \u{b7} # changes");
     t.tap(Key::Digit(2));
     t.tap(Key::Digit(2)); // B
-    t.tap(Key::Star); // abc
-    t.shows("abc \u{b7} * changes");
+    t.tap(Key::Hash); // abc
+    t.shows("abc \u{b7} # changes");
+    assert!(matches!(t.screen(), Screen::Setup(Setup { page: 3, .. })), "# stays on the page");
     t.wait(1100);
     t.tap(Key::Digit(3)); // d
     t.reads("\"Name\" \"Bd\" sel");
-    t.tap(Key::Star); // 123
-    t.shows("123 \u{b7} * changes");
+    t.tap(Key::Star); // a space: a first and a last name
+    t.tap(Key::Digit(4));
+    t.reads("\"Name\" \"Bd g\" sel");
+    t.tap(Key::Hash); // 123
+    t.shows("123 \u{b7} # changes");
     t.tap(Key::Digit(4));
     t.tap(Key::Digit(4));
-    t.reads("\"Name\" \"Bd44\" sel");
+    t.reads("\"Name\" \"Bd g44\" sel");
     t.tap(Key::Left);
-    t.reads("\"Name\" \"Bd4\" sel");
-    t.tap(Key::Star); // back to ABC
-    t.shows("ABC \u{b7} * changes");
+    t.reads("\"Name\" \"Bd g4\" sel");
+    t.tap(Key::Hash); // back to ABC
+    t.shows("ABC \u{b7} # changes");
     t.tap(Key::Down);
     t.tap(Key::Digit(1));
     t.reads("\"Phone\" \".\" sel");
     t.tap(Key::Up);
     t.tap(Key::Up); // wraps to E-mail
     t.reads("\"E-mail\" \"\" sel");
+    // an address: abc, letters, 1 four times for @, letters, 1 once for the dot
+    t.tap(Key::Hash);
+    for d in [2, 0] {
+        t.tap(Key::Digit(d));
+        t.wait(1100);
+    }
+    for _ in 0..4 {
+        t.tap(Key::Digit(1));
+    }
+    t.wait(1100);
+    t.tap(Key::Digit(3));
+    t.wait(1100);
+    t.tap(Key::Digit(1));
+    t.wait(1100);
+    t.tap(Key::Digit(9));
+    t.reads("\"E-mail\" \"a @d.w\" sel");
     t.tap(Key::Right); // \u{25b6} does nothing on text
     t.knob(1);
-    t.reads("\"E-mail\" \"\" sel");
+    t.reads("\"E-mail\" \"a @d.w\" sel");
 }
 
 /// SETUP-5: the time page's three rows turn with the knob and write the settings 0 6 x.

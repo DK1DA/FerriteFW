@@ -44,8 +44,8 @@ pub async fn task() {
     // KEY-3, KEY-4), which also handles keys held together.
     let mut keys = Keys::new(2, 0, 0);
     let mut enc = Encoder::new(PER_DETENT);
-    // KEY-24: B before A, so clockwise (to the right) is +1, up; A first had every knob backwards (Oct 19, 2026).
-    enc.update(ENC_B.read(), ENC_A.read());
+    // KEY-24: A before B again (Nov 9, 2026, reversing Oct 19's B before A: Alex, "turns the wrong way").
+    enc.update(ENC_A.read(), ENC_B.read());
     // SND-12: PC15 (board::init made it an input with its pull-up) with the keys: stock's boot check, then its
     // debounce. What the Radio task has been told: it starts with PE1 low, nothing connected; a full queue is
     // tried again on the next poll.
@@ -54,7 +54,7 @@ pub async fn task() {
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut tick = 0u32;
     loop {
-        let d = enc.update(ENC_B.read(), ENC_A.read());
+        let d = enc.update(ENC_A.read(), ENC_B.read());
         if d != 0 {
             let _ = INPUT.try_send(Input::Knob(d));
         }

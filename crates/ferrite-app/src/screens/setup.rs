@@ -42,7 +42,7 @@ enum Ask {
 const PAGES: [(&str, crate::text::Txt, Ask); 8] = [
     (
         "Welcome to Ferrite",
-        txt!("A few questions, one per page. Each has a default, so OK on every page gives a working radio. OK goes on, BACK goes back, # skips the rest."),
+        txt!("A few questions, one per page. Each has a default, so OK on every page gives a working radio. OK goes on, BACK goes back, # skips the rest (where you type, # changes the letters)."),
         Ask::Nothing,
     ),
     (
@@ -142,7 +142,7 @@ impl Setup {
     /// The row a page opens on: the current value.
     fn first_row(app: &App, page: u8) -> u8 {
         match PAGES[page as usize].2 {
-            Ask::Region => app.set.region.saturating_sub(1).min(REGION_ROWS - 1),
+            Ask::Region => crate::settings::region_row(app.set.region),
             Ask::BatterySave => app.bsave,
             _ => 0,
         }
@@ -284,8 +284,13 @@ impl View for Setup {
             (Key::Left, Short | Repeat) if text => self.delete(app),
             (Key::Left | Key::Right, Short | Repeat) => self.turn(app, if e.key == Key::Right { 1 } else { -1 }),
             (Key::Digit(d), Short) if text => self.tap(app, d),
-            (Key::Star, Short) if text => {
-                // Callsign: letters / digits; owner card: ABC / abc / 123 (KEY-12).
+            // KEY-12: * (marked _) is the space on the owner card (a callsign has none, SETUP-12).
+            (Key::Star, Short) if ask == Ask::Owner => {
+                let _ = app.set.owner[self.row as usize % 3].push(b' ');
+                self.with(app, |s| s.tap_key = 0);
+            }
+            (Key::Hash, Short) if text => {
+                // KEY-12: # (marked ^) changes the letters: callsign letters / digits; owner card ABC / abc / 123.
                 let next = match (ask, self.flags & (LOWER | DIGITS)) {
                     (Ask::Callsign, 0) => DIGITS,
                     (Ask::Callsign, _) => 0,
@@ -297,7 +302,7 @@ impl View for Setup {
             }
             // OK on a region chooses it and goes on: no region is chosen for you (SETUP-3).
             (Key::Menu, Short) if ask == Ask::Region && self.row < REGION_ROWS => {
-                app.set.region = self.row + 1;
+                app.set.region = crate::settings::region_at(self.row);
                 app.region_steps(); // VFO-18
                 if single {
                     self.finish(app);
@@ -361,9 +366,9 @@ impl View for Setup {
                     let tip: &[u8] = if long {
                         b"over 6 characters: no APRS" // SETUP-13: CW ID sends it whole, AX.25 can't
                     } else if mode != 0 {
-                        "digits \u{b7} * letters".as_bytes()
+                        "digits \u{b7} # letters".as_bytes()
                     } else {
-                        "digits type \u{b7} * letters/digits".as_bytes()
+                        "digits type \u{b7} # letters/digits".as_bytes()
                     };
                     w::field(lcd, 10, 220, 170, 186, 182, tip, &w::st(&UI_12, if long { AMBER } else { SUB }, BG, Align::Left));
                     w::key_line(lcd, 10, 230, 200, "\x1b", "delete", BG);
@@ -372,10 +377,11 @@ impl View for Setup {
             Ask::Region => {
                 let (region, ext, row) = (app.set.region, app.set.extend_tx, self.row);
                 for i in 0..REGION_ROWS {
-                    let name = REGION_LIST[i as usize];
-                    let note = if region == i + 1 { "chosen" } else { "" };
+                    let r = crate::settings::region_at(i);
+                    let name = REGION_LIST[r as usize - 1];
+                    let note = if region == r { "chosen" } else { "" };
                     let focused = row == i;
-                    if app.dirty(R_ROW + i as usize, Mix::new().h(&focused).h(&(region == i + 1)).get()) {
+                    if app.dirty(R_ROW + i as usize, Mix::new().h(&focused).h(&(region == r)).get()) {
                         choice(lcd, 94 + 19 * i as i32, 17, name.as_bytes(), note.as_bytes(), focused); // 17: odd, DISP-20
                     }
                 }
@@ -403,7 +409,7 @@ impl View for Setup {
                 if app.dirty(R_ROW + 3, Mix::new().h(&mode).get()) {
                     let m = ["ABC", "abc", "123"][(mode / 4) as usize];
                     let mut t = Buf::<48>::new();
-                    let _ = uwrite!(t, "{} \u{b7} * changes", m);
+                    let _ = uwrite!(t, "{} \u{b7} # changes", m);
                     w::field(lcd, 10, 220, 240, 258, 254, t.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
                     w::key_line(lcd, 10, 230, 272, "\x1b", "delete", BG);
                 }
@@ -466,6 +472,9 @@ impl View for Setup {
             Hints::new(&[("OK", "Done"), ("BACK", "Back")])
         } else if self.page == LAST {
             Hints::new(&[("OK", "Start"), ("BACK", "Previous")])
+        } else if matches!(self.ask(), Ask::Callsign | Ask::Owner) {
+            // KEY-12: where you type, # is the letters' mode, not Skip
+            Hints::new(&[("OK", "Next"), ("BACK", "Previous"), ("#", "Mode")])
         } else {
             Hints::new(&[("OK", "Next"), ("BACK", "Previous"), ("#", "Skip")])
         }
@@ -525,7 +534,8 @@ impl Setup {
             Ask::Callsign => row(b"Callsign", app.set.callsign.as_bytes(), true),
             Ask::Region => {
                 for i in 0..REGION_ROWS {
-                    row(REGION_LIST[i as usize].as_bytes(), if app.set.region == i + 1 { b"chosen" } else { b"" }, self.row == i);
+                    let r = crate::settings::region_at(i);
+                    row(REGION_LIST[r as usize - 1].as_bytes(), if app.set.region == r { b"chosen" } else { b"" }, self.row == i);
                 }
                 row(b"Extend TX", ON_OFF[app.set.extend_tx as usize].as_bytes(), self.row == REGION_ROWS);
             }

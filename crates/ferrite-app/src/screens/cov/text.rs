@@ -77,7 +77,7 @@ fn aprs_path() {
     t.app.set_aprs_custom_path(b"WIDE1-1");
     open(&mut t, TextFor::AprsPath);
     assert_eq!(typed(&t), "WIDE1-1");
-    t.tap(Key::Hash);
+    t.tap(Key::Star);
     assert_eq!(typed(&t), "WIDE1-1,");
     t.app.text = ferrite_ui::text::Buf::from(b"A,B,C"); // three entries
     t.tap(Key::Menu);
