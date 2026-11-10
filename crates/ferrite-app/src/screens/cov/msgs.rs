@@ -274,6 +274,22 @@ fn service_recipient_stays_multitap() {
     assert!(t.app.set.predictive, "the choice is kept");
 }
 
+/// APRS-39: GWALL, the graffiti wall (suggested by Daria, an alpha tester): a service, its format shown.
+#[test]
+fn gwall_is_a_service() {
+    let k = crate::screens::contacts::service(b"GWALL").expect("GWALL is a service");
+    assert_eq!(crate::screens::contacts::SERVICES[k].1, "Graffiti wall");
+    for (call, _, f) in crate::screens::contacts::SERVICES {
+        let line = std::format!("Format: {f}");
+        let w = ferrite_ui::gfx::text4_width(line.as_bytes(), &ferrite_ui::assets::UI_12);
+        assert!(w <= 224, "{call}'s format line is {w} px");
+    }
+    let mut t = T::new();
+    compose(&mut t, b"GWALL", b"");
+    t.draw();
+    t.shows("Format: message (? for help)");
+}
+
 /// APRS-38: on an empty recipient the knob moves through the address book.
 #[test]
 fn knob_moves_the_address_book() {

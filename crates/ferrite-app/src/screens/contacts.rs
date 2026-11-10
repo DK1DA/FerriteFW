@@ -18,12 +18,14 @@ use ferrite_ui::text::Buf;
 use ufmt::uwrite;
 
 /// APRS-39: the services, with what each does and the format of a message to it.
-pub(crate) const SERVICES: [(&str, &str, &str); 5] = [
+pub(crate) const SERVICES: [(&str, &str, &str); 6] = [
     ("SMSGTE", "Text a phone", "@number message"),
     ("EMAIL-2", "Send an email", "address message"),
     ("WXBOT", "Weather for a place", "place"),
     ("ANSRVR", "Group messages", "CQ group message"),
     ("WHO-IS", "Look up a callsign", "callsign"),
+    // suggested by Daria, an alpha tester (Nov 9, 2026)
+    ("GWALL", "Graffiti wall", "message (? for help)"), // ? answers with its own format
 ];
 
 /// The service a recipient is, if it is one (APRS-39: picked or typed).
