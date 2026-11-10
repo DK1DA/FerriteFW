@@ -8,6 +8,11 @@ Ferrite is Rust on [Embassy](https://embassy.dev), for the AT32F403A in the RT-9
 
 - git, [rustup](https://rustup.rs) and Python 3.
 - The compiler is a pinned nightly (`rust-toolchain.toml`). rustup installs it, its components and the radio's target on the first build.
+- The ARM binutils, for the fast-flash check and the size tools (`arm-none-eabi-readelf`, `-nm`, `-objdump`, `-addr2line`):
+  - Fedora: `sudo dnf install arm-none-eabi-binutils-cs`
+  - Debian and Ubuntu: `sudo apt install binutils-arm-none-eabi`
+  - Arch: `sudo pacman -S arm-none-eabi-binutils`
+  - macOS: `brew install arm-none-eabi-binutils`
 - Everything else is in this repo, the chip drivers and the digital modes included.
 
 ## Run it on the PC
