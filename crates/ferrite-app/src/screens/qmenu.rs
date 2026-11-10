@@ -237,30 +237,7 @@ pub(crate) fn frozen(app: &App) -> bool {
 pub(crate) fn repaint<S: ChannelStore>(app: &mut App, lcd: &mut impl Panel, cx: &Cx<S>) {
     app.drawn.qmenu_gone = false;
     let (x, y, bw, bh) = BOX;
-    if app.home_layout() == 0 {
-        let a = app.active;
-        let mut above = y; // the box's rows not yet covered by a card or a gap
-        for s in 0..ferrite_core::msg::SLOTS as u8 {
-            let (cy, ch) = super::home::card(s, a);
-            // the gap above this card, inside the box: the background it was before the box
-            let (g0, g1) = (above.max(y), cy.min(y + bh));
-            if g1 > g0 {
-                lcd.fill(x, g0, bw, g1 - g0, BG);
-            }
-            if cy < y + bh && cy + ch > y {
-                // drawn whole by home's render, which follows: its geometry and every part of it unknown
-                let p = s as usize;
-                app.drawn.card[p] = 0;
-                app.drawn.meter[p] = None;
-                for r in [R_FRAME, R_HEAD, R_FREQ, R_INFO, R_SUB] {
-                    app.drawn.hash[r + p] = 0;
-                }
-            }
-            above = above.max(cy + ch);
-        }
-        if above < y + bh {
-            lcd.fill(x, above, bw, y + bh - above, BG); // below the last card
-        }
+    if super::home::uncover(app, lcd, BOX) {
         return;
     }
     let (hash0, meter0, card0, knob0) = (app.drawn.hash, app.drawn.meter, app.drawn.card, app.knob_at.take());

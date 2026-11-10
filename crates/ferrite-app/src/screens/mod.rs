@@ -432,7 +432,10 @@ impl App {
             self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
         let popup_gone = self.drawn.popup_gone;
-        if popup_gone && !cleared {
+        if popup_gone && !cleared && self.screen == Screen::Home && home::uncover(self, lcd, w::POPUP_BOX) {
+            // HOME-8: the popup went from home's cards: only the cards under it are drawn again (DISP-25)
+            self.drawn.popup_gone = false;
+        } else if popup_gone && !cleared {
             // The popup went: clear its box and let every region draw again over it.
             let (x, y, w_, h) = w::POPUP_BOX;
             lcd.fill(x, y, w_, h, BG);

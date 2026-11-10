@@ -481,3 +481,32 @@ fn knob_row_first() {
     let keys: std::vec::Vec<&str> = lines(&t.app).iter().map(|l| l.0).collect();
     assert_eq!(keys, ["Knob", "PTT A", "PTT B", "PF1", "PF2"]);
 }
+
+/// HOME-8, DISP-25: a shortcut's popup over home's cards goes with nothing flickering, only what it covered drawn
+/// again, and home exactly as drawn from scratch after, in every layout (the other two still clear and redraw).
+#[test]
+fn a_shortcut_popup_goes_straight_to_home() {
+    for layout in 0..3 {
+        let mut t = T::new();
+        t.app.set.layout = layout;
+        let mut fb = FrameBuffer::new();
+        t.render(&mut fb);
+        t.hold(Key::Digit(2)); // TX power: a popup for 1.2 s
+        t.render(&mut fb);
+        assert!(t.app.toast.is_some_and(|x| x.center));
+        t.wait(crate::POPUP_MS + 100);
+        assert!(t.app.toast.is_none(), "layout {layout}: the popup timed out");
+        fb.begin_pass();
+        t.render(&mut fb);
+        let r = fb.end_pass(false);
+        if layout == 0 {
+            assert_eq!(r.flicker, 0, "layout {layout}: closing");
+        }
+        let mut fresh = FrameBuffer::new();
+        t.app.drawn.screen = None;
+        t.app.drawn.sbar = None;
+        t.render(&mut fresh);
+        let diff = (0..fb.px.len()).filter(|&i| fb.px[i] != fresh.px[i]).count();
+        assert_eq!(diff, 0, "layout {layout}: after the popup, home as drawn from scratch");
+    }
+}
