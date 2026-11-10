@@ -69,10 +69,42 @@ pub struct AprsCfg {
     pub mic_e: u8,
     /// APRS-54: telemetry (0 5 6 4): the battery, MCU temperature and beacon power after our position comment.
     pub telemetry: bool,
+    /// APRS-57: auto reply (0 5 9 9): bit 0 on; bits 4-5 the delay, an index into [`REPLY_DELAYS_S`].
+    pub reply: u8,
+    /// APRS-57: who gets the reply, as typed: `*` everyone, `VE7*` every callsign starting so, else one
+    /// callsign-SSID exactly; zero-padded.
+    pub reply_to: [u8; REPLY_TO_LEN],
+    /// APRS-57: the reply, zero-padded (empty: none is sent).
+    pub reply_text: [u8; REPLY_TEXT_LEN],
+}
+
+/// APRS-57.1: [`AprsCfg::reply_matches`]'s rule, on the pattern as typed.
+pub fn reply_pattern(pat: &[u8], call: &[u8]) -> bool {
+    let up = |c: &u8| c.to_ascii_uppercase();
+    match pat.iter().position(|&c| c == b'*') {
+        Some(n) => call.len() >= n && call[..n].iter().map(up).eq(pat[..n].iter().map(up)),
+        None if pat.is_empty() => true,
+        None => {
+            // SSID 0 may be written or not: VE7ABC and VE7ABC-0 are the same station
+            let bare = |c: &[u8]| if c.ends_with(b"-0") { c.len() - 2 } else { c.len() };
+            call[..bare(call)].iter().map(up).eq(pat[..bare(pat)].iter().map(up))
+        }
+    }
 }
 
 /// APRS-50: the comment's room.
 pub const COMMENT_LEN: usize = 40;
+/// APRS-57: auto reply's delays (0 5 9 9), as Kenwood's: 10 s by default.
+pub const REPLY_DELAYS_S: [u16; 4] = [10, 30, 60, 120];
+pub const REPLY_DELAY_NAMES: [&str; 4] = ["10 s", "30 s", "1 min", "2 min"];
+/// APRS-57: the pattern's room (a callsign-SSID: 9) and the reply's (45, as Kenwood's).
+pub const REPLY_TO_LEN: usize = 9;
+pub const REPLY_TEXT_LEN: usize = 45;
+/// APRS-57: everyone, until set.
+pub const REPLY_TO_DEFAULT: [u8; REPLY_TO_LEN] = *b"*\0\0\0\0\0\0\0\0";
+/// APRS-57.2: one reply to a station in this long, whatever it sends (two radios replying to each other stop at
+/// one reply each).
+pub const REPLY_HOLD_S: u32 = 30 * 60;
 /// APRS-51: 0 5 5 6's names, by the digits dropped.
 pub const AMBIGUITY_NAMES: [&str; 5] = ["Exact", "1 digit", "2 digits", "3 digits", "4 digits"];
 /// APRS-52: 0 5 5 7's names; the status's message bits are 8 minus its place (Off duty 111 to Priority 001).
@@ -144,7 +176,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0, telemetry: false };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: REPLY_TO_DEFAULT, reply_text: [0; REPLY_TEXT_LEN] };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {
@@ -173,6 +205,34 @@ impl AprsCfg {
     pub fn comment_text(&self) -> &[u8] {
         let n = self.comment.iter().position(|&c| c == 0).unwrap_or(COMMENT_LEN);
         &self.comment[..n]
+    }
+
+    /// APRS-57: auto reply is on.
+    pub fn reply_on(&self) -> bool {
+        self.reply & 1 != 0
+    }
+
+    /// APRS-57: the wait before the reply, in seconds.
+    pub fn reply_delay_s(&self) -> u16 {
+        REPLY_DELAYS_S[(self.reply >> 4) as usize % REPLY_DELAYS_S.len()]
+    }
+
+    /// APRS-57: the pattern as typed (empty reads as everyone).
+    pub fn reply_to_text(&self) -> &[u8] {
+        let n = self.reply_to.iter().position(|&c| c == 0).unwrap_or(REPLY_TO_LEN);
+        &self.reply_to[..n]
+    }
+
+    /// APRS-57: the reply as typed.
+    pub fn reply_text(&self) -> &[u8] {
+        let n = self.reply_text.iter().position(|&c| c == 0).unwrap_or(REPLY_TEXT_LEN);
+        &self.reply_text[..n]
+    }
+
+    /// APRS-57.1: a station the pattern takes: `*` (or none) everyone; text then `*` every callsign starting so;
+    /// else the callsign-SSID exactly ("VE7ABC" is SSID 0 only; "VE7ABC*" every SSID). Case doesn't matter.
+    pub fn reply_matches(&self, call: &[u8]) -> bool {
+        reply_pattern(self.reply_to_text(), call)
     }
 
     /// A stored path value 0 5 9 1 can hold: one of the [`PATHS`], and Custom only once one is set.
@@ -647,6 +707,21 @@ impl App {
         let n = t.len().min(COMMENT_LEN);
         self.aprs.comment = [0; COMMENT_LEN];
         self.aprs.comment[..n].copy_from_slice(&t[..n]);
+        self.aprs_st |= DIRTY;
+    }
+
+    /// APRS-57: the reply or its pattern being typed, kept as it changes (as the comment, APRS-50).
+    pub(crate) fn set_aprs_reply_text(&mut self, t: &[u8]) {
+        let n = t.len().min(REPLY_TEXT_LEN);
+        self.aprs.reply_text = [0; REPLY_TEXT_LEN];
+        self.aprs.reply_text[..n].copy_from_slice(&t[..n]);
+        self.aprs_st |= DIRTY;
+    }
+
+    pub(crate) fn set_aprs_reply_to(&mut self, t: &[u8]) {
+        let n = t.len().min(REPLY_TO_LEN);
+        self.aprs.reply_to = [0; REPLY_TO_LEN];
+        self.aprs.reply_to[..n].copy_from_slice(&t[..n]);
         self.aprs_st |= DIRTY;
     }
 

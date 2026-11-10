@@ -68,6 +68,8 @@ pub enum Dest {
     ZoneEdit,
     /// A13: SAME location codes (MENU 0 4 5 2).
     LocationCodes,
+    /// A16b: APRS auto reply (MENU 0 5 9 9, APRS-57).
+    AutoReply,
     /// A14: DTMF dialer (MENU 0 8 5 1).
     DtmfDialer,
     /// A15: DTMF memories (MENU 0 8 5 2).
@@ -205,6 +207,7 @@ impl Dest {
             RangePreset => ("Range preset", "14", "A11"),
             ZoneEdit => ("Zone editor", "10", "A12"),
             LocationCodes => ("Location codes", "23", "A13"),
+            AutoReply => ("Auto reply", "25", "A16b"),
             DtmfDialer => ("DTMF dialer", "17", "A14"),
             DtmfMemories => ("DTMF memories", "17", "A15"),
             Compose => ("Compose message", "25", "A16"),
@@ -299,7 +302,7 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 68] = {
+pub const ALL: [Dest; 69] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
@@ -309,13 +312,13 @@ pub const ALL: [Dest; 68] = {
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
         LinkStatus, WriteProgress, PowerOff, EmptyBattery, Mailbox,
-        Group(1), Sub(4, 2), Value(Item::Power), FinishUpdate, Satellites,
+        Group(1), Sub(4, 2), Value(Item::Power), FinishUpdate, Satellites, AutoReply,
     ]
 };
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 53] = [
+pub const MENU0: [(&[u8], Dest); 54] = [
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 4], Dest::RangePresets),
     (&[1, 5], Dest::SkipList),
@@ -334,6 +337,7 @@ pub const MENU0: [(&[u8], Dest); 53] = [
     (&[4, 2], Dest::Sub(4, 2)),
     (&[4, 5], Dest::Sub(4, 5)),
     (&[4, 5, 2], Dest::LocationCodes),
+    (&[5, 9, 9], Dest::AutoReply),
     (&[5, 1], Dest::AprsHeard),
     (&[5, 2], Dest::AprsMessages),
     (&[5, 5], Dest::Sub(5, 5)),
@@ -455,6 +459,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::KeyTest => Screen::KeyTest(super::keytest::KeyTest::new()),
         Dest::PositionEntry => Screen::PosEntry(super::posentry::PosEntry::new()),
         Dest::LocationCodes => Screen::SameCodes(super::samecodes::SameCodes::new()),
+        Dest::AutoReply => Screen::AutoReply(super::autoreply::AutoReply::new()),
         Dest::DtmfDialer => Screen::Dtmf(super::dtmf::DtmfPad::dialer()),
         Dest::DtmfMemories => Screen::Dtmf(super::dtmf::DtmfPad::memories()),
         Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),

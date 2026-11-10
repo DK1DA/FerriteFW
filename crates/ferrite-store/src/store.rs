@@ -122,8 +122,8 @@ pub enum Job {
 /// bytes), then the settings added later (path, digipeater, beacon after voice with telemetry as its bit 1
 /// (APRS-54), the SSID: [`APRS_MORE`]), then the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 5, APRS-45:
 /// [`APRS_FX25`]), the message sound, symbol, TX delay and level, then the comment and ambiguity
-/// ([`APRS_COMMENT`]), then Mic-E ([`APRS_MIC_E`]). A record from before them is shorter and reads them as their
-/// defaults.
+/// ([`APRS_COMMENT`]), then Mic-E ([`APRS_MIC_E`]), then auto reply ([`APRS_REPLY`]). A record from before them
+/// is shorter and reads them as their defaults.
 const QUICK_LEN: usize = 68;
 const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
 const APRS_PATH: usize = APRS_MORE + 4;
@@ -136,7 +136,11 @@ const APRS_COMMENT: usize = APRS_SYMBOL + 3;
 const APRS_AMBIG: usize = APRS_COMMENT + ferrite_app::aprs::COMMENT_LEN;
 /// APRS-52: Mic-E (an older record reads Off).
 const APRS_MIC_E: usize = APRS_AMBIG + 1;
-const APRS_PAYLOAD: usize = APRS_MIC_E + 1;
+/// APRS-57: auto reply: on and the delay, the pattern, the reply (an older record reads off, everyone, none).
+const APRS_REPLY: usize = APRS_MIC_E + 1;
+const APRS_REPLY_TO: usize = APRS_REPLY + 1;
+const APRS_REPLY_TEXT: usize = APRS_REPLY_TO + ferrite_app::aprs::REPLY_TO_LEN;
+const APRS_PAYLOAD: usize = APRS_REPLY_TEXT + ferrite_app::aprs::REPLY_TEXT_LEN;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
 const _: () = assert!(APRS.end - APRS.start >= 2 * SECTOR);
 /// APRS-32: the stored messages [`FlashStore::message_heard`] looks through, newest first.
@@ -365,6 +369,27 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 }
             }
             if c.len as usize >= APRS_PAYLOAD {
+                // APRS-57: on (bit 0) and the delay (bits 4-5); the pattern and the reply only when printable
+                let mut r = [0u8; APRS_PAYLOAD - APRS_REPLY];
+                self.f.raw_read(c.at + APRS_REPLY as u32, &mut r)?;
+                if r[0] & !0x31 == 0 {
+                    cfg.reply = r[0];
+                }
+                let field = |t: &[u8], ok: &dyn Fn(u8) -> bool| -> Option<usize> {
+                    let n = t.iter().position(|&b| b == 0).unwrap_or(t.len());
+                    t[..n].iter().all(|&b| ok(b)).then_some(n)
+                };
+                let to = &r[1..1 + ferrite_app::aprs::REPLY_TO_LEN];
+                if let Some(n) = field(to, &|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'*') {
+                    cfg.reply_to = [0; ferrite_app::aprs::REPLY_TO_LEN];
+                    cfg.reply_to[..n].copy_from_slice(&to[..n]);
+                }
+                let text = &r[1 + ferrite_app::aprs::REPLY_TO_LEN..];
+                if let Some(n) = field(text, &|b| (b' '..=b'~').contains(&b)) {
+                    cfg.reply_text[..n].copy_from_slice(&text[..n]);
+                }
+            }
+            if c.len as usize >= APRS_REPLY {
                 let mut x = [0u8; 1];
                 self.f.raw_read(c.at + APRS_MIC_E as u32, &mut x)?;
                 if (x[0] as usize) < ferrite_app::aprs::MIC_E_NAMES.len() {
@@ -1643,6 +1668,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         p[APRS_COMMENT..APRS_AMBIG].copy_from_slice(&c.comment);
         p[APRS_AMBIG] = c.ambiguity;
         p[APRS_MIC_E] = c.mic_e;
+        p[APRS_REPLY] = c.reply;
+        p[APRS_REPLY_TO..APRS_REPLY_TEXT].copy_from_slice(&c.reply_to);
+        p[APRS_REPLY_TEXT..APRS_PAYLOAD].copy_from_slice(&c.reply_text);
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {
                 Some((k, t)) if k as usize == i => t,
@@ -2315,7 +2343,13 @@ mod tests {
         comment[..7].copy_from_slice(b"On foot");
         let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
         custom[..7].copy_from_slice(b"WIDE2-2");
-        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5, telemetry: true }
+        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5, telemetry: true, reply: 0x21, reply_to: *b"VE7*\0\0\0\0\0", reply_text: reply_text() }
+    }
+
+    fn reply_text() -> [u8; ferrite_app::aprs::REPLY_TEXT_LEN] {
+        let mut t = [0u8; ferrite_app::aprs::REPLY_TEXT_LEN];
+        t[..14].copy_from_slice(b"Away, back 5pm");
+        t
     }
 
     /// The APRS record's payload as it is stored for `cfg`.
@@ -2346,7 +2380,7 @@ mod tests {
         assert_eq!(p.len(), APRS_PAYLOAD);
         assert!(mounted_with(&p) == full, "a whole record reads back");
         let d = AprsCfg::DEFAULT;
-        for len in [APRS_MORE, APRS_PATH, APRS_FX25, APRS_SOUND, APRS_SYMBOL, APRS_COMMENT, APRS_MIC_E] {
+        for len in [APRS_MORE, APRS_PATH, APRS_FX25, APRS_SOUND, APRS_SYMBOL, APRS_COMMENT, APRS_MIC_E, APRS_REPLY] {
             let c = mounted_with(&p[..len]);
             let pick = |kept: bool, f: &dyn Fn(&AprsCfg) -> u32| if kept { f(&full) } else { f(&d) };
             assert_eq!((c.f5k, c.beacon, c.power), (full.f5k, full.beacon, full.power), "{len}: the first settings");
@@ -2361,7 +2395,8 @@ mod tests {
             let sym = len >= APRS_COMMENT;
             assert_eq!((c.symbol as u32, c.txdelay as u32, c.tx_level as u32), (pick(sym, &|x| x.symbol as u32), pick(sym, &|x| x.txdelay as u32), pick(sym, &|x| x.tx_level as u32)), "{len}: symbol");
             assert_eq!((c.comment == full.comment, c.ambiguity as u32), (len >= APRS_MIC_E, pick(len >= APRS_MIC_E, &|x| x.ambiguity as u32)), "{len}: comment");
-            assert_eq!(c.mic_e, d.mic_e, "{len}: Mic-E");
+            assert_eq!(c.mic_e as u32, pick(len >= APRS_REPLY, &|x| x.mic_e as u32), "{len}: Mic-E");
+            assert!((c.reply, c.reply_to, c.reply_text) == (d.reply, d.reply_to, d.reply_text), "{len}: auto reply (APRS-57)");
         }
     }
 

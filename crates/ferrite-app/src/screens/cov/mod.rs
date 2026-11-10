@@ -35,6 +35,7 @@ mod pin;
 mod posentry;
 mod probe;
 mod samecodes;
+mod autoreply;
 mod save;
 mod quick;
 mod scan;

@@ -26,8 +26,12 @@ use ferrite_ui::text::Buf;
 /// The APRS record's length (LINK-43): eight bytes, the custom path, FX.25 on transmit (APRS-45), then (protocol
 /// 4, decision 347) the message sound (APRS-6.1), symbol (APRS-47), TX delay (APRS-48), TX level (APRS-49), the
 /// comment (APRS-50), ambiguity (APRS-51), Mic-E (APRS-52) and telemetry (APRS-54): every MENU 0 5 value, so
-/// Console needs no terminal for them. A shorter record (Console before them) keeps the radio's values past its end.
-pub const APRS_REC: usize = APRS_V1 + 4 + COMMENT_LEN + 3;
+/// Console needs no terminal for them; then (0.8.2) auto reply (APRS-57): on and the delay, the pattern, the
+/// reply, at [`APRS_REPLY_AT`]. A shorter record (Console before them) keeps the radio's values past its end.
+pub const APRS_REC: usize = APRS_REPLY_AT + 1 + crate::aprs::REPLY_TO_LEN + crate::aprs::REPLY_TEXT_LEN;
+/// APRS-57: where auto reply starts in the record: its byte (bit 0 on, bits 4-5 the delay), the pattern (9, zero-
+/// padded), the reply (45, zero-padded). The record before it (protocol 4, decision 347) ends here.
+pub const APRS_REPLY_AT: usize = APRS_V1 + 4 + COMMENT_LEN + 3;
 /// The record before protocol 4: up to FX.25.
 const APRS_V1: usize = 8 + CUSTOM_LEN + 1;
 /// The newest messages watched for events.
@@ -533,13 +537,16 @@ pub(super) fn aprs_record(app: &App, w: &mut Window) {
     w.put(&[c.fx25, c.sound, c.symbol, c.txdelay, c.tx_level]);
     w.put(&c.comment);
     w.put(&[c.ambiguity, c.mic_e, c.telemetry as u8]);
+    w.put(&[c.reply]); // APRS-57
+    w.put(&c.reply_to);
+    w.put(&c.reply_text);
 }
 
 /// A whole APRS record written (LINK-43): checked as MENU 0 5's editors check each value, then kept as they keep
 /// it (written back at the next tick, slot C retuned when it is the APRS slot). Nothing changes if any value is
 /// refused.
 pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
-    if rec.len() != APRS_REC && rec.len() != APRS_V1 && rec.len() != APRS_V1 - 1 {
+    if rec.len() != APRS_REC && rec.len() != APRS_REPLY_AT && rec.len() != APRS_V1 && rec.len() != APRS_V1 - 1 {
         return Status::BadArg;
     }
     let invalid = |o: &mut Out, why: &str| {
@@ -553,8 +560,8 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
         return invalid(o, "custom path: one or two entries like WIDE2-2");
     }
     let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7], fx25: rec.get(8 + CUSTOM_LEN).copied().unwrap_or(app.aprs_cfg().fx25), ..app.aprs_cfg() };
-    if rec.len() == APRS_REC {
-        let t = &rec[APRS_V1..];
+    if rec.len() >= APRS_REPLY_AT {
+        let t = &rec[APRS_V1..APRS_REPLY_AT];
         let (head, tail) = t.split_at(4);
         let (comment, last) = tail.split_at(COMMENT_LEN);
         (c.sound, c.symbol, c.txdelay, c.tx_level) = (head[0], head[1], head[2], head[3]);
@@ -574,6 +581,30 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
         if c.ambiguity > 4 || c.mic_e as usize >= crate::aprs::MIC_E_NAMES.len() || last[2] > 1 {
             return invalid(o, "ambiguity, Mic-E or telemetry out of range");
         }
+    }
+    // APRS-57: auto reply, as its page checks it: the pattern capitals, digits, - and *; the reply printable.
+    if rec.len() == APRS_REC {
+        let r = &rec[APRS_REPLY_AT..];
+        let (to, text) = r[1..].split_at(crate::aprs::REPLY_TO_LEN);
+        let field = |t: &[u8], ok: &dyn Fn(u8) -> bool| {
+            let n = t.iter().position(|&b| b == 0).unwrap_or(t.len());
+            t[n..].iter().all(|&b| b == 0) && t[..n].iter().all(|&b| ok(b))
+        };
+        if r[0] & !0x31 != 0 {
+            return invalid(o, "auto reply: on/off and a delay of 0-3");
+        }
+        if !field(to, &|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-' || b == b'*') {
+            return invalid(o, "auto reply to: capitals, digits, - and *, up to 9");
+        }
+        if !field(text, &|b| (b' '..=b'~').contains(&b)) {
+            return invalid(o, "auto reply: up to 45 printable characters");
+        }
+        c.reply = r[0];
+        c.reply_to.copy_from_slice(to);
+        if c.reply_to_text().is_empty() {
+            c.reply_to = crate::aprs::REPLY_TO_DEFAULT; // everyone, as *
+        }
+        c.reply_text.copy_from_slice(text);
     }
     if c.f5k != 0 {
         let f = c.f5k as u32 * 500;

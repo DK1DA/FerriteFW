@@ -50,6 +50,8 @@ pub enum TextFor {
     /// A new contact's callsign, then a contact's name (APRS-37): the App keeps the callsign between them.
     ContactCall,
     ContactName,
+    /// 0 5 9 9: who auto reply answers (APRS-57.1): capitals, digits and `-`, * typing the wildcard.
+    ReplyTo,
 }
 
 /// What a text takes: any text, a channel name (the name set, CHAN-31), capitals and digits (a callsign, a grid
@@ -61,6 +63,8 @@ enum Kind {
     Caps,
     Digits,
     Path,
+    /// APRS-57.1: a callsign pattern: capitals and digits, * typing the wildcard.
+    Pattern,
 }
 
 impl TextFor {
@@ -78,6 +82,7 @@ impl TextFor {
             TextFor::AprsPath => "APRS path",
             TextFor::ContactCall => "Contact callsign",
             TextFor::ContactName => "Contact name",
+            TextFor::ReplyTo => "Reply to",
         }
     }
 
@@ -85,7 +90,7 @@ impl TextFor {
         match self {
             TextFor::Callsign => 10,
             TextFor::Preset(_) | TextFor::ContactName => 12,
-            TextFor::ContactCall => 9,
+            TextFor::ContactCall | TextFor::ReplyTo => 9,
             TextFor::DtmfName(_) => 10,
             TextFor::GridFixed | TextFor::GridWaypoint => 6,
             TextFor::Capcode => 7,
@@ -115,6 +120,7 @@ impl TextFor {
                 b
             }
             TextFor::AprsPath => Buf::from(app.aprs_custom_path()),
+            TextFor::ReplyTo => Buf::from(app.aprs_cfg().reply_to_text()),
             TextFor::ContactCall => Buf::from(app.contact_call.as_bytes()),
             TextFor::ContactName => store.data().contact_of(app.contact_call.as_bytes()).map_or(Buf::new(), |c| Buf::from(c.name.as_bytes())),
         }
@@ -125,6 +131,7 @@ impl TextFor {
             TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint | TextFor::ContactCall => Kind::Caps,
             TextFor::Capcode | TextFor::Clock => Kind::Digits,
             TextFor::AprsPath => Kind::Path,
+            TextFor::ReplyTo => Kind::Pattern,
             TextFor::ChannelName | TextFor::Channel(_) | TextFor::SaveName | TextFor::ContactName => Kind::Name,
             _ => Kind::Any,
         }
@@ -132,7 +139,7 @@ impl TextFor {
 
     /// Capitals and digits only, * switching them (a callsign, a grid square, a path).
     fn callsign(self) -> bool {
-        matches!(self.kind(), Kind::Caps | Kind::Path)
+        matches!(self.kind(), Kind::Caps | Kind::Path | Kind::Pattern)
     }
 }
 
@@ -260,9 +267,13 @@ impl View for Text {
                 s.last = 0;
             }
             // KEY-12: * (marked _) the space; a path's comma.
-            (Key::Star, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Name | Kind::Path) => {
+            (Key::Star, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Name | Kind::Path | Kind::Pattern) => {
                 if app.text.len() < max {
-                    app.text.push(if self.to.kind() == Kind::Path { b"," } else { b" " });
+                    app.text.push(match self.to.kind() {
+                        Kind::Path => b",",
+                        Kind::Pattern => b"*", // APRS-57.1: the wildcard
+                        _ => b" ",
+                    });
                 }
                 s.last = 0;
             }
@@ -305,7 +316,14 @@ impl View for Text {
                 (b"", b"")
             } else if self.to.callsign() {
                 // KEY-12: * (marked _) the space or a path's comma, # (marked ^) the letters' mode.
-                (if self.to.kind() == Kind::Path { b"comma" } else { b"" }, if m == 0 { b"digits" } else { b"letters" })
+                (
+                    match self.to.kind() {
+                        Kind::Path => b"comma",
+                        Kind::Pattern => b"any",
+                        _ => b"",
+                    },
+                    if m == 0 { b"digits" } else { b"letters" },
+                )
             } else {
                 (b"space", MODES[self.next_mode() as usize].as_bytes())
             };
@@ -314,6 +332,8 @@ impl View for Text {
                 txt!("Year, month, day, hour, minute: 202610081430. Local time.")
             } else if self.to == TextFor::Capcode {
                 txt!("The capcode's digits. Empty keeps every capcode.")
+            } else if self.to == TextFor::ReplyTo {
+                txt!("* alone: everyone. VE7*: every call starting VE7. Else one callsign-SSID.")
             } else if self.to == TextFor::AprsPath {
                 txt!("Like WIDE1-1,WIDE2-1: up to 2 entries, * between.")
             } else if self.to.callsign() {
@@ -391,6 +411,10 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
             app.set_clock_by_hand(utc);
             app.back();
             return app.show_toast(b"Clock", b"set", false);
+        }
+        TextFor::ReplyTo => {
+            // APRS-57.1: empty is everyone, as *
+            app.set_aprs_reply_to(if t.is_empty() { b"*".as_slice() } else { t.as_bytes() });
         }
         TextFor::AprsPath => {
             // APRS-26: up to 2 entries like WIDE2-1, chosen at once

@@ -72,7 +72,8 @@ def walk(t, paths):
             continue
         if u.id != "Group":
             # A tool's own settings (0 2 6 x, FM broadcast): its number opens the tool; hold MENU there has them.
-            t.check(u.id in ("Fm", "Scope", "Hf"), f"{path} {name}: a group or its tool's screen", u.id)
+            # 0 5 9 9 opens auto reply's own page (APRS-57).
+            t.check(u.id in ("Fm", "Scope", "Hf", "AutoReply"), f"{path} {name}: a group or its tool's screen", u.id)
             via.append(f"{path} {name} ({u.id})")
             continue
         t.eq(u.sel and u.sel["name"], name, f"{path}: the row is {name}")

@@ -447,3 +447,36 @@ fn listening_slows_the_events() {
     let (busy, _) = bytes(false);
     assert!(busy > quiet, "without audio the events take more: {busy} against {quiet}");
 }
+
+/// LINK-43, APRS-57: auto reply at the record's end (0.8.2): read and written; a bad pattern, reply or delay is
+/// refused and changes nothing; an empty pattern reads as everyone; the record before it keeps the radio's.
+#[test]
+fn aprs_record_carries_auto_reply() {
+    let mut pc = Pc::new(true);
+    let at = super::APRS_REPLY_AT;
+    let mut rec = pc.aprs_rec();
+    assert_eq!((rec[at], &rec[at + 1..at + 2]), (0, &b"*"[..]), "off, everyone");
+    rec[at] = 0x21; // on, 1 min
+    rec[at + 1..at + 1 + crate::aprs::REPLY_TO_LEN].copy_from_slice(b"VE7*\0\0\0\0\0");
+    let text = at + 1 + crate::aprs::REPLY_TO_LEN;
+    rec[text..text + 4].copy_from_slice(b"Away");
+    assert_eq!(pc.aprs_write(&rec).0, 0);
+    let c = pc.app.aprs_cfg();
+    assert!(c.reply_on() && c.reply_delay_s() == 60 && c.reply_to_text() == b"VE7*" && c.reply_text() == b"Away");
+    assert_eq!(pc.aprs_rec(), rec, "read back as written");
+    for (i, v, why) in [(at, 0x41u8, "delay"), (at + 1, b'v', "lower case"), (at + 1, b'/', "a slash"), (text, 0x07, "a control character")] {
+        let mut bad = rec.clone();
+        bad[i] = v;
+        let (s, a) = pc.aprs_write(&bad);
+        assert_ne!(s, 0, "{why} refused");
+        assert!(core::str::from_utf8(&a).unwrap().contains("auto reply"), "{why}: says what");
+        assert!(pc.app.aprs_cfg().reply_text() == b"Away", "{why}: nothing changed");
+    }
+    let mut empty = rec.clone();
+    empty[at + 1..at + 1 + crate::aprs::REPLY_TO_LEN].fill(0);
+    assert_eq!(pc.aprs_write(&empty).0, 0);
+    assert_eq!(pc.app.aprs_cfg().reply_to_text(), b"*", "an empty pattern is everyone");
+    // the record before auto reply (Console 0.8.1) keeps the radio's
+    assert_eq!(pc.aprs_write(&rec[..at]).0, 0);
+    assert!(pc.app.aprs_cfg().reply_on() && pc.app.aprs_cfg().reply_text() == b"Away");
+}

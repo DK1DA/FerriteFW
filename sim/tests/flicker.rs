@@ -234,6 +234,8 @@ const BUDGET: &[(&str, u64)] = &[
     // The address book on the empty recipient redraws when a message arrives (its Recent group; decision 226).
     ("A16 Compose message", 146000),
     ("A16a Quick messages", 90000),
+    // The test's knob turns auto reply on and off: the header, the row and the help line twice (APRS-57).
+    ("A16b Auto reply", 105000),
     ("A17 PIN entry", 10000),
     ("A18 Confirm", 10000),
     ("A19 Extend TX warning", 10000),
