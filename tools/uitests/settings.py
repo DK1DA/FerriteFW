@@ -164,14 +164,14 @@ def extend_tx_warns_first_and_shows_on_status(t):
 
 @test("TONE-9", pages=("Group", "Quick"))
 def tail_elimination_is_a_transmit_setting(t):
-    """Tail elimination lives in the Transmit group: its mode and phase in Transmit's Advanced (0 8 8 2, 0 8 8 3;
+    """Tail removal (tail elimination) lives in the Transmit group: its mode and phase in Transmit's Advanced (0 8 8 2, 0 8 8 3;
     MENU-32), the end tone a main row (0 8 4); it is not a squelch option (0 9 9, System's Advanced, and the quick
     settings have no tail elimination row)."""
     u = t.keys("MENU 0 8 8")
     t.eq(u.title, "Advanced", "MENU 0 8 8: Transmit's Advanced")
     t.check(u["help"]["args"][0].startswith("MENU 0 8 8 "), "its rows are MENU 0 8 8 N", u["help"])
     names = u.names()
-    t.check({"Tail elimination", "Phase"} <= set(names), "mode and phase", names)
+    t.check({"Tail removal", "Phase"} <= set(names), "mode and phase", names)
     u = t.keys("BACK")
     t.eq((u.title, u.sel and u.sel["name"]), ("Transmit", "Advanced"), "in the Transmit group")
     t.home()

@@ -629,26 +629,30 @@ pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row, cue: Cue) {
 fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
     let bg = if r.selected { BLUE } else { BG };
     let (fg, sub) = if r.selected { (BLUE_FG, BLUE_FG) } else { (if r.grey { DIM } else { TEXT }, SUB) };
-    let base = y + h / 2 + 5;
+    // A tall row (the menus, 25 px) is in the 14 px font, names and values.
+    let big = h >= 25;
+    let nf: &Font4 = if big { &UI_14 } else { &UI_12 };
+    let base = if big { y + h / 2 + 6 } else { y + h / 2 + 5 };
+    let nbase = base;
     let x = if let Some(n) = r.num {
-        field(lcd, 0, 25, y, y + h, base, &[b'0' + n % 10], &st(&UI_12, sub, bg, Align::Center));
+        field(lcd, 0, 25, y, y + h, nbase, &[b'0' + n % 10], &st(nf, sub, bg, Align::Center));
         25
     } else {
         lcd.fill(0, y, 8, h, bg);
         8
     };
     // The name keeps its room; the value gets the rest.
-    let name = cut(r.name, &UI_12, 232 - x - 40);
-    let nw = field(lcd, x, text4_width(name, &UI_12), y, y + h, base, name, &st(&UI_12, fg, bg, Align::Left));
+    let name = cut(r.name, nf, 232 - x - 40);
+    let nw = field(lcd, x, text4_width(name, nf), y, y + h, nbase, name, &st(nf, fg, bg, Align::Left));
     let x = x + nw;
-    let value = cut(r.value, &UI_12, 232 - x - if r.dot { 18 } else { 8 });
-    let vw = text4_width(value, &UI_12);
+    let value = cut(r.value, nf, 232 - x - if r.dot { 18 } else { 8 });
+    let vw = text4_width(value, nf);
     let vx = 232 - vw;
     lcd.fill(x, y, vx - x, h, bg);
     if r.dot {
         lcd.fill_r(x + 4, base - 7, 6, 6, 3, if r.selected { BLUE_FG } else { AMBER });
     }
-    field(lcd, vx, vw, y, y + h, base, value, &st(&UI_12, sub, bg, Align::Right));
+    field(lcd, vx, vw, y, y + h, base, value, &st(nf, sub, bg, Align::Right));
     lcd.fill(232, y, 8, h, bg);
 }
 

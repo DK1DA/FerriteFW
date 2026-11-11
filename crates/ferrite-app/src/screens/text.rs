@@ -74,7 +74,7 @@ impl TextFor {
             TextFor::Zone(_) => "Zone name",
             TextFor::Preset(_) => "Range name",
             TextFor::Callsign => "Callsign",
-            TextFor::PowerOn => "Power-on message",
+            TextFor::PowerOn => "Power-on text",
             TextFor::DtmfName(_) => "DTMF memory name",
             TextFor::GridFixed | TextFor::GridWaypoint => "Grid square",
             TextFor::Capcode => "Pager capcode",

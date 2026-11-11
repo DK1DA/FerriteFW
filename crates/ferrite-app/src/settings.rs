@@ -345,7 +345,7 @@ pub const PAUSE_TIME_NAMES: [&str; 3] = ["30 s", "1 min", "5 min"];
 pub const CHANNEL_DISPLAY: [&str; 3] = ["Name", "Number", "Frequency"];
 
 /// 0 6 8's values (GPS-4, GPS-14).
-pub const GPS_RXTX: [&str; 4] = ["Always on", "Off on receive", "Off on transmit", "Off on both"];
+pub const GPS_RXTX: [&str; 4] = ["Never", "Receive", "Transmit", "Both"];
 /// The arrival alarm's radii in metres (0 6 7, GPS-12): off, then 50 m to 1 km.
 pub const ARRIVAL_M: [u16; 6] = [0, 50, 100, 200, 500, 1000];
 
@@ -387,7 +387,7 @@ pub const LPM_BELOW: [u8; 4] = [10, 20, 30, 40];
 pub const KEYPAD_LIGHTS: [&str; 4] = ["Off", "With screen", "On key press", "Always"];
 /// 0 7 6's values: the heartbeat is the dark-screen flash in the battery's colour. Short enough for the menu's
 /// value column and the terminal's `set` (24 characters).
-pub const LED_MODES: [&str; 3] = ["Off", "RX and TX", "RX, TX and heartbeat"];
+pub const LED_MODES: [&str; 3] = ["Off", "RX and TX", "RX, TX, heartbeat"];
 /// 0 7 8's values, minutes (0 off).
 pub const AUTO_OFF_TIMES: [u16; 5] = [0, 30, 60, 120, 240];
 /// 0 9 1 1's values, seconds (0 off).

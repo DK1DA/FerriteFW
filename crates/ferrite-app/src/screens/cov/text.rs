@@ -20,7 +20,7 @@ fn typed(t: &T) -> String {
 fn power_on_message() {
     let mut t = T::new();
     open(&mut t, TextFor::PowerOn);
-    t.shows("Power-on message");
+    t.shows("Power-on text");
     t.tap(Key::Digit(4));
     t.tap(Key::Digit(4));
     t.wait(1100);

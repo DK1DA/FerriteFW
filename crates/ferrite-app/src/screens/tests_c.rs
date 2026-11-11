@@ -1316,7 +1316,7 @@ fn about_names_the_licence() {
 
 /// MENU-33, MENU-6.1 (decisions 256, 259): no row says only "setting comes next": Background job, Scan target and the
 /// Nearby sort are out of the menu, and the rows after them closed up (0 1 2 Resume, 0 1 6 Advanced, 0 2 4
-/// Channel display); the FM presets row went too (decision 258: 0 2 6 1 is the step).
+/// Channel shows); the FM presets row went too (decision 258: 0 2 6 1 is the step).
 #[test]
 fn stub_rows_are_out_of_the_menu() {
     use crate::screens::groups::{items, GROUP_ITEMS, SUBS};
@@ -1327,7 +1327,7 @@ fn stub_rows_are_out_of_the_menu() {
     assert_eq!(items(1, 0)[1].name(), "Resume");
     assert_eq!(items(1, 0)[5].name(), "Advanced");
     assert_eq!(items(1, 6)[0].name(), "Pause time");
-    assert_eq!(items(2, 0)[3].name(), "Channel display");
+    assert_eq!(items(2, 0)[3].name(), "Channel shows");
     assert_eq!(items(2, 6)[0].name(), "Step");
     assert_eq!(crate::screens::nav::menu0(&[1, 4]), Some(Dest::RangePresets));
     assert_eq!(crate::screens::nav::menu0(&[1, 5]), Some(Dest::SkipList));

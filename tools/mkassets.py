@@ -34,7 +34,7 @@ WORDMARK = " EFIRT"
 # Characters the font files lack, drawn from tools/art.py at the font's cap height, centred in its advance; only
 # in the fonts named (they cost flash in every font they are in). ★ marks a zone's priority channel (decision 157).
 DRAWN = {"\u2605": art.star}
-DRAWN_IN = ("ui_12", "ui_12b")
+DRAWN_IN = ("ui_12", "ui_12b", "ui_14")
 
 
 def add_drawn(f):
@@ -53,6 +53,7 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12", REG, 12, TEXT, False, "status bar, hints, labels, lists, values"),
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
     ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
+    ("ui_14", REG, 14, TEXT, False, "the menus' rows (MENU 0): names and values"),
     ("name_26", BOLD, 26, NAME, False, "channel names on the large home card when they fit (13 characters); the callsign on the owner card; the GPS screen's grid square"),
     ("name_22", BOLD, 22, NAME_GPS, False, "channel names on the home cards (16 characters fit the large card); the GPS screen's position"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),

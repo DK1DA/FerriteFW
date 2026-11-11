@@ -1000,7 +1000,7 @@ fn remote_keys_drive_the_menus() {
     pc.keys("DOWN");
     let sel: Vec<_> = pc.lines("row").into_iter().filter(|r| r.contains(" sel")).collect();
     assert_eq!(sel.len(), 1);
-    assert!(sel[0].starts_with("row 2 \"Home layout\""), "{sel:?}");
+    assert!(sel[0].starts_with("row 2 \"Layout\""), "{sel:?}");
     pc.keys("BACK");
     assert!(matches!(pc.app.screen(), Screen::Advanced(_)));
     assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 0]).0, Status::Invalid as u8, "no steps");
