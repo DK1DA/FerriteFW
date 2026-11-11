@@ -66,11 +66,16 @@ pub struct Sub {
     ui_start: bool,
     /// The Live View carries the screen as drawn (LINK-19.5).
     texts: bool,
+    /// LINK-67: each state part's FNV-1a as last sent (the radio, slots A-C), when it was last looked at, and
+    /// whether the next event sends them all.
+    state: [u32; 4],
+    state_at: u32,
+    state_all: bool,
 }
 
 impl Sub {
     pub const fn new() -> Self {
-        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, log: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false }
+        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, log: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false, state: [0; 4], state_at: 0, state_all: false }
     }
 }
 
@@ -125,7 +130,7 @@ fn watched(d: &dyn crate::data::Data) -> ([(u16, u8); WATCHED], u16) {
 impl Session {
     /// `SUBSCRIBE` (LINK-46): the mask, then optionally the UI's least gap (100 ms units) and flags.
     pub(super) fn subscribe<S: ChannelStore>(&mut self, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
-        let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI | ev::SUB_LOG) == 0) else { return Status::BadArg };
+        let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI | ev::SUB_LOG | ev::SUB_STATE) == 0) else { return Status::BadArg };
         let texts = p.get(2).is_some_and(|f| f & ev::TEXTS != 0);
         let renew = p.get(2).is_some_and(|f| f & ev::RENEW != 0) && mask == self.sub.mask && texts == self.sub.texts;
         let gap = match p.get(1) {
@@ -137,7 +142,7 @@ impl Session {
             let d = st.data();
             let (msgs, msgs_n) = watched(d);
             let ui_start = mask & ev::SUB_UI != 0;
-            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, log: log_top(d), ui_at: now, ui_start, texts, ..Sub::new() };
+            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, log: log_top(d), ui_at: now, ui_start, texts, state_all: mask & ev::SUB_STATE != 0, ..Sub::new() };
         }
         self.sub.gap_ms = gap;
         o.put(&[mask, DICT_VERSION]);
@@ -162,7 +167,7 @@ impl Session {
 
     /// Events wait to go (the rest of a cut UI update, a message event, the whole state): poll again soon.
     pub fn events_waiting(&self) -> bool {
-        self.sub.mask != 0 && (self.sub.ui_more || self.sub.dirty || self.sub.ui_start)
+        self.sub.mask != 0 && (self.sub.ui_more || self.sub.dirty || self.sub.ui_start || self.sub.state_all)
     }
 
     /// The subscription ends (a new `HELLO`, a new connection).
@@ -220,6 +225,9 @@ impl Session {
             if self.sub.mask & ev::SUB_LOG != 0 {
                 self.log_event(d, out);
             }
+        }
+        if self.sub.mask & ev::SUB_STATE != 0 {
+            self.state_event(app, st, dev, live, now, out);
         }
         if let Some(t) = ui.filter(|_| self.sub.mask & ev::SUB_UI != 0) {
             let since = now.wrapping_sub(self.sub.ui_at);
@@ -323,6 +331,40 @@ impl Session {
     }
 
     /// One `EVENT` frame out: false (nothing sent) if `out` lacks room for it and an answer after it.
+    /// LINK-67: the radio state's parts that changed since they were last sent, at most every UI gap (the whole
+    /// record after a subscription).
+    #[inline(never)]
+    fn state_event<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut dyn Sink) {
+        use ferrite_core::link::state as m;
+        if !self.sub.state_all && now.wrapping_sub(self.sub.state_at) < self.sub.gap_ms || self.sub.budget < 0 {
+            return;
+        }
+        self.sub.state_at = now;
+        let r = super::state::record(app, st, dev, live);
+        let mut parts = 0u8;
+        let mut sig = [0u32; 4];
+        for (i, h) in sig.iter_mut().enumerate() {
+            *h = fnv(FNV0, &r[super::state::part(i)]);
+            if *h != self.sub.state[i] || self.sub.state_all {
+                parts |= 1 << i;
+            }
+        }
+        if parts == 0 {
+            return;
+        }
+        let mut p = [0u8; 2 + m::LEN];
+        p[..2].copy_from_slice(&[ev::STATE, parts]);
+        let mut n = 2;
+        for i in (0..4).filter(|i| parts & 1 << i != 0) {
+            let part = &r[super::state::part(i)];
+            p[n..n + part.len()].copy_from_slice(part);
+            n += part.len();
+        }
+        if self.emit(&p[..n], out) {
+            (self.sub.state, self.sub.state_all) = (sig, false);
+        }
+    }
+
     fn emit(&mut self, payload: &[u8], out: &mut dyn Sink) -> bool {
         let mut w = [0u8; MAX_WIRE];
         let Some(k) = wire::build(msg::EVENT, self.sub.seq, payload, &mut w) else { return false };

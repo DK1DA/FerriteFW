@@ -142,6 +142,13 @@ pub mod msg {
     /// status bar, the home cards or the list's rows, the hint bar, a toast), `MORE` for the rest. An optional
     /// byte: 0 the state, 1 the key names (`ui keys`).
     pub const UI: u8 = 0x33;
+    /// The radio's state as one fixed record (LINK-67, decision 373): the radio, then each slot ([`super::state`]);
+    /// no payload. Also pushed by `SUBSCRIBE`'s [`super::event::SUB_STATE`]. Radios that say caps2
+    /// [`super::caps2::STATE`].
+    pub const STATE: u8 = 0x34;
+    /// Tunes a slot by command (LINK-68, decision 373): the slot, an op ([`super::tune`]) and its argument, through
+    /// the keypad's paths and checks; answered as `SLOT`'s read, or `invalid` and the reason (nothing changed).
+    pub const TUNE: u8 = 0x35;
     /// Events this session wants pushed (LINK-46): a [`super::event`] mask (0 ends them), then optionally the UI's
     /// least gap in 100 ms units and flags ([`super::event::RENEW`]). Answer: the mask, the Live View dictionary's
     /// version, the next UI sequence number.
@@ -271,6 +278,9 @@ pub mod caps2 {
     /// The line commands answer: `CMD` (LINK-34) and the terminal's command line. Without it (a user build,
     /// decision 347) `CMD` is refused and Console uses the records alone.
     pub const LINE_CMDS: u8 = 16;
+    /// The radio state message and the tuning commands (LINK-67, LINK-68; decision 373): [`super::msg::STATE`],
+    /// [`super::msg::TUNE`] and `SUBSCRIBE`'s [`super::event::SUB_STATE`].
+    pub const STATE: u8 = 32;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -281,6 +291,9 @@ pub mod event {
     pub const SUB_UI: u8 = 4;
     /// New event log entries (LINK-57): only from a radio that says [`super::caps::LISTS`].
     pub const SUB_LOG: u8 = 8;
+    /// The radio state (LINK-67): [`STATE`] events with the parts that changed; only from a radio that says caps2
+    /// [`super::caps2::STATE`].
+    pub const SUB_STATE: u8 = 16;
     /// `SUBSCRIBE`'s flags bit: keep the Live View stream as it is (a keepalive); without it a UI subscription starts
     /// over with the whole state.
     pub const RENEW: u8 = 1;
@@ -297,6 +310,10 @@ pub mod event {
     pub const UI: u8 = 4;
     /// A new event log entry (LINK-57): the record as `LOG_READ` gives it (its sequence number first).
     pub const LOG: u8 = 5;
+    /// The radio state (LINK-67): a parts mask ([`super::state::PART_RADIO`], then a bit per slot from
+    /// [`super::state::PART_SLOT`]), then those parts in that order, as `STATE`'s record lays them out. The first
+    /// after a subscription has them all.
+    pub const STATE: u8 = 6;
     /// The UI's least gap by default: Bluetooth 500 ms, the cable 200 ms; at least 100 ms.
     pub const UI_GAP_BT_MS: u32 = 500;
     pub const UI_GAP_CABLE_MS: u32 = 200;
@@ -334,6 +351,64 @@ pub const LOG_FIXED: usize = 23;
 pub const LOG_UNREAD: u8 = 1;
 /// The record has a position: latitude and longitude (i32 each, degrees x 1e7) follow the fixed part.
 pub const LOG_POS: u8 = 2;
+
+/// The radio state record (LINK-67, decision 373), all little-endian: the radio's part ([`RADIO_LEN`] bytes), then
+/// one part per slot ([`SLOT_LEN`] bytes each, A to C).
+///
+/// The radio: version ([`VERSION`]), the active slot, [`flags`](TX) (u8), battery % (u8), battery mV (u16), GPS
+/// (u8: 0 off, 1 searching, 2 fix), satellites (u8), latitude and longitude (i32 each, degrees x 1e7: the fix,
+/// else the fixed position; [`NO_POS`] for both without one).
+///
+/// A slot: flags (u8: [`ON_CHANNEL`] ...), channel (u16, 0-based; [`NONE`] on its VFO), zone (u16; [`NONE`] on a
+/// VFO, [`LOCAL`] for Local), frequency (u32, 10 Hz: what it receives now, a scan's step), mode (u8, the slot
+/// modes: 0 FM, 1 NFM, 2 AM, 6 WFM), power (u8: 0 low, 1 mid, 2 high), signal (i16, dBm, while the squelch is
+/// open; [`NO_SIGNAL`] else), name (16 bytes, 0-padded: the channel's, or the broadcast's RDS station name).
+pub mod state {
+    pub const VERSION: u8 = 1;
+    pub const RADIO_LEN: usize = 16;
+    pub const SLOT_LEN: usize = 29;
+    pub const LEN: usize = RADIO_LEN + 3 * SLOT_LEN;
+    pub const NAME_LEN: usize = 16;
+    /// The event's parts mask: the radio's part, then slot A's (`PART_SLOT << 0`), B's, C's.
+    pub const PART_RADIO: u8 = 1;
+    pub const PART_SLOT: u8 = 2;
+    pub const PART_ALL: u8 = 0x0F;
+    /// The radio's flags: transmitting, Dry TX on (MENU 0 8 8 5), the keys locked, the battery low.
+    pub const TX: u8 = 1;
+    pub const DRY: u8 = 2;
+    pub const LOCKED: u8 = 4;
+    pub const BATTERY_LOW: u8 = 8;
+    /// A slot's flags.
+    pub const ON_CHANNEL: u8 = 1;
+    pub const SCANNING: u8 = 2;
+    pub const OPEN: u8 = 4;
+    pub const TRANSMITTING: u8 = 8;
+    pub const APRS: u8 = 16;
+    pub const BROADCAST: u8 = 32;
+    pub const MUTED: u8 = 64;
+    pub const OFF: u8 = 128;
+    pub const NONE: u16 = 0xFFFF;
+    pub const LOCAL: u16 = 0xFFFE;
+    pub const NO_POS: i32 = i32::MAX;
+    pub const NO_SIGNAL: i16 = i16::MIN;
+}
+
+/// `TUNE`'s ops (LINK-68, decision 373), each as the keypad does it on home with the slot active, then the slot
+/// made active again only if it was.
+pub mod tune {
+    /// u16: the channel by number (0-based), as typing it on a channel slot (CHAN-21); an empty number or an HF
+    /// channel is refused.
+    pub const CHANNEL: u8 = 1;
+    /// i8 (-100 to 100, not 0): ▲▼ that many times: the next channel in the zone, or the VFO by its step (the FM
+    /// step on a broadcast VFO).
+    pub const STEP: u8 = 2;
+    /// i8 (-20 to 20, not 0): ◀▶ that many times: the next zone with a channel, or the VFO's next band.
+    pub const GROUP: u8 = 3;
+    /// u16: the zone's first channel (0-based zone; 0xFFFE Local), as picking it in the zone list.
+    pub const ZONE: u8 = 4;
+    /// u8: 1 starts a scan as SIDE2 does (the scan screen opens), 0 stops it.
+    pub const SCAN: u8 = 5;
+}
 
 /// `SLOT`'s mask (LINK-33): which fields follow, in this order.
 pub mod slot {

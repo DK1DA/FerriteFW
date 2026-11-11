@@ -572,6 +572,13 @@ impl Session {
             msg::STOCK_RESTORE => Status::Ok,
             msg::KEY => key(app, st, self.by, now, p, &mut o),
             msg::SLOT => slot(app, st, p, &mut o),
+            // LINK-67: the radio state record; LINK-68: a slot tuned by command
+            msg::STATE if !p.is_empty() => Status::BadArg,
+            msg::STATE => {
+                o.put(&state::record(app, st, dev, live));
+                Status::Ok
+            }
+            msg::TUNE => tune(app, st, p, &mut o),
             msg::CMD => self.command(app, st, dev, live, p, &mut o),
             msg::MORE => {
                 self.more(app, st, dev, live, &mut o);
@@ -726,7 +733,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }]); // LINK-35.2: two bytes
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }]); // LINK-35.2: two bytes
         layouts(st, o); // LINK-62
         Status::Ok
     }
@@ -1084,6 +1091,39 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status
     let flags = if g.split { m::SPLIT } else { 0 } | if g.aprs { m::APRS } else { 0 } | if g.scanning { m::SCANNING } else { 0 };
     o.put(&[flags]);
     Status::Ok
+}
+
+/// `TUNE` (LINK-68): the slot, the op and its argument; the slot after as `SLOT` reads it, or `invalid` and the
+/// reason (nothing changed).
+fn tune<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status {
+    use crate::slotctl::Tune;
+    use ferrite_core::link::tune as t;
+    let (s, op, arg) = match p {
+        [s, op, arg @ ..] if (*s as usize) < ferrite_core::msg::SLOTS => (*s, *op, arg),
+        _ => return Status::BadArg,
+    };
+    let u16_arg = || <[u8; 2]>::try_from(arg).ok().map(u16::from_le_bytes);
+    let i8_arg = |max: i8| match arg {
+        &[v] if v as i8 != 0 && (v as i8).unsigned_abs() <= max as u8 => Some(v as i8),
+        _ => None,
+    };
+    let what = match op {
+        t::CHANNEL => u16_arg().map(Tune::Channel),
+        t::STEP => i8_arg(100).map(Tune::Step),
+        t::GROUP => i8_arg(20).map(Tune::Group),
+        t::ZONE => u16_arg().map(Tune::Zone),
+        t::SCAN => match arg {
+            &[on @ (0 | 1)] => Some(Tune::Scan(on == 1)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(what) = what else { return Status::BadArg };
+    if let Err(why) = app.slot_tune(s, what, st) {
+        o.put(why.as_bytes());
+        return Status::Invalid;
+    }
+    slot(app, st, &[s], o)
 }
 
 fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status {
@@ -1759,6 +1799,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
 }
 
 pub mod lists;
+pub mod state;
 mod sub;
 pub mod z;
 /// LINK-43: the APRS record's length, for Ferrite Console (which reads its layout from this crate).
