@@ -151,10 +151,10 @@ const SYMBOLS: [&[u8]; 10] = [b"0", b".,?!", b"-/_'", b"()&+", b"@#*=", b":;%\""
 const NAME_SYMBOLS: [&[u8]; 10] = [b"0", b".!", b"-/_'", b"()&+", b"#", b"5", b"6", b"7", b"8", b"9"];
 const DIGITS: [&[u8]; 10] = [b"0", b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8", b"9"];
 /// Callsigns' capitals (APRS-37, SETUP-12): an APRS callsign, pattern or path takes only "-" besides capitals and
-/// digits (AX.25: `VE7XYZ-9`, `WIDE1-1`); the station callsign (0 8 6 1) "/" (`VE7XYZ/P`), as setup's page; a grid
+/// digits (AX.25: `VE7XYZ-9`, `WIDE1-1`); the station callsign (0 8 6 1) "-" and "/" (`VE7XYZ-7`, `VE7XYZ/P`), as setup's page; a grid
 /// square none.
 const APRS_CALL: [&[u8]; 10] = [b"0", b"-1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
-const STATION_CALL: [&[u8]; 10] = [b"0", b"/1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
+const STATION_CALL: [&[u8]; 10] = [b"0", b"-/1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
 const GRID: [&[u8]; 10] = [b"0", b"1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
 pub(crate) const MODES: [&str; 4] = ["ABC", "abc", "123", "Sym"];
 /// A key tapped again within this steps through its letters.
@@ -482,7 +482,7 @@ mod tests {
     }
 
     /// APRS-37, APRS-26, APRS-57.1: an APRS callsign (a contact's, auto reply's pattern) or path types capitals,
-    /// digits and "-" only, in both its modes; SETUP-12: the station callsign "/" in place of "-"; a grid square
+    /// digits and "-" only, in both its modes; SETUP-12: the station callsign "-" and "/"; a grid square
     /// letters and digits alone. Never lower case.
     #[test]
     fn callsign_keys() {
@@ -495,7 +495,7 @@ mod tests {
             assert!(typed(Text::new(to)).contains(&b'-'), "{to:?}: the SSID's -");
         }
         let all = typed(Text::new(TextFor::Callsign));
-        assert!(all.contains(&b'/') && !all.contains(&b'-') && !all.contains(&b'.'));
+        assert!(all.contains(&b'/') && all.contains(&b'-') && !all.contains(&b'.'));
         let all = typed(Text::new(TextFor::GridFixed));
         assert!(all.iter().all(|c| c.is_ascii_alphanumeric()));
         // tapping 1 twice on a contact's callsign: - then 1, then - again

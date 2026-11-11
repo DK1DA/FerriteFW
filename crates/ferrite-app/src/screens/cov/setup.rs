@@ -91,8 +91,11 @@ fn callsign_tips() {
     t.tap(Key::Hash); // letters again
     t.tap(Key::Left);
     assert_eq!(t.app.callsign(), b"123456");
-    // 1 cycles / and 1 for a callsign, 0 only 0
+    // 1 cycles -, / and 1 for a callsign (SETUP-12), 0 only 0
     t.tap(Key::Digit(1));
+    assert_eq!(t.app.callsign(), b"123456-");
+    t.tap(Key::Digit(1));
+    assert_eq!(t.app.callsign(), b"123456/");
     t.tap(Key::Digit(1));
     assert_eq!(t.app.callsign(), b"1234561");
     t.wait(1200);

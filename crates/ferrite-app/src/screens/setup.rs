@@ -170,10 +170,10 @@ impl Setup {
         let again = self.tap_key == d + 1 && now.wrapping_sub(self.tap_at) as u32 * 16 < TAP_MS;
         let mut set: &[u8] = TAPS[d as usize];
         if !owner {
-            // Callsigns: capitals, digits and / only (SETUP-12).
+            // Callsigns: capitals, digits, - and / only (SETUP-12).
             set = match d {
                 0 => b"0",
-                1 => b"/1",
+                1 => b"-/1",
                 _ => set,
             };
         }
