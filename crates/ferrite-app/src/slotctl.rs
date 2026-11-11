@@ -206,7 +206,7 @@ impl App {
     }
 
     /// LINK-68: tunes slot `s` as home's keys would with it active, or refuses with the reason (nothing changed).
-    /// The active slot stays as it was.
+    /// The active slot stays as it was, except for a scan's start: the scanned slot becomes the active one.
     pub fn slot_tune(&mut self, s: u8, t: Tune, store: &impl ChannelStore) -> Result<(), &'static str> {
         use crate::screens::home;
         if s as usize >= SLOTS {
@@ -272,7 +272,15 @@ impl App {
                     home::group(self, d.signum() as i32, store);
                 }
             }
-            Tune::Scan(on) if on != scanning => crate::screens::scan::side2(self, store),
+            Tune::Scan(false) if scanning => crate::screens::scan::side2(self, store),
+            Tune::Scan(true) if !scanning => {
+                // a scan runs on the slot the radio receives: SIDE2 scans the active one, so the slot stays active
+                crate::screens::scan::side2(self, store);
+                if was != s {
+                    self.out.push(RadioCmd::Active(s)); // NAV-5
+                }
+                return Ok(());
+            }
             Tune::Scan(_) => {}
         }
         self.active = was;

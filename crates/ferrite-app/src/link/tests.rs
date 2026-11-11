@@ -826,7 +826,7 @@ fn state_record() {
 }
 
 /// LINK-68: `TUNE` moves a slot as home's keys do with it active (a channel by number, ▲▼, ◀▶, a zone, SIDE2's
-/// scan), leaves the active slot as it was, and answers as `SLOT` reads it; refusals change nothing.
+/// scan), leaves the active slot as it was (a scan's slot becomes active), and answers as `SLOT` reads it; refusals change nothing.
 #[test]
 fn tune_by_command() {
     use ferrite_core::link::tune as t;
@@ -875,6 +875,7 @@ fn tune_by_command() {
     // stops
     assert_eq!(tune(&mut pc, other, t::SCAN, &[1]).0, 0);
     assert!(matches!(pc.app.screen, Screen::Scan(_)), "the scan screen, as SIDE2 opens it");
+    assert_eq!(pc.app.active(), other, "a scan's slot becomes the active one (SIDE2 scans the active slot)");
     pc.app.scan_mask |= 1 << other;
     let (s, a) = tune(&mut pc, other, t::STEP, &[1]);
     assert_eq!(s, Status::Invalid as u8);
@@ -886,7 +887,7 @@ fn tune_by_command() {
         stopped |= c == ferrite_core::msg::RadioCmd::Scan { slot: other, on: false };
     }
     assert!(stopped, "the Radio task told to stop (it reports the slot scanning no more)");
-    assert_eq!(pc.app.active(), active);
+    assert_eq!(pc.app.active(), other, "and stays active");
     // malformed
     for p in [&[other, t::STEP, 0][..], &[other, t::STEP, 101], &[other, t::GROUP, 21], &[other, t::SCAN, 2], &[other, t::CHANNEL, 1], &[3, t::STEP, 1], &[other, 9, 1], &[other]] {
         assert_eq!(pc.ask(msg::TUNE, p).0, Status::BadArg as u8, "{p:?}");
