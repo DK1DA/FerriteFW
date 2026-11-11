@@ -812,10 +812,10 @@ fn set_every_light_setting() {
         ("set 0 7 4 2 1", "0 7 4 2 Brightness: 1"),
         ("set 0 7 4 2 4", "0 7 4 2 Brightness: 4"),
         ("set 0 7 4 3 off", "0 7 4 3 On transmit: Off"),
-        ("set 0 7 4 4 keys", "0 7 4 4 Wake screen on: Keys"),
-        ("set 0 7 4 4 keys, rx and tx", "0 7 4 4 Wake screen on: Keys, RX and TX"),
-        ("set 0 7 4 5 on key press", "0 7 4 5 Keypad light: On key press"),
-        ("set 0 7 6 rx, tx and heartbeat", "0 7 6 LEDs: RX, TX and heartbeat"),
+        ("set 0 7 4 4 keys", "0 7 4 4 Wake on: Keys"),
+        ("set 0 7 4 4 keys, rx and tx", "0 7 4 4 Wake on: Keys, RX and TX"),
+        ("set 0 7 4 5 on key press", "0 7 4 5 Key light: On key press"),
+        ("set 0 7 6 rx, tx, heartbeat", "0 7 6 LEDs: RX, TX, heartbeat"),
         ("set 0 7 6 rx and tx", "0 7 6 LEDs: RX and TX"),
     ] {
         r.cmd(cmd);

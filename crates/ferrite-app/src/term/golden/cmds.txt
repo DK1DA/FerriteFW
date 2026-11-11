@@ -208,7 +208,7 @@
   ! a menu number from MENU, e.g. 0 7 1 (Theme)
 > set 0 7 2 10
   writes true
-  ! Home layout: one of Watch, Single + scope, Watch + activity
+  ! Layout: one of Watch, Single + scope, Watch + activity
 > set 0 1 1 Off
   writes true
   = 0 1 1 Watch: Off
@@ -650,7 +650,7 @@
   | set 0 1 6 2 Up                    # Direction
   | set 0 1 6 3 Off                   # Scan inputs
   | set 0 1 6 4 Start                 # Return to
-  | set 0 2 4 Name                    # Channel display
+  | set 0 2 4 Name                    # Channel shows
   | set 0 2 5 50 km                   # Local zone
   | set 0 2 6 1 100 kHz               # Step
   | set 0 2 6 2 Auto                  # AGC
@@ -692,28 +692,28 @@
   | set 0 5 9 8 Off                   # Decode log
   | set 0 5 9 9 Off                   # Auto reply
   | set 0 6 1 Auto                    # GPS
-  | set 0 6 3 DDM                     # Coordinate format
+  | set 0 6 3 DDM                     # Coordinates
   | set 0 6 4 Metric                  # Units
   | set 0 6 5 UTC                     # Time zone
   | set 0 6 6 24 h, GPS               # Clock
-  | set 0 6 8 Always on               # GPS during RX/TX
+  | set 0 6 8 Never                   # GPS off during
   | set 0 7 1 Night red               # Theme
-  | set 0 7 2 Watch                   # Home layout
+  | set 0 7 2 Watch                   # Layout
   | set 0 7 3 1 Bars                  # S-meter
-  | set 0 7 3 2 Callsign              # Power-on message
+  | set 0 7 3 2 Callsign              # Power-on text
   | set 0 7 3 3 Logo                  # Boot screen
   | set 0 7 4 1 1 min                 # Timeout
   | set 0 7 4 2 3                     # Brightness
   | set 0 7 4 3 On                    # On transmit
-  | set 0 7 4 4 Keys and RX           # Wake screen on
-  | set 0 7 4 5 With screen           # Keypad light
+  | set 0 7 4 4 Keys and RX           # Wake on
+  | set 0 7 4 5 With screen           # Key light
   | set 0 7 5 1 On                    # Key beep
   | set 0 7 5 2 Mid                   # Beep volume
   | set 0 7 5 3 On                    # Alert tones
   | set 0 7 5 4 On                    # Arrival tone
   | set 0 7 5 5 Packet                # Message sound
   | set 0 7 5 6 Max                   # Message volume
-  | set 0 7 6 RX, TX and heartbeat    # LEDs
+  | set 0 7 6 RX, TX, heartbeat       # LEDs
   | set 0 7 7 1 Level 1               # Battery Save
   | set 0 7 7 2 Auto                  # Low Power Mode
   | set 0 7 7 3 20 %                  # Auto below
@@ -727,11 +727,11 @@
   | set 0 8 4 Off                     # End tone
   | set 0 8 5 3 100 ms                # Speed
   | set 0 8 5 4 On                    # Sidetone
-  | set 0 8 5 5 300 ms                # First digit delay
+  | set 0 8 5 5 300 ms                # Start delay
   | set 0 8 6 2 Off                   # CW ID
   | set 0 8 7 Off                     # Busy lockout default
   | set 0 8 8 1 Normal                # Subtone level
-  | set 0 8 8 2 Off                   # Tail elimination
+  | set 0 8 8 2 Off                   # Tail removal
   | set 0 8 8 3 55 Hz                 # Phase
   | set 0 9 1 1 Off                   # Auto lock
   | set 0 9 2 1 Off                   # Bluetooth
@@ -910,7 +910,7 @@
   | set 0 1 6 2 Up                    # Direction
   | set 0 1 6 3 Off                   # Scan inputs
   | set 0 1 6 4 Start                 # Return to
-  | set 0 2 4 Name                    # Channel display
+  | set 0 2 4 Name                    # Channel shows
   | set 0 2 5 50 km                   # Local zone
   | set 0 2 6 1 100 kHz               # Step
   | set 0 2 6 2 Auto                  # AGC
@@ -952,28 +952,28 @@
   | set 0 5 9 8 Off                   # Decode log
   | set 0 5 9 9 Off                   # Auto reply
   | set 0 6 1 Auto                    # GPS
-  | set 0 6 3 DDM                     # Coordinate format
+  | set 0 6 3 DDM                     # Coordinates
   | set 0 6 4 Metric                  # Units
   | set 0 6 5 UTC                     # Time zone
   | set 0 6 6 24 h, GPS               # Clock
-  | set 0 6 8 Always on               # GPS during RX/TX
+  | set 0 6 8 Never                   # GPS off during
   | set 0 7 1 Dark                    # Theme
-  | set 0 7 2 Watch                   # Home layout
+  | set 0 7 2 Watch                   # Layout
   | set 0 7 3 1 Bars                  # S-meter
-  | set 0 7 3 2 Callsign              # Power-on message
+  | set 0 7 3 2 Callsign              # Power-on text
   | set 0 7 3 3 Logo                  # Boot screen
   | set 0 7 4 1 1 min                 # Timeout
   | set 0 7 4 2 7                     # Brightness
   | set 0 7 4 3 On                    # On transmit
-  | set 0 7 4 4 Keys and RX           # Wake screen on
-  | set 0 7 4 5 With screen           # Keypad light
+  | set 0 7 4 4 Keys and RX           # Wake on
+  | set 0 7 4 5 With screen           # Key light
   | set 0 7 5 1 On                    # Key beep
   | set 0 7 5 2 Mid                   # Beep volume
   | set 0 7 5 3 On                    # Alert tones
   | set 0 7 5 4 On                    # Arrival tone
   | set 0 7 5 5 Packet                # Message sound
   | set 0 7 5 6 Max                   # Message volume
-  | set 0 7 6 RX, TX and heartbeat    # LEDs
+  | set 0 7 6 RX, TX, heartbeat       # LEDs
   | set 0 7 7 1 Level 1               # Battery Save
   | set 0 7 7 2 Auto                  # Low Power Mode
   | set 0 7 7 3 20 %                  # Auto below
@@ -987,11 +987,11 @@
   | set 0 8 4 Off                     # End tone
   | set 0 8 5 3 100 ms                # Speed
   | set 0 8 5 4 On                    # Sidetone
-  | set 0 8 5 5 300 ms                # First digit delay
+  | set 0 8 5 5 300 ms                # Start delay
   | set 0 8 6 2 Off                   # CW ID
   | set 0 8 7 Off                     # Busy lockout default
   | set 0 8 8 1 Normal                # Subtone level
-  | set 0 8 8 2 Off                   # Tail elimination
+  | set 0 8 8 2 Off                   # Tail removal
   | set 0 8 8 3 55 Hz                 # Phase
   | set 0 9 1 1 Off                   # Auto lock
   | set 0 9 2 1 Off                   # Bluetooth

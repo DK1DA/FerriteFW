@@ -30,8 +30,8 @@ TX_BANDS = ((14_400_000, 14_800_000), (42_000_000, 45_000_000))
 DEFAULTS = {
     "0 1 1": ("Watch", "A+B"), "0 1 6 1": ("Pause time", "1 min"),
     "0 1 2": ("Resume", "5 s"), "0 1 6 3": ("Scan inputs", "Off"), "0 1 6 4": ("Return to", "Start"),
-    "0 1 3": ("Priority check", "Every 2 s"), "0 7 2": ("Home layout", "Watch"), "0 7 4 1": ("Timeout", "1 min"),
-    "0 7 4 4": ("Wake screen on", "Keys and RX"), "0 7 7 1": ("Battery Save", "Off"), "0 8 4": ("End tone", "Off"),
+    "0 1 3": ("Priority check", "Every 2 s"), "0 7 2": ("Layout", "Watch"), "0 7 4 1": ("Timeout", "1 min"),
+    "0 7 4 4": ("Wake on", "Keys and RX"), "0 7 7 1": ("Battery Save", "Off"), "0 8 4": ("End tone", "Off"),
     "0 8 6 1": ("Callsign", "Empty"), "0 9 3 1": ("PIN lock", "Off"),
 }
 XB_TIMEOUTS = (30, 60, 120, 180, 300, 600)

@@ -80,7 +80,7 @@ wired [6, 4]: Some(false) Metric
 wired [6, 5]: Some(false) UTC
 wired [6, 6]: Some(false) 24 h, GPS
 wired [6, 7]: None 
-wired [6, 8]: Some(false) Always on
+wired [6, 8]: Some(false) Never
 wired [6, 9]: Some(false) None
 wired [7, 1]: Some(false) Dark
 wired [7, 2]: Some(false) Watch
@@ -101,7 +101,7 @@ wired [7, 5, 3]: Some(false) On
 wired [7, 5, 4]: Some(false) On
 wired [7, 5, 5]: Some(false) Packet
 wired [7, 5, 6]: Some(false) Max
-wired [7, 6]: Some(false) RX, TX and heartbeat
+wired [7, 6]: Some(false) RX, TX, heartbeat
 wired [7, 7]: Some(false) Level 1
 wired [7, 7, 1]: Some(false) Level 1
 wired [7, 7, 2]: Some(false) Auto
@@ -131,7 +131,7 @@ wired [8, 8, 2]: Some(false) Off
 wired [8, 8, 3]: Some(false) 55 Hz
 wired [8, 8, 4]: Some(false) Off
 wired [8, 8, 5]: Some(false) Off
-wired [9, 1]: Some(false) No auto lock
+wired [9, 1]: Some(false) Manual lock
 wired [9, 1, 1]: Some(false) Off
 wired [9, 1, 2]: None 
 wired [9, 1, 3]: None 
@@ -167,7 +167,7 @@ set 0 1 6 1 1 min                 # Pause time
 set 0 1 6 2 Up                    # Direction
 set 0 1 6 3 Off                   # Scan inputs
 set 0 1 6 4 Start                 # Return to
-set 0 2 4 Name                    # Channel display
+set 0 2 4 Name                    # Channel shows
 set 0 2 5 50 km                   # Local zone
 set 0 2 6 1 100 kHz               # Step
 set 0 2 6 2 Auto                  # AGC
@@ -209,28 +209,28 @@ set 0 5 9 7 APRS first            # Shared VHF
 set 0 5 9 8 Off                   # Decode log
 set 0 5 9 9 Off                   # Auto reply
 set 0 6 1 Auto                    # GPS
-set 0 6 3 DDM                     # Coordinate format
+set 0 6 3 DDM                     # Coordinates
 set 0 6 4 Metric                  # Units
 set 0 6 5 UTC                     # Time zone
 set 0 6 6 24 h, GPS               # Clock
-set 0 6 8 Always on               # GPS during RX/TX
+set 0 6 8 Never                   # GPS off during
 set 0 7 1 Dark                    # Theme
-set 0 7 2 Watch                   # Home layout
+set 0 7 2 Watch                   # Layout
 set 0 7 3 1 Bars                  # S-meter
-set 0 7 3 2 Callsign              # Power-on message
+set 0 7 3 2 Callsign              # Power-on text
 set 0 7 3 3 Logo                  # Boot screen
 set 0 7 4 1 1 min                 # Timeout
 set 0 7 4 2 7                     # Brightness
 set 0 7 4 3 On                    # On transmit
-set 0 7 4 4 Keys and RX           # Wake screen on
-set 0 7 4 5 With screen           # Keypad light
+set 0 7 4 4 Keys and RX           # Wake on
+set 0 7 4 5 With screen           # Key light
 set 0 7 5 1 On                    # Key beep
 set 0 7 5 2 Mid                   # Beep volume
 set 0 7 5 3 On                    # Alert tones
 set 0 7 5 4 On                    # Arrival tone
 set 0 7 5 5 Packet                # Message sound
 set 0 7 5 6 Max                   # Message volume
-set 0 7 6 RX, TX and heartbeat    # LEDs
+set 0 7 6 RX, TX, heartbeat       # LEDs
 set 0 7 7 1 Level 1               # Battery Save
 set 0 7 7 2 Auto                  # Low Power Mode
 set 0 7 7 3 20 %                  # Auto below
@@ -244,11 +244,11 @@ set 0 8 3 5                       # Mic gain
 set 0 8 4 Off                     # End tone
 set 0 8 5 3 100 ms                # Speed
 set 0 8 5 4 On                    # Sidetone
-set 0 8 5 5 300 ms                # First digit delay
+set 0 8 5 5 300 ms                # Start delay
 set 0 8 6 2 Off                   # CW ID
 set 0 8 7 Off                     # Busy lockout default
 set 0 8 8 1 Normal                # Subtone level
-set 0 8 8 2 Off                   # Tail elimination
+set 0 8 8 2 Off                   # Tail removal
 set 0 8 8 3 55 Hz                 # Phase
 set 0 9 1 1 Off                   # Auto lock
 set 0 9 2 1 Off                   # Bluetooth
@@ -277,7 +277,7 @@ All settings are at their defaults.
 :_ :get 0 2 1_ 0 2 1 Browse: a page on the radio, not a setting
 :_ :get 0 2 2_ 0 2 2 Add repeater: a page on the radio, not a setting
 :_ :get 0 2 3_ 0 2 3 Zones: a page on the radio, not a setting
-:_ :get 0 2 4_ 0 2 4 Channel display: Name
+:_ :get 0 2 4_ 0 2 4 Channel shows: Name
 :_ :get 0 2 5_ 0 2 5 Local zone: 50 km
 :_ :get 0 2 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 2 6 1_ 0 2 6 1 Step: 100 kHz
@@ -340,25 +340,25 @@ All settings are at their defaults.
 :_ :get 0 5 9 9_ 0 5 9 9 Auto reply: Off
 :_ :get 0 6 1_ 0 6 1 GPS: Auto
 :_ :get 0 6 2_ 0 6 2 Position: a page on the radio, not a setting
-:_ :get 0 6 3_ 0 6 3 Coordinate format: DDM
+:_ :get 0 6 3_ 0 6 3 Coordinates: DDM
 :_ :get 0 6 4_ 0 6 4 Units: Metric
 :_ :get 0 6 5_ 0 6 5 Time zone: UTC
 :_ :get 0 6 6_ 0 6 6 Clock: 24 h, GPS
 :_ :get 0 6 7_ 0 6 7 Waypoints: a page on the radio, not a setting
-:_ :get 0 6 8_ 0 6 8 GPS during RX/TX: Always on
+:_ :get 0 6 8_ 0 6 8 GPS off during: Never
 :_ :get 0 6 9_ 0 6 9 Fixed position: None
 :_ :get 0 7 1_ 0 7 1 Theme: Dark
-:_ :get 0 7 2_ 0 7 2 Home layout: Watch
+:_ :get 0 7 2_ 0 7 2 Layout: Watch
 :_ :get 0 7 3_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 3 1_ 0 7 3 1 S-meter: Bars
-:_ :get 0 7 3 2_ 0 7 3 2 Power-on message: Callsign
+:_ :get 0 7 3 2_ 0 7 3 2 Power-on text: Callsign
 :_ :get 0 7 3 3_ 0 7 3 3 Boot screen: Logo
 :_ :get 0 7 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 4 1_ 0 7 4 1 Timeout: 1 min
 :_ :get 0 7 4 2_ 0 7 4 2 Brightness: 7
 :_ :get 0 7 4 3_ 0 7 4 3 On transmit: On
-:_ :get 0 7 4 4_ 0 7 4 4 Wake screen on: Keys and RX
-:_ :get 0 7 4 5_ 0 7 4 5 Keypad light: With screen
+:_ :get 0 7 4 4_ 0 7 4 4 Wake on: Keys and RX
+:_ :get 0 7 4 5_ 0 7 4 5 Key light: With screen
 :_ :get 0 7 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 5 1_ 0 7 5 1 Key beep: On
 :_ :get 0 7 5 2_ 0 7 5 2 Beep volume: Mid
@@ -366,7 +366,7 @@ All settings are at their defaults.
 :_ :get 0 7 5 4_ 0 7 5 4 Arrival tone: On
 :_ :get 0 7 5 5_ 0 7 5 5 Message sound: Packet
 :_ :get 0 7 5 6_ 0 7 5 6 Message volume: Max
-:_ :get 0 7 6_ 0 7 6 LEDs: RX, TX and heartbeat
+:_ :get 0 7 6_ 0 7 6 LEDs: RX, TX, heartbeat
 :_ :get 0 7 7_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 7 1_ 0 7 7 1 Battery Save: Level 1
 :_ :get 0 7 7 2_ 0 7 7 2 Low Power Mode: Auto
@@ -385,14 +385,14 @@ All settings are at their defaults.
 :_ :get 0 8 5 2_ 0 8 5 2 Memories: a page on the radio, not a setting
 :_ :get 0 8 5 3_ 0 8 5 3 Speed: 100 ms
 :_ :get 0 8 5 4_ 0 8 5 4 Sidetone: On
-:_ :get 0 8 5 5_ 0 8 5 5 First digit delay: 300 ms
+:_ :get 0 8 5 5_ 0 8 5 5 Start delay: 300 ms
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 6 1_ 0 8 6 1 Callsign: Empty
 :_ :get 0 8 6 2_ 0 8 6 2 CW ID: Off
 :_ :get 0 8 7_ 0 8 7 Busy lockout default: Off
 :_ :get 0 8 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 8 1_ 0 8 8 1 Subtone level: Normal
-:_ :get 0 8 8 2_ 0 8 8 2 Tail elimination: Off
+:_ :get 0 8 8 2_ 0 8 8 2 Tail removal: Off
 :_ :get 0 8 8 3_ 0 8 8 3 Phase: 55 Hz
 :_ :get 0 8 8 4_ 0 8 8 4 Extend TX: Off
 :_ :get 0 8 8 5_ 0 8 8 5 Dry TX: Off
@@ -988,12 +988,12 @@ change [6, 7] -2: false None  [] Home
 change [6, 7] 3: false None  [] Home
 change [6, 7] 0: false None  [] Home
 reset [6, 7]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
-change [6, 8] 1: true Some(true) Off on receive [] Home
-change [6, 8] -1: true Some(false) Always on [] Home
-change [6, 8] 2: true Some(true) Off on transmit [] Home
-change [6, 8] -2: true Some(false) Always on [] Home
-change [6, 8] 3: true Some(true) Off on both [] Home
-change [6, 8] 0: true Some(true) Off on both [] Home
+change [6, 8] 1: true Some(true) Receive [] Home
+change [6, 8] -1: true Some(false) Never [] Home
+change [6, 8] 2: true Some(true) Transmit [] Home
+change [6, 8] -2: true Some(false) Never [] Home
+change [6, 8] 3: true Some(true) Both [] Home
+change [6, 8] 0: true Some(true) Both [] Home
 reset [6, 8]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [6, 9] 1: false Some(false) None [] Home
 change [6, 9] -1: false Some(false) None [] Home
@@ -1136,11 +1136,11 @@ change [7, 5, 6] 3: true Some(true) High [Chime { sound: 3, level: 10 }] Home
 change [7, 5, 6] 0: true Some(true) High [Chime { sound: 3, level: 10 }] Home
 reset [7, 5, 6]: [Chime { sound: 3, level: 11 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [7, 6] 1: true Some(true) Off [] Home
-change [7, 6] -1: true Some(false) RX, TX and heartbeat [] Home
+change [7, 6] -1: true Some(false) RX, TX, heartbeat [] Home
 change [7, 6] 2: true Some(true) RX and TX [] Home
-change [7, 6] -2: true Some(false) RX, TX and heartbeat [] Home
-change [7, 6] 3: true Some(false) RX, TX and heartbeat [] Home
-change [7, 6] 0: true Some(false) RX, TX and heartbeat [] Home
+change [7, 6] -2: true Some(false) RX, TX, heartbeat [] Home
+change [7, 6] 3: true Some(false) RX, TX, heartbeat [] Home
+change [7, 6] 0: true Some(false) RX, TX, heartbeat [] Home
 reset [7, 6]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [7, 7] 1: true Some(true) Level 2 [BatterySave(L2)] Home
 change [7, 7] -1: true Some(false) Level 1 [BatterySave(L1)] Home
@@ -1345,12 +1345,12 @@ change [8, 8, 5] -2: true Some(false) Off [] Home
 change [8, 8, 5] 3: true Some(true) On [] Home
 change [8, 8, 5] 0: true Some(false) Off [] Home
 reset [8, 8, 5]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
-change [9, 1] 1: false Some(false) No auto lock [] Home
-change [9, 1] -1: false Some(false) No auto lock [] Home
-change [9, 1] 2: false Some(false) No auto lock [] Home
-change [9, 1] -2: false Some(false) No auto lock [] Home
-change [9, 1] 3: false Some(false) No auto lock [] Home
-change [9, 1] 0: false Some(false) No auto lock [] Home
+change [9, 1] 1: false Some(false) Manual lock [] Home
+change [9, 1] -1: false Some(false) Manual lock [] Home
+change [9, 1] 2: false Some(false) Manual lock [] Home
+change [9, 1] -2: false Some(false) Manual lock [] Home
+change [9, 1] 3: false Some(false) Manual lock [] Home
+change [9, 1] 0: false Some(false) Manual lock [] Home
 reset [9, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [9, 1, 1] 1: true Some(true) 30 s [] Home
 change [9, 1, 1] -1: true Some(false) Off [] Home
@@ -1563,13 +1563,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 1 6 4 2_ Return to: one of Start, Last hit
 :_ :set 0 1 6 4 10_ Return to: one of Start, Last hit
 :_ :set 0 1 6 4 none_ Return to: one of Start, Last hit
-:_ :set 0 2 4 xyzzy_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 on_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 off_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 1_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 2_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 10_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 none_ Channel display: one of Name, Number, Frequency
+:_ :set 0 2 4 xyzzy_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 on_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 off_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 1_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 2_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 10_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 none_ Channel shows: one of Name, Number, Frequency
 :_ :set 0 2 5 xyzzy_ Local zone: one of 50 km, 80 km, Off, 10 km, 20 km, 30 km
 :_ :set 0 2 5 on_ Local zone: one of 50 km, 80 km, Off, 10 km, 20 km, 30 km
 :_ :set 0 2 5 off_ 0 2 5 Local zone: Off
@@ -1675,13 +1675,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 4 2_ Popups: one of Off, On
 :_ :set 0 4 4 10_ Popups: one of Off, On
 :_ :set 0 4 4 none_ Popups: one of Off, On
-:_ :set 0 4 5 1 xyzzy_ SAME: US/Canada only
-:_ :set 0 4 5 1 on_ SAME: US/Canada only
-:_ :set 0 4 5 1 off_ SAME: US/Canada only
-:_ :set 0 4 5 1 1_ SAME: US/Canada only
-:_ :set 0 4 5 1 2_ SAME: US/Canada only
-:_ :set 0 4 5 1 10_ SAME: US/Canada only
-:_ :set 0 4 5 1 none_ SAME: US/Canada only
+:_ :set 0 4 5 1 xyzzy_ SAME: US/CA only
+:_ :set 0 4 5 1 on_ SAME: US/CA only
+:_ :set 0 4 5 1 off_ SAME: US/CA only
+:_ :set 0 4 5 1 1_ SAME: US/CA only
+:_ :set 0 4 5 1 2_ SAME: US/CA only
+:_ :set 0 4 5 1 10_ SAME: US/CA only
+:_ :set 0 4 5 1 none_ SAME: US/CA only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_  C  APRS                  144.80000                     idle 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_  C  VFO                   118.95000   AM                idle 0 5 3 APRS mode: Off
@@ -1864,13 +1864,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 6 1 2_ GPS: one of Off, Auto, On
 :_ :set 0 6 1 10_ GPS: one of Off, Auto, On
 :_ :set 0 6 1 none_ GPS: one of Off, Auto, On
-:_ :set 0 6 3 xyzzy_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 on_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 off_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 1_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 2_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 10_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 none_ Coordinate format: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 xyzzy_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 on_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 off_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 1_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 2_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 10_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 none_ Coordinates: one of DDM, DMS, Grid square, Decimal
 :_ :set 0 6 4 xyzzy_ Units: one of Metric, Imperial, Nautical
 :_ :set 0 6 4 on_ Units: one of Metric, Imperial, Nautical
 :_ :set 0 6 4 off_ Units: one of Metric, Imperial, Nautical
@@ -1892,13 +1892,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 6 6 2_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
 :_ :set 0 6 6 10_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
 :_ :set 0 6 6 none_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
-:_ :set 0 6 8 xyzzy_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 on_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 off_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 1_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 2_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 10_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 none_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
+:_ :set 0 6 8 xyzzy_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 on_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 off_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 1_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 2_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 10_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 none_ GPS off during: one of Never, Receive, Transmit, Both
 :_ :set 0 7 1 xyzzy_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 on_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 off_ Theme: one of Dark, Daylight, Night red, Cyberpunk
@@ -1906,13 +1906,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 1 2_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 10_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 none_ Theme: one of Dark, Daylight, Night red, Cyberpunk
-:_ :set 0 7 2 xyzzy_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 on_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 off_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 1_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 2_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 10_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 none_ Home layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 xyzzy_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 on_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 off_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 1_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 2_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 10_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 none_ Layout: one of Watch, Single + scope, Watch + activity
 :_ :set 0 7 3 1 xyzzy_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 on_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 off_ S-meter: one of Bars, dBm
@@ -1920,13 +1920,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 3 1 2_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 10_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 none_ S-meter: one of Bars, dBm
-:_ :set 0 7 3 2 xyzzy_ Power-on message: one of Callsign, Text, Off
-:_ :set 0 7 3 2 on_ Power-on message: one of Callsign, Text, Off
-:_ :set 0 7 3 2 off_ 0 7 3 2 Power-on message: Off
-:_ :set 0 7 3 2 1_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 2_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 10_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 none_ Power-on message: one of Off, Callsign, Text
+:_ :set 0 7 3 2 xyzzy_ Power-on text: one of Callsign, Text, Off
+:_ :set 0 7 3 2 on_ Power-on text: one of Callsign, Text, Off
+:_ :set 0 7 3 2 off_ 0 7 3 2 Power-on text: Off
+:_ :set 0 7 3 2 1_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 2_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 10_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 none_ Power-on text: one of Off, Callsign, Text
 :_ :set 0 7 3 3 xyzzy_ Boot screen: one of Logo, Owner card
 :_ :set 0 7 3 3 on_ Boot screen: one of Logo, Owner card
 :_ :set 0 7 3 3 off_ Boot screen: one of Logo, Owner card
@@ -1955,20 +1955,20 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 4 3 2_ On transmit: one of Off, On
 :_ :set 0 7 4 3 10_ On transmit: one of Off, On
 :_ :set 0 7 4 3 none_ On transmit: one of Off, On
-:_ :set 0 7 4 4 xyzzy_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 on_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 off_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 1_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 2_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 10_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 none_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 5 xyzzy_ Keypad light: one of With screen, On key press, Always, Off
-:_ :set 0 7 4 5 on_ 0 7 4 5 Keypad light: On key press
-:_ :set 0 7 4 5 off_ 0 7 4 5 Keypad light: Off
-:_ :set 0 7 4 5 1_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 2_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 10_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 none_ Keypad light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 4 xyzzy_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 on_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 off_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 1_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 2_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 10_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 none_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 5 xyzzy_ Key light: one of With screen, On key press, Always, Off
+:_ :set 0 7 4 5 on_ 0 7 4 5 Key light: On key press
+:_ :set 0 7 4 5 off_ 0 7 4 5 Key light: Off
+:_ :set 0 7 4 5 1_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 2_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 10_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 none_ Key light: one of Off, With screen, On key press, Always
 :_ :set 0 7 5 1 xyzzy_ Key beep: one of On, Off
 :_ :set 0 7 5 1 on_ 0 7 5 1 Key beep: On
 :_ :set 0 7 5 1 off_ 0 7 5 1 Key beep: Off
@@ -2011,13 +2011,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 5 6 2_ Message volume: one of Max, Low, Mid, High
 :_ :set 0 7 5 6 10_ Message volume: one of Max, Low, Mid, High
 :_ :set 0 7 5 6 none_ Message volume: one of Max, Low, Mid, High
-:_ :set 0 7 6 xyzzy_ LEDs: one of RX, TX and heartbeat, Off, RX and TX
-:_ :set 0 7 6 on_ LEDs: one of RX, TX and heartbeat, Off, RX and TX
+:_ :set 0 7 6 xyzzy_ LEDs: one of RX, TX, heartbeat, Off, RX and TX
+:_ :set 0 7 6 on_ LEDs: one of RX, TX, heartbeat, Off, RX and TX
 :_ :set 0 7 6 off_ 0 7 6 LEDs: Off
-:_ :set 0 7 6 1_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 2_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 10_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 none_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
+:_ :set 0 7 6 1_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 2_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 10_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 none_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
 :_ :set 0 7 7 1 xyzzy_ Battery Save: one of Level 1, Level 2, Level 3, Off
 :_ :set 0 7 7 1 on_ Battery Save: one of Level 1, Level 2, Level 3, Off
 :_ :set 0 7 7 1 off_  Battery 7.9 V   GPS off   Bluetooth off   Battery Save 0 0 7 7 1 Battery Save: Off
@@ -2109,13 +2109,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 5 4 2_ Sidetone: one of Off, On
 :_ :set 0 8 5 4 10_ Sidetone: one of Off, On
 :_ :set 0 8 5 4 none_ Sidetone: one of Off, On
-:_ :set 0 8 5 5 xyzzy_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 on_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 off_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 1_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 2_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 10_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 none_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
+:_ :set 0 8 5 5 xyzzy_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 on_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 off_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 1_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 2_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 10_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 none_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
 :_ :set 0 8 6 2 xyzzy_ CW ID: set a callsign first
 :_ :set 0 8 6 2 on_ CW ID: set a callsign first
 :_ :set 0 8 6 2 off_ 0 8 6 2 CW ID: Off
@@ -2137,13 +2137,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 8 1 2_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 8 1 10_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 8 1 none_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 8 2 xyzzy_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 on_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 off_ 0 8 8 2 Tail elimination: Off
-:_ :set 0 8 8 2 1_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 2_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 10_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 none_ Tail elimination: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 xyzzy_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 on_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 off_ 0 8 8 2 Tail removal: Off
+:_ :set 0 8 8 2 1_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 2_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 10_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 none_ Tail removal: one of Off, Receive, Transmit, Both
 :_ :set 0 8 8 3 xyzzy_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 8 3 on_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 8 3 off_ Phase: one of 55 Hz, 120??, 180??, 240??
@@ -2276,7 +2276,7 @@ wired [6, 4]: Some(true) Nautical
 wired [6, 5]: Some(true) UTC+3
 wired [6, 6]: Some(false) 24 h, GPS
 wired [6, 7]: None 
-wired [6, 8]: Some(true) Off on transmit
+wired [6, 8]: Some(true) Transmit
 wired [6, 9]: Some(true) JJ00aa
 wired [7, 1]: Some(true) Cyberpunk
 wired [7, 2]: Some(true) Single + scope
@@ -2363,7 +2363,7 @@ set 0 1 6 1 30 s                  # Pause time
 set 0 1 6 2 Up                    # Direction
 set 0 1 6 3 Off                   # Scan inputs
 set 0 1 6 4 Start                 # Return to
-set 0 2 4 Name                    # Channel display
+set 0 2 4 Name                    # Channel shows
 set 0 2 5 20 km                   # Local zone
 set 0 2 6 1 50 kHz                # Step
 set 0 2 6 2 Fixed 3               # AGC
@@ -2406,21 +2406,21 @@ set 0 5 9 7 A·B first            # Shared VHF
 set 0 5 9 8 Off                   # Decode log
 set 0 5 9 9 Off                   # Auto reply
 set 0 6 1 Auto                    # GPS
-set 0 6 3 DDM                     # Coordinate format
+set 0 6 3 DDM                     # Coordinates
 set 0 6 4 Nautical                # Units
 set 0 6 5 UTC+3                   # Time zone
 set 0 6 6 24 h, GPS               # Clock
-set 0 6 8 Off on transmit         # GPS during RX/TX
+set 0 6 8 Transmit                # GPS off during
 set 0 7 1 Cyberpunk               # Theme
-set 0 7 2 Single + scope          # Home layout
+set 0 7 2 Single + scope          # Layout
 set 0 7 3 1 Bars                  # S-meter
-set 0 7 3 2 Callsign              # Power-on message
+set 0 7 3 2 Callsign              # Power-on text
 set 0 7 3 3 Logo                  # Boot screen
 set 0 7 4 1 5 min                 # Timeout
 set 0 7 4 2 10                    # Brightness
 set 0 7 4 3 On                    # On transmit
-set 0 7 4 4 Keys                  # Wake screen on
-set 0 7 4 5 Off                   # Keypad light
+set 0 7 4 4 Keys                  # Wake on
+set 0 7 4 5 Off                   # Key light
 set 0 7 5 1 On                    # Key beep
 set 0 7 5 2 High                  # Beep volume
 set 0 7 5 3 On                    # Alert tones
@@ -2441,11 +2441,11 @@ set 0 8 3 7                       # Mic gain
 set 0 8 4 Two-tone down           # End tone
 set 0 8 5 3 140 ms                # Speed
 set 0 8 5 4 On                    # Sidetone
-set 0 8 5 5 450 ms                # First digit delay
+set 0 8 5 5 450 ms                # Start delay
 set 0 8 6 2 Off                   # CW ID
 set 0 8 7 Off                     # Busy lockout default
 set 0 8 8 1 High                  # Subtone level
-set 0 8 8 2 Off                   # Tail elimination
+set 0 8 8 2 Off                   # Tail removal
 set 0 8 8 3 180°                 # Phase
 set 0 9 1 1 2 min                 # Auto lock
 set 0 9 2 1 Off                   # Bluetooth
@@ -2486,13 +2486,13 @@ set 0 5 9 4 High                  # TX level
 set 0 5 9 7 A·B first            # Shared VHF
 set 0 6 4 Nautical                # Units
 set 0 6 5 UTC+3                   # Time zone
-set 0 6 8 Off on transmit         # GPS during RX/TX
+set 0 6 8 Transmit                # GPS off during
 set 0 7 1 Cyberpunk               # Theme
-set 0 7 2 Single + scope          # Home layout
+set 0 7 2 Single + scope          # Layout
 set 0 7 4 1 5 min                 # Timeout
 set 0 7 4 2 10                    # Brightness
-set 0 7 4 4 Keys                  # Wake screen on
-set 0 7 4 5 Off                   # Keypad light
+set 0 7 4 4 Keys                  # Wake on
+set 0 7 4 5 Off                   # Key light
 set 0 7 5 2 High                  # Beep volume
 set 0 7 5 5 Pager                 # Message sound
 set 0 7 5 6 High                  # Message volume
@@ -2507,7 +2507,7 @@ set 0 8 2 3 1 s                   # Tail
 set 0 8 3 7                       # Mic gain
 set 0 8 4 Two-tone down           # End tone
 set 0 8 5 3 140 ms                # Speed
-set 0 8 5 5 450 ms                # First digit delay
+set 0 8 5 5 450 ms                # Start delay
 set 0 8 8 1 High                  # Subtone level
 set 0 8 8 3 180°                 # Phase
 set 0 9 1 1 2 min                 # Auto lock
@@ -2526,7 +2526,7 @@ Ferrite 0.8.1   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 2 1_ 0 2 1 Browse: a page on the radio, not a setting
 :_ :get 0 2 2_ 0 2 2 Add repeater: a page on the radio, not a setting
 :_ :get 0 2 3_ 0 2 3 Zones: a page on the radio, not a setting
-:_ :get 0 2 4_ 0 2 4 Channel display: Name
+:_ :get 0 2 4_ 0 2 4 Channel shows: Name
 :_ :get 0 2 5_ 0 2 5 Local zone: 20 km (not the default)
 :_ :get 0 2 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 2 6 1_ 0 2 6 1 Step: 50 kHz (not the default)
@@ -2589,25 +2589,25 @@ Ferrite 0.8.1   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 5 9 9_ 0 5 9 9 Auto reply: Off
 :_ :get 0 6 1_ 0 6 1 GPS: Auto
 :_ :get 0 6 2_ 0 6 2 Position: a page on the radio, not a setting
-:_ :get 0 6 3_ 0 6 3 Coordinate format: DDM
+:_ :get 0 6 3_ 0 6 3 Coordinates: DDM
 :_ :get 0 6 4_ 0 6 4 Units: Nautical (not the default)
 :_ :get 0 6 5_ 0 6 5 Time zone: UTC+3 (not the default)
 :_ :get 0 6 6_ 0 6 6 Clock: 24 h, GPS
 :_ :get 0 6 7_ 0 6 7 Waypoints: a page on the radio, not a setting
-:_ :get 0 6 8_ 0 6 8 GPS during RX/TX: Off on transmit (not the default)
+:_ :get 0 6 8_ 0 6 8 GPS off during: Transmit (not the default)
 :_ :get 0 6 9_ 0 6 9 Fixed position: JJ00aa (not the default)
 :_ :get 0 7 1_ 0 7 1 Theme: Cyberpunk (not the default)
-:_ :get 0 7 2_ 0 7 2 Home layout: Single + scope (not the default)
+:_ :get 0 7 2_ 0 7 2 Layout: Single + scope (not the default)
 :_ :get 0 7 3_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 3 1_ 0 7 3 1 S-meter: Bars
-:_ :get 0 7 3 2_ 0 7 3 2 Power-on message: Callsign
+:_ :get 0 7 3 2_ 0 7 3 2 Power-on text: Callsign
 :_ :get 0 7 3 3_ 0 7 3 3 Boot screen: Logo
 :_ :get 0 7 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 4 1_ 0 7 4 1 Timeout: 5 min (not the default)
 :_ :get 0 7 4 2_ 0 7 4 2 Brightness: 10 (not the default)
 :_ :get 0 7 4 3_ 0 7 4 3 On transmit: On
-:_ :get 0 7 4 4_ 0 7 4 4 Wake screen on: Keys (not the default)
-:_ :get 0 7 4 5_ 0 7 4 5 Keypad light: Off (not the default)
+:_ :get 0 7 4 4_ 0 7 4 4 Wake on: Keys (not the default)
+:_ :get 0 7 4 5_ 0 7 4 5 Key light: Off (not the default)
 :_ :get 0 7 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 5 1_ 0 7 5 1 Key beep: On
 :_ :get 0 7 5 2_ 0 7 5 2 Beep volume: High (not the default)
@@ -2634,14 +2634,14 @@ Ferrite 0.8.1   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 8 5 2_ 0 8 5 2 Memories: a page on the radio, not a setting
 :_ :get 0 8 5 3_ 0 8 5 3 Speed: 140 ms (not the default)
 :_ :get 0 8 5 4_ 0 8 5 4 Sidetone: On
-:_ :get 0 8 5 5_ 0 8 5 5 First digit delay: 450 ms (not the default)
+:_ :get 0 8 5 5_ 0 8 5 5 Start delay: 450 ms (not the default)
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 6 1_ 0 8 6 1 Callsign: N0CALL (not the default)
 :_ :get 0 8 6 2_ 0 8 6 2 CW ID: Off
 :_ :get 0 8 7_ 0 8 7 Busy lockout default: Off
 :_ :get 0 8 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 8 1_ 0 8 8 1 Subtone level: High (not the default)
-:_ :get 0 8 8 2_ 0 8 8 2 Tail elimination: Off
+:_ :get 0 8 8 2_ 0 8 8 2 Tail removal: Off
 :_ :get 0 8 8 3_ 0 8 8 3 Phase: 180?? (not the default)
 :_ :get 0 8 8 4_ 0 8 8 4 Extend TX: Off
 :_ :get 0 8 8 5_ 0 8 8 5 Dry TX: Off
@@ -3237,12 +3237,12 @@ change [6, 7] -2: false None  [] Home
 change [6, 7] 3: false None  [] Home
 change [6, 7] 0: false None  [] Home
 reset [6, 7]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 1, theme: 3, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 8, vox_tail: 1, mic_gain: 7, tx_timeout: 8, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 40, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 0, auto_off: 2, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 2, end_tone: 3, dtmf_ms: 140, dtmf_delay: 45, cw_id: 0, gps: 2, gps_rxtx: 2, arrival: 0, menu_timeout: 0, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 2, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 5, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
-change [6, 8] 1: true Some(true) Off on both [] Home
-change [6, 8] -1: true Some(true) Off on transmit [] Home
-change [6, 8] 2: true Some(false) Always on [] Home
-change [6, 8] -2: true Some(true) Off on transmit [] Home
-change [6, 8] 3: true Some(true) Off on receive [] Home
-change [6, 8] 0: true Some(true) Off on receive [] Home
+change [6, 8] 1: true Some(true) Both [] Home
+change [6, 8] -1: true Some(true) Transmit [] Home
+change [6, 8] 2: true Some(false) Never [] Home
+change [6, 8] -2: true Some(true) Transmit [] Home
+change [6, 8] 3: true Some(true) Receive [] Home
+change [6, 8] 0: true Some(true) Receive [] Home
 reset [6, 8]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 1, theme: 3, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 8, vox_tail: 1, mic_gain: 7, tx_timeout: 8, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 40, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 0, auto_off: 2, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 2, end_tone: 3, dtmf_ms: 140, dtmf_delay: 45, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 0, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 2, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 5, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [6, 9] 1: false Some(false) None [] Home
 change [6, 9] -1: false Some(false) None [] Home
@@ -3386,7 +3386,7 @@ change [7, 5, 6] 0: true Some(true) Mid [Chime { sound: 3, level: 9 }] Home
 reset [7, 5, 6]: [Chime { sound: 3, level: 11 }] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 8, vox_tail: 1, mic_gain: 7, tx_timeout: 8, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 40, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 0, auto_off: 2, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 2, end_tone: 3, dtmf_ms: 140, dtmf_delay: 45, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 0, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [7, 6] 1: true Some(true) RX and TX [] Home
 change [7, 6] -1: true Some(true) Off [] Home
-change [7, 6] 2: true Some(false) RX, TX and heartbeat [] Home
+change [7, 6] 2: true Some(false) RX, TX, heartbeat [] Home
 change [7, 6] -2: true Some(true) Off [] Home
 change [7, 6] 3: true Some(true) Off [] Home
 change [7, 6] 0: true Some(true) Off [] Home
@@ -3812,13 +3812,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 1 6 4 2_ Return to: one of Start, Last hit
 :_ :set 0 1 6 4 10_ Return to: one of Start, Last hit
 :_ :set 0 1 6 4 none_ Return to: one of Start, Last hit
-:_ :set 0 2 4 xyzzy_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 on_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 off_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 1_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 2_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 10_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 none_ Channel display: one of Name, Number, Frequency
+:_ :set 0 2 4 xyzzy_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 on_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 off_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 1_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 2_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 10_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 none_ Channel shows: one of Name, Number, Frequency
 :_ :set 0 2 5 xyzzy_ Local zone: one of 50 km, 80 km, Off, 10 km, 20 km, 30 km
 :_ :set 0 2 5 on_ Local zone: one of 50 km, 80 km, Off, 10 km, 20 km, 30 km
 :_ :set 0 2 5 off_ 0 2 5 Local zone: Off
@@ -3924,13 +3924,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 4 2_ Popups: one of Off, On
 :_ :set 0 4 4 10_ Popups: one of Off, On
 :_ :set 0 4 4 none_ Popups: one of Off, On
-:_ :set 0 4 5 1 xyzzy_ SAME: US/Canada only
-:_ :set 0 4 5 1 on_ SAME: US/Canada only
-:_ :set 0 4 5 1 off_ SAME: US/Canada only
-:_ :set 0 4 5 1 1_ SAME: US/Canada only
-:_ :set 0 4 5 1 2_ SAME: US/Canada only
-:_ :set 0 4 5 1 10_ SAME: US/Canada only
-:_ :set 0 4 5 1 none_ SAME: US/Canada only
+:_ :set 0 4 5 1 xyzzy_ SAME: US/CA only
+:_ :set 0 4 5 1 on_ SAME: US/CA only
+:_ :set 0 4 5 1 off_ SAME: US/CA only
+:_ :set 0 4 5 1 1_ SAME: US/CA only
+:_ :set 0 4 5 1 2_ SAME: US/CA only
+:_ :set 0 4 5 1 10_ SAME: US/CA only
+:_ :set 0 4 5 1 none_ SAME: US/CA only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_  C  APRS                  144.64000                     idle 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_  C  VFO                   118.95000   AM                idle 0 5 3 APRS mode: Off
@@ -4113,13 +4113,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 6 1 2_ GPS: one of Off, Auto, On
 :_ :set 0 6 1 10_ GPS: one of Off, Auto, On
 :_ :set 0 6 1 none_ GPS: one of Off, Auto, On
-:_ :set 0 6 3 xyzzy_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 on_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 off_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 1_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 2_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 10_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 none_ Coordinate format: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 xyzzy_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 on_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 off_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 1_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 2_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 10_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 none_ Coordinates: one of DDM, DMS, Grid square, Decimal
 :_ :set 0 6 4 xyzzy_ Units: one of Metric, Imperial, Nautical
 :_ :set 0 6 4 on_ Units: one of Metric, Imperial, Nautical
 :_ :set 0 6 4 off_ Units: one of Metric, Imperial, Nautical
@@ -4141,13 +4141,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 6 6 2_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
 :_ :set 0 6 6 10_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
 :_ :set 0 6 6 none_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
-:_ :set 0 6 8 xyzzy_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 on_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 off_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 1_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 2_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 10_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 none_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
+:_ :set 0 6 8 xyzzy_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 on_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 off_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 1_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 2_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 10_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 none_ GPS off during: one of Never, Receive, Transmit, Both
 :_ :set 0 7 1 xyzzy_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 on_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 off_ Theme: one of Dark, Daylight, Night red, Cyberpunk
@@ -4155,13 +4155,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 1 2_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 10_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 none_ Theme: one of Dark, Daylight, Night red, Cyberpunk
-:_ :set 0 7 2 xyzzy_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 on_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 off_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 1_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 2_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 10_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 none_ Home layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 xyzzy_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 on_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 off_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 1_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 2_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 10_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 none_ Layout: one of Watch, Single + scope, Watch + activity
 :_ :set 0 7 3 1 xyzzy_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 on_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 off_ S-meter: one of Bars, dBm
@@ -4169,13 +4169,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 3 1 2_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 10_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 none_ S-meter: one of Bars, dBm
-:_ :set 0 7 3 2 xyzzy_ Power-on message: one of Callsign, Text, Off
-:_ :set 0 7 3 2 on_ Power-on message: one of Callsign, Text, Off
-:_ :set 0 7 3 2 off_ 0 7 3 2 Power-on message: Off
-:_ :set 0 7 3 2 1_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 2_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 10_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 none_ Power-on message: one of Off, Callsign, Text
+:_ :set 0 7 3 2 xyzzy_ Power-on text: one of Callsign, Text, Off
+:_ :set 0 7 3 2 on_ Power-on text: one of Callsign, Text, Off
+:_ :set 0 7 3 2 off_ 0 7 3 2 Power-on text: Off
+:_ :set 0 7 3 2 1_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 2_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 10_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 none_ Power-on text: one of Off, Callsign, Text
 :_ :set 0 7 3 3 xyzzy_ Boot screen: one of Logo, Owner card
 :_ :set 0 7 3 3 on_ Boot screen: one of Logo, Owner card
 :_ :set 0 7 3 3 off_ Boot screen: one of Logo, Owner card
@@ -4204,20 +4204,20 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 4 3 2_ On transmit: one of Off, On
 :_ :set 0 7 4 3 10_ On transmit: one of Off, On
 :_ :set 0 7 4 3 none_ On transmit: one of Off, On
-:_ :set 0 7 4 4 xyzzy_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 on_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 off_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 1_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 2_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 10_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 none_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 5 xyzzy_ Keypad light: one of With screen, On key press, Always, Off
-:_ :set 0 7 4 5 on_ 0 7 4 5 Keypad light: On key press
-:_ :set 0 7 4 5 off_ 0 7 4 5 Keypad light: Off
-:_ :set 0 7 4 5 1_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 2_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 10_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 none_ Keypad light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 4 xyzzy_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 on_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 off_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 1_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 2_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 10_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 none_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 5 xyzzy_ Key light: one of With screen, On key press, Always, Off
+:_ :set 0 7 4 5 on_ 0 7 4 5 Key light: On key press
+:_ :set 0 7 4 5 off_ 0 7 4 5 Key light: Off
+:_ :set 0 7 4 5 1_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 2_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 10_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 none_ Key light: one of Off, With screen, On key press, Always
 :_ :set 0 7 5 1 xyzzy_ Key beep: one of On, Off
 :_ :set 0 7 5 1 on_ 0 7 5 1 Key beep: On
 :_ :set 0 7 5 1 off_ 0 7 5 1 Key beep: Off
@@ -4260,13 +4260,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 5 6 2_ Message volume: one of Max, Low, Mid, High
 :_ :set 0 7 5 6 10_ Message volume: one of Max, Low, Mid, High
 :_ :set 0 7 5 6 none_ Message volume: one of Max, Low, Mid, High
-:_ :set 0 7 6 xyzzy_ LEDs: one of RX, TX and heartbeat, Off, RX and TX
-:_ :set 0 7 6 on_ LEDs: one of RX, TX and heartbeat, Off, RX and TX
+:_ :set 0 7 6 xyzzy_ LEDs: one of RX, TX, heartbeat, Off, RX and TX
+:_ :set 0 7 6 on_ LEDs: one of RX, TX, heartbeat, Off, RX and TX
 :_ :set 0 7 6 off_ 0 7 6 LEDs: Off
-:_ :set 0 7 6 1_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 2_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 10_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 none_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
+:_ :set 0 7 6 1_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 2_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 10_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 none_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
 :_ :set 0 7 7 1 xyzzy_ Battery Save: one of Level 1, Level 2, Level 3, Off
 :_ :set 0 7 7 1 on_ Battery Save: one of Level 1, Level 2, Level 3, Off
 :_ :set 0 7 7 1 off_  Battery 7.9 V   GPS off   Bluetooth off   Battery Save 0 0 7 7 1 Battery Save: Off
@@ -4358,13 +4358,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 5 4 2_ Sidetone: one of Off, On
 :_ :set 0 8 5 4 10_ Sidetone: one of Off, On
 :_ :set 0 8 5 4 none_ Sidetone: one of Off, On
-:_ :set 0 8 5 5 xyzzy_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 on_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 off_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 1_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 2_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 10_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 none_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
+:_ :set 0 8 5 5 xyzzy_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 on_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 off_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 1_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 2_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 10_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 none_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
 :_ :set 0 8 6 2 xyzzy_ CW ID: one of Off, Every 10 min, On unkey
 :_ :set 0 8 6 2 on_ 0 8 6 2 CW ID: On unkey
 :_ :set 0 8 6 2 off_ 0 8 6 2 CW ID: Off
@@ -4386,13 +4386,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 8 1 2_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 8 1 10_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 8 1 none_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 8 2 xyzzy_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 on_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 off_ 0 8 8 2 Tail elimination: Off
-:_ :set 0 8 8 2 1_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 2_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 10_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 none_ Tail elimination: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 xyzzy_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 on_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 off_ 0 8 8 2 Tail removal: Off
+:_ :set 0 8 8 2 1_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 2_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 10_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 none_ Tail removal: one of Off, Receive, Transmit, Both
 :_ :set 0 8 8 3 xyzzy_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 8 3 on_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 8 3 off_ Phase: one of 55 Hz, 120??, 180??, 240??
@@ -4525,7 +4525,7 @@ wired [6, 4]: Some(true) Imperial
 wired [6, 5]: Some(true) UTC+5:30
 wired [6, 6]: Some(false) 24 h, GPS
 wired [6, 7]: None 
-wired [6, 8]: Some(true) Off on transmit
+wired [6, 8]: Some(true) Transmit
 wired [6, 9]: Some(false) None
 wired [7, 1]: Some(true) Night red
 wired [7, 2]: Some(true) Single + scope
@@ -4576,7 +4576,7 @@ wired [8, 8, 2]: Some(true) Transmit
 wired [8, 8, 3]: Some(true) 180°
 wired [8, 8, 4]: Some(false) Off
 wired [8, 8, 5]: Some(false) Off
-wired [9, 1]: Some(true) No auto lock
+wired [9, 1]: Some(true) Manual lock
 wired [9, 1, 1]: Some(true) Off
 wired [9, 1, 2]: None 
 wired [9, 1, 3]: None 
@@ -4612,7 +4612,7 @@ set 0 1 6 1 1 min                 # Pause time
 set 0 1 6 2 Up                    # Direction
 set 0 1 6 3 Off                   # Scan inputs
 set 0 1 6 4 Start                 # Return to
-set 0 2 4 Name                    # Channel display
+set 0 2 4 Name                    # Channel shows
 set 0 2 5 50 km                   # Local zone
 set 0 2 6 1 100 kHz               # Step
 set 0 2 6 2 Auto                  # AGC
@@ -4654,21 +4654,21 @@ set 0 5 9 7 APRS first            # Shared VHF
 set 0 5 9 8 Off                   # Decode log
 set 0 5 9 9 Off                   # Auto reply
 set 0 6 1 Auto                    # GPS
-set 0 6 3 DMS                     # Coordinate format
+set 0 6 3 DMS                     # Coordinates
 set 0 6 4 Imperial                # Units
 set 0 6 5 UTC+5:30                # Time zone
 set 0 6 6 24 h, GPS               # Clock
-set 0 6 8 Off on transmit         # GPS during RX/TX
+set 0 6 8 Transmit                # GPS off during
 set 0 7 1 Night red               # Theme
-set 0 7 2 Single + scope          # Home layout
+set 0 7 2 Single + scope          # Layout
 set 0 7 3 1 Bars                  # S-meter
-set 0 7 3 2 Callsign              # Power-on message
+set 0 7 3 2 Callsign              # Power-on text
 set 0 7 3 3 Logo                  # Boot screen
 set 0 7 4 1 5 min                 # Timeout
 set 0 7 4 2 1                     # Brightness
 set 0 7 4 3 On                    # On transmit
-set 0 7 4 4 Keys and RX           # Wake screen on
-set 0 7 4 5 On key press          # Keypad light
+set 0 7 4 4 Keys and RX           # Wake on
+set 0 7 4 5 On key press          # Key light
 set 0 7 5 1 On                    # Key beep
 set 0 7 5 2 High                  # Beep volume
 set 0 7 5 3 On                    # Alert tones
@@ -4689,11 +4689,11 @@ set 0 8 3 5                       # Mic gain
 set 0 8 4 Chirp                   # End tone
 set 0 8 5 3 200 ms                # Speed
 set 0 8 5 4 On                    # Sidetone
-set 0 8 5 5 1000 ms               # First digit delay
+set 0 8 5 5 1000 ms               # Start delay
 set 0 8 6 2 Every 10 min          # CW ID
 set 0 8 7 Off                     # Busy lockout default
 set 0 8 8 1 Normal                # Subtone level
-set 0 8 8 2 Transmit              # Tail elimination
+set 0 8 8 2 Transmit              # Tail removal
 set 0 8 8 3 180°                 # Phase
 set 0 9 1 1 Off                   # Auto lock
 set 0 9 2 1 Off                   # Bluetooth
@@ -4716,17 +4716,17 @@ set 0 3 1 2 50 kHz                # Step
 set 0 3 1 3 10.0 ms               # Sweep speed
 set 0 3 1 4 Monitor               # Trigger
 set 0 5 8 Cable                   # KISS TNC
-set 0 6 3 DMS                     # Coordinate format
+set 0 6 3 DMS                     # Coordinates
 set 0 6 4 Imperial                # Units
 set 0 6 5 UTC+5:30                # Time zone
-set 0 6 8 Off on transmit         # GPS during RX/TX
+set 0 6 8 Transmit                # GPS off during
 set 0 7 1 Night red               # Theme
-set 0 7 2 Single + scope          # Home layout
-set 0 7 3 2 Callsign              # Power-on message
+set 0 7 2 Single + scope          # Layout
+set 0 7 3 2 Callsign              # Power-on text
 set 0 7 4 1 5 min                 # Timeout
 set 0 7 4 2 1                     # Brightness
-set 0 7 4 4 Keys and RX           # Wake screen on
-set 0 7 4 5 On key press          # Keypad light
+set 0 7 4 4 Keys and RX           # Wake on
+set 0 7 4 5 On key press          # Key light
 set 0 7 5 2 High                  # Beep volume
 set 0 7 6 RX and TX               # LEDs
 set 0 7 8 Off                     # Auto power off
@@ -4734,10 +4734,10 @@ set 0 8 2 2 9                     # Level
 set 0 8 2 3 3 s                   # Tail
 set 0 8 4 Chirp                   # End tone
 set 0 8 5 3 200 ms                # Speed
-set 0 8 5 5 1000 ms               # First digit delay
+set 0 8 5 5 1000 ms               # Start delay
 set 0 8 6 2 Every 10 min          # CW ID
 set 0 8 8 1 Normal                # Subtone level
-set 0 8 8 2 Transmit              # Tail elimination
+set 0 8 8 2 Transmit              # Tail removal
 set 0 8 8 3 180°                 # Phase
 set 0 9 1 1 Off                   # Auto lock
 set 0 9 2 3 Terminal              # Cable port
@@ -4755,7 +4755,7 @@ set 0 9 2 3 Terminal              # Cable port
 :_ :get 0 2 1_ 0 2 1 Browse: a page on the radio, not a setting
 :_ :get 0 2 2_ 0 2 2 Add repeater: a page on the radio, not a setting
 :_ :get 0 2 3_ 0 2 3 Zones: a page on the radio, not a setting
-:_ :get 0 2 4_ 0 2 4 Channel display: Name
+:_ :get 0 2 4_ 0 2 4 Channel shows: Name
 :_ :get 0 2 5_ 0 2 5 Local zone: 50 km
 :_ :get 0 2 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 2 6 1_ 0 2 6 1 Step: 100 kHz (not the default)
@@ -4818,25 +4818,25 @@ set 0 9 2 3 Terminal              # Cable port
 :_ :get 0 5 9 9_ 0 5 9 9 Auto reply: Off
 :_ :get 0 6 1_ 0 6 1 GPS: Auto
 :_ :get 0 6 2_ 0 6 2 Position: a page on the radio, not a setting
-:_ :get 0 6 3_ 0 6 3 Coordinate format: DMS (not the default)
+:_ :get 0 6 3_ 0 6 3 Coordinates: DMS (not the default)
 :_ :get 0 6 4_ 0 6 4 Units: Imperial (not the default)
 :_ :get 0 6 5_ 0 6 5 Time zone: UTC+5:30 (not the default)
 :_ :get 0 6 6_ 0 6 6 Clock: 24 h, GPS
 :_ :get 0 6 7_ 0 6 7 Waypoints: a page on the radio, not a setting
-:_ :get 0 6 8_ 0 6 8 GPS during RX/TX: Off on transmit (not the default)
+:_ :get 0 6 8_ 0 6 8 GPS off during: Transmit (not the default)
 :_ :get 0 6 9_ 0 6 9 Fixed position: None
 :_ :get 0 7 1_ 0 7 1 Theme: Night red (not the default)
-:_ :get 0 7 2_ 0 7 2 Home layout: Single + scope (not the default)
+:_ :get 0 7 2_ 0 7 2 Layout: Single + scope (not the default)
 :_ :get 0 7 3_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 3 1_ 0 7 3 1 S-meter: Bars
-:_ :get 0 7 3 2_ 0 7 3 2 Power-on message: Callsign (not the default)
+:_ :get 0 7 3 2_ 0 7 3 2 Power-on text: Callsign (not the default)
 :_ :get 0 7 3 3_ 0 7 3 3 Boot screen: Logo
 :_ :get 0 7 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 4 1_ 0 7 4 1 Timeout: 5 min (not the default)
 :_ :get 0 7 4 2_ 0 7 4 2 Brightness: 1 (not the default)
 :_ :get 0 7 4 3_ 0 7 4 3 On transmit: On
-:_ :get 0 7 4 4_ 0 7 4 4 Wake screen on: Keys and RX (not the default)
-:_ :get 0 7 4 5_ 0 7 4 5 Keypad light: On key press (not the default)
+:_ :get 0 7 4 4_ 0 7 4 4 Wake on: Keys and RX (not the default)
+:_ :get 0 7 4 5_ 0 7 4 5 Key light: On key press (not the default)
 :_ :get 0 7 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 7 5 1_ 0 7 5 1 Key beep: On
 :_ :get 0 7 5 2_ 0 7 5 2 Beep volume: High (not the default)
@@ -4863,14 +4863,14 @@ set 0 9 2 3 Terminal              # Cable port
 :_ :get 0 8 5 2_ 0 8 5 2 Memories: a page on the radio, not a setting
 :_ :get 0 8 5 3_ 0 8 5 3 Speed: 200 ms (not the default)
 :_ :get 0 8 5 4_ 0 8 5 4 Sidetone: On
-:_ :get 0 8 5 5_ 0 8 5 5 First digit delay: 1000 ms (not the default)
+:_ :get 0 8 5 5_ 0 8 5 5 Start delay: 1000 ms (not the default)
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 6 1_ 0 8 6 1 Callsign: Empty
 :_ :get 0 8 6 2_ 0 8 6 2 CW ID: Every 10 min (not the default)
 :_ :get 0 8 7_ 0 8 7 Busy lockout default: Off
 :_ :get 0 8 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 8 1_ 0 8 8 1 Subtone level: Normal (not the default)
-:_ :get 0 8 8 2_ 0 8 8 2 Tail elimination: Transmit (not the default)
+:_ :get 0 8 8 2_ 0 8 8 2 Tail removal: Transmit (not the default)
 :_ :get 0 8 8 3_ 0 8 8 3 Phase: 180?? (not the default)
 :_ :get 0 8 8 4_ 0 8 8 4 Extend TX: Off
 :_ :get 0 8 8 5_ 0 8 8 5 Dry TX: Off
@@ -5466,12 +5466,12 @@ change [6, 7] -2: false None  [] Home
 change [6, 7] 3: false None  [] Home
 change [6, 7] 0: false None  [] Home
 reset [6, 7]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps: 2, gps_rxtx: 250, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
-change [6, 8] 1: true Some(true) Off on both [] Home
-change [6, 8] -1: true Some(true) Off on transmit [] Home
-change [6, 8] 2: true Some(false) Always on [] Home
-change [6, 8] -2: true Some(true) Off on transmit [] Home
-change [6, 8] 3: true Some(true) Off on receive [] Home
-change [6, 8] 0: true Some(true) Off on receive [] Home
+change [6, 8] 1: true Some(true) Both [] Home
+change [6, 8] -1: true Some(true) Transmit [] Home
+change [6, 8] 2: true Some(false) Never [] Home
+change [6, 8] -2: true Some(true) Transmit [] Home
+change [6, 8] 3: true Some(true) Receive [] Home
+change [6, 8] 0: true Some(true) Receive [] Home
 reset [6, 8]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [6, 9] 1: false Some(false) None [] Home
 change [6, 9] -1: false Some(false) None [] Home
@@ -5613,7 +5613,7 @@ change [7, 5, 6] -2: true Some(false) Max [Chime { sound: 3, level: 11 }] Home
 change [7, 5, 6] 3: true Some(true) High [Chime { sound: 3, level: 10 }] Home
 change [7, 5, 6] 0: true Some(true) High [Chime { sound: 3, level: 10 }] Home
 reset [7, 5, 6]: [Chime { sound: 3, level: 11 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
-change [7, 6] 1: true Some(false) RX, TX and heartbeat [] Home
+change [7, 6] 1: true Some(false) RX, TX, heartbeat [] Home
 change [7, 6] -1: true Some(true) RX and TX [] Home
 change [7, 6] 2: true Some(true) Off [] Home
 change [7, 6] -2: true Some(true) RX and TX [] Home
@@ -5823,12 +5823,12 @@ change [8, 8, 5] -2: true Some(false) Off [] Home
 change [8, 8, 5] 3: true Some(true) On [] Home
 change [8, 8, 5] 0: true Some(false) Off [] Home
 reset [8, 8, 5]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
-change [9, 1] 1: false Some(true) No auto lock [] Home
-change [9, 1] -1: false Some(true) No auto lock [] Home
-change [9, 1] 2: false Some(true) No auto lock [] Home
-change [9, 1] -2: false Some(true) No auto lock [] Home
-change [9, 1] 3: false Some(true) No auto lock [] Home
-change [9, 1] 0: false Some(true) No auto lock [] Home
+change [9, 1] 1: false Some(true) Manual lock [] Home
+change [9, 1] -1: false Some(true) Manual lock [] Home
+change [9, 1] 2: false Some(true) Manual lock [] Home
+change [9, 1] -2: false Some(true) Manual lock [] Home
+change [9, 1] 3: false Some(true) Manual lock [] Home
+change [9, 1] 0: false Some(true) Manual lock [] Home
 reset [9, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, lpm: 2, lpm_below: 20, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, aprs_fixed: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps: 2, gps_rxtx: 0, arrival: 0, menu_timeout: 3, pause_time: 1, spare_lock: 0, busy_default: false, smeter_dbm: false, ch_display: 0, scan_down: false, scan_return_hit: false, msg_vol: 3, mcu_fixed: false, sq_chip: false, aprs_mute: true, dtmf_rx: true, aprs_share: 0, local: 4, sat_min_el: 2, decode_log: false } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7, fx25: 16, sound: 3, symbol: 0, txdelay: 30, tx_level: 1, comment: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: [42, 0, 0, 0, 0, 0, 0, 0, 0], reply_text: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
 change [9, 1, 1] 1: true Some(true) 30 s [] Home
 change [9, 1, 1] -1: true Some(false) Off [] Home
@@ -6041,13 +6041,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 1 6 4 2_ Return to: one of Start, Last hit
 :_ :set 0 1 6 4 10_ Return to: one of Start, Last hit
 :_ :set 0 1 6 4 none_ Return to: one of Start, Last hit
-:_ :set 0 2 4 xyzzy_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 on_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 off_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 1_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 2_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 10_ Channel display: one of Name, Number, Frequency
-:_ :set 0 2 4 none_ Channel display: one of Name, Number, Frequency
+:_ :set 0 2 4 xyzzy_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 on_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 off_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 1_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 2_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 10_ Channel shows: one of Name, Number, Frequency
+:_ :set 0 2 4 none_ Channel shows: one of Name, Number, Frequency
 :_ :set 0 2 5 xyzzy_ Local zone: one of 50 km, 80 km, Off, 10 km, 20 km, 30 km
 :_ :set 0 2 5 on_ Local zone: one of 50 km, 80 km, Off, 10 km, 20 km, 30 km
 :_ :set 0 2 5 off_ 0 2 5 Local zone: Off
@@ -6153,13 +6153,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 4 2_ Popups: one of Off, On
 :_ :set 0 4 4 10_ Popups: one of Off, On
 :_ :set 0 4 4 none_ Popups: one of Off, On
-:_ :set 0 4 5 1 xyzzy_ SAME: US/Canada only
-:_ :set 0 4 5 1 on_ SAME: US/Canada only
-:_ :set 0 4 5 1 off_ SAME: US/Canada only
-:_ :set 0 4 5 1 1_ SAME: US/Canada only
-:_ :set 0 4 5 1 2_ SAME: US/Canada only
-:_ :set 0 4 5 1 10_ SAME: US/Canada only
-:_ :set 0 4 5 1 none_ SAME: US/Canada only
+:_ :set 0 4 5 1 xyzzy_ SAME: US/CA only
+:_ :set 0 4 5 1 on_ SAME: US/CA only
+:_ :set 0 4 5 1 off_ SAME: US/CA only
+:_ :set 0 4 5 1 1_ SAME: US/CA only
+:_ :set 0 4 5 1 2_ SAME: US/CA only
+:_ :set 0 4 5 1 10_ SAME: US/CA only
+:_ :set 0 4 5 1 none_ SAME: US/CA only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_  C  APRS                  144.80000                     idle 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_  C  VFO                   118.95000   AM                idle 0 5 3 APRS mode: Off
@@ -6342,13 +6342,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 6 1 2_ GPS: one of Off, Auto, On
 :_ :set 0 6 1 10_ GPS: one of Off, Auto, On
 :_ :set 0 6 1 none_ GPS: one of Off, Auto, On
-:_ :set 0 6 3 xyzzy_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 on_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 off_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 1_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 2_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 10_ Coordinate format: one of DDM, DMS, Grid square, Decimal
-:_ :set 0 6 3 none_ Coordinate format: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 xyzzy_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 on_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 off_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 1_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 2_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 10_ Coordinates: one of DDM, DMS, Grid square, Decimal
+:_ :set 0 6 3 none_ Coordinates: one of DDM, DMS, Grid square, Decimal
 :_ :set 0 6 4 xyzzy_ Units: one of Metric, Imperial, Nautical
 :_ :set 0 6 4 on_ Units: one of Metric, Imperial, Nautical
 :_ :set 0 6 4 off_ Units: one of Metric, Imperial, Nautical
@@ -6370,13 +6370,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 6 6 2_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
 :_ :set 0 6 6 10_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
 :_ :set 0 6 6 none_ Clock: one of 24 h, GPS, 24 h, 12 h, GPS, 12 h
-:_ :set 0 6 8 xyzzy_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 on_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 off_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 1_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 2_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 10_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
-:_ :set 0 6 8 none_ GPS during RX/TX: one of Always on, Off on receive, Off on transmit, Off on bot
+:_ :set 0 6 8 xyzzy_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 on_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 off_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 1_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 2_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 10_ GPS off during: one of Never, Receive, Transmit, Both
+:_ :set 0 6 8 none_ GPS off during: one of Never, Receive, Transmit, Both
 :_ :set 0 7 1 xyzzy_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 on_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 off_ Theme: one of Dark, Daylight, Night red, Cyberpunk
@@ -6384,13 +6384,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 1 2_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 10_ Theme: one of Dark, Daylight, Night red, Cyberpunk
 :_ :set 0 7 1 none_ Theme: one of Dark, Daylight, Night red, Cyberpunk
-:_ :set 0 7 2 xyzzy_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 on_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 off_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 1_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 2_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 10_ Home layout: one of Watch, Single + scope, Watch + activity
-:_ :set 0 7 2 none_ Home layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 xyzzy_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 on_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 off_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 1_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 2_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 10_ Layout: one of Watch, Single + scope, Watch + activity
+:_ :set 0 7 2 none_ Layout: one of Watch, Single + scope, Watch + activity
 :_ :set 0 7 3 1 xyzzy_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 on_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 off_ S-meter: one of Bars, dBm
@@ -6398,13 +6398,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 3 1 2_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 10_ S-meter: one of Bars, dBm
 :_ :set 0 7 3 1 none_ S-meter: one of Bars, dBm
-:_ :set 0 7 3 2 xyzzy_ Power-on message: one of Callsign, Text, Off
-:_ :set 0 7 3 2 on_ Power-on message: one of Callsign, Text, Off
-:_ :set 0 7 3 2 off_ 0 7 3 2 Power-on message: Off
-:_ :set 0 7 3 2 1_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 2_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 10_ Power-on message: one of Off, Callsign, Text
-:_ :set 0 7 3 2 none_ Power-on message: one of Off, Callsign, Text
+:_ :set 0 7 3 2 xyzzy_ Power-on text: one of Callsign, Text, Off
+:_ :set 0 7 3 2 on_ Power-on text: one of Callsign, Text, Off
+:_ :set 0 7 3 2 off_ 0 7 3 2 Power-on text: Off
+:_ :set 0 7 3 2 1_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 2_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 10_ Power-on text: one of Off, Callsign, Text
+:_ :set 0 7 3 2 none_ Power-on text: one of Off, Callsign, Text
 :_ :set 0 7 3 3 xyzzy_ Boot screen: one of Logo, Owner card
 :_ :set 0 7 3 3 on_ Boot screen: one of Logo, Owner card
 :_ :set 0 7 3 3 off_ Boot screen: one of Logo, Owner card
@@ -6433,20 +6433,20 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 4 3 2_ On transmit: one of Off, On
 :_ :set 0 7 4 3 10_ On transmit: one of Off, On
 :_ :set 0 7 4 3 none_ On transmit: one of Off, On
-:_ :set 0 7 4 4 xyzzy_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 on_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 off_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 1_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 2_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 10_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 4 none_ Wake screen on: one of Keys and RX, Keys, RX and TX, Keys
-:_ :set 0 7 4 5 xyzzy_ Keypad light: one of With screen, On key press, Always, Off
-:_ :set 0 7 4 5 on_ 0 7 4 5 Keypad light: On key press
-:_ :set 0 7 4 5 off_ 0 7 4 5 Keypad light: Off
-:_ :set 0 7 4 5 1_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 2_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 10_ Keypad light: one of Off, With screen, On key press, Always
-:_ :set 0 7 4 5 none_ Keypad light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 4 xyzzy_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 on_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 off_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 1_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 2_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 10_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 4 none_ Wake on: one of Keys and RX, Keys, RX and TX, Keys
+:_ :set 0 7 4 5 xyzzy_ Key light: one of With screen, On key press, Always, Off
+:_ :set 0 7 4 5 on_ 0 7 4 5 Key light: On key press
+:_ :set 0 7 4 5 off_ 0 7 4 5 Key light: Off
+:_ :set 0 7 4 5 1_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 2_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 10_ Key light: one of Off, With screen, On key press, Always
+:_ :set 0 7 4 5 none_ Key light: one of Off, With screen, On key press, Always
 :_ :set 0 7 5 1 xyzzy_ Key beep: one of On, Off
 :_ :set 0 7 5 1 on_ 0 7 5 1 Key beep: On
 :_ :set 0 7 5 1 off_ 0 7 5 1 Key beep: Off
@@ -6489,13 +6489,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 7 5 6 2_ Message volume: one of Max, Low, Mid, High
 :_ :set 0 7 5 6 10_ Message volume: one of Max, Low, Mid, High
 :_ :set 0 7 5 6 none_ Message volume: one of Max, Low, Mid, High
-:_ :set 0 7 6 xyzzy_ LEDs: one of RX, TX and heartbeat, Off, RX and TX
-:_ :set 0 7 6 on_ LEDs: one of RX, TX and heartbeat, Off, RX and TX
+:_ :set 0 7 6 xyzzy_ LEDs: one of RX, TX, heartbeat, Off, RX and TX
+:_ :set 0 7 6 on_ LEDs: one of RX, TX, heartbeat, Off, RX and TX
 :_ :set 0 7 6 off_ 0 7 6 LEDs: Off
-:_ :set 0 7 6 1_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 2_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 10_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
-:_ :set 0 7 6 none_ LEDs: one of Off, RX and TX, RX, TX and heartbeat
+:_ :set 0 7 6 1_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 2_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 10_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
+:_ :set 0 7 6 none_ LEDs: one of Off, RX and TX, RX, TX, heartbeat
 :_ :set 0 7 7 1 xyzzy_ Battery Save: one of Level 1, Level 2, Level 3, Off
 :_ :set 0 7 7 1 on_ Battery Save: one of Level 1, Level 2, Level 3, Off
 :_ :set 0 7 7 1 off_  Battery 7.9 V   GPS off   Bluetooth off   Battery Save 0 0 7 7 1 Battery Save: Off
@@ -6587,13 +6587,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 5 4 2_ Sidetone: one of Off, On
 :_ :set 0 8 5 4 10_ Sidetone: one of Off, On
 :_ :set 0 8 5 4 none_ Sidetone: one of Off, On
-:_ :set 0 8 5 5 xyzzy_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 on_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 off_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 1_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 2_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 10_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
-:_ :set 0 8 5 5 none_ First digit delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700
+:_ :set 0 8 5 5 xyzzy_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 on_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 off_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 1_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 2_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 10_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
+:_ :set 0 8 5 5 none_ Start delay: one of 1000 ms, 950 ms, 900 ms, 850 ms, 800 ms, 750 ms, 700 ms, 65
 :_ :set 0 8 6 2 xyzzy_ CW ID: set a callsign first
 :_ :set 0 8 6 2 on_ CW ID: set a callsign first
 :_ :set 0 8 6 2 off_ 0 8 6 2 CW ID: Off
@@ -6615,13 +6615,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 8 1 2_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 8 1 10_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 8 1 none_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 8 2 xyzzy_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 on_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 off_ 0 8 8 2 Tail elimination: Off
-:_ :set 0 8 8 2 1_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 2_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 10_ Tail elimination: one of Off, Receive, Transmit, Both
-:_ :set 0 8 8 2 none_ Tail elimination: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 xyzzy_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 on_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 off_ 0 8 8 2 Tail removal: Off
+:_ :set 0 8 8 2 1_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 2_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 10_ Tail removal: one of Off, Receive, Transmit, Both
+:_ :set 0 8 8 2 none_ Tail removal: one of Off, Receive, Transmit, Both
 :_ :set 0 8 8 3 xyzzy_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 8 3 on_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 8 3 off_ Phase: one of 55 Hz, 120??, 180??, 240??

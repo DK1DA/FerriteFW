@@ -87,6 +87,6 @@ fn hints_and_heard_tone() {
     t.live.slots[a].heard_tone = 885; // the Radio task heard 88.5 on the slot
     t.tap(Key::Digit(4)); // Tones
     assert_eq!(row(&t), 3);
-    t.shows(", heard 88.5");
+    t.shows("heard 88.5");
     t.reads("hints \"^v\" \"Move\" \"OK\" \"Use heard\" \"BACK\" \"Back\"");
 }

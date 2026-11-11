@@ -239,7 +239,7 @@ fn settings_rows_answer() {
     if groups::greyed(&r.app, &[4, 5, 1]).is_some() {
         r.term.set_settings(4, 5, 0);
         r.settings_change(1);
-        assert_eq!(r.term.note.as_bytes(), b"US/Canada only");
+        assert_eq!(r.term.note.as_bytes(), b"US/CA only");
     }
 }
 

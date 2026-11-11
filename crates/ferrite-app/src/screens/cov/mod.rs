@@ -281,3 +281,83 @@ impl ferrite_ui::panel::Panel for Texts {
         true
     }
 }
+
+/// DISP-6: every MENU 0 row's name and value fit the row at the menus' 14 px (a value never cut): each
+/// row as drawn (a fresh radio and a set-up one, the row highlighted or not) and every value each setting can show,
+/// with the not-default dot.
+#[test]
+fn menu_rows_fit_at_14px() {
+    use crate::screens::groups::{Group, GROUP_ITEMS, SUBS};
+    use ferrite_ui::assets::UI_14;
+    use ferrite_ui::gfx::text4_width;
+    let mut out = std::collections::BTreeSet::new();
+    for ready in [false, true] {
+        let t = if ready { T::ready() } else { T::new() };
+        let mut pages: std::vec::Vec<(u8, u8)> = (1..=9u8).map(|g| (g, 0)).collect();
+        pages.extend(SUBS.iter().map(|x| x.0));
+        for (g, sub) in pages {
+            let grp = Group { g, sub, row: 0 };
+            let n = if sub == 0 { GROUP_ITEMS[g as usize - 1].len() } else { grp.items().len() };
+            for i in 0..n as u8 {
+                for sel in [0u8, 1] {
+                    let grp = Group { row: if sel == 1 { i } else { 255 }, ..grp };
+                    let (name, v, dot, _) = grp.row(&t.app, &t.dev, &t.s, i);
+                    let nw = text4_width(name.as_bytes(), &UI_14).min(232 - 25 - 40);
+                    let room = 232 - 25 - nw - if dot { 18 } else { 8 };
+                    let vw = text4_width(v.as_bytes(), &UI_14);
+                    if vw > room {
+                        out.insert(std::format!("0 {} {} {}: {:?} {:?} ({} > {})", g, sub, i + 1, name, core::str::from_utf8(v.as_bytes()).unwrap(), vw, room));
+                    }
+                }
+            }
+        }
+    }
+    // every value each setting can show
+    for (p, vals) in crate::screens::groups::all_values() {
+        let name = if p[2] == 0 {
+            GROUP_ITEMS[p[0] as usize - 1].get(p[1] as usize - 1).map(|e| e.name())
+        } else {
+            SUBS.iter().find(|x| x.0 == (p[0], p[1])).and_then(|x| x.1.get(p[2] as usize - 1)).map(|e| e.name())
+        };
+        let Some(name) = name else { continue };
+        let nw = text4_width(name.as_bytes(), &UI_14).min(232 - 25 - 40);
+        for v in vals {
+            for dot in [false, true] {
+                let room = 232 - 25 - nw - if dot { 18 } else { 8 };
+                let vw = text4_width(v.as_bytes(), &UI_14);
+                if vw > room {
+                    out.insert(std::format!("0 {} {} {}: {:?} {:?} ({} > {}{})", p[0], p[1], p[2], name, v, vw, room, if dot { " with the dot" } else { "" }));
+                }
+            }
+        }
+    }
+    // MENU 0's top level (D2): every group with its longest summary (a scan running, a long count, no GPS fix)
+    {
+        let mut t = T::ready();
+        t.app.scan_mask = 1;
+        t.dev.gps = ferrite_core::msg::GpsState::Searching;
+        t.dev.tx_built = false;
+        for (i, (name, _)) in crate::screens::advanced::GROUPS.iter().enumerate() {
+            for v in [crate::screens::advanced::group_value(&t.app, 1024, &t.dev, i), crate::screens::advanced::group_value(&T::new().app, 1024, &T::new().dev, i)] {
+                let nw = text4_width(name.as_bytes(), &UI_14).min(232 - 25 - 40);
+                let (room, vw) = (232 - 25 - nw - 8, text4_width(v.as_bytes(), &UI_14));
+                let name_room = 232 - 25 - if v.is_empty() { 8 } else { 40 };
+                if vw > room || text4_width(name.as_bytes(), &UI_14) > name_room {
+                    out.insert(std::format!("0 {}: {:?} {:?} ({} > {})", i + 1, name, core::str::from_utf8(v.as_bytes()).unwrap(), vw, room));
+                }
+            }
+        }
+        // Quick settings (D1): every row, its value with the not-default dot
+        for t in [T::new(), T::ready()] {
+            for item in crate::slot::QUICK {
+                let v = crate::screens::quick::row_value(&t.app, item);
+                let nw = text4_width(item.name().as_bytes(), &UI_14).min(232 - 25 - 40);
+                let (room, vw) = (232 - 25 - nw - 18, text4_width(v.as_bytes(), &UI_14));
+                if vw > room {
+                    out.insert(std::format!("Quick {:?}: {:?} ({} > {} with the dot)", item.name(), core::str::from_utf8(v.as_bytes()).unwrap(), vw, room));
+                }
+            }
+        }
+    }
+    assert!(out.is_empty(), "menu values that don't fit at 14 px:\n{}", out.iter().cloned().collect::<std::vec::Vec<_>>().join("\n"));
+}

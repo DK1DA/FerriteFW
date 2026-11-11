@@ -132,7 +132,7 @@ impl View for Advanced {
         for (i, (name, _)) in GROUPS.iter().enumerate() {
             let v = group_value(app, cx.store.count(), dev, i);
             let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == row, grey: false };
-            app.list_row(lcd, i, 41 + 22 * i as i32, 22, &r);
+            app.menu_row(lcd, i, 41 + 24 * i as i32, 24, &r);
         }
         let mut p = Buf::<16>::new();
         match recent[sel.unwrap_or(0)].filter(|_| sel.is_some()) {
@@ -142,11 +142,11 @@ impl View for Advanced {
                 t.push(item.name().as_bytes());
                 t.push(b"; arrows pick another.");
                 p.set(b"Recent");
-                app.help_box(lcd, 242, 34, t.as_bytes(), p.as_bytes());
+                app.help_box(lcd, 260, 36, t.as_bytes(), p.as_bytes());
             }
             None => {
                 let _ = uwrite!(p, "MENU 0 {}", row.min(8) + 1);
-                app.help_txt(lcd, 242, 34, GROUPS[row.min(8) as usize].1, p.as_bytes());
+                app.help_txt(lcd, 260, 36, GROUPS[row.min(8) as usize].1, p.as_bytes());
             }
         }
     }
@@ -160,12 +160,9 @@ impl View for Advanced {
 pub(crate) fn group_value(app: &App, channels: u16, dev: &Device, i: usize) -> Buf<24> {
     let mut v = Buf::<24>::new();
     match i {
-        0 => {
-            v.push(WATCH_TEXT[app.watch as usize % 3].as_bytes());
-            if app.scan_mask != 0 {
-                v.push(" \u{b7} scan".as_bytes());
-            }
-        }
+        // decision 372: "Scanning" while a scan runs, else the watch (the two together no longer fit at 14 px)
+        0 if app.scan_mask != 0 => v.set(b"Scanning"),
+        0 => v.push(WATCH_TEXT[app.watch as usize % 3].as_bytes()),
         1 => {
             let _ = uwrite!(v, "{} used", channels);
         }
@@ -180,7 +177,6 @@ pub(crate) fn group_value(app: &App, channels: u16, dev: &Device, i: usize) -> B
                 let _ = uwrite!(v, "{} sats", dev.sats);
             }
         },
-        6 => v.set(b"Dark"),
         7 => v.set(if dev.tx_built { b"Ready".as_slice() } else { b"Receive only" }),
         8 => v.set(VERSION.as_bytes()),
         _ => {}

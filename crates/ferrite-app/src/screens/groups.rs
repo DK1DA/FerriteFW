@@ -86,7 +86,7 @@ const G2: [Entry; 6] = [
     Entry(concat!("Browse||", txtc!("Zones, all channels, nearby, recent."))),
     Entry(concat!("Add repeater||", txtc!("Frequency, shift, tone, name."))),
     Entry(concat!("Zones||", txtc!("Name, scan options, priority channels."))),
-    Entry(concat!("Channel display|Name|", txtc!("Name, number or frequency on home."))),
+    Entry(concat!("Channel shows|Name|", txtc!("Name, number or frequency on home."))),
     Entry(concat!("Local zone|50 km|", txtc!("A zone of the channels within this range of you, nearest first. Needs a GPS fix or the fixed position (0 6 9)."))),
     Entry(concat!("FM broadcast||", txtc!("Step, AGC, radio monitor, sleep timer."))),
 ];
@@ -120,21 +120,21 @@ const G5: [Entry; 9] = [
 const G6: [Entry; 9] = [
     Entry(concat!("GPS|Auto|", txtc!("Off, Auto (when needed) or On."))),
     Entry(concat!("Position||", txtc!("Fix, satellites, position, grid."))),
-    Entry(concat!("Coordinate format|DDM|", txtc!("Decimal, DDM, DMS or grid square."))),
+    Entry(concat!("Coordinates|DDM|", txtc!("Decimal, DDM, DMS or grid square."))),
     Entry(concat!("Units|Metric|", txtc!("Distance, altitude and speed units."))),
     Entry(concat!("Time zone|UTC|", txtc!("The clock's offset from UTC."))),
     Entry(concat!("Clock|24 h|", txtc!("12 or 24 h, from GPS; OK sets it by hand."))),
     Entry(concat!("Waypoints||", txtc!("Marked places; go to one."))),
-    Entry(concat!("GPS during RX/TX|Always on|", txtc!("Turn the GPS off around signals."))),
+    Entry(concat!("GPS off during|Never|", txtc!("Turn the GPS off while receiving, transmitting or both."))),
     Entry(concat!("Fixed position|None|", txtc!("Used when there is no fix."))),
 ];
 const G7: [Entry; 9] = [
     Entry(concat!("Theme|Dark|", txtc!("Dark, daylight or night red."))),
-    Entry(concat!("Home layout|Watch|", txtc!("What home shows."))),
+    Entry(concat!("Layout|Watch|", txtc!("What home shows."))),
     Entry(concat!("Display|Bars|", txtc!("S-meter, power-on message, boot screen."))),
     Entry(concat!("Backlight|15 s|", txtc!("Timeout, brightness, wake."))),
     Entry(concat!("Sounds|Beep on|", txtc!("Key beep, volume, alert tones."))),
-    Entry(concat!("LEDs|RX, TX and heartbeat|", txtc!("And a flash while the screen is dark."))),
+    Entry(concat!("LEDs|RX, TX, heartbeat|", txtc!("And a flash while the screen is dark."))),
     Entry(concat!("Power saving|Level 1|", txtc!("Battery Save, Low Power Mode."))),
     Entry(concat!("Auto power off|Off|", txtc!("Off after a time without key or signal."))),
     Entry(concat!("Menu timeout|30 s|", txtc!("An idle menu returns home."))),
@@ -150,7 +150,7 @@ const G8: [Entry; 8] = [
     Entry(concat!("Advanced||", txtc!("Subtone level, tail, Extend TX, Dry TX."))),
 ];
 const G9: [Entry; 9] = [
-    Entry(concat!("Keys and lock|No auto lock|", txtc!("Auto lock, key test, shortcuts."))),
+    Entry(concat!("Keys and lock|Manual lock|", txtc!("Auto lock, key test, shortcuts."))),
     Entry(concat!("Connections|BT off|", txtc!("Bluetooth, link status, cable port."))),
     Entry(concat!("PIN and lock|Off|", txtc!("PIN lock, channel-only mode, PIN."))),
     Entry(concat!("Region|Not set|", txtc!("Your amateur bands and defaults."))),
@@ -229,15 +229,15 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((7, 3), &[
         Entry(concat!("S-meter|Bars|", txtc!("Bars or dBm."))),
-        Entry(concat!("Power-on message|Callsign|", txtc!("Off, callsign or text."))),
+        Entry(concat!("Power-on text|Callsign|", txtc!("Off, callsign or text."))),
         Entry(concat!("Boot screen|Logo|", txtc!("Logo, or the owner card."))),
     ]),
     ((7, 4), &[
         Entry(concat!("Timeout|1 min|", txtc!("Backlight off after this."))),
         Entry(concat!("Brightness|7|", txtc!("1-10; night red keeps its own."))),
         Entry(concat!("On transmit|On|", txtc!("Light up while transmitting."))),
-        Entry(concat!("Wake screen on|Keys and RX|", txtc!("What wakes the screen."))),
-        Entry(concat!("Keypad light|With screen|", txtc!("Off, with the screen, on key press, always."))),
+        Entry(concat!("Wake on|Keys and RX|", txtc!("What wakes the screen."))),
+        Entry(concat!("Key light|With screen|", txtc!("Off, with the screen, on key press, always."))),
     ]),
     ((7, 5), &[
         Entry(concat!("Key beep|On|", txtc!("Beep on key presses."))),
@@ -262,7 +262,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry(concat!("Memories||", txtc!("16 stored sequences."))),
         Entry(concat!("Speed|100 ms|", txtc!("Each tone and each gap."))),
         Entry(concat!("Sidetone|On|", txtc!("Hear the digits you send."))),
-        Entry(concat!("First digit delay|300 ms|", txtc!("Wait after key-up so a repeater opens."))),
+        Entry(concat!("Start delay|300 ms|", txtc!("Wait after key-up so a repeater opens."))),
     ]),
     ((8, 6), &[
         Entry(concat!("Callsign|Empty|", txtc!("For APRS, CW ID, power-on message."))),
@@ -270,7 +270,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((8, 8), &[
         Entry(concat!("Subtone level|Normal|", txtc!("CTCSS/DCS strength: raise for a deaf repeater."))),
-        Entry(concat!("Tail elimination|Off|", txtc!("Receive, transmit or both."))),
+        Entry(concat!("Tail removal|Off|", txtc!("Receive, transmit or both."))),
         Entry(concat!("Phase|55 Hz|", txtc!("55 Hz or a phase shift."))),
         Entry(concat!("Extend TX|Off|", txtc!("Transmit beyond the amateur bands."))),
         Entry(concat!("Dry TX|Off|", txtc!("Key with no RF out: bench tests."))),
@@ -368,7 +368,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 /// Why an item can't be used here, if it can't (MENU-14).
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
-        [4, 5, ..] if !app.set.wx_region() => Some("US/Canada only"), // WX-3
+        [4, 5, ..] if !app.set.wx_region() => Some("US/CA only"), // WX-3
         [5, 3] | [5, 6, 1] if app.set.kiss_on() => app.kiss_holds_aprs(), // KISS-10
         [8, 8, 5] if !app.radio.tx_built => Some("not in this build"), // TX-48
         [8, 8, 5] if app.remote_in => Some("on the radio only"), // TX-48: never the link's (LINK-19)
@@ -446,6 +446,25 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
+/// Every value each setting can show, with its menu path (tests: the menus' widths).
+#[cfg(test)]
+pub(crate) fn all_values() -> std::vec::Vec<([u8; 3], std::vec::Vec<std::string::String>)> {
+    let text = |b: &Buf<24>| std::string::String::from_utf8_lossy(b.as_bytes()).into_owned();
+    SETTINGS
+        .iter()
+        .map(|st| {
+            let v: std::vec::Vec<std::string::String> = match st.kind {
+                Kind::Flip(l) => l.iter().map(|x| std::string::String::from(*x)).collect(),
+                Kind::Pick(l) => l.iter().map(|x| std::string::String::from(*x)).collect(),
+                Kind::Round(n, f) => (0..n).map(|i| { let mut b = Buf::new(); f(i, &mut b); text(&b) }).collect(),
+                Kind::Level(lo, hi, step, f) => (lo..=hi).step_by(step.max(1) as usize).map(|i| { let mut b = Buf::new(); f(i, &mut b); text(&b) }).collect(),
+                _ => std::vec::Vec::new(),
+            };
+            (st.path, v)
+        })
+        .collect()
+}
+
 static SETTINGS: [Setting; 97 + cfg!(feature = "bench") as usize] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
@@ -888,7 +907,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
         [9, 1] => {
             let t = AUTO_LOCK_TIMES[s.auto_lock as usize % AUTO_LOCK_TIMES.len()] as u32;
             if t == 0 {
-                b.set(b"No auto lock");
+                b.set(b"Manual lock");
             } else {
                 secs(b, t, "Off");
             }
@@ -1372,10 +1391,10 @@ impl Group {
         for i in 0..self.items().len() {
             let (name, v, dot, grey) = self.row(app, cx.dev, cx.store, i as u8);
             let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i as u8 == self.row, grey };
-            app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
+            app.menu_row(lcd, i, 23 + 25 * i as i32, 25, &r);
         }
         let (path, help) = self.help(app);
-        app.help_note(lcd, 226, 46, help, path.as_bytes());
+        app.help_note(lcd, 252, 44, help, path.as_bytes());
     }
 
     /// OK (or its digit) on the highlighted row: its screen, its list, or (OK only) a toggle.
