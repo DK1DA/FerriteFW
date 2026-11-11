@@ -10,6 +10,9 @@
 //! frequency no chip tunes or above 1000 MHz, a shift or split that needs the other band relay from RX (TX-37), the
 //! APRS slot (APRS-19),
 //! channel-only mode (PIN-5: only `active`), a slot scanning (SIDE2 stops it), and anything while transmitting.
+//!
+//! The link's `TUNE` (LINK-68, decision 373) moves a slot the way home's keys do: a channel by number, ▲▼, ◀▶, a
+//! zone, SIDE2's scan ([`App::slot_tune`]), through home's own code with the slot made active for it.
 
 use crate::chan::ChannelStore;
 use crate::screens::{entry, tones};
@@ -48,6 +51,21 @@ impl SlotChange {
     fn touches_slot(&self) -> bool {
         SlotChange { active: false, ..*self } != SlotChange::default()
     }
+}
+
+/// A `TUNE` (LINK-68): what to do to the slot, as a key on home would.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tune {
+    /// The channel by number (0-based), as typed on a channel slot.
+    Channel(u16),
+    /// ▲▼ this many times.
+    Step(i8),
+    /// ◀▶ this many times: zones on a channel, bands on a VFO.
+    Group(i8),
+    /// The zone's first channel (0xFFFE: Local), as picked in the zone list.
+    Zone(u16),
+    /// SIDE2: start (true) or stop a scan.
+    Scan(bool),
 }
 
 /// A slot as the PC sees it.
@@ -107,11 +125,7 @@ impl App {
                 return Err("channel-only mode: only the active slot can change (PIN-5)");
             }
             if self.aprs_slot(s) {
-                return Err(match self.aprs_holder() {
-                    Some(crate::aprs::Holder::Kiss) => "slot C held by KISS (KISS-9)",
-                    Some(crate::aprs::Holder::Beacon) => "slot C held by beacons (APRS-29)",
-                    _ => "slot C held by APRS mode (APRS-19)",
-                });
+                return Err(self.aprs_held());
             }
             if self.scan_mask & 1 << s != 0 {
                 return Err("the slot is scanning: SIDE2 stops it");
@@ -179,6 +193,97 @@ impl App {
             self.active = s; // NAV-5, the SLOT key
             self.out.push(RadioCmd::Active(s));
         }
+        Ok(())
+    }
+
+    /// Why the APRS slot can't be changed (APRS-19).
+    fn aprs_held(&self) -> &'static str {
+        match self.aprs_holder() {
+            Some(crate::aprs::Holder::Kiss) => "slot C held by KISS (KISS-9)",
+            Some(crate::aprs::Holder::Beacon) => "slot C held by beacons (APRS-29)",
+            _ => "slot C held by APRS mode (APRS-19)",
+        }
+    }
+
+    /// LINK-68: tunes slot `s` as home's keys would with it active, or refuses with the reason (nothing changed).
+    /// The active slot stays as it was, except for a scan's start: the scanned slot becomes the active one.
+    pub fn slot_tune(&mut self, s: u8, t: Tune, store: &impl ChannelStore) -> Result<(), &'static str> {
+        use crate::screens::home;
+        if s as usize >= SLOTS {
+            return Err("no such slot: A, B or C");
+        }
+        if self.radio.keyed.is_some() {
+            return Err("transmitting: nothing changes while keyed (TX-22)");
+        }
+        if self.aprs_slot(s) {
+            return Err(self.aprs_held());
+        }
+        let scanning = self.scan_mask & 1 << s != 0;
+        if scanning && !matches!(t, Tune::Scan(_)) {
+            return Err("the slot is scanning: stop the scan first");
+        }
+        let sl = &self.slots[s as usize];
+        // what the keys would refuse, checked first
+        let target = match t {
+            Tune::Channel(num) => match store.by_num(num) {
+                None => return Err("no channel by that number"),
+                Some((c, _)) if c.is_hf() => return Err("an HF channel: HF mode recalls it (CHAN-26)"),
+                Some(found) => Some(found),
+            },
+            Tune::Step(_) if sl.on_channel() && self.zlen(store, sl.zone) == 0 => return Err("the slot's zone is empty"),
+            Tune::Zone(z) => {
+                let known = if z == crate::local::LOCAL { crate::local::on(self) } else { z < store.zones() };
+                if !known {
+                    return Err("no such zone");
+                }
+                match home::first_slot_channel(self, store, z) {
+                    Some(p) => Some((self.zat(store, z, p).ok_or("no such zone")?, p)),
+                    None => return Err("that zone has no channel this slot can take"),
+                }
+            }
+            Tune::Scan(true) if !scanning => {
+                if self.low_power() {
+                    return Err("Low Power Mode: no scans (PWR-24.4)");
+                }
+                if self.slot_off(s) {
+                    return Err("the slot is off: * turns it back on (HOME-15.4)");
+                }
+                if sl.on_channel() && sl.zone == crate::local::LOCAL && self.local.is_empty() {
+                    return Err("Local has no channels to scan (CHAN-34)");
+                }
+                None
+            }
+            _ => None,
+        };
+        let was = self.active;
+        self.active = s;
+        match t {
+            Tune::Channel(_) | Tune::Zone(_) => {
+                let (c, pos) = target.expect("checked above");
+                let zone = if let Tune::Zone(z) = t { z } else { c.zone };
+                let sl = &mut self.slots[s as usize];
+                (sl.zone, sl.pos, sl.ch, sl.vfo_mode) = (zone, pos, Some(c), false);
+                self.send_slot(s);
+            }
+            Tune::Step(d) => home::step(self, d as i32, false, store),
+            Tune::Group(d) => {
+                // one press at a time: a press goes on to the next zone that has a channel
+                for _ in 0..d.unsigned_abs() {
+                    home::group(self, d.signum() as i32, store);
+                }
+            }
+            Tune::Scan(false) if scanning => crate::screens::scan::side2(self, store),
+            Tune::Scan(true) if !scanning => {
+                // a scan runs on the slot the radio receives: SIDE2 scans the active one, so the slot stays active
+                crate::screens::scan::side2(self, store);
+                if was != s {
+                    self.out.push(RadioCmd::Active(s)); // NAV-5
+                }
+                return Ok(());
+            }
+            Tune::Scan(_) => {}
+        }
+        self.active = was;
         Ok(())
     }
 }

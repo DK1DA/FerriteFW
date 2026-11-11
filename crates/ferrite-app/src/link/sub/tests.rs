@@ -271,7 +271,7 @@ fn aprs_events() {
     pc.aprs_second();
     pc.aprs_second();
     assert!(pc.events(2000).is_empty());
-    assert_eq!(pc.ask(msg::SUBSCRIBE, &[0x10]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::SUBSCRIBE, &[0x20]).0, Status::BadArg as u8);
 }
 
 #[derive(Default)]
@@ -479,4 +479,28 @@ fn aprs_record_carries_auto_reply() {
     // the record before auto reply (Console 0.8.1) keeps the radio's
     assert_eq!(pc.aprs_write(&rec[..at]).0, 0);
     assert!(pc.app.aprs_cfg().reply_on() && pc.app.aprs_cfg().reply_text() == b"Away");
+}
+
+/// LINK-67.1: subscribed to the radio state, the session gets the whole record once, then only the parts that
+/// changed (a slot's squelch opening: that slot's part alone), at most every gap; nothing while nothing changes.
+#[test]
+fn radio_state_events() {
+    use ferrite_core::link::state as m;
+    let mut pc = Pc::new(true);
+    assert_eq!(pc.ask(msg::SUBSCRIBE, &[ev::SUB_STATE, 2]).0, 0);
+    let e = pc.events(300);
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!((e[0][0], e[0][1], e[0].len()), (ev::STATE, m::PART_ALL, 2 + m::LEN));
+    let (_, rec) = pc.ask(msg::STATE, &[]);
+    assert_eq!(&e[0][2..], &rec[..]);
+    pc.ask(msg::SUBSCRIBE, &[ev::SUB_STATE, 2, ev::RENEW]);
+    assert!(pc.events(1000).is_empty(), "nothing changed");
+    // slot B hears a signal: B's part alone, with the signal
+    (pc.live.slots[1].squelch_open, pc.live.slots[1].rssi) = (true, -93);
+    pc.ask(msg::SUBSCRIBE, &[ev::SUB_STATE, 2, ev::RENEW]);
+    let e = pc.events(300);
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!((e[0][1], e[0].len()), (m::PART_SLOT << 1, 2 + m::SLOT_LEN));
+    assert_eq!(e[0][2] & m::OPEN, m::OPEN);
+    assert_eq!(i16::from_le_bytes([e[0][13], e[0][14]]), -93);
 }

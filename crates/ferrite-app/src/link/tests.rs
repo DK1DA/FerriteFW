@@ -189,7 +189,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63; RADIO, LINK-66; LINE_CMDS, decision 347), then the layouts (LINK-62)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63; RADIO, LINK-66; LINE_CMDS, decision 347; STATE, LINK-67), then the layouts (LINK-62)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 8;
         let c = v + 1 + a[v] as usize;
@@ -794,6 +794,104 @@ fn slot_read_and_set() {
     let (s, a) = pc.ask(msg::SLOT, &off(tx, 1));
     assert_eq!((s, i32::from_le_bytes([a[14], a[15], a[16], a[17]]), a[18] & m::SPLIT), (0, tx, m::SPLIT));
     assert_eq!(pc.ask(msg::SLOT, &off(0, 2)).0, Status::BadArg as u8);
+}
+
+// ---- STATE and TUNE (LINK-67, LINK-68) ----
+
+/// LINK-67: `STATE` answers the whole record: the version, the active slot, then each slot's flags, channel,
+/// frequency and name as the slot is.
+#[test]
+fn state_record() {
+    use ferrite_core::link::state as m;
+    let mut pc = Pc::new(true);
+    let (s, a) = pc.ask(msg::STATE, &[]);
+    assert_eq!((s, a.len(), a[0], a[1]), (0, m::LEN, m::VERSION, pc.app.active()));
+    assert_eq!(pc.ask(msg::STATE, &[1]).0, Status::BadArg as u8);
+    // slot B to a channel: its part says so, with the channel's number, zone, frequency and name
+    let c = (0..pc.st.count()).find_map(|i| pc.st.by_number(i)).filter(|c| !c.is_hf()).unwrap();
+    let mut p = std::vec![1, ferrite_core::link::tune::CHANNEL];
+    p.extend_from_slice(&c.num.to_le_bytes());
+    assert_eq!(pc.ask(msg::TUNE, &p).0, 0);
+    let (_, a) = pc.ask(msg::STATE, &[]);
+    let b = &a[m::RADIO_LEN + m::SLOT_LEN..m::RADIO_LEN + 2 * m::SLOT_LEN];
+    assert_eq!(b[0] & m::ON_CHANNEL, m::ON_CHANNEL);
+    assert_eq!((u16::from_le_bytes([b[1], b[2]]), u16::from_le_bytes([b[3], b[4]])), (c.num, c.zone));
+    assert_eq!(u32::from_le_bytes([b[5], b[6], b[7], b[8]]), c.rx);
+    assert_eq!(i16::from_le_bytes([b[11], b[12]]), m::NO_SIGNAL, "squelch shut: no signal");
+    let name = &b[13..13 + m::NAME_LEN];
+    assert_eq!(&name[..c.name().len().min(m::NAME_LEN)], &c.name()[..c.name().len().min(m::NAME_LEN)]);
+    // the radio's part: the position the store has (the sample's fix)
+    let f = crate::data::Data::fix(pc.st.data()).unwrap();
+    assert_eq!((i32::from_le_bytes([a[8], a[9], a[10], a[11]]), i32::from_le_bytes([a[12], a[13], a[14], a[15]])), (f.pos.lat, f.pos.lon));
+}
+
+/// LINK-68: `TUNE` moves a slot as home's keys do with it active (a channel by number, ▲▼, ◀▶, a zone, SIDE2's
+/// scan), leaves the active slot as it was (a scan's slot becomes active), and answers as `SLOT` reads it; refusals change nothing.
+#[test]
+fn tune_by_command() {
+    use ferrite_core::link::tune as t;
+    let mut pc = Pc::new(true);
+    let tune = |pc: &mut Pc, s: u8, op: u8, arg: &[u8]| {
+        let mut p = std::vec![s, op];
+        p.extend_from_slice(arg);
+        pc.ask(msg::TUNE, &p)
+    };
+    let active = pc.app.active();
+    let other = (active + 1) % 3;
+    // ▲ twice on a VFO: two of its steps up
+    let f0 = pc.app.slot_state(other).freq;
+    let (s, a) = tune(&mut pc, other, t::STEP, &[2]);
+    assert_eq!((s, a.len(), a[0]), (0, 19, other));
+    let f1 = u32::from_le_bytes([a[4], a[5], a[6], a[7]]);
+    assert!(f1 > f0, "{f0} -> {f1}");
+    assert_eq!(pc.app.active(), active, "the active slot stays");
+    let (_, a) = tune(&mut pc, other, t::STEP, &[(-2i8) as u8]);
+    assert_eq!(u32::from_le_bytes([a[4], a[5], a[6], a[7]]), f0, "and back");
+    // a channel by number, then ▲ to the next in its zone, then zones
+    let c = (0..pc.st.count()).find_map(|i| pc.st.by_number(i)).filter(|c| !c.is_hf()).unwrap();
+    let (s, a) = tune(&mut pc, other, t::CHANNEL, &c.num.to_le_bytes());
+    assert_eq!((s, u16::from_le_bytes([a[2], a[3]])), (0, c.num));
+    if pc.st.zone_len(c.zone) > 1 {
+        let (s, a) = tune(&mut pc, other, t::STEP, &[1]);
+        assert_eq!(s, 0);
+        assert_ne!(u16::from_le_bytes([a[2], a[3]]), c.num, "the next channel");
+    }
+    let (s, _) = tune(&mut pc, other, t::ZONE, &0u16.to_le_bytes());
+    assert_eq!(s, 0);
+    assert_eq!(pc.app.slots[other as usize].zone, 0);
+    if pc.st.zones() > 1 {
+        assert_eq!(tune(&mut pc, other, t::GROUP, &[1]).0, 0);
+        assert_ne!(pc.app.slots[other as usize].zone, 0, "the next zone");
+    }
+    // refusals: an empty number, no such zone; nothing changes
+    let before = pc.app.slot_state(other);
+    let (s, a) = tune(&mut pc, other, t::CHANNEL, &3999u16.to_le_bytes());
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).contains("no channel"), "{}", text(&a));
+    let (s, _) = tune(&mut pc, other, t::ZONE, &500u16.to_le_bytes());
+    assert_eq!(s, Status::Invalid as u8);
+    assert_eq!(pc.app.slot_state(other), before);
+    // SIDE2: the scan starts (the scan screen up; the Radio task reports it scanning), the slot refuses steps, then
+    // stops
+    assert_eq!(tune(&mut pc, other, t::SCAN, &[1]).0, 0);
+    assert!(matches!(pc.app.screen, Screen::Scan(_)), "the scan screen, as SIDE2 opens it");
+    assert_eq!(pc.app.active(), other, "a scan's slot becomes the active one (SIDE2 scans the active slot)");
+    pc.app.scan_mask |= 1 << other;
+    let (s, a) = tune(&mut pc, other, t::STEP, &[1]);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).contains("scanning"));
+    while pc.app.pop_cmd().is_some() {}
+    assert_eq!(tune(&mut pc, other, t::SCAN, &[0]).0, 0);
+    let mut stopped = false;
+    while let Some(c) = pc.app.pop_cmd() {
+        stopped |= c == ferrite_core::msg::RadioCmd::Scan { slot: other, on: false };
+    }
+    assert!(stopped, "the Radio task told to stop (it reports the slot scanning no more)");
+    assert_eq!(pc.app.active(), other, "and stays active");
+    // malformed
+    for p in [&[other, t::STEP, 0][..], &[other, t::STEP, 101], &[other, t::GROUP, 21], &[other, t::SCAN, 2], &[other, t::CHANNEL, 1], &[3, t::STEP, 1], &[other, 9, 1], &[other]] {
+        assert_eq!(pc.ask(msg::TUNE, p).0, Status::BadArg as u8, "{p:?}");
+    }
 }
 
 // ---- CMD and MORE (LINK-34) ----
