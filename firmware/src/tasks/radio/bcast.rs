@@ -28,7 +28,7 @@ impl Radio {
 
     /// HF mode's report: frequency, signal and which receiver (ModeLive::Hf).
     /// BCR-2, BCR-5: FM broadcast's report ten times a second (the signal, stereo pilot and SNR: about 2 ms of I2C
-    /// each) and, every other time, up to 8 RDS groups into the decoder (station name, radio text). Nothing in HF
+    /// each) and, every other time, up to 8 RDS groups into the decoder (station name, radio text, programme type). Nothing in HF
     /// mode or with FM off.
     #[inline(never)] // in slow flash (memory.x): ten times a second at most
     pub(super) fn fm_poll(&mut self) {
@@ -61,6 +61,7 @@ impl Radio {
             rssi: q.map_or(0, |q| q.rssi),
             snr: q.map_or(0, |q| q.snr),
             stereo: q.is_some_and(|q| q.stereo),
+            pty: fm.rds.pty, // BCR-26.8
             heard: self.si_heard,
         };
     }

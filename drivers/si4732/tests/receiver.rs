@@ -31,7 +31,7 @@ fn chip(cts_after: u32, stc_after: u32, err_on: Option<u8>) -> MockI2c<impl FnMu
         buf.fill(0);
         buf[0] = 0x80;
         match cmd[0] {
-            0x10 => buf.copy_from_slice(&[0x80, 32, b'6', b'0', 0, 0, 0, 0, b'C']),
+            0x10 => buf.copy_from_slice(&[0x80, 32, b'6', b'0', 0x12, 0x34, b'3', b'0', b'C']),
             0x14 => {
                 ints += 1;
                 buf[0] = 0x80 | (ints > stc_after) as u8;
@@ -158,7 +158,7 @@ fn errors_and_timeouts() {
     // Nobody there.
     let mut si = Si4732::new(MockI2c::new(|_, _| Err(Nack)), ADDR);
     assert_eq!(si.ready(), Err(Error::Nack));
-    assert_eq!(si.revision(&mut MockDelay::default()).map(|r| r.0), Err(Error::Nack));
+    assert_eq!(si.revision(&mut MockDelay::default()).map(|r| r.part), Err(Error::Nack));
 }
 
 /// Passes through to `inner` until its writes or reads run out, then NACKs (a chip that drops off the bus part way).
@@ -190,13 +190,14 @@ fn flaky(writes: usize, reads: usize) -> Flaky<MockI2c<impl FnMut(&[I2cTxn], &mu
     Flaky { inner: chip(0, 0, None), writes, reads }
 }
 
-/// GET_REV (AN332): part number in RESP1, firmware major and minor in RESP2-3, chip revision in RESP8.
+/// GET_REV (AN332): part number in RESP1, firmware major and minor in RESP2-3, the patch in RESP4-5, the
+/// component in RESP6-7, chip revision in RESP8.
 #[test]
 fn revision_volume_mute() {
     let mut si = Si4732::new(chip(0, 0, None), ADDR);
     let mut d = MockDelay::default();
     assert_eq!(si.mode(), None);
-    assert_eq!(si.revision(&mut d), Ok((32, b'6', b'0', b'C')));
+    assert_eq!(si.revision(&mut d), Ok(si4732::Rev { part: 32, fw: *b"60", patch: 0x1234, cmp: *b"30", chip: b'C' }));
     si.volume(80, &mut d).unwrap(); // held to 63
     si.mute(true, &mut d).unwrap();
     si.mute(false, &mut d).unwrap();

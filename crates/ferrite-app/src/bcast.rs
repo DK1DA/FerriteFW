@@ -175,6 +175,37 @@ impl App {
     }
 }
 
+/// The programme types (BCR-26.8): RBDS's North American list (NRSC-4) in the US and Canada, RDS's (EN 50067)
+/// elsewhere; empty for 0 (none) and RBDS's unassigned 24-28. At most 15 characters: the card's header holds
+/// "123 · " and the name beside "muted".
+static PTY_RBDS: [&str; 32] = [
+    "", "News", "Information", "Sports", "Talk", "Rock", "Classic rock", "Adult hits", "Soft rock", "Top 40",
+    "Country", "Oldies", "Soft", "Nostalgia", "Jazz", "Classical", "Rhythm & blues", "Soft R&B", "Language",
+    "Religious music", "Religious talk", "Personality", "Public", "College", "", "", "", "", "", "Weather",
+    "Emergency test", "Emergency",
+];
+static PTY_RDS: [&str; 32] = [
+    "", "News", "Current affairs", "Information", "Sport", "Education", "Drama", "Culture", "Science", "Varied",
+    "Pop music", "Rock music", "Easy listening", "Light classical", "Classical", "Other music", "Weather",
+    "Finance", "Children's", "Social affairs", "Religion", "Phone-in", "Travel", "Leisure", "Jazz", "Country",
+    "National music", "Oldies", "Folk music", "Documentary", "Alarm test", "Alarm",
+];
+
+pub fn pty_name(pty: u8, region: Option<Region>) -> &'static str {
+    let rbds = matches!(region, Some(Region::Us | Region::Canada));
+    (if rbds { &PTY_RBDS } else { &PTY_RDS })[pty as usize & 31]
+}
+
+impl App {
+    /// BCR-26.8: the programme type slot `s` plays now ("" when it isn't the broadcast playing, or none is sent).
+    pub(crate) fn bcast_pty(&self, live: &LiveAll, s: u8) -> &'static str {
+        match live.mode {
+            ModeLive::Fm { pty, .. } if self.radio.fm_on && self.bcast_slot() == Some(s) => pty_name(pty, self.set.region()),
+            _ => "",
+        }
+    }
+}
+
 /// The RDS line (BCR-26): the radio text, else the station name, else nothing (padding trimmed).
 pub fn rds_text<'a>(ps: &'a [u8], rt: &'a [u8]) -> &'a [u8] {
     let rt = trim(rt);

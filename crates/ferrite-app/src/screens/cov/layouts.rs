@@ -22,7 +22,7 @@ fn fm_live(t: &mut T, s: u8) {
     t.app.set_vfo(s, mhz(100) + 50_000);
     let mut rt = [0u8; 64];
     rt[..9].copy_from_slice(b"Some text");
-    t.live.mode = ModeLive::Fm { freq: 10_050, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, heard: true };
+    t.live.mode = ModeLive::Fm { freq: 10_050, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, pty: 0, heard: true };
     t.live.bcast_heard = true;
     t.wait(200);
     assert_eq!(t.app.bcast_slot(), Some(s));
@@ -75,7 +75,7 @@ fn single_broadcast() {
     t.shows("STEREO");
     t.shows("Some text");
     t.shows("60");
-    t.live.mode = ModeLive::Fm { freq: 10_050, ps: [b' '; 8], rt: [0; 64], rssi: 0, snr: 0, stereo: false, heard: true };
+    t.live.mode = ModeLive::Fm { freq: 10_050, ps: [b' '; 8], rt: [0; 64], rssi: 0, snr: 0, stereo: false, pty: 0, heard: true };
     t.wait(100);
     t.shows("No RDS");
     t.app.set_vfo(a, mhz(146) + 52_000); // out of the band: the settings come back

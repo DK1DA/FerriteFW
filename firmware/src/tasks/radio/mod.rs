@@ -574,7 +574,7 @@ fn si_input(mode: SiMode) {
 }
 
 /// The boot check of the SI4732: reset pulse, FM power-up, ready within 500 ms, its revision read, then powered
-/// down and held in reset. True when it answered.
+/// down and held in reset. True when it answered; its revision goes to `SI_REV` for About.
 async fn si_probe(si: &mut Si4732<SiBus>) -> bool {
     let d = &mut BusyDelay;
     SI_RST.write(false);
@@ -593,7 +593,16 @@ async fn si_probe(si: &mut Si4732<SiBus>) -> bool {
         };
     }
     if ok {
-        ok = si.revision(d).is_ok();
+        ok = match si.revision(d) {
+            Ok(r) => {
+                // SELF-5: About shows it
+                for (a, v) in crate::tasks::SI_REV.iter().zip([r.fw[0], r.fw[1], r.cmp[0], r.cmp[1], r.chip]) {
+                    a.store(v, core::sync::atomic::Ordering::Relaxed);
+                }
+                true
+            }
+            Err(_) => false,
+        };
     }
     let _ = si.power_down(d); // also clears the driver's mode when the chip didn't answer
     SI_RST.write(false);

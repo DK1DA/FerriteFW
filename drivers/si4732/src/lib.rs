@@ -100,6 +100,20 @@ impl From<Nack> for Error {
 }
 
 /// A completed tune or seek.
+/// GET_REV's answer (AN332). The firmware, component and chip revisions are ASCII ("6", "0"; "D").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Rev {
+    /// The part number's last two digits (32 for an SI4732).
+    pub part: u8,
+    /// Firmware major and minor.
+    pub fw: [u8; 2],
+    /// The patch ID (0 without one).
+    pub patch: u16,
+    /// Component major and minor: which firmware features the die has (the AM filters, AN332).
+    pub cmp: [u8; 2],
+    pub chip: u8,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Tune {
     /// FM: 10 kHz units; AM and SSB: kHz.
@@ -253,11 +267,11 @@ impl<B: I2c> Si4732<B> {
         self.command(&[POWER_DOWN], &mut [], delay)
     }
 
-    /// Part number (32 for an SI4732), firmware major and minor, chip revision.
-    pub fn revision(&mut self, delay: &mut impl Delay) -> Result<(u8, u8, u8, u8), Error> {
+    /// GET_REV (AN332): the part number, the firmware, the patch, the component and the chip revision.
+    pub fn revision(&mut self, delay: &mut impl Delay) -> Result<Rev, Error> {
         let mut r = [0u8; 9];
         self.command(&[GET_REV], &mut r, delay)?;
-        Ok((r[1], r[2], r[3], r[8]))
+        Ok(Rev { part: r[1], fw: [r[2], r[3]], patch: u16::from_be_bytes([r[4], r[5]]), cmp: [r[6], r[7]], chip: r[8] })
     }
 
     /// Volume 0-63.

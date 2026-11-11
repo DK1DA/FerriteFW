@@ -80,3 +80,19 @@ fn ptt_from_info() {
     t.wait(500); // the bar moves
     t.ptt(false);
 }
+
+/// SELF-5: About shows the SI4732's firmware, chip and component revisions from the boot probe; "Not read" when
+/// it didn't answer.
+#[test]
+fn si4732_revision() {
+    let mut t = T::ready();
+    healthy(&mut t);
+    let s = page(&mut t, Page::About);
+    assert!(s.contains("SI4732") && s.contains("Not read"), "{s}");
+    t.dev.selftest.si_rev = *b"6000D";
+    let s = page(&mut t, Page::About);
+    assert!(s.contains("FW 6.0, rev D, cmp 0.0"), "{s}");
+    t.dev.selftest.si_rev = [b'6', b'0', b'3', b'0', 0x01];
+    let s = page(&mut t, Page::About);
+    assert!(s.contains("rev ?"), "an unprintable byte: {s}");
+}

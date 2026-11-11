@@ -30,7 +30,7 @@ fn tune(t: &mut T, s: u8, f: Freq10) -> Vec<RadioCmd> {
 fn live_fm(t: &mut T, freq: u16, heard: bool) {
     let mut rt = [0u8; 64];
     rt[..9].copy_from_slice(b"Some text");
-    t.live.mode = ModeLive::Fm { freq, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, heard };
+    t.live.mode = ModeLive::Fm { freq, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, pty: 0, heard };
     t.live.bcast_heard = heard;
 }
 

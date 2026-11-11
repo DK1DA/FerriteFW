@@ -82,20 +82,20 @@ const CARRIERS: [(Freq10, f32); 5] =
 const HF_STATIONS: [Freq10; 9] = [19_800, 90_900, 108_900, 502_500, 607_000, 733_500, 958_000, 1_173_500, 1_540_000];
 
 /// The fake's FM stations: frequency (10 kHz), RDS station name, radio texts (the station swaps to the next
-/// every 20 s, flipping the A/B flag: BCR-30), signal (dBuV), SNR (dB) and stereo. 99.1 sends no radio text, so its
+/// every 20 s, flipping the A/B flag: BCR-30), signal (dBuV), SNR (dB), stereo and the programme type (RBDS numbers: BCR-26.8; 100.5 sends none). 99.1 sends no radio text, so its
 /// card falls back to the station name (BCR-26); 100.5 sends the full 64 characters.
-pub type Station = (u16, &'static str, [&'static str; 2], u8, u8, bool);
+pub type Station = (u16, &'static str, [&'static str; 2], u8, u8, bool, u8);
 
 pub const STATIONS: [Station; 6] = [
-    (8_890, "CBC R2", ["Tempo with Julie Nesrallah", "Tempo with Julie Nesrallah"], 38, 16, true),
-    (9_150, "CBC R1", ["Ottawa Morning: traffic and weather on the hour", "Ottawa Morning: traffic and weather on the hour"], 41, 18, true),
-    (9_810, "JAZZ FM", ["Now playing: Take Five, Dave Brubeck Quartet", "Up next: So What, Miles Davis"], 36, 15, true),
-    (9_910, "CHEZ 99", ["", ""], 31, 11, false),
+    (8_890, "CBC R2", ["Tempo with Julie Nesrallah", "Tempo with Julie Nesrallah"], 38, 16, true, 15),
+    (9_150, "CBC R1", ["Ottawa Morning: traffic and weather on the hour", "Ottawa Morning: traffic and weather on the hour"], 41, 18, true, 2),
+    (9_810, "JAZZ FM", ["Now playing: Take Five, Dave Brubeck Quartet", "Up next: So What, Miles Davis"], 36, 15, true, 14),
+    (9_910, "CHEZ 99", ["", ""], 31, 11, false, 6),
     (10_050, "RDS TEST", [
         "Now playing: Harvest Moon by Neil Young, live at Massey Hall 71",
         "Up next: the 9 o'clock news, then Ottawa traffic and weather now",
-    ], 48, 24, true),
-    (10_650, "KISS", ["The Morning Show", "The Morning Show"], 44, 20, true),
+    ], 48, 24, true, 0),
+    (10_650, "KISS", ["The Morning Show", "The Morning Show"], 44, 20, true, 9),
 ];
 
 /// Three slots: A has a signal 3 s in every 10, B one for 2 s in every 25 (a watched slot opening), C scans.
@@ -563,7 +563,8 @@ impl FakeRadio {
                     }
                 }
                 let (rssi, snr, stereo) = st.map_or((8, 2, false), |s| (s.3 + ((t * 1.3).sin() * 2.0) as u8, s.4, s.5));
-                ModeLive::Fm { freq: self.fm, ps, rt, rssi, snr, stereo, heard }
+                let pty = st.filter(|_| t - t0 >= 0.4).map_or(0, |s| s.6); // with the station name
+                ModeLive::Fm { freq: self.fm, ps, rt, rssi, snr, stereo, pty, heard }
             }
             Fake::Hf { t0, freq, mode } => {
                 let p = ((t - t0) / 2.0 * 100.0) as u32;
@@ -785,6 +786,7 @@ pub fn device_at(secs: u64) -> Device {
             cal: CalState::Ok,
             chips: 3,
             si4732: true,
+            si_rev: *b"6000D", // SELF-5: a sample
             ssb_patch: true,
             battery_trim: 0,
         },
