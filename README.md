@@ -53,6 +53,10 @@ Ferrite's public key (ID `5B2C47F45817851B`) is also in [`minisign.pub`](minisig
 
 Building, testing, the code's layout and how to put your own build on a radio: [DEVELOPING.md](DEVELOPING.md).
 
+## Contributing
+
+Issues are what help most: bugs, ideas, design suggestions and fixes. We'd rather have an issue than an AI-generated pull request: [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licence
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md): free for any noncommercial use. Selling Ferrite, shipping it on radios for sale or selling a service built on it needs a commercial licence. Copyright 2026 Alex Harvey.
