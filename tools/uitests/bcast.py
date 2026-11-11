@@ -19,7 +19,7 @@ def mhz_of_slot(t, L):
     t.fail(f"slot {L}: no frequency in {t.slot(L)!r}")
 
 
-@test("BCR-21", pages=("Home",))
+@test("BCR-21", "BCR-26.8", pages=("Home",))
 def slot_in_the_band_is_broadcast(t):
     """A VFO in 87.5-108.0 MHz (ends included) is a broadcast slot; just outside it, and tuned back out, it is a
     BK4829 slot again (the card's kind and header say which)."""
@@ -31,7 +31,11 @@ def slot_in_the_band_is_broadcast(t):
         a = card(t, "A")
         t.eq(a["kind"], kind, f"A on {f} MHz")
         if kind == "broadcast":
-            t.eq(a["head"], "VFO · Broadcast", f"{f} MHz: the header names the band")
+            # BCR-26.8: a station sending its programme type names it there instead ("VFO · Jazz")
+            t.check(a["head"].startswith("VFO · ") and len(a["head"]) > len("VFO · "),
+                    f"{f} MHz: the header names the band, or the station's programme type", a["head"])
+            if a["head"] != "VFO · Broadcast":
+                t.note(f"{f} MHz: the station sends its programme type: {a['head']}")
     t.check(a["head"] != "VFO · Broadcast", "tuned out: an ordinary slot", a["head"])
 
 
