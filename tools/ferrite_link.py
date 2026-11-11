@@ -100,6 +100,7 @@ POSITION = 7  # LINK-53: a channel's position by number, <ii lat, lon in 1e-7 de
 CAP_POSITION = 64  # LINK-53: HELLO's caps say POSITION
 DATA_READ, DATA_WRITE = 0x61, 0x62  # LINK-59, LINK-60 (decision 333): the SPI data range raw (writes: the cable only)
 CLOCK = 0x63  # LINK-65 (decision 340): set or read the radio's clock
+STATE, TUNE = 0x34, 0x35  # LINK-67, LINK-68 (decision 373): the radio state record, a slot tuned by command
 CAP2_DATA = 2  # LINK-59: HELLO's second caps byte says the raw data messages and the layout bytes (LINK-62)
 QUICK, WAYPOINT, DTMF = 8, 9, 10  # LINK-54 - LINK-56: flags + text; name(16) <ii lat, lon, source; len + symbols + name
 WP_ADD = 0xFFFF  # LINK-55: WRITE_MANY's index for a new waypoint

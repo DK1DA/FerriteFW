@@ -5,6 +5,7 @@ SAFE-6, KISS-6, TERM-4.3): the tests drive the radio on the cable as always and 
 radio) and turn the lock off after.
 """
 import re
+from pathlib import Path
 import struct
 import time
 
@@ -12,6 +13,9 @@ import ferrite_link as fl
 
 from .core import test
 from .restart import clear_pin_lock, pin_lock, power_on_pin, set_pin_lock, the_pin
+
+# The workspace's version, as the terminal's top line shows it (TERM-4.3).
+VERSION = re.search(r'^version = "([^"]+)"', (Path(__file__).resolve().parents[2] / "Cargo.toml").read_text(), re.M)[1]
 
 HELLO = bytes([fl.PROTOCOL]) + bytes(8) + b"uitest.py bt"
 
@@ -236,7 +240,7 @@ def bt_terminal_and_link(t):
         t.keys("SIDE2")
         t.home()  # the scan goes on; home's card shows where it is
     try:
-        want = ("Ferrite 0.8.1", "bluetooth", "Press Enter for the menu")
+        want = (f"Ferrite {VERSION}", "bluetooth", "Press Enter for the menu")
         head = bt_until(raw, b"\x03\r", want)  # the top line names the port; the banner under it (TERM-11, TERM-20)
         t.check(all(w in head for w in want), "Enter on Bluetooth: the terminal's top line and banner", head[-300:])
         steps = set()
