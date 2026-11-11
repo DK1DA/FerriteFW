@@ -150,6 +150,12 @@ const SYMBOLS: [&[u8]; 10] = [b"0", b".,?!", b"-/_'", b"()&+", b"@#*=", b":;%\""
 /// A channel name's symbols (CHAN-31): only those the name set has, on the keys that type them in [`SYMBOLS`].
 const NAME_SYMBOLS: [&[u8]; 10] = [b"0", b".!", b"-/_'", b"()&+", b"#", b"5", b"6", b"7", b"8", b"9"];
 const DIGITS: [&[u8]; 10] = [b"0", b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8", b"9"];
+/// Callsigns' capitals (APRS-37, SETUP-12): an APRS callsign, pattern or path takes only "-" besides capitals and
+/// digits (AX.25: `VE7XYZ-9`, `WIDE1-1`); the station callsign (0 8 6 1) "/" (`VE7XYZ/P`), as setup's page; a grid
+/// square none.
+const APRS_CALL: [&[u8]; 10] = [b"0", b"-1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
+const STATION_CALL: [&[u8]; 10] = [b"0", b"/1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
+const GRID: [&[u8]; 10] = [b"0", b"1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
 pub(crate) const MODES: [&str; 4] = ["ABC", "abc", "123", "Sym"];
 /// A key tapped again within this steps through its letters.
 pub(crate) const TAP_MS: u32 = 1000;
@@ -174,7 +180,14 @@ impl Text {
 
     /// The layout the keys type in ([`legend`]): a channel name's symbols in place of the full set (CHAN-31).
     fn keys(self) -> u8 {
-        if self.mode == 3 && self.to.kind() == Kind::Name { 4 } else { self.mode }
+        match (self.to, self.to.kind(), self.mode) {
+            (_, Kind::Name, 3) => 4,
+            // the capitals of a callsign, grid square or path: their own key 1 (APRS-37, SETUP-12)
+            (TextFor::Callsign, _, 0) => 6,
+            (TextFor::GridFixed | TextFor::GridWaypoint, _, 0) => 7,
+            (_, Kind::Caps | Kind::Path | Kind::Pattern, 0) => 5,
+            (_, _, m) => m,
+        }
     }
 
     /// The mode # goes to: KEY-12's case and symbols; a callsign has capitals and digits only (SETUP-12).
@@ -196,9 +209,10 @@ pub(crate) fn open(app: &mut App, to: TextFor, store: &impl ChannelStore) {
     app.open(super::nav::Dest::Text(to));
 }
 
-/// The characters key d types in a mode (4: a channel name's symbols, CHAN-31).
+/// The characters key d types in a mode (4: a channel name's symbols, CHAN-31; 5-7 the capitals of an APRS
+/// callsign, the station callsign and a grid square).
 pub(crate) fn legend(mode: u8, d: u8) -> &'static [u8] {
-    [UPPER, LOWER, DIGITS, SYMBOLS, NAME_SYMBOLS][mode as usize % 5][d as usize % 10]
+    [UPPER, LOWER, DIGITS, SYMBOLS, NAME_SYMBOLS, APRS_CALL, STATION_CALL, GRID][mode as usize % 8][d as usize % 10]
 }
 
 /// One digit key into a text: a new character, or the next one on the same key within [`TAP_MS`]. Returns
@@ -322,7 +336,7 @@ impl View for Text {
                         Kind::Pattern => b"any",
                         _ => b"",
                     },
-                    if m == 0 { b"digits" } else { b"letters" },
+                    if self.mode == 0 { b"digits" } else { b"letters" },
                 )
             } else {
                 (b"space", MODES[self.next_mode() as usize].as_bytes())
@@ -466,4 +480,32 @@ mod tests {
             assert!(legend(t.keys(), 4).contains(&b'@'));
         }
     }
+
+    /// APRS-37, APRS-26, APRS-57.1: an APRS callsign (a contact's, auto reply's pattern) or path types capitals,
+    /// digits and "-" only, in both its modes; SETUP-12: the station callsign "/" in place of "-"; a grid square
+    /// letters and digits alone. Never lower case.
+    #[test]
+    fn callsign_keys() {
+        let typed = |t: Text| -> std::vec::Vec<u8> { (0..10).flat_map(|d| legend(t.keys(), d).iter().copied()).collect() };
+        for to in [TextFor::ContactCall, TextFor::ReplyTo, TextFor::AprsPath] {
+            for mode in [0, Text::new(to).next_mode()] {
+                let all = typed(Text { mode, ..Text::new(to) });
+                assert!(all.iter().all(|&c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'-'), "{to:?} mode {mode}: {:?}", core::str::from_utf8(&all));
+            }
+            assert!(typed(Text::new(to)).contains(&b'-'), "{to:?}: the SSID's -");
+        }
+        let all = typed(Text::new(TextFor::Callsign));
+        assert!(all.contains(&b'/') && !all.contains(&b'-') && !all.contains(&b'.'));
+        let all = typed(Text::new(TextFor::GridFixed));
+        assert!(all.iter().all(|c| c.is_ascii_alphanumeric()));
+        // tapping 1 twice on a contact's callsign: - then 1, then - again
+        let mut b = Buf::<16>::new();
+        let t = Text::new(TextFor::ContactCall);
+        let (l, a) = tap(&mut b, 9, t.keys(), 1, 0, 0, 0);
+        let (l, a) = tap(&mut b, 9, t.keys(), 1, l, a, 100);
+        assert_eq!(b.as_bytes(), b"1");
+        tap(&mut b, 9, t.keys(), 1, l, a, 200);
+        assert_eq!(b.as_bytes(), b"-");
+    }
 }
+
