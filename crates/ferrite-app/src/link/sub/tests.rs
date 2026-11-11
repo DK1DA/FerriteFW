@@ -481,7 +481,7 @@ fn aprs_record_carries_auto_reply() {
     assert!(pc.app.aprs_cfg().reply_on() && pc.app.aprs_cfg().reply_text() == b"Away");
 }
 
-/// LINK-67: subscribed to the radio state, the session gets the whole record once, then only the parts that
+/// LINK-67.1: subscribed to the radio state, the session gets the whole record once, then only the parts that
 /// changed (a slot's squelch opening: that slot's part alone), at most every gap; nothing while nothing changes.
 #[test]
 fn radio_state_events() {
