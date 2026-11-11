@@ -357,7 +357,7 @@ impl View for Options {
             p.set(title(self.of));
             p.push(b" MENU");
             // under the rows and "0 Full menu": six or seven rows push it down
-            let y = OPTS_HELP_Y.max(23 + 22 * (all.len() as i32 + 1) + 6);
+            let y = opts_help_y(all.len());
             app.help_txt(lcd, y, 46, help, p.as_bytes());
         }
     }
@@ -373,6 +373,13 @@ impl View for Options {
 
 /// Where an options page's help box goes (under five rows and "0 Full menu"; lower under more).
 pub(crate) const OPTS_HELP_Y: i32 = 140;
+/// An options page's rows (decision 372: the menus' 14 px text in 25 px rows).
+pub(crate) const OPTS_ROW_H: i32 = 25;
+
+/// The help box's place under `rows` rows and "0 Full menu".
+pub(crate) fn opts_help_y(rows: usize) -> i32 {
+    OPTS_HELP_Y.max(23 + OPTS_ROW_H * (rows as i32 + 1) + 6)
+}
 
 /// An options page's rows, the one style (MENU-25): numbered 1-n with their values, the selected one
 /// highlighted, then "0 Full menu".
@@ -380,11 +387,11 @@ pub(crate) fn options_page<'a>(app: &mut App, lcd: &mut impl Panel, rows: impl I
     let mut n = 0;
     for (i, (name, value)) in rows.enumerate() {
         let r = Row { num: Some(i as u8 + 1), name, value, dot: false, selected: i as u8 == sel, grey: false };
-        app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
+        app.menu_row(lcd, i, 23 + OPTS_ROW_H * i as i32, OPTS_ROW_H, &r);
         n = i + 1;
     }
     let r = Row { num: Some(0), name: b"Full menu", value: b">", dot: false, selected: false, grey: false };
-    app.list_row(lcd, n, 23 + 22 * n as i32, 22, &r);
+    app.menu_row(lcd, n, 23 + OPTS_ROW_H * n as i32, OPTS_ROW_H, &r);
 }
 
 /// Beacon now (APRS-17.7, APRS-17.8): from the APRS list, hold V/M on the APRS card and V/M in compose. Refused while the link

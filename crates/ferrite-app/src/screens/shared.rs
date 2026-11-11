@@ -376,7 +376,15 @@ impl App {
     /// List row `i` (region R_ROW + i) at y, drawn when what it shows changed (MENU-12).
     pub(crate) fn list_row(&mut self, lcd: &mut impl Panel, i: usize, y: i32, h: i32, r: &Row) {
         if self.dirty(R_ROW + i, Mix::new().h(&r.num).h(&r.name).h(&r.value).h(&r.dot).h(&r.selected).h(&r.grey).get()) {
-            w::list_row(lcd, y, h, r, self.cue());
+            w::list_row(lcd, y, h, r, self.cue(), false);
+        }
+    }
+
+    /// A menu's row (DISP-6, decision 372: MENU 0, Quick settings, the options pages): [`App::list_row`] in the
+    /// menus' 14 px text.
+    pub(crate) fn menu_row(&mut self, lcd: &mut impl Panel, i: usize, y: i32, h: i32, r: &Row) {
+        if self.dirty(R_ROW + i, Mix::new().h(&r.num).h(&r.name).h(&r.value).h(&r.dot).h(&r.selected).h(&r.grey).get()) {
+            w::list_row(lcd, y, h, r, self.cue(), true);
         }
     }
 

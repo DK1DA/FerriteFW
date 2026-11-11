@@ -100,12 +100,15 @@ impl View for Shortcut {
                     _ => b"Simplex",
                 }),
                 8 => app.item_text(Item::Offset, true, &mut v),
-                9 => v.set(if app.slot(app.active()).on_channel() { b"to VFO" } else { b"to channel" }), // KEY-23
+                // KEY-23; decision 372: the direction in the value, the name short ("Copy VFO/channel" + "to
+                // channel" no longer fit at 14 px)
+                9 => v.set(if app.slot(app.active()).on_channel() { b"channel to VFO" } else { b"VFO to channel" }),
                 _ => {}
             }
             let grey = d == 6 && app.greyed(Item::Step).is_some(); // VFO-8: step is VFO only
+            let name = if d == 9 { "Copy" } else { name };
             let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: d == self.sel as usize, grey };
-            app.list_row(lcd, d, 44 + 22 * d as i32, 22, &r);
+            app.menu_row(lcd, d, 44 + 22 * d as i32, 22, &r); // ten rows: 22 px, the menus' text
         }
         let mut path = Buf::<16>::new();
         path.push(b"Hold ");

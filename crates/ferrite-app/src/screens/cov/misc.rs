@@ -118,7 +118,7 @@ fn advanced_recent_and_states() {
     t.app.log_unread = 2;
     t.dev.gps = ferrite_core::msg::GpsState::Searching;
     t.draw();
-    t.shows("\u{b7} scan");
+    t.shows("Scanning"); // decision 372: the watch beside it no longer fit
     t.shows("2 new");
     t.shows("Searching");
 }

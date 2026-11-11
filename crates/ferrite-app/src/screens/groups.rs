@@ -1391,7 +1391,7 @@ impl Group {
         for i in 0..self.items().len() {
             let (name, v, dot, grey) = self.row(app, cx.dev, cx.store, i as u8);
             let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i as u8 == self.row, grey };
-            app.list_row(lcd, i, 23 + 25 * i as i32, 25, &r);
+            app.menu_row(lcd, i, 23 + 25 * i as i32, 25, &r);
         }
         let (path, help) = self.help(app);
         app.help_note(lcd, 252, 44, help, path.as_bytes());

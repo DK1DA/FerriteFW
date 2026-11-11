@@ -498,7 +498,7 @@ fn opts_page(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
     let mut p = Buf::<24>::new();
     p.set(name_of(app, s.sat).as_bytes());
     p.push(b" MENU");
-    app.help_txt(lcd, super::opts::OPTS_HELP_Y.max(23 + 22 * (OPT_ROWS.len() as i32 + 1) + 6), 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1, p.as_bytes());
+    app.help_txt(lcd, super::opts::opts_help_y(OPT_ROWS.len()), 46, OPT_ROWS[(s.opt - 1) as usize % OPT_ROWS.len()].1, p.as_bytes());
 }
 
 // ---- drawing parts ----

@@ -136,7 +136,7 @@ impl View for Quick {
                 selected: i as u8 == row,
                 grey: app.greyed(item).is_some(),
             };
-            app.list_row(lcd, i, 41 + 22 * i as i32, 22, &r);
+            app.menu_row(lcd, i, 41 + 22 * i as i32, 22, &r); // ten rows: 22 px, the menus' text (decision 372)
         }
         let item = QUICK[row as usize];
         let why = app.greyed(item);
@@ -178,10 +178,11 @@ pub(crate) fn row_value(app: &App, item: Item) -> Buf<32> {
     app.item_text(item, true, &mut t);
     v.set(t.as_bytes());
     if item == Item::Tones && heard(app) != 0 {
-        // TSRCH-16: "T 100.0, heard 88.5"
+        // TSRCH-16: "heard 88.5" (decision 372: the set tone beside it no longer fit at 14 px; the help line says
+        // OK uses it)
         let mut h = Buf::<24>::new();
         super::shared::heard_text(heard(app), app.slot(app.active).cfg().rx_tone, &mut h);
-        v.push(b", heard");
+        v.set(b"heard");
         v.push(&h.as_bytes()[5..]);
     }
     v
@@ -225,7 +226,7 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
         };
         let num = if i <= FM_ROWS { i + 1 } else { 0 };
         let r = Row { num: Some(num), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i == row, grey: false };
-        app.list_row(lcd, i as usize, 41 + 22 * i as i32, 22, &r);
+        app.menu_row(lcd, i as usize, 41 + 25 * i as i32, 25, &r);
     }
     let i = row.min(FM_ROWS + 1);
     let help = match i {

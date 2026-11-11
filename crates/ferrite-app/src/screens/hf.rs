@@ -904,11 +904,11 @@ impl View for Hf {
             let vals = option_values(&h);
             for (i, ((name, _), v)) in OPTIONS.iter().zip(&vals).enumerate() {
                 let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == self.row, grey: false };
-                app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
+                app.menu_row(lcd, i, 23 + 25 * i as i32, 25, &r); // the menus' text (decision 372)
             }
             let r = Row { num: Some(0), name: b"Full menu", value: b">", dot: false, selected: false, grey: false };
-            app.list_row(lcd, 6, 23 + 22 * 6, 22, &r);
-            app.help_txt(lcd, 186, 46, OPTIONS[self.row as usize % OPTIONS.len()].1, b"HF MENU");
+            app.menu_row(lcd, 6, 23 + 25 * 6, 25, &r);
+            app.help_txt(lcd, 204, 46, OPTIONS[self.row as usize % OPTIONS.len()].1, b"HF MENU");
             return;
         }
         // HF-15 (decision 349): the "rig" layout.

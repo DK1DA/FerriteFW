@@ -618,19 +618,18 @@ pub struct Row<'a> {
 }
 
 #[cfg_attr(feature = "clipcheck", track_caller)]
-pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row, cue: Cue) {
+pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row, cue: Cue, big: bool) {
     clip_site!();
     crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| {
-        list_row_now(b, y, h, r);
+        list_row_now(b, y, h, r, big);
         cue.draw(b);
     });
 }
 
-fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
+fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row, big: bool) {
     let bg = if r.selected { BLUE } else { BG };
     let (fg, sub) = if r.selected { (BLUE_FG, BLUE_FG) } else { (if r.grey { DIM } else { TEXT }, SUB) };
-    // A tall row (the menus, 25 px) is in the 14 px font, names and values.
-    let big = h >= 25;
+    // The menus' rows (DISP-6) are in the 14 px font, names and values.
     let nf: &Font4 = if big { &UI_14 } else { &UI_12 };
     let base = if big { y + h / 2 + 6 } else { y + h / 2 + 5 };
     let nbase = base;
@@ -641,8 +640,8 @@ fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
         lcd.fill(0, y, 8, h, bg);
         8
     };
-    // The name keeps its room; the value gets the rest.
-    let name = cut(r.name, nf, 232 - x - 40);
+    // The name keeps its room (all of it with no value); the value gets the rest.
+    let name = cut(r.name, nf, 232 - x - if r.value.is_empty() { 8 } else { 40 });
     let nw = field(lcd, x, text4_width(name, nf), y, y + h, nbase, name, &st(nf, fg, bg, Align::Left));
     let x = x + nw;
     let value = cut(r.value, nf, 232 - x - if r.dot { 18 } else { 8 });
@@ -1223,7 +1222,7 @@ mod tests {
         hint_bar(&mut fb, &[("SLOT", "A·B·C"), ("OK", "Quick"), (LEFT, "Band")]);
         hint_bar(&mut fb, &[(UP, ""), ("Knob", "Change")]);
         toast(&mut fb, b"VE3KPW-9", b"On my way", true);
-        list_row(&mut fb, 41, 22, &Row { num: Some(1), name: b"Squelch", value: b"4", dot: true, selected: true, grey: false }, Cue::default());
+        list_row(&mut fb, 41, 22, &Row { num: Some(1), name: b"Squelch", value: b"4", dot: true, selected: true, grey: false }, Cue::default(), false);
         kv(&mut fb, 20, 18, &KV_STATUS, b"Transmit", b"Ready", GREEN, false, Cue::default());
         help_box(&mut fb, 265, 33, b"Audio opens above this level. Home: SIDE1 + knob.", b"MENU 1");
         edit_cell(&mut fb, 161, 85, 72, 31, b"Tone", b"T 100.0", true, false);

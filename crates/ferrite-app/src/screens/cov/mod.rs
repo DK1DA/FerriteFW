@@ -331,5 +331,33 @@ fn menu_rows_fit_at_14px() {
             }
         }
     }
+    // MENU 0's top level (D2): every group with its longest summary (a scan running, a long count, no GPS fix)
+    {
+        let mut t = T::ready();
+        t.app.scan_mask = 1;
+        t.dev.gps = ferrite_core::msg::GpsState::Searching;
+        t.dev.tx_built = false;
+        for (i, (name, _)) in crate::screens::advanced::GROUPS.iter().enumerate() {
+            for v in [crate::screens::advanced::group_value(&t.app, 1024, &t.dev, i), crate::screens::advanced::group_value(&T::new().app, 1024, &T::new().dev, i)] {
+                let nw = text4_width(name.as_bytes(), &UI_14).min(232 - 25 - 40);
+                let (room, vw) = (232 - 25 - nw - 8, text4_width(v.as_bytes(), &UI_14));
+                let name_room = 232 - 25 - if v.is_empty() { 8 } else { 40 };
+                if vw > room || text4_width(name.as_bytes(), &UI_14) > name_room {
+                    out.insert(std::format!("0 {}: {:?} {:?} ({} > {})", i + 1, name, core::str::from_utf8(v.as_bytes()).unwrap(), vw, room));
+                }
+            }
+        }
+        // Quick settings (D1): every row, its value with the not-default dot
+        for t in [T::new(), T::ready()] {
+            for item in crate::slot::QUICK {
+                let v = crate::screens::quick::row_value(&t.app, item);
+                let nw = text4_width(item.name().as_bytes(), &UI_14).min(232 - 25 - 40);
+                let (room, vw) = (232 - 25 - nw - 18, text4_width(v.as_bytes(), &UI_14));
+                if vw > room {
+                    out.insert(std::format!("Quick {:?}: {:?} ({} > {} with the dot)", item.name(), core::str::from_utf8(v.as_bytes()).unwrap(), vw, room));
+                }
+            }
+        }
+    }
     assert!(out.is_empty(), "menu values that don't fit at 14 px:\n{}", out.iter().cloned().collect::<std::vec::Vec<_>>().join("\n"));
 }
