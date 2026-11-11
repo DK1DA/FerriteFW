@@ -160,7 +160,6 @@ fn vm_in_compose_is_a_beacon() {
 fn predictive_case_pick_and_ok() {
     let mut t = T::new();
     compose(&mut t, b"VE3KPW-9", b"");
-    t.tap(Key::Hash); // Capital -> CAPS
     for k in [4, 6, 6, 3] {
         t.tap(Key::Digit(k)); // home / good / gone...
     }
@@ -171,7 +170,7 @@ fn predictive_case_pick_and_ok() {
     t.tap(Key::Menu); // the word goes in, then sends
     assert_eq!(t.s.messages(), n + 1);
     let m = t.s.message(0).unwrap();
-    assert!(m.text.as_bytes().iter().all(|c| !c.is_ascii_lowercase()), "CAPS: {:?}", core::str::from_utf8(m.text.as_bytes()));
+    assert!(m.text.as_bytes()[0].is_ascii_uppercase(), "a capital starts it: {:?}", core::str::from_utf8(m.text.as_bytes()));
 }
 
 /// TEXT-3: OK with keys that spell nothing doesn't send: "No word"; the same for PTT's send.
@@ -184,12 +183,12 @@ fn predictive_no_word_does_not_send() {
     }
     let n = t.s.messages();
     t.tap(Key::Menu);
-    assert_eq!(t.toast(), "No word / hold * to spell it");
+    assert_eq!(t.toast(), "No word / # to spell it");
     assert_eq!(t.s.messages(), n);
     msgs::send(&mut t.app, &t.s);
     assert_eq!(t.s.messages(), n, "send refuses the same");
-    // hold * with keys that spell nothing: they go, and multi-tap starts
-    t.hold(Key::Star);
+    // TEXT-10: # with keys that spell nothing: they go, and multi-tap's abc starts
+    t.tap(Key::Hash);
     assert!(!t.app.set.predictive);
     assert!(t.app.text.is_empty());
 }
@@ -206,11 +205,11 @@ fn predictive_no_word_other_keys() {
     for k in [Key::Digit(1), Key::Left] {
         t.app.toast = None;
         t.tap(k);
-        assert_eq!(t.toast(), "No word / hold * to spell it", "{k:?}");
+        assert_eq!(t.toast(), "No word / # to spell it", "{k:?}");
     }
     t.app.toast = None;
     t.hold(Key::Digit(7));
-    assert_eq!(t.toast(), "No word / hold * to spell it");
+    assert_eq!(t.toast(), "No word / # to spell it");
     assert_eq!(draft(&t), "Hi ");
     for _ in 0..4 {
         t.tap(Key::Exit);
@@ -264,14 +263,42 @@ fn send_refusals() {
     assert_eq!(t.toast(), "Not sent / KISS on: the app sends");
 }
 
-/// APRS-39: a message to a service stays in multi-tap: hold * says so.
+/// APRS-39, TEXT-10: a message to a service stays in multi-tap: # goes round abc, ABC, 123 without T9, and the
+/// choice of T9 is kept for the next message.
 #[test]
 fn service_recipient_stays_multitap() {
     let mut t = T::new();
     compose(&mut t, b"WXBOT", b"");
+    for _ in 0..4 {
+        t.tap(Key::Hash);
+        assert!(t.app.set.predictive, "the choice is kept");
+    }
+    // abc, ABC, 123, abc, ABC (the service's format shows where the mode would)
+    assert!(matches!(t.app.screen, Screen::Compose(c) if c.case == 1), "{:?}", t.app.screen);
+}
+
+/// TEXT-10 (Daria, an alpha tester): # goes round T9, abc, ABC, 123 and back to T9 on a message, the hint bar
+/// naming the next; hold * no longer switches.
+#[test]
+fn hash_cycles_t9_and_multitap() {
+    let mut t = T::new();
+    compose(&mut t, b"VE3KPW-9", b"");
+    t.shows("Typing: T9");
+    for want in ["abc", "ABC", "123", "T9"] {
+        t.tap(Key::Hash);
+        t.shows(&std::format!("Typing: {want}"));
+        assert_eq!(t.app.set.predictive, want == "T9");
+    }
     t.hold(Key::Star);
-    assert_eq!(t.toast(), "Multi-tap / for services");
-    assert!(t.app.set.predictive, "the choice is kept");
+    assert!(t.app.set.predictive, "hold * changes nothing");
+    // a word in progress goes in before multi-tap starts
+    for k in [4, 6, 6, 3] {
+        t.tap(Key::Digit(k));
+    }
+    t.tap(Key::Hash);
+    assert!(!t.app.set.predictive && t.app.text.is_empty());
+    let d = t.s.draft();
+    assert_eq!(d.text.len(), 4, "the word kept: {:?}", core::str::from_utf8(d.text.as_bytes()));
 }
 
 /// APRS-39: GWALL, the graffiti wall (suggested by Daria, an alpha tester): a service, its format shown.

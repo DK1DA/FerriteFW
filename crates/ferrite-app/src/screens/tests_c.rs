@@ -808,7 +808,7 @@ fn predictive_no_word() {
     for _ in 0..5 {
         t.tap(Key::Digit(9));
     }
-    t.tap(Key::Hash);
+    t.tap(Key::Down); // not a key that takes the word
     assert_eq!(text(&t), "");
     assert!(t.app.text.as_bytes() == b"99999", "the keys stay");
     for _ in 0..5 {
@@ -818,8 +818,8 @@ fn predictive_no_word() {
     assert_eq!(t.name(), "Compose message");
 }
 
-/// TEXT-2: 1 after a word is a full stop, again the next mark; hold a digit types it; hold * switches to
-/// multi-tap (TEXT-10, kept as a setting).
+/// TEXT-2: 1 after a word is a full stop, again the next mark; hold a digit types it; # goes to multi-tap
+/// (TEXT-10, kept as a setting).
 #[test]
 fn predictive_marks_digits_and_switch() {
     let mut t = T::new();
@@ -833,7 +833,7 @@ fn predictive_marks_digits_and_switch() {
     t.hold(Key::Digit(7));
     t.hold(Key::Digit(3));
     assert_eq!(text(&t), "Ok, 73");
-    t.hold(Key::Star);
+    t.tap(Key::Hash);
     assert!(!t.app.set.predictive);
     t.tap(Key::Digit(4));
     assert_eq!(text(&t), "Ok, 73g", "multi-tap now");

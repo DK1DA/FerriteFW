@@ -295,8 +295,6 @@ const TO_MAX: usize = 9;
 const TEXT_MAX: usize = 67;
 /// Predictive: what 1 cycles through (TEXT-2.1). Printable ASCII, none of APRS's | ~ { (TEXT-13).
 const PUNCT: &[u8] = b".,?!'/-@:";
-/// The case of the next predicted word (TEXT-2): Capital, CAPS, lower.
-const PCASES: [&str; 3] = ["Abc", "ABC", "abc"];
 /// Compose's text is the draft's, unless a quick message is being edited (TEXT-7) or the comment (APRS-50).
 const DRAFT: u8 = 255;
 const COMMENT: u8 = 254;
@@ -314,7 +312,7 @@ pub struct Compose {
     pub taps: u8,
     pub at: u16,
     /// Predictive (TEXT-2): the candidate picked for the keys typed (the matches best first, each followed by
-    /// its short form), the case of the next word (index into [`PCASES`]), the punctuation mark + 1 when 1 was
+    /// its short form), the case of the next word (0 Capital, 1 CAPS, 2 lower; set by what comes before it), the punctuation mark + 1 when 1 was
     /// the last key, and the quick message highlighted on an empty message (TEXT-6). The keys typed for the
     /// word in progress are the App's text buffer, as digits.
     pub pick: u8,
@@ -551,7 +549,7 @@ fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
     let keys = app.text;
     let (w, ok, drop) = pending(keys.as_bytes(), t.as_bytes(), *s);
     if !ok {
-        app.show_toast(b"No word", "hold * to spell it".as_bytes(), false); // TEXT-3
+        app.show_toast(b"No word", "# to spell it".as_bytes(), false); // TEXT-3
         return false;
     }
     if t.len() - drop + w.len() > room(*s) {
@@ -630,7 +628,17 @@ impl Compose {
                 s.punct = 0;
                 s.pcase = next_case(t.as_bytes(), s.pcase);
             }
-            (Key::Hash, Short) => s.pcase = (s.pcase + 1) % 3, // # (marked ^): case
+            // TEXT-10: # (marked ^) goes on to multi-tap's abc, the word in progress taken first; T9's case stays
+            // automatic (a capital starts a message and follows . ? !, Q-codes in capitals)
+            (Key::Hash, Short) => {
+                // keys that spell nothing go (TEXT-3: # to spell it), as does a word with no room
+                if pending(keys.as_bytes(), t.as_bytes(), s).1 && !accept(app, &mut s, &mut t) {
+                    app.text.clear();
+                }
+                app.text.clear();
+                app.set.predictive = false;
+                (s.case, s.key, s.pick, s.punct) = (0, 0, 0, 0);
+            }
             (Key::Up | Key::Down, Short | Repeat) if !keys.is_empty() || quick_list => {
                 let d = if e.key == Key::Up { -1 } else { 1 };
                 return self.pred_knob(app, d, store);
@@ -788,23 +796,6 @@ impl View for Compose {
                 return;
             }
         }
-        // TEXT-10: hold * switches predictive and multi-tap for message text; the choice is kept. A message to a
-        // service stays in multi-tap (APRS-39).
-        if s.field == 1 && s.list & SVC != 0 && (e.key, e.press) == (Key::Star, Long) {
-            return app.show_toast("Multi-tap".as_bytes(), "for services".as_bytes(), false);
-        }
-        if s.field == 1 && (e.key, e.press) == (Key::Star, Long) {
-            let mut t = text_of(app, store, s);
-            if s.pred(app) && !accept(app, &mut s, &mut t) {
-                app.text.clear();
-            }
-            put_text(app, store, s, t);
-            app.set.predictive = !app.set.predictive;
-            app.text.clear();
-            app.show_toast(if app.set.predictive { "Predictive".as_bytes() } else { "Multi-tap".as_bytes() }, "hold * to switch".as_bytes(), false);
-            app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
-            return;
-        }
         // TEXT-12: ◀▶ move the cursor in the message; a word being predicted goes in first.
         if s.field == 1 && matches!((e.key, e.press), (Key::Left | Key::Right, Short | Repeat)) {
             let mut t = text_of(app, store, s);
@@ -858,6 +849,15 @@ impl View for Compose {
             }
             // APRS-17.8: V/M sends a beacon; the draft stays as it is
             (Key::VfoMem, Short) => return super::opts::beacon_now(app, store),
+            // TEXT-10: # goes round abc, ABC, 123, then T9 on the message (never to a service, APRS-39: back to abc)
+            (Key::Hash, Short) if !to && s.case == 2 && s.list & SVC == 0 => {
+                put_text(app, store, s, cur);
+                app.set.predictive = true;
+                app.text.clear();
+                let t = text_of(app, store, s);
+                app.screen = Screen::Compose(Compose { case: 0, key: 0, pick: 0, punct: 0, pcase: next_case(t.as_bytes(), 2), ..s });
+                return;
+            }
             (Key::Hash, Short) => {
                 s.case = (s.case + 1) % 3;
                 s.key = 0;
@@ -1055,7 +1055,7 @@ impl View for Compose {
                         lcd.text4(8, y + 13, b.as_bytes(), &UI_12, AMBER, BG);
                         b.clear();
                     } else if pred && self.field == 1 {
-                        let _ = uwrite!(b, "Words: {}", PCASES[self.pcase as usize % 3]);
+                        b.push(b"Typing: T9"); // TEXT-10
                     } else {
                         let _ = uwrite!(b, "Typing: {}", ["abc", "ABC", "123"][self.case as usize % 3]);
                     }
@@ -1098,15 +1098,20 @@ impl View for Compose {
         } else if self.field == 0 {
             Hints::new(&[("OK", "Next"), ("#", "Case"), ("BACK", "Delete")])
         } else if pred && !app.text.is_empty() {
-            Hints::new(&[("Knob", "Word"), ("*", "Space"), ("Hold *", "Spell")]) // TEXT-11
+            Hints::new(&[("Knob", "Word"), ("*", "Space"), ("#", "abc")]) // TEXT-11
         } else if pred && self.list & LISTED != 0 {
             Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("*", "Write")]) // TEXT-6.1
-        } else if self.quick_edit_on() {
-            Hints::new(&[("OK", "Keep"), ("Hold *", if pred { "Spell" } else { "Words" }), ("BACK", "Delete")])
-        } else if pred {
-            Hints::new(&[("OK", "Send"), ("1", "Mark"), ("Hold *", "Spell")]) // TEXT-11.1
         } else {
-            Hints::new(&[("OK", "Send"), ("#", "Case"), ("Hold *", "Words")])
+            // TEXT-10: # names the mode it goes to: abc, ABC, 123, T9 (a service's message: back to abc)
+            let next = match (pred, self.case) {
+                (true, _) => "abc",
+                (false, 0) => "ABC",
+                (false, 1) => "123",
+                (false, _) if self.list & SVC != 0 => "abc",
+                (false, _) => "T9",
+            };
+            let ok = if self.quick_edit_on() { ("OK", "Keep") } else { ("OK", "Send") };
+            if pred { Hints::new(&[ok, ("1", "Mark"), ("#", next)]) } else { Hints::new(&[ok, ("#", next), ("BACK", "Delete")]) }
         }
     }
 }
@@ -1197,7 +1202,7 @@ fn quick_rows(app: &mut App, store: &impl ChannelStore, lcd: &mut impl Panel, y:
 fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], head: &[u8], s: Compose) {
     let n = candidates(keys, head);
     if n == 0 {
-        lcd.text4(8, y + 11, "No word: hold * to spell it".as_bytes(), &UI_12, AMBER, BG);
+        lcd.text4(8, y + 11, "No word: # to spell it".as_bytes(), &UI_12, AMBER, BG);
         return;
     }
     let from = s.pick as usize / 3 * 3;
