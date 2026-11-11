@@ -1449,17 +1449,21 @@ fn num(id: u8) -> Buf<5> {
     b
 }
 
-/// The heard list's symbol names (APRS-3) from the APRS symbol table and code.
+/// The heard list's symbol names (APRS-3) from the APRS symbol table and code, as APRS 1.2's symbol tables
+/// name them (datasheets: APRS_1.2c, chapter 21). `table` is `/` (primary), `\` (alternate) or an overlay's
+/// character, which takes the alternate symbol.
 fn sym(table: u8, code: u8) -> Sym {
-    match (table == b'/', code) {
-        (_, b'>') | (_, b'j') | (_, b'v') => Sym::Car,
-        (true, b'-') => Sym::Home,
+    let primary = table == b'/';
+    match (primary, code) {
+        (_, b'>') | (true, b'j') | (_, b'v') | (false, b'k') => Sym::Car, // \k: SUV, ATV, 4x4
+        (_, b'-') => Sym::Home,                                           // \-: house (HF)
         (_, b'#') => Sym::Digi,
         (_, b'_') => Sym::Wx,
-        (false, b'&') | (true, b'&') => Sym::IGate,
-        (_, b'k') | (_, b'u') => Sym::Truck,
-        (_, b's') | (_, b'Y') => Sym::Boat,
-        _ => Sym::Ht,
+        (false, b'[') if table == b'\\' => Sym::Wx, // wall cloud; with an overlay a person
+        (_, b'&') => Sym::IGate,
+        (true, b'k') | (_, b'u') => Sym::Truck,
+        (_, b's') | (true, b'Y') => Sym::Boat, // \Y: radios and devices
+        _ => Sym::Ht,                          // \j: work zone
     }
 }
 
@@ -1509,6 +1513,21 @@ mod tests {
         let mut b = [0u8; FRAME_MAX];
         let n = Frame::new(Address::from_text(src).unwrap(), Address::from_text(dest).unwrap(), &p, info).unwrap().write(&mut b).unwrap();
         (b, n)
+    }
+
+    /// APRS-3: the heard list's names follow APRS 1.2's symbol tables, the alternate table's own meanings too
+    /// (\[ a wall cloud, \- a house, \k an SUV, \j a work zone, \Y radios); an overlay takes the alternate symbol.
+    #[test]
+    fn symbol_names_by_table() {
+        for (t, c, want) in [
+            (b'/', b'>', Sym::Car), (b'\\', b'>', Sym::Car), (b'/', b'j', Sym::Car), (b'\\', b'j', Sym::Ht),
+            (b'/', b'k', Sym::Truck), (b'\\', b'k', Sym::Car), (b'/', b'-', Sym::Home), (b'\\', b'-', Sym::Home),
+            (b'/', b'Y', Sym::Boat), (b'\\', b'Y', Sym::Ht), (b'/', b'[', Sym::Ht), (b'\\', b'[', Sym::Wx),
+            (b'A', b'[', Sym::Ht), (b'/', b'_', Sym::Wx), (b'\\', b'_', Sym::Wx), (b'\\', b'#', Sym::Digi),
+            (b'I', b'&', Sym::IGate), (b'/', b'u', Sym::Truck), (b'\\', b's', Sym::Boat),
+        ] {
+            assert_eq!(sym(t, c), want, "{}{}", t as char, c as char);
+        }
     }
 
     fn fix() -> Fix {
@@ -2584,29 +2603,6 @@ mod tests {
         let n = core::mem::size_of::<AprsLive>();
         std::println!("AprsLive: {n} B, heard entry {} B, out {} B", core::mem::size_of::<Option<Heard>>(), core::mem::size_of::<Option<Out>>());
         assert!(n <= 8_500, "{n}"); // 50 stations (decision 246)
-    }
-
-    /// APRS-3: the heard list's symbol from the table and code: a house only from the primary table, the rest from
-    /// either; anything else a handheld.
-    #[test]
-    fn symbols() {
-        for (t, c, s) in [
-            (b'/', b'>', Sym::Car),
-            (b'\\', b'j', Sym::Car),
-            (b'/', b'-', Sym::Home),
-            (b'\\', b'-', Sym::Ht),
-            (b'/', b'#', Sym::Digi),
-            (b'/', b'_', Sym::Wx),
-            (b'\\', b'&', Sym::IGate),
-            (b'/', b'&', Sym::IGate),
-            (b'/', b'k', Sym::Truck),
-            (b'\\', b'u', Sym::Truck),
-            (b'/', b's', Sym::Boat),
-            (b'/', b'Y', Sym::Boat),
-            (b'/', b'[', Sym::Ht),
-        ] {
-            assert_eq!(sym(t, c), s, "{}{}", t as char, c as char);
-        }
     }
 
     /// APRS-35: a general query's footprint: decimal degrees and miles; anything malformed is none; the distance
