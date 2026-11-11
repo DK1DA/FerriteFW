@@ -177,14 +177,14 @@ impl App {
 
 /// The programme types (BCR-26.8): RBDS's North American list (NRSC-4) in the US and Canada, RDS's (EN 50067)
 /// elsewhere; empty for 0 (none) and RBDS's unassigned 24-28. At most 15 characters: the card's header holds
-/// "123 · " and the name beside "muted".
-static PTY_RBDS: [&str; 32] = [
+/// "123 · " and the name beside "muted". Consts, so in slow flash (read twice a second at most).
+const PTY_RBDS: [&str; 32] = [
     "", "News", "Information", "Sports", "Talk", "Rock", "Classic rock", "Adult hits", "Soft rock", "Top 40",
     "Country", "Oldies", "Soft", "Nostalgia", "Jazz", "Classical", "Rhythm & blues", "Soft R&B", "Language",
     "Religious music", "Religious talk", "Personality", "Public", "College", "", "", "", "", "", "Weather",
     "Emergency test", "Emergency",
 ];
-static PTY_RDS: [&str; 32] = [
+const PTY_RDS: [&str; 32] = [
     "", "News", "Current affairs", "Information", "Sport", "Education", "Drama", "Culture", "Science", "Varied",
     "Pop music", "Rock music", "Easy listening", "Light classical", "Classical", "Other music", "Weather",
     "Finance", "Children's", "Social affairs", "Religion", "Phone-in", "Travel", "Leisure", "Jazz", "Country",
