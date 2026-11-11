@@ -455,7 +455,7 @@ fn broadcast_card_and_report() {
     t.wait(100);
     let mut rt = [0u8; 64];
     rt[..9].copy_from_slice(b"Some text");
-    t.live.mode = ModeLive::Fm { freq: 10_050, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, heard: false };
+    t.live.mode = ModeLive::Fm { freq: 10_050, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, pty: 0, heard: false };
     let v = ui(&t);
     assert!(find(&v, "card B").ends_with(" kind=broadcast"), "{v:#?}");
     let b = find(&v, "bcast B");

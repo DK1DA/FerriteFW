@@ -107,18 +107,21 @@ def about_pages_go_round(t):
     t.eq((u.id, u.sel and u.sel["name"]), ("Group", "About"), "BACK leaves to System, on About")
 
 
-@test("BOOT-11", "SELF-8", "SELF-9", pages=("Info",))
+@test("BOOT-11", "SELF-5", "SELF-8", "SELF-9", pages=("Info",))
 def about_rows(t):
-    """About: version, MCU, the unique ID (one row, base32), SPI flash, calibration, the transmit state, self-test, SSB
-    patch (installed or the path to install it); System (▶): CPU, RAM, stack free, MCU temp, battery, uptime."""
+    """About: version, MCU, the unique ID (one row, base32), SPI flash, calibration, the transmit state, self-test, the
+    SI4732's revisions, SSB patch (installed or the path to install it); System (▶): CPU, RAM, stack free, MCU temp,
+    battery, uptime."""
     u = t.keys("MENU 0 9 8")
-    want = ["Version", "MCU", "ID", "SPI flash", "Calibration", "Transmit", "Self-test", "SSB patch"]
+    want = ["Version", "MCU", "ID", "SPI flash", "Calibration", "Transmit", "Self-test", "SI4732", "SSB patch"]
     t.eq(u.names(), want, "the About rows")
     t.check(re.fullmatch(r"(?:[0-9A-HJKMNP-TV-Z]{5} ){3}[0-9A-HJKMNP-TV-Z]{5}|Not read", u.row("ID")["value"] or ""),
             "the unique ID, base32 on one row", u.row("ID"))
     t.check(u.row("Version")["value"].startswith("v"), "the version", u.row("Version"))
     t.check(u.row("Transmit")["value"], "the transmit state", u.row("Transmit"))
     t.check(u.row("SSB patch")["value"], "the SSB patch state", u.row("SSB patch"))
+    t.check(re.fullmatch(r"FW \w\.\w, rev \w, cmp \w\.\w|Not read", u.row("SI4732")["value"] or ""), "the SI4732's revisions",
+            u.row("SI4732"))
     t.note(f"About: {[(r['name'], r['value']) for r in u.rows]}")
     u = t.keys("RIGHT")
     t.eq(u.names(), ["CPU", "RAM", "Stack free", "MCU temp", "Battery", "Uptime", "Clock"], "the System rows")

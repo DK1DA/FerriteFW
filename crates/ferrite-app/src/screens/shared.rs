@@ -457,7 +457,10 @@ impl App {
         // CHAN-34: a slot on Local names Local, where ◀▶ go on from
         let zone = sl.ch.filter(|_| sl.on_channel() && !lv.scanning && !self.aprs_slot(s)).and_then(|c| if sl.zone == crate::local::LOCAL { Some(crate::chan::Name::from(b"Local".as_slice())) } else { store.zone_name(c.zone) });
         if self.in_bcast_band(s) && !lv.scanning {
-            b.push(b"Broadcast"); // BCR-21: a slot in the broadcast band says so where the band goes
+            // BCR-21: a slot in the broadcast band says so where the band goes; BCR-26.8: the programme type there
+            // while it plays a station that sends one
+            let pty = self.bcast_pty(live, s);
+            b.push(if pty.is_empty() { b"Broadcast".as_slice() } else { pty.as_bytes() });
         } else if let Some(z) = zone {
             b.push(z.as_bytes());
         } else {

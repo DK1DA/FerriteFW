@@ -91,3 +91,19 @@ fn bad_blocks_and_control_characters() {
     let z = Rds::zeroed();
     assert!(z.ps == [0; 8] && z.text().is_empty() && !z.ps_complete() && !z.rt_complete());
 }
+
+/// BCR-26.8: the programme type, bits 9-5 of block B in every group; a block B with two or more errors corrected
+/// doesn't change it.
+#[test]
+fn programme_type() {
+    let mut r = Rds::init();
+    assert_eq!(r.pty, 0);
+    r.feed(0xC201, 5 << 5, 0xE0CD, chars(b"CB"), 0); // 0A, PTY 5 (Rock in RBDS)
+    assert_eq!(r.pty, 5);
+    r.feed(0xC201, 0x2000 | 15 << 5, chars(b"He"), chars(b"ll"), 0); // 2A carries it too
+    assert_eq!(r.pty, 15);
+    r.feed(0xC201, 0x2000 | 9 << 5, chars(b"He"), chars(b"ll"), 0x20); // block B: 3-5 errors corrected
+    assert_eq!(r.pty, 15);
+    r.feed(0xC201, 0x2000 | 9 << 5, chars(b"He"), chars(b"ll"), 0x10); // 1-2 corrected: taken
+    assert_eq!(r.pty, 9);
+}

@@ -817,7 +817,7 @@ pub enum ModeLive {
     /// FM broadcast: frequency (10 kHz), RDS station name and the last complete radio text (all 64 characters,
     /// NUL-padded: BCR-30), level (dBuV), SNR (dB), the stereo pilot, and whether it is on the speaker now (no
     /// amateur slot heard, BCR-24).
-    Fm { freq: u16, ps: [u8; 8], rt: [u8; 64], rssi: u8, snr: u8, stereo: bool, heard: bool },
+    Fm { freq: u16, ps: [u8; 8], rt: [u8; 64], rssi: u8, snr: u8, stereo: bool, pty: u8, heard: bool },
     /// HF mode: frequency, signal (dBm), SNR on the SI4732, which receiver, the SSB patch load (0-100, 255 =
     /// loaded or none).
     Hf { freq: Freq10, rssi: i16, snr: u8, si4732: bool, loading: u8 },
@@ -1033,6 +1033,9 @@ pub struct SelfTest {
     /// BK4829s that answered, a bit per chip; the SI4732 answered.
     pub chips: u8,
     pub si4732: bool,
+    /// SELF-5: the SI4732's GET_REV at the boot probe, ASCII: firmware major and minor, component major and minor,
+    /// chip revision ("6.0", "3.0", "D"); zeros when it didn't answer.
+    pub si_rev: [u8; 5],
     /// A verified SSB patch is in SPI flash (HF-20).
     pub ssb_patch: bool,
     /// Battery reading trim in 10 mV (not in the menu until built: decision 276).

@@ -11,7 +11,7 @@ const FM1005: ferrite_core::freq::Freq10 = mhz(100) + 50_000;
 fn live_fm(t: &mut T, rt: &[u8], ps: &[u8; 8], rssi: u8) {
     let mut r = [0u8; 64];
     r[..rt.len()].copy_from_slice(rt);
-    t.live.mode = ModeLive::Fm { freq: 10_050, ps: *ps, rt: r, rssi, snr: 20, stereo: true, heard: true };
+    t.live.mode = ModeLive::Fm { freq: 10_050, ps: *ps, rt: r, rssi, snr: 20, stereo: true, pty: 0, heard: true };
     t.live.bcast_heard = true;
 }
 

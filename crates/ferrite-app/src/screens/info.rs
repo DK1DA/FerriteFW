@@ -108,7 +108,7 @@ fn volts(b: &mut Buf<40>, mv: u16) {
     let _ = uwrite!(b, "{}.{} V", mv / 1000, Zero((mv % 1000 / 10) as u32, 2));
 }
 
-const ABOUT: [InfoRow; 8] = [
+const ABOUT: [InfoRow; 9] = [
     // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
     ("Version", |_, b| {
         let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
@@ -146,6 +146,21 @@ const ABOUT: [InfoRow; 8] = [
         let failed = c.iter().any(|x| x.1 == Some(false));
         let _ = uwrite!(b, "{} of {} passed", ok, c.len());
         if failed { RED } else { TEXT }
+    }),
+    // SELF-5: the SI4732's firmware, chip and component revisions, from the boot probe
+    ("SI4732", |Ctx { dev: d, .. }, b| {
+        let r = d.selftest.si_rev;
+        if r == [0; 5] {
+            return fixed(b, "Not read", SUB);
+        }
+        let c = |v: u8| if v.is_ascii_alphanumeric() { v } else { b'?' };
+        b.push(b"FW ");
+        b.push(&[c(r[0]), b'.', c(r[1])]);
+        b.push(b", rev ");
+        b.push(&[c(r[4])]);
+        b.push(b", cmp ");
+        b.push(&[c(r[2]), b'.', c(r[3])]);
+        TEXT
     }),
     ("SSB patch", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
 ];

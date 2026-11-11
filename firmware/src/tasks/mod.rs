@@ -34,6 +34,9 @@ pub const UNTESTED: u8 = 3;
 
 /// Each check's state. A static rather than only an event, so a result reported before the UI subscribes is
 /// not lost.
+/// SELF-5: the SI4732's revision from the boot probe (`SelfTest::si_rev`), written once by the Radio task before
+/// its check passes.
+pub static SI_REV: [AtomicU8; 5] = [const { AtomicU8::new(0) }; 5];
 pub static CHECK_STATE: [AtomicU8; CHECKS] = [const { AtomicU8::new(PENDING) }; CHECKS];
 
 

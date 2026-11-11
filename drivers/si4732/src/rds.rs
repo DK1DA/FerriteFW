@@ -1,9 +1,10 @@
 //! RDS (Radio Data System) from the four 16-bit blocks of each group: programme identification, station
-//! name (PS, group 0) and radio text (group 2).
+//! name (PS, group 0), radio text (group 2) and the programme type (PTY, in every group's block B).
 
 #[derive(Clone, Copy)]
 pub struct Rds {
     pub pi: u16,
+    pub pty: u8,      // programme type 0-31 (0: none), from block B when it had few errors
     pub ps: [u8; 8],  // space padded
     pub rt: [u8; 64], // NUL ends it, like the C string it mirrors
     pub groups: u32,  // groups accepted
@@ -20,7 +21,7 @@ fn clean(c: u8) -> u8 {
 impl Rds {
     /// All zero, as the status starts; `init()` is the state after a retune.
     pub const fn zeroed() -> Self {
-        Rds { pi: 0, ps: [0; 8], rt: [0; 64], groups: 0, ps_seen: 0, rt_ab: 0, rt_seen: 0, rt_end: 0xFF }
+        Rds { pi: 0, pty: 0, ps: [0; 8], rt: [0; 64], groups: 0, ps_seen: 0, rt_ab: 0, rt_seen: 0, rt_end: 0xFF }
     }
 
     pub const fn init() -> Self {
@@ -54,6 +55,9 @@ impl Rds {
             self.pi = a;
         }
         self.groups += 1;
+        if eb < 2 {
+            self.pty = (b >> 5 & 0x1F) as u8;
+        }
         let version_b = b >> 11 & 1 != 0;
         match b >> 12 {
             0 if ed != 3 => {

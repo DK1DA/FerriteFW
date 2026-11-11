@@ -186,7 +186,7 @@ fn wake_screen_on() {
     // Broadcast FM never wakes it, nor lights the LED.
     t.wait(16_000);
     assert!(t.app.dark());
-    t.live.mode = ferrite_core::msg::ModeLive::Fm { freq: 10_050, ps: [b' '; 8], rt: [0; 64], rssi: 40, snr: 20, stereo: true, heard: true };
+    t.live.mode = ferrite_core::msg::ModeLive::Fm { freq: 10_050, ps: [b' '; 8], rt: [0; 64], rssi: 40, snr: 20, stereo: true, pty: 0, heard: true };
     t.wait(1_000);
     assert!(t.app.dark(), "broadcast plays: still dark");
     assert!(!t.app.leds(&t.live, &dev(90, false)).green, "no receive LED for broadcast");
