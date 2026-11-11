@@ -579,6 +579,16 @@ impl Session {
                 Status::Ok
             }
             msg::TUNE => tune(app, st, p, &mut o),
+            // LINK-69: a beacon now, as the radio's own; transmits, so a PIN lock's Bluetooth needs AUTH first
+            // (LINK-30, as every request)
+            msg::BEACON if !p.is_empty() => Status::BadArg,
+            msg::BEACON => match crate::screens::opts::send_beacon(app, st) {
+                Ok(()) => Status::Ok,
+                Err((_, why)) => {
+                    o.put(why.as_bytes());
+                    Status::Invalid
+                }
+            },
             msg::CMD => self.command(app, st, dev, live, p, &mut o),
             msg::MORE => {
                 self.more(app, st, dev, live, &mut o);
@@ -733,7 +743,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }]); // LINK-35.2: two bytes
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | ferrite_core::link::caps2::BEACON | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }]); // LINK-35.2: two bytes
         layouts(st, o); // LINK-62
         Status::Ok
     }
