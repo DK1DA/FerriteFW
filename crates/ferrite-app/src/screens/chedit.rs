@@ -232,9 +232,13 @@ impl View for ChEdit {
             w::badge(lcd, 7, 26, a, true, BG);
             let mut l = Buf::<32>::new();
             chan_label(ch.num, &mut l);
-            w::field(lcd, 21, 48, 24, 41, 38, b"", const { &w::st(&UI_12, TEXT, BG, Align::Left) });
-            w::field(lcd, 27, 42, 24, 41, 38, l.as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Left) });
-            field_box(lcd, 68, 23, 122, 20, b"Zone", zone, cell == ZONE, false);
+            // the zone box starts after the number as wide as it is ("CH 1234" with 4,000 channels), so it never
+            // covers its last digit
+            let lw = text4_width(l.as_bytes(), &UI_12);
+            let zx = 27 + lw + 5;
+            w::field(lcd, 21, 6, 24, 41, 38, b"", const { &w::st(&UI_12, TEXT, BG, Align::Left) });
+            w::field(lcd, 27, zx - 27, 24, 41, 38, l.as_bytes(), const { &w::st(&UI_12, TEXT, BG, Align::Left) });
+            field_box(lcd, zx, 23, 190 - zx, 20, b"Zone", zone, cell == ZONE, false);
             lcd.fill(190, 23, 2, 20, BG);
             w::tag(lcd, 232, 25, b"EDIT", BLUE, BG);
         }
