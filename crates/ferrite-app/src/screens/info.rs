@@ -318,6 +318,15 @@ const CYCLE: [Page; 8] = [
     Page::Checks,
 ];
 
+/// HOME-10: the quick help's pages in #'s order, round (◀▶ still go through About's ring, KEY-19).
+const HELP_PAGES: [Help; 5] = [Help::HomeKeys, Help::SideKeys, Help::Digits, Help::MenuNos, Help::Manual];
+
+/// The help page # goes to next.
+fn next_help(h: Help) -> Help {
+    let i = HELP_PAGES.iter().position(|&x| x == h).unwrap_or(0);
+    HELP_PAGES[(i + 1) % HELP_PAGES.len()]
+}
+
 const BACK_ONLY: [(&str, &str); 1] = [("BACK", "Back")];
 
 pub(crate) fn def(p: Page) -> PageDef {
@@ -343,12 +352,13 @@ pub(crate) fn def(p: Page) -> PageDef {
         },
         // The hint bar names the page ▶ goes to.
         Page::Help(h) => {
+            // HOME-10: # names the help page it goes to; ◀▶ still go round About's pages
             let (title, hints): (_, &'static [(&str, &str)]) = match h {
-                Help::Manual => ("Manual", &[(ARROWS_LR, "Keys"), ("BACK", "Back")]),
-                Help::HomeKeys => ("Home keys", &[(ARROWS_LR, "Side keys"), ("BACK", "Back")]),
-                Help::SideKeys => ("Side keys", &[(ARROWS_LR, "Holds"), ("BACK", "Back")]),
-                Help::Digits => ("Holds", &[(ARROWS_LR, "Menu numbers"), ("BACK", "Back")]),
-                Help::MenuNos => ("Menu numbers", &[(ARROWS_LR, "Self-test"), ("BACK", "Back")]),
+                Help::Manual => ("Manual", &[("#", "Home keys"), ("BACK", "Back")]),
+                Help::HomeKeys => ("Home keys", &[("#", "Side keys"), ("BACK", "Back")]),
+                Help::SideKeys => ("Side keys", &[("#", "Holds"), ("BACK", "Back")]),
+                Help::Digits => ("Holds", &[("#", "Menu numbers"), ("BACK", "Back")]),
+                Help::MenuNos => ("Menu numbers", &[("#", "Manual"), ("BACK", "Back")]),
             };
             PageDef { title, rows: &NONE, note: Note::None, hints }
         }
@@ -468,6 +478,7 @@ impl View for Info {
                 app.back();
                 app.show_toast(b"SSB patch", b"in use", false);
             }
+            (Page::Help(h), Key::Hash) => app.screen = Screen::Info(Info { page: Page::Help(next_help(h)) }), // HOME-10
             (_, Key::Exit) => app.back(),
             _ => {}
         }

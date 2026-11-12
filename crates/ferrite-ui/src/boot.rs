@@ -239,7 +239,8 @@ fn paint_at(lcd: &mut impl Panel, b: &BootInfo, full: bool, t: Option<u32>) {
     };
     // Each line paints its own full width (no blank first).
     crate::widgets::field(lcd, 0, 240, 276, 298, 290, text, &crate::widgets::st(&UI_12, col, BG, Align::Center));
-    let more: &[u8] = if failed.is_some() { b"Any key: continue" } else { b"" };
+    // BOOT-9.1: the foot says # is help (HOME-10), unless a failed check needs its "any key"
+    let more: &[u8] = if failed.is_some() { b"Any key: continue" } else { b"Press # for help" };
     crate::widgets::field(lcd, 0, 240, 298, 320, 308, more, const { &crate::widgets::st(&UI_12, SUB, BG, Align::Center) });
 }
 

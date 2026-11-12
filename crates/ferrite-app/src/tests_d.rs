@@ -514,7 +514,8 @@ fn event_hooks_open_their_screens() {
     assert!(matches!(t.app.screen(), Screen::Quick(_)));
     // The mailbox: the Status page's last row.
     t.hold(Key::Exit);
-    t.tap(Key::Hash);
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(0)); // MENU 0 0
     t.tap(Key::Up); // wraps to the last row
     t.tap(Key::Menu);
     assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::Mailbox }));

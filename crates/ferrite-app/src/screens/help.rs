@@ -31,7 +31,7 @@ pub(crate) const HOME_KEYS: [Row; 15] = [
     ("MENU", "Quick settings"),
     ("Hold MENU", "More settings"),
     ("MENU 0", "Menu by number"),
-    ("#", "Status; pause watch"),
+    ("#", "Help; pause watch"), // HOME-10 (decision 376): Status is MENU 0 0
     ("Hold #", "Key lock"),
     ("Hold *", "Quick menu"),
     ("Hold BACK", "Home, from anywhere"),

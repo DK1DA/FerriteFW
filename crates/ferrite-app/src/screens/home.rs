@@ -441,7 +441,10 @@ impl View for Home {
                     app.out.push(RadioCmd::PauseWatch(pause));
                     app.show_toast(b"Watch paused", b"for 1 min", false);
                 } else {
-                    app.screen = Screen::Status(super::status::Status { row: 0, from_menu: false });
+                    // HOME-10: the quick help, its first page the home keys; # goes on through the help pages,
+                    // BACK home (the Status page is MENU 0 0 since decision 376)
+                    app.push_back();
+                    app.screen = Screen::Info(super::info::Info { page: super::info::Page::Help(super::help::Help::HomeKeys) });
                 }
             }
             (Key::Menu, Short) => app.screen = Screen::Quick(super::quick::Quick { row: 0 }), // MENU-1
@@ -512,7 +515,8 @@ impl View for Home {
         }
         let a = app.active;
         let group = if app.bcast_slot() == Some(a) && !app.slots[a as usize].on_channel() { "Seek" } else { group }; // BCR-25
-        Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, (ARROWS_LR, group)])
+        // HOME-10.1: hold SLOT, the slot's settings (EDIT-1, EDIT-2), where a tap's A·B·C told nothing new
+        Hints::new(&[("Hold SLOT", "Edit"), mid, (ARROWS_LR, group)])
     }
 }
 

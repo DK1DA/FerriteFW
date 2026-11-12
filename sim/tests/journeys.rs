@@ -341,11 +341,11 @@ fn channel_only_mode() {
 }
 
 /// The Status page lists every state in words, with a scroll cue for the rows below (SBAR-13, SBAR-14, DISP-24,
-/// HOME-10); the live numbers (MCU temp, stack) are System's (SELF-9).
+/// MENU 0 0 since decision 376); the live numbers (MCU temp, stack) are System's (SELF-9).
 #[test]
 fn status_page() {
     let mut r = Radio::new();
-    r.run("press HASH; expect screen \"Status\"; expect text \"Transmit Ready\"; expect text \"Region Canada\"");
+    r.run("hold MENU; press 0; expect screen \"Status\"; expect text \"Transmit Ready\"; expect text \"Region Canada\"");
     // The rows below the page: 19 rows down is the last of its 20 (the list wraps at its end).
     for _ in 0..19 {
         r.press(Key::Down);

@@ -641,7 +641,7 @@
   | card A active=0 head="VFO · VHF" state="off" freq=146.52000 name="" mode="AM" tone="D023I*" shift="SPLIT" power="No TX" s="+60" meter=20 rx=0 scan=0 kind=slot
   | card B active=1 head="VFO · UHF" state="idle" freq=443.47500 name="" mode="FM" tone="" shift="" power="No TX" s="+60" meter=20 rx=0 scan=0 kind=slot
   | card C active=0 head="VFO · Airband" state="off" freq=118.95000 name="" mode="AM" tone="" shift="" power="No TX" s="+60" meter=20 rx=0 scan=0 kind=slot
-  | hints "SLOT" "A·B·C" "OK" "Quick" "<>" "Band"
+  | hints "Hold SLOT" "Edit" "OK" "Quick" "<>" "Band"
 > ui keys
   writes true
   list UiKeys

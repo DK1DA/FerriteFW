@@ -123,19 +123,26 @@ def hold_digit_shortcuts(t):
     t.eq(t.ui(0.3).active["power"], p0, "power back")
 
 
-@test("HOME-10", "KEY-17", "SBAR-13", pages=("Status",))
-def hash_opens_status(t):
-    """# on home opens the Status page (watch off, so nothing to pause)."""
+@test("HOME-10", "KEY-17", "SBAR-13", pages=("Info", "Status"))
+def hash_opens_help(t):
+    """# on home opens the quick help on the home keys (decision 376; watch off, so nothing to pause); # goes on
+    through the help pages and round, BACK goes home; the Status page is MENU 0 0."""
     t.set("0 1 1", "Off")
     t.home()
     u = t.keys("HASH")
-    t.eq(u.id, "Status", "# on home")
-    t.check(u.rows and u.rows[0]["name"] == "Transmit", "the Status page's rows", u.rows[:2])
+    t.eq((u.id, u.title), ("Info", "Keys"), "# on home: the quick help")
+    titles = [u.title]
+    for _ in range(5):
+        titles.append(t.keys("HASH").title)
+    t.eq(titles, ["Keys", "Side+PTT", "Holds", "Menu nos", "Manual", "Keys"], "# goes round the help pages")
+    t.eq(t.keys("BACK").id, "Home", "BACK: home")
+    st = t.keys("MENU 0 0")
+    t.check(st.id == "Status" and st.rows and st.rows[0]["name"] == "Transmit", "Status: MENU 0 0", st.rows[:2])
 
 
 @test("HOME-10", "WATCH-6", pages=("Home", "Quick", "Status"))
 def hash_pauses_watch_while_receiving(t):
-    """While a watched slot is receiving the hint bar says "# Pause" and # pauses watch instead of Status. Slot B is
+    """While a watched slot is receiving the hint bar says "# Pause" and # pauses watch instead of the quick help. Slot B is
     made to receive by opening its squelch fully (level 0: the noise floor opens it), so no signal is needed."""
     t.set("0 1 1", "A+B+C")
     was = t.home().state["active"]
