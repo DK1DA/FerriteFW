@@ -164,11 +164,22 @@ def options_page_per_satellite(t):
     t.eq((p.get("power"), p.get("uhf_only")), (0, 0), "back as they were")
 
 
+def held(t, timeout=10):
+    """`sat`'s list once the store has mounted: until then it says No satellites (a slow start under a full
+    parallel run used to fail here)."""
+    end = time.time() + timeout
+    while True:
+        out = t.cmd("sat")
+        if "#" in out or time.time() > end:
+            return out
+        time.sleep(0.2)
+
+
 @test("SAT-2", "SAT-3", pages=("SatList",))
 def sat_command_lists_and_deletes(t):
     """`sat` lists the satellites held (place, name, catalogue number); `sat add` is the terminal's (pasting
     needs the terminal itself, not the link); `sat del N` deletes one and the pass list follows."""
-    out = t.cmd("sat")
+    out = held(t)
     t.check("ISS #25544" in out and "SO-50 #27607" in out, "the sample's satellites", out)
     ok, why = t.cmd_err("sat add")
     t.check(not ok and "not over the link" in why, "sat add is refused over the link", why)
