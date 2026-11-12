@@ -1587,8 +1587,8 @@ impl App {
     /// hint bar's toast was missed on the radio, Oct 13, 2026): kept up while held, over any other toast, and
     /// [`STUCK_AFTER_MS`] after the release; inputs let go before the UI first looked are named once for as long.
     fn ptt_stuck_notice(&mut self, stuck: u8) {
+        use crate::screens::STUCK_HEAD;
         use ferrite_core::stuck::{names, EVER_SHIFT, NOW};
-        const HEAD: &[u8] = b"PTT stuck";
         let held = stuck & NOW;
         let mask = if held != 0 {
             held
@@ -1600,9 +1600,9 @@ impl App {
         self.stuck_shown = true;
         let mut b = [0u8; 28];
         let n = names(mask, &mut b);
-        let ours = self.toast.is_some_and(|t| t.center && t.head.as_bytes() == HEAD && t.body.as_bytes() == &b[..n]);
+        let ours = self.toast.is_some_and(|t| t.center && t.head.as_bytes() == STUCK_HEAD && t.body.as_bytes() == &b[..n]);
         if !ours {
-            self.show_popup(HEAD, &b[..n]);
+            self.show_popup(STUCK_HEAD, &b[..n]);
         }
         if let Some(t) = &mut self.toast {
             t.until = self.now.wrapping_add(STUCK_AFTER_MS);

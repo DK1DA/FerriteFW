@@ -894,6 +894,26 @@ fn tune_by_command() {
     }
 }
 
+/// LINK-68: a scan started by `TUNE` while another screen is in use leaves that screen up (the scan screen opens
+/// only over home); in channel-only mode only the active slot can be tuned (PIN-5), as `SLOT` refuses the others.
+#[test]
+fn tune_keeps_the_screen_and_channel_only() {
+    use ferrite_core::link::tune as t;
+    let mut pc = Pc::new(true);
+    let other = (pc.app.active() + 1) % 3;
+    let up = Screen::Status(crate::screens::status::Status { row: 0, from_menu: true });
+    pc.app.screen = up;
+    assert_eq!(pc.ask(msg::TUNE, &[other, t::SCAN, 1]).0, 0);
+    assert_eq!(pc.app.screen, up, "the screen in use stays up");
+    assert_eq!(pc.app.active(), other, "the scan's slot still becomes the active one");
+    let mut pc = Pc::new(true);
+    pc.app.set.chan_only = true;
+    let active = pc.app.active();
+    let (s, a) = pc.ask(msg::TUNE, &[(active + 1) % 3, t::STEP, 1]);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).contains("PIN-5"), "{}", text(&a));
+}
+
 /// LINK-69: `BEACON` sends a beacon now as the radio's Beacon now does, with its checks: refused with APRS and
 /// beacons off, while KISS holds the APRS slot, and without a callsign; nothing asked of the APRS task then.
 #[test]

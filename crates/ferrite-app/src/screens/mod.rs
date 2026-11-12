@@ -115,6 +115,9 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 pub use shared::{Cx, Hints};
 
+/// SAFE-14's popup head: home keeps drawing under it (it lasts as long as PTT is held).
+pub(crate) const STUCK_HEAD: &[u8] = b"PTT stuck";
+
 /// Which screen is up, with its state. One variant per screen module.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Screen {
@@ -439,6 +442,7 @@ impl App {
         if popup_gone {
             self.drawn.popup = 0;
         }
+        // (Not SAFE-14's "PTT stuck": it stays up while PTT is held, and home's RX and TX must keep showing.)
         // HOME-8: a shortcut's popup on home, already on the screen: home waits under it as under the quick menu
         // (it redrew under the popup every frame and the popup over it again, 24 KB each, Nov 9, 2026); the first
         // frame draws home first, so what the shortcut changed shows at once.
@@ -446,7 +450,7 @@ impl App {
             && !popup_gone
             && self.screen == Screen::Home
             && self.drawn.popup != 0
-            && self.toast.is_some_and(|t| t.center);
+            && self.toast.is_some_and(|t| t.center && t.head.as_bytes() != STUCK_HEAD);
         if popup_gone && !cleared && self.screen == Screen::Home && home::uncover(self, lcd, w::POPUP_BOX) {
             // HOME-8: the popup went from home's cards: only the cards under it are drawn again (DISP-25)
             self.drawn.popup_gone = false;

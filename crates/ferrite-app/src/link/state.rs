@@ -46,7 +46,8 @@ fn radio<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &LiveAll, b: &m
     };
     let (lat, lon) = st.data().fix().map_or((m::NO_POS, m::NO_POS), |f| (f.pos.lat, f.pos.lon));
     b[..4].copy_from_slice(&[m::VERSION, app.active, flags, dev.battery_pct]);
-    b[4..6].copy_from_slice(&dev.battery_mv.to_le_bytes());
+    // to 10 mV: millivolt jitter would change the part's hash and send it at every gap (LINK-67)
+    b[4..6].copy_from_slice(&(dev.battery_mv / 10 * 10).to_le_bytes());
     b[6..8].copy_from_slice(&[gps, dev.sats]);
     b[8..12].copy_from_slice(&lat.to_le_bytes());
     b[12..16].copy_from_slice(&lon.to_le_bytes());
@@ -57,7 +58,8 @@ fn slot(app: &App, live: &LiveAll, s: u8, b: &mut [u8]) {
     let sl = &app.slots[i];
     let lv = &live.slots[i];
     let bit = 1u8 << s;
-    let on_ch = sl.on_channel() && sl.ch.is_some();
+    // the APRS slot is tuned to APRS, not its parked channel: no channel to report (LINK-67)
+    let on_ch = sl.on_channel() && sl.ch.is_some() && !app.aprs_slot(s);
     let bcast = app.radio.fm_on && app.bcast_slot() == Some(s);
     let scanning = app.scan_mask & bit != 0;
     let keyed = app.radio.keyed == Some(s);

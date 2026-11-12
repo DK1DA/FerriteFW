@@ -99,7 +99,6 @@ impl From<Nack> for Error {
     }
 }
 
-/// A completed tune or seek.
 /// GET_REV's answer (AN332). The firmware, component and chip revisions are ASCII ("6", "0"; "D").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rev {
@@ -114,6 +113,7 @@ pub struct Rev {
     pub chip: u8,
 }
 
+/// A completed tune or seek.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Tune {
     /// FM: 10 kHz units; AM and SSB: kHz.

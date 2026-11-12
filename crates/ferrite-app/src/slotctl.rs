@@ -218,6 +218,9 @@ impl App {
         if self.aprs_slot(s) {
             return Err(self.aprs_held());
         }
+        if self.set.chan_only && s != self.active {
+            return Err("channel-only mode: only the active slot can change (PIN-5)");
+        }
         let scanning = self.scan_mask & 1 << s != 0;
         if scanning && !matches!(t, Tune::Scan(_)) {
             return Err("the slot is scanning: stop the scan first");
@@ -274,8 +277,13 @@ impl App {
             }
             Tune::Scan(false) if scanning => crate::screens::scan::side2(self, store),
             Tune::Scan(true) if !scanning => {
-                // a scan runs on the slot the radio receives: SIDE2 scans the active one, so the slot stays active
+                // a scan runs on the slot the radio receives: SIDE2 scans the active one, so the slot stays active;
+                // the scan screen opens only over home: another screen in use stays up
+                let up = self.screen;
                 crate::screens::scan::side2(self, store);
+                if !matches!(up, crate::Screen::Home) {
+                    self.screen = up;
+                }
                 if was != s {
                     self.out.push(RadioCmd::Active(s)); // NAV-5
                 }

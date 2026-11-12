@@ -38,6 +38,8 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           "$HOME/.cargo/bin/rustup" toolchain install # reads rust-toolchain.toml
           "$HOME/.cargo/bin/cargo" install -q --locked cargo-llvm-cov # the build report's coverage
+          # nextest runs the test binaries in parallel: the covered host tests 233 -> 29 s on the Mac (Nov 11, 2026)
+          curl -LsSf https://get.nexte.st/0.9.151/linux | tar zxf - -C "$HOME/.cargo/bin"
 
       - name: Host tests
         run: |
@@ -45,10 +47,10 @@ jobs:
           # power-cut and chip-gone tests run about 40 times slower instrumented (11 s plain, over 7 min covered), so
           # they're skipped here and run plainly in the bench build below (store coverage 96.7 -> 92.7 %).
           mkdir -p target/ci
-          cargo llvm-cov --no-report -q -- --skip chip_gone --skip power_cut 2>&1 | tee target/ci/host-tests.log
-          cargo llvm-cov --no-report -q -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea \
+          cargo llvm-cov nextest --no-report -E 'not (test(chip_gone) | test(power_cut))' 2>&1 | tee target/ci/host-tests.log
+          cargo llvm-cov nextest --no-report -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea \
             --all-features 2>&1 | tee target/ci/driver-tests.log
-          cargo test -q --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench
+          cargo nextest run --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench
           # the update file's installer checks (UPD-20 - UPD-24)
           python3 -m unittest tools/test_ffw.py
       - name: Lints
