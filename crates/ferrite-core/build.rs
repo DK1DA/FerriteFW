@@ -10,7 +10,9 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     let sha = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    // --no-optional-locks: git status otherwise refreshes the index, which (watched below) rebuilt everything
+    // after ferrite-core on every build
+    let dirty = git(&["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
     println!("cargo:rustc-env=FERRITE_BUILD={sha}{}", if dirty { "+" } else { "" });
     // Rebuild when HEAD moves or the index changes (a commit, a checkout, a staged edit).
     if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
