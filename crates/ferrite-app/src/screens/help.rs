@@ -149,7 +149,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, h: Help) {
             let mut all: [Row; N] = [("", ""); N];
             for (i, r) in all.iter_mut().enumerate() {
                 *r = match i {
-                    0 => ("", "Hold a key on home"),
+                    0 => ("", "Shortcuts - long press (hold)"),
                     i if i <= HOLD_KEYS.len() => HOLD_KEYS[i - 1],
                     i => (DIGITS[i - 1 - HOLD_KEYS.len()], super::shortcut::SHORTCUTS[i - 1 - HOLD_KEYS.len()]),
                 };
