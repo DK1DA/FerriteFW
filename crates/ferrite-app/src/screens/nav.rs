@@ -556,7 +556,7 @@ fn home_channel(app: &mut App, store: &impl ChannelStore) {
             crate::slot::chan_label(c.num, &mut l);
             app.show_toast(b"Home channel", l.as_bytes(), false);
         }
-        None => app.show_toast(b"No home channel", b"hold SLOT to set", false),
+        None => app.show_toast(b"No home channel", b"hold ABC to set", false),
     }
 }
 

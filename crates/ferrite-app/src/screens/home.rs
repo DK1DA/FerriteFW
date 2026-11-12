@@ -441,10 +441,10 @@ impl View for Home {
                     app.out.push(RadioCmd::PauseWatch(pause));
                     app.show_toast(b"Watch paused", b"for 1 min", false);
                 } else {
-                    // HOME-10: the quick help, its first page the home keys; # goes on through the help pages,
+                    // HOME-10: the quick help, its first page the holds; # goes on through the help pages,
                     // BACK home (the Status page is MENU 0 0 since decision 376)
                     app.push_back();
-                    app.screen = Screen::Info(super::info::Info { page: super::info::Page::Help(super::help::Help::HomeKeys) });
+                    app.screen = Screen::Info(super::info::Info { page: super::info::Page::Help(super::help::Help::Digits) });
                 }
             }
             (Key::Menu, Short) => app.screen = Screen::Quick(super::quick::Quick { row: 0 }), // MENU-1
@@ -511,12 +511,13 @@ impl View for Home {
             // watch while a watched slot is receiving (WATCH-6), else hold MENU is the APRS page.
             let ok = if app.aprs_holder() == Some(crate::aprs::Holder::Beacon) { ("OK", "Send") } else { ("OK", "Heard") };
             let third = if app.watched_rx() { ("#", "Pause") } else { ("Hold MENU", "APRS") };
-            return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), ok, third]);
+            return Hints::new(&[("ABC", "Next"), ok, third]); // the key as it is marked
         }
         let a = app.active;
         let group = if app.bcast_slot() == Some(a) && !app.slots[a as usize].on_channel() { "Seek" } else { group }; // BCR-25
-        // HOME-10.1: hold SLOT, the slot's settings (EDIT-1, EDIT-2), where a tap's A·B·C told nothing new
-        Hints::new(&[("Hold SLOT", "Edit"), mid, (ARROWS_LR, group)])
+        // HOME-10.1: hold ABC (the SLOT key, as marked), the slot's settings (EDIT-1, EDIT-2), where a tap's A·B·C
+        // told nothing new
+        Hints::new(&[("Hold ABC", "Edit"), mid, (ARROWS_LR, group)])
     }
 }
 

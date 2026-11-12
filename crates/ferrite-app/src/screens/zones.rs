@@ -849,7 +849,7 @@ impl View for Zones {
         match self.edit() {
             Some(_) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("#", "Reset")]),
             None if self.on_nearby() => Hints::new(&[("OK", "Open"), ("#", "New"), ("BACK", "Back")]),
-            None => Hints::new(&[("OK", "Use"), ("SLOT", "Edit"), ("#", "New")]), // KEY-9: three; \* still deletes (CHAN-12)
+            None => Hints::new(&[("OK", "Use"), ("ABC", "Edit"), ("#", "New")]), // KEY-9: three; \* still deletes (CHAN-12)
         }
     }
 }

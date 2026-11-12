@@ -318,8 +318,9 @@ const CYCLE: [Page; 8] = [
     Page::Checks,
 ];
 
-/// HOME-10: the quick help's pages in #'s order, round (◀▶ still go through About's ring, KEY-19).
-const HELP_PAGES: [Help; 5] = [Help::HomeKeys, Help::SideKeys, Help::Digits, Help::MenuNos, Help::Manual];
+/// HOME-10: the quick help's pages in #'s order, round, the holds first (Alex: "start with the hold page"); ◀▶
+/// still go through About's ring (KEY-19).
+const HELP_PAGES: [Help; 5] = [Help::Digits, Help::HomeKeys, Help::SideKeys, Help::MenuNos, Help::Manual];
 
 /// The help page # goes to next.
 fn next_help(h: Help) -> Help {
@@ -354,11 +355,11 @@ pub(crate) fn def(p: Page) -> PageDef {
         Page::Help(h) => {
             // HOME-10: # names the help page it goes to; ◀▶ still go round About's pages
             let (title, hints): (_, &'static [(&str, &str)]) = match h {
-                Help::Manual => ("Manual", &[("#", "Home keys"), ("BACK", "Back")]),
+                Help::Digits => ("Holds", &[("#", "Home keys"), ("BACK", "Back")]),
                 Help::HomeKeys => ("Home keys", &[("#", "Side keys"), ("BACK", "Back")]),
-                Help::SideKeys => ("Side keys", &[("#", "Holds"), ("BACK", "Back")]),
-                Help::Digits => ("Holds", &[("#", "Menu numbers"), ("BACK", "Back")]),
+                Help::SideKeys => ("Side keys", &[("#", "Menu numbers"), ("BACK", "Back")]),
                 Help::MenuNos => ("Menu numbers", &[("#", "Manual"), ("BACK", "Back")]),
+                Help::Manual => ("Manual", &[("#", "Holds"), ("BACK", "Back")]),
             };
             PageDef { title, rows: &NONE, note: Note::None, hints }
         }

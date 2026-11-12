@@ -130,7 +130,7 @@ fn toast_replaces_the_hint_bar() {
     assert!(toast.y0 >= 300, "the toast is in the hint bar's rows: {}", toast.y0);
     assert!(items.iter().any(|t| t.s.contains("443.475") || t.s.contains("146.520")), "frequencies still shown");
     r.wait(3200);
-    r.expect_no_text("Copied").expect_text("SLOT");
+    r.expect_no_text("Copied").expect_text("Hold ABC"); // the hint bar back
 }
 
 /// A short press fires on release before 700 ms; a long press fires while held at 700 ms, and its release does
@@ -211,7 +211,7 @@ fn typed_ahead_keys_are_kept() {
 #[test]
 fn hash_on_home() {
     let mut r = Radio::new();
-    r.run("press HASH; expect screen \"Home keys\"; home");
+    r.run("press HASH; expect screen \"Holds\"; home");
     r.wait(17_000); // B is heard from 20 to 22 s
     assert!(r.sim.radio().live.slots[1].squelch_open, "B heard");
     r.press(Key::Hash);
@@ -262,7 +262,7 @@ fn keys_mean_the_same_whatever_the_look() {
         for theme in 0..3 {
             r.sim.app_mut().settings_mut().theme = theme;
             r.wait(200);
-            r.run("hold 1; expect screen \"Scope\"; home; press HASH; expect screen \"Home keys\"; home");
+            r.run("hold 1; expect screen \"Scope\"; home; press HASH; expect screen \"Holds\"; home");
         }
         let _ = layout;
         r.event(Event::Layout);

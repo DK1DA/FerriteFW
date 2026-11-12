@@ -127,7 +127,7 @@ def zones_list_rows_and_chips(t):
         r = zone_row(u, ZONE)
         t.eq((r["value"], r["chips"]), ("5", ""), "the test zone: 5 channels, no chips")
         t.check(re.match(r"\d+ zones? · \d+ ch$", u["head"]["args"][0]), "the header counts zones and channels", u["head"])
-        t.eq(u.hints, [("OK", "Use"), ("SLOT", "Edit"), ("#", "New")], "the hint bar")
+        t.eq(u.hints, [("OK", "Use"), ("ABC", "Edit"), ("#", "New")], "the hint bar")
         t.cmd(f'zone {f.zone} "{ZONE}" scan=on shown=off')
         u = t.ui()
         t.eq(zone_row(u, ZONE)["chips"], "SCAN HID", "in scan all and hidden from ◀▶")

@@ -24,8 +24,8 @@ pub(crate) const HOME_KEYS: [Row; 15] = [
     ("\x1b\x1a", "Band, or zone"),
     ("0-9", "Type freq or channel"),
     ("*", "Mute slot; point"),
-    ("SLOT", "Next slot, A-B-C"),
-    ("Hold SLOT", "Edit the slot"),
+    ("ABC", "Next slot, A-B-C"), // the SLOT key, named as it is marked
+    ("Hold ABC", "Edit the slot"),
     ("V/M", "VFO or channel"),
     ("Hold V/M", "Zones"),
     ("MENU", "Quick settings"),
@@ -82,8 +82,8 @@ fn row(lcd: &mut impl Panel, b: i32, (key, action): Row) {
     w::field(lcd, ACTION_X, ACTION_W, b - 13, b + 4, b, action.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Left) });
 }
 
-/// A page of rows from the top of the content area, with an optional heading line.
-fn rows(lcd: &mut impl Panel, head: &[u8], rows: impl Iterator<Item = Row>) {
+/// A page of rows from the top of the content area, `h` px apart, with an optional heading line.
+fn rows(lcd: &mut impl Panel, head: &[u8], rows: impl Iterator<Item = Row>, h: i32) {
     let mut b = 37;
     if !head.is_empty() {
         w::field(lcd, 8, 224, 22, 40, 36, head, const { &w::st(&UI_12B, TEXT, BG, Align::Left) });
@@ -92,15 +92,26 @@ fn rows(lcd: &mut impl Panel, head: &[u8], rows: impl Iterator<Item = Row>) {
     }
     for r in rows {
         row(lcd, b, r);
-        b += ROW_H;
+        b += h;
     }
 }
+
+/// HELP-4: the holds page's rows: closer than the others' so its 17 lines fit above the hint bar.
+const HOLD_ROW_H: i32 = 16;
 
 /// HELP-4: the ten hold digits, from the table the shortcut list (MENU 0 9 1 3) runs.
 const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
-/// HELP-4: the two holds that aren't digit shortcuts, after the ten (HOME-17, KEY-13).
-pub(crate) const HOLD_KEYS: [Row; 2] = [("*", "Quick menu"), ("#", "Key lock")];
+/// HELP-4: the holds that aren't digit shortcuts, before the ten (EDIT-1, KEY-26, MENU-2, KEY-5, HOME-17,
+/// KEY-13; decision 376: the key holds first, as # opens this page first).
+pub(crate) const HOLD_KEYS: [Row; 6] = [
+    ("ABC", "Edit the slot"),
+    ("V/M", "Zones"),
+    ("MENU", "More settings"),
+    ("BACK", "Home, from anywhere"),
+    ("*", "Quick menu"),
+    ("#", "Key lock"),
+];
 
 /// HELP-2: the QR code, centred, and the address under it.
 fn manual(lcd: &mut impl Panel) {
@@ -130,16 +141,21 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, h: Help) {
     lcd.fill(0, 21, 240, 279, BG);
     match h {
         Help::Manual => manual(lcd),
-        Help::HomeKeys => rows(lcd, b"", HOME_KEYS.iter().copied()),
-        Help::SideKeys => rows(lcd, b"", SIDE_KEYS.iter().copied()),
+        Help::HomeKeys => rows(lcd, b"", HOME_KEYS.iter().copied(), ROW_H),
+        Help::SideKeys => rows(lcd, b"", SIDE_KEYS.iter().copied(), ROW_H),
         Help::Digits => {
-            // a plain array: core's iterator adapters (a zip) would land in fast flash
-            let mut all: [Row; 12] = [("", ""); 12];
+            // a plain array: core's iterator adapters (a zip) would land in fast flash; the heading a row of its own
+            const N: usize = 1 + HOLD_KEYS.len() + 10;
+            let mut all: [Row; N] = [("", ""); N];
             for (i, r) in all.iter_mut().enumerate() {
-                *r = if i < 10 { (DIGITS[i], super::shortcut::SHORTCUTS[i]) } else { HOLD_KEYS[i - 10] };
+                *r = match i {
+                    0 => ("", "Hold a key on home"),
+                    i if i <= HOLD_KEYS.len() => HOLD_KEYS[i - 1],
+                    i => (DIGITS[i - 1 - HOLD_KEYS.len()], super::shortcut::SHORTCUTS[i - 1 - HOLD_KEYS.len()]),
+                };
             }
-            rows(lcd, "Hold a key on home".as_bytes(), all.iter().copied())
+            rows(lcd, b"", all.iter().copied(), HOLD_ROW_H)
         }
-        Help::MenuNos => rows(lcd, "MENU, then the number".as_bytes(), MENU_NOS.iter().copied()),
+        Help::MenuNos => rows(lcd, "MENU, then the number".as_bytes(), MENU_NOS.iter().copied(), ROW_H),
     }
 }

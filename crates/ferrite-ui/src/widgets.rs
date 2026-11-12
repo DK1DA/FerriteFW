@@ -1219,7 +1219,7 @@ mod tests {
         meter(&mut fb, 15, 124, None, 7, GREEN, SURFACE);
         assert_eq!(fb.at(16, 128), GREEN);
         assert_eq!(fb.at(15 + 8 * 10 + 1, 128), LINE);
-        hint_bar(&mut fb, &[("SLOT", "A·B·C"), ("OK", "Quick"), (LEFT, "Band")]);
+        hint_bar(&mut fb, &[("Hold ABC", "Edit"), ("OK", "Quick"), (LEFT, "Band")]);
         hint_bar(&mut fb, &[(UP, ""), ("Knob", "Change")]);
         toast(&mut fb, b"VE3KPW-9", b"On my way", true);
         list_row(&mut fb, 41, 22, &Row { num: Some(1), name: b"Squelch", value: b"4", dot: true, selected: true, grey: false }, Cue::default(), false);

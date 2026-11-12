@@ -125,16 +125,16 @@ def hold_digit_shortcuts(t):
 
 @test("HOME-10", "KEY-17", "SBAR-13", pages=("Info", "Status"))
 def hash_opens_help(t):
-    """# on home opens the quick help on the home keys (decision 376; watch off, so nothing to pause); # goes on
+    """# on home opens the quick help on the holds (decision 376; watch off, so nothing to pause); # goes on
     through the help pages and round, BACK goes home; the Status page is MENU 0 0."""
     t.set("0 1 1", "Off")
     t.home()
     u = t.keys("HASH")
-    t.eq((u.id, u.title), ("Info", "Keys"), "# on home: the quick help")
+    t.eq((u.id, u.title), ("Info", "Holds"), "# on home: the quick help, the holds first")
     titles = [u.title]
     for _ in range(5):
         titles.append(t.keys("HASH").title)
-    t.eq(titles, ["Keys", "Side+PTT", "Holds", "Menu nos", "Manual", "Keys"], "# goes round the help pages")
+    t.eq(titles, ["Holds", "Keys", "Side+PTT", "Menu nos", "Manual", "Holds"], "# goes round the help pages")
     t.eq(t.keys("BACK").id, "Home", "BACK: home")
     st = t.keys("MENU 0 0")
     t.check(st.id == "Status" and st.rows and st.rows[0]["name"] == "Transmit", "Status: MENU 0 0", st.rows[:2])
