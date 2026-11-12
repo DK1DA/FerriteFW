@@ -149,6 +149,10 @@ pub mod msg {
     /// Tunes a slot by command (LINK-68, decision 373): the slot, an op ([`super::tune`]) and its argument, through
     /// the keypad's paths and checks; answered as `SLOT`'s read, or `invalid` and the reason (nothing changed).
     pub const TUNE: u8 = 0x35;
+    /// Sends a position beacon now (LINK-69), as the radio's Beacon now does (APRS-17.8, the same checks): no
+    /// payload; `invalid` and the reason when it can't ("APRS and beacons off", "KISS on: the app sends", no
+    /// callsign). Radios that say caps2 [`super::caps2::BEACON`].
+    pub const BEACON: u8 = 0x36;
     /// Events this session wants pushed (LINK-46): a [`super::event`] mask (0 ends them), then optionally the UI's
     /// least gap in 100 ms units and flags ([`super::event::RENEW`]). Answer: the mask, the Live View dictionary's
     /// version, the next UI sequence number.
@@ -281,6 +285,8 @@ pub mod caps2 {
     /// The radio state message and the tuning commands (LINK-67, LINK-68; decision 373): [`super::msg::STATE`],
     /// [`super::msg::TUNE`] and `SUBSCRIBE`'s [`super::event::SUB_STATE`].
     pub const STATE: u8 = 32;
+    /// [`super::msg::BEACON`]: a beacon now from the link (LINK-69).
+    pub const BEACON: u8 = 64;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).

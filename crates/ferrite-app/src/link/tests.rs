@@ -189,7 +189,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63; RADIO, LINK-66; LINE_CMDS, decision 347; STATE, LINK-67), then the layouts (LINK-62)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | ferrite_core::link::caps2::BEACON | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63; RADIO, LINK-66; LINE_CMDS, decision 347; STATE, LINK-67; BEACON, LINK-69), then the layouts (LINK-62)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 8;
         let c = v + 1 + a[v] as usize;
@@ -892,6 +892,23 @@ fn tune_by_command() {
     for p in [&[other, t::STEP, 0][..], &[other, t::STEP, 101], &[other, t::GROUP, 21], &[other, t::SCAN, 2], &[other, t::CHANNEL, 1], &[3, t::STEP, 1], &[other, 9, 1], &[other]] {
         assert_eq!(pc.ask(msg::TUNE, p).0, Status::BadArg as u8, "{p:?}");
     }
+}
+
+/// LINK-69: `BEACON` sends a beacon now as the radio's Beacon now does, with its checks: refused with APRS and
+/// beacons off, while KISS holds the APRS slot, and without a callsign; nothing asked of the APRS task then.
+#[test]
+fn beacon_from_the_link() {
+    let mut pc = Pc::new(true);
+    let (s, a) = pc.ask(msg::BEACON, &[]);
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "APRS and beacons off"));
+    assert!(!pc.st.beacon_asked());
+    pc.app.set_aprs_mode(true);
+    assert_eq!(pc.ask(msg::BEACON, &[]).0, 0);
+    assert!(pc.st.beacon_asked(), "the APRS task asked for a beacon");
+    assert_eq!(pc.ask(msg::BEACON, &[1]).0, Status::BadArg as u8);
+    (pc.app.set.bt, pc.app.set.kiss_port) = (true, 2);
+    let (s, a) = pc.ask(msg::BEACON, &[]);
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "KISS on: the app sends"));
 }
 
 // ---- CMD and MORE (LINK-34) ----

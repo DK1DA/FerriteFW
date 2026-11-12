@@ -400,18 +400,25 @@ pub(crate) fn beacon_now(app: &mut App, store: &impl ChannelStore) {
     if app.remote_tx_refused() {
         return;
     }
+    if let Err((head, why)) = send_beacon(app, store) {
+        app.show_toast(head.as_bytes(), why.as_bytes(), false);
+    }
+}
+
+/// A beacon now (APRS-17.8), from the radio's keys or the link's `BEACON` (LINK-69): asked of the APRS task and
+/// "Beacon now / done" shown, or refused with the toast's two lines and nothing asked.
+pub(crate) fn send_beacon(app: &mut App, store: &impl ChannelStore) -> Result<(), (&'static str, &'static str)> {
     if let Some(why) = app.kiss_holds_aprs() {
-        return app.show_toast(b"Not sent", why.as_bytes(), false);
+        return Err(("Not sent", why));
     }
     // APRS-17.9: with neither APRS mode nor beacons holding C nothing may send, so the beacon isn't asked for
     // (asked for, it would wait and go the moment either came on).
     if app.aprs_holder().is_none() {
-        return app.show_toast(b"Not sent", b"APRS and beacons off", false);
+        return Err(("Not sent", "APRS and beacons off"));
     }
-    if store.data().request(Op::BeaconNow) {
-        app.show_toast(b"Beacon now", b"done", false);
-    } else {
-        let why: &[u8] = if app.set.callsign.as_bytes().is_empty() { b"set a callsign first" } else { b"callsign over 6" };
-        app.show_toast(b"Beacon now", why, false);
+    if !store.data().request(Op::BeaconNow) {
+        return Err(("Beacon now", if app.set.callsign.as_bytes().is_empty() { "set a callsign first" } else { "callsign over 6" }));
     }
+    app.show_toast(b"Beacon now", b"done", false);
+    Ok(())
 }
