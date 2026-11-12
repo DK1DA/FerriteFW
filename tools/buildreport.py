@@ -7,7 +7,7 @@
     python3 tools/buildreport.py tx --from-logs HOST.log DRIVERS.log   # tests already run under cargo llvm-cov (CI)
     python3 tools/buildreport.py tx --sig FILE.ffw                     # the update file's signature (CI)
 
---from-logs takes the output of `cargo llvm-cov --no-report` (the workspace, then the drivers with --all-features)
+--from-logs takes the output of `cargo llvm-cov nextest --no-report` (or `cargo llvm-cov --no-report`) (the workspace, then the drivers with --all-features)
 saved by the caller: the counts come from those logs and the coverage from that run's data, so nothing runs twice.
 
 What it shows:
@@ -101,6 +101,10 @@ def test_counts(text, ok):
     for m in re.finditer(r"test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored", text):
         for k, v in zip(tot, m.groups()):
             tot[k] += int(v)
+    # cargo nextest's summary: "Summary [ 28.9s] 2016 tests run: 2016 passed, 2 failed, 38 skipped"
+    for m in re.finditer(r"Summary \[[^\]]*\] \d+ tests? run: ([^\n]*)", text):
+        for n, k in re.findall(r"(\d+) (passed|failed|skipped)", m.group(1)):
+            tot["ignored" if k == "skipped" else k] += int(n)
     tot["ok"] = ok and tot["failed"] == 0 and tot["passed"] > 0
     return tot
 
@@ -108,7 +112,7 @@ def test_counts(text, ok):
 def logged_tests(path):
     """The counts in a saved test log (--from-logs): ok when every suite in it said ok."""
     text = open(path, errors="replace").read()
-    return test_counts(text, "test result: FAILED" not in text)
+    return test_counts(text, "test result: FAILED" not in text and "error: test run failed" not in text)
 
 
 def ui_tests(path):
