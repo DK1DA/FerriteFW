@@ -442,10 +442,6 @@ macro_rules! field {
     };
 }
 
-/// Every setting the menu changes, in menu order: what the terminal's `set` takes and `dump` writes (less those
-/// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
-/// setting is one row here (and its field, default and place in `persist.rs`).
-#[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
 /// Every value each setting can show, with its menu path (tests: the menus' widths).
 #[cfg(test)]
 pub(crate) fn all_values() -> std::vec::Vec<([u8; 3], std::vec::Vec<std::string::String>)> {
@@ -465,6 +461,10 @@ pub(crate) fn all_values() -> std::vec::Vec<([u8; 3], std::vec::Vec<std::string:
         .collect()
 }
 
+/// Every setting the menu changes, in menu order: what the terminal's `set` takes and `dump` writes (less those
+/// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
+/// setting is one row here (and its field, default and place in `persist.rs`).
+#[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
 static SETTINGS: [Setting; 97 + cfg!(feature = "bench") as usize] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
