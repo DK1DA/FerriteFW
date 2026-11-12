@@ -82,8 +82,6 @@ pub(crate) enum Act {
     Open(Dest),
     /// Show hidden channels in the lists, or not (a setting, kept).
     ShowHidden,
-    /// Beacons off, or on again in their mode (APRS-17).
-    Beacon,
     /// A waypoint typed as a grid square (GPS-21): text entry.
     Grid,
     /// The arrival alarm's next radius (GPS-12, 0 6 7): off, 50 m ... 1 km.
@@ -149,12 +147,11 @@ const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 1)), txt!("Ba
 /// row (beacons alone hold C); a digit opens a row that opens a screen (MENU-25), so OK 1 reads the messages.
 pub(crate) const APRS_ROW_HEARD: u8 = 1;
 pub(crate) const APRS_ROW_BEACON_NOW: u8 = 3;
-const APRS: [Opt; 8] = [
+const APRS: [Opt; 7] = [
     ("Messages", Act::Open(Dest::AprsMessages), txt!("Inbox, sent and compose")),
     ("Heard", Act::Open(Dest::AprsHeard), txt!("Stations heard, newest first")),
     ("Sent", Act::Open(Dest::AprsSent), txt!("Your beacons and who repeated them")),
     ("Beacon now", Act::Do(Simple::BeaconNow), txt!("Sends your position once (needs a callsign)")),
-    ("Beacon on/off", Act::Beacon, txt!("Automatic beacons, in their mode (0 5 6 1)")),
     ("Event log", Act::Open(Dest::EventLog), txt!("Everything decoded and logged")),
     ("Clear the heard list", Act::Confirm(Simple::ClearHeard), txt!("Stations return when heard")),
     ("APRS settings", Act::Open(Dest::Group(5)), txt!("Beacon, path, symbol, frequency")),
@@ -298,10 +295,6 @@ impl View for Options {
                     if !(d == Dest::AprsHeard && matches!(app.screen, Screen::Aprs(a) if !a.station)) {
                         app.open(d);
                     }
-                }
-                Act::Beacon => {
-                    app.back();
-                    app.toggle_beacon();
                 }
                 Act::Grid => {
                     app.back();

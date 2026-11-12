@@ -40,18 +40,6 @@ fn beacon_now() {
     assert_eq!(t.toast(), "Not sent / KISS on: the app sends");
 }
 
-/// APRS-29: Beacon on/off turns the automatic beacons on and back.
-#[test]
-fn beacon_switch() {
-    let mut t = T::new();
-    t.app.set_aprs_mode(true);
-    t.wait(100);
-    let before = t.app.aprs_cfg().beacon;
-    options(&mut t, Of::Heard);
-    run(&mut t, 5);
-    assert_ne!(t.app.aprs_cfg().beacon, before);
-}
-
 /// APRS-46: Delete all messages asks first; then the inbox count is gone.
 #[test]
 fn delete_all_messages() {

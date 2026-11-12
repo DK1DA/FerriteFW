@@ -424,15 +424,15 @@ fn kiss_suspends_the_radios_own_aprs() {
 }
 
 /// APRS-17.7, APRS-17.3, MENU-25 (decision 257): one APRS list in one order from the APRS slot and from the heard
-/// list (1 Messages, 2 Heard, 3 Sent (APRS-53), 4 Beacon now, 5 Beacon on/off, 6 Event log, 7 Clear the heard list,
-/// 8 APRS settings);
+/// list (1 Messages, 2 Heard, 3 Sent (APRS-53), 4 Beacon now, 5 Event log, 6 Clear the heard list, 7 APRS settings;
+/// decision 375 took out Beacon on/off);
 /// OK 1 on C reads the messages; hold MENU on C opens the same list on the same row as OK; a digit on a row that
 /// does something only moves to it.
 #[test]
 fn one_aprs_list_from_c_and_heard() {
     use crate::screens::opts::{rows, Of};
     let names: Vec<&str> = rows(Of::AprsCard).iter().map(|r| r.0).collect();
-    assert_eq!(names, ["Messages", "Heard", "Sent", "Beacon now", "Beacon on/off", "Event log", "Clear the heard list", "APRS settings"]);
+    assert_eq!(names, ["Messages", "Heard", "Sent", "Beacon now", "Event log", "Clear the heard list", "APRS settings"]);
     assert!(core::ptr::eq(rows(Of::AprsCard), rows(Of::Heard)), "one list");
     let mut a = A::new();
     a.app.set_aprs_mode(true);

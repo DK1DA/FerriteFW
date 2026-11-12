@@ -273,31 +273,21 @@ fn ptt_on_aprs_slot_composes_and_ptt_sends() {
     a.app.key_up(Key::Ptt(1), a.t + 100, &a.s);
 }
 
-/// Beacon mode, power and on/off (0 5 6 1, 0 5 6 3, APRS-17.1).
+/// Beacon mode and power (0 5 6 1, 0 5 6 3, APRS-17.1); a mode paused by the old "Beacon on/off" (decision 375
+/// removed it) reads as off.
 #[test]
 fn beacon_settings() {
     let mut a = A::new();
     let mut b = Buf::<24>::new();
     a.app.beacon_mode_text(&mut b);
     assert_eq!(b.as_bytes(), b"Off");
-    a.app.toggle_beacon();
-    a.app.beacon_mode_text(&mut b);
-    assert_eq!(b.as_bytes(), b"Every 10 min", "on with none chosen");
-    a.app.step_beacon(-4);
+    a.app.step_beacon(1);
     a.app.beacon_mode_text(&mut b);
     assert_eq!(b.as_bytes(), b"Manual");
-    a.app.toggle_beacon();
-    assert_eq!(a.app.aprs_cfg().mode(), 0);
-    a.app.toggle_beacon();
-    assert_eq!(a.app.aprs_cfg().mode(), 1, "on again in its mode");
-    // Modes past 15 (every 10 km, smart) come back too.
-    for m in [16, 17] {
-        a.app.set_aprs(AprsCfg { beacon: m, ..a.app.aprs_cfg() });
-        a.app.toggle_beacon();
-        assert_eq!(a.app.aprs_cfg().mode(), 0);
-        a.app.toggle_beacon();
-        assert_eq!(a.app.aprs_cfg().mode(), m, "mode {m} back after a pause");
-    }
+    a.app.set_aprs(AprsCfg { beacon: 5 | 0x80, ..a.app.aprs_cfg() });
+    assert_eq!(a.app.aprs_cfg().mode(), 0, "paused: off");
+    a.app.beacon_mode_text(&mut b);
+    assert_eq!(b.as_bytes(), b"Off");
     a.app.set_aprs(AprsCfg { power: 2, ..a.app.aprs_cfg() });
     a.mode(true);
     assert!(a.cmds().contains(&RadioCmd::SlotParam { slot: 2, param: Param::Power, value: 2 }));
