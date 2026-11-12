@@ -603,11 +603,16 @@ fn value(store: &impl ChannelStore, z: ZoneId, c: &ZoneCfg, row: usize, b: &mut 
             s => uwrite!(b, "{} s", s),
         },
         _ => match c.pri[row - 6].and_then(|n| (0..store.zone_len(z)).filter_map(|i| store.zone_at(z, i)).find(|ch| ch.num == n)) {
+            // the channel's name (the number and name together didn't fit beside "Priority 1" at 14 px); the
+            // number when it has none
+            Some(ch) if !ch.name().is_empty() => {
+                b.push(ch.name());
+                Ok(())
+            }
             Some(ch) => {
                 let mut l = Buf::<32>::new();
                 chan_label(ch.num, &mut l);
-                let _ = uwrite!(b, "{} ", Txt(l.as_bytes()));
-                b.push(ch.name());
+                b.push(l.as_bytes());
                 Ok(())
             }
             None => uwrite!(b, "None"),
