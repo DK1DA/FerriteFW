@@ -33,8 +33,8 @@ pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
     pub f5k: u16,
     /// Beacon mode: 0 off, 1 manual, then every [`BEACON_MINS`] minutes, and smart ([`SMART`]; 10-16 were the
-    /// distance modes, read as smart since decision 272). Bit 7: off, the mode kept for "beacon on" (the heard list's and the APRS
-    /// card's options).
+    /// distance modes, read as smart since decision 272). Bit 7: off with the mode kept, set by the APRS list's "Beacon on/off" until
+    /// 0.8.3 (decision 375 removed it); a saved one still reads as off.
     pub beacon: u8,
     /// Beacon and message power: 0 low (APRS-20's default), 1 mid, 2 high.
     pub power: u8,
@@ -362,8 +362,6 @@ const TIMED: usize = 2;
 const DROPPED: usize = TIMED + BEACON_MINS.len();
 /// The smart mode's number, kept where it was saved.
 pub const SMART: usize = DROPPED + 7;
-/// Beacon on from "beacon on/off" with no mode chosen yet: every 10 minutes.
-const BEACON_ON: u8 = 5;
 /// The highest saved mode number + 1 (the link's check).
 pub const BEACON_MODES: usize = SMART + 1;
 /// 0 5 6 1's steps: off, manual, the timed ones, smart.
@@ -751,22 +749,6 @@ impl App {
         let i = (at as i32 + d).rem_euclid(BEACON_STEPS as i32) as usize;
         let m = if i == DROPPED { SMART } else { i };
         self.set_aprs(AprsCfg { beacon: m as u8, ..self.aprs });
-    }
-
-    /// "Beacon on/off" (APRS-17): off keeps the mode for turning it on again; on with none chosen is every 10 min.
-    pub(crate) fn toggle_beacon(&mut self) {
-        let b = self.aprs.beacon;
-        let beacon = if self.aprs.mode() != 0 {
-            b | BEACON_PAUSED
-        } else if b & !BEACON_PAUSED != 0 {
-            b & !BEACON_PAUSED // the paused mode back, smart (17) included
-        } else {
-            BEACON_ON
-        };
-        self.set_aprs(AprsCfg { beacon, ..self.aprs });
-        let mut t = Buf::<24>::new();
-        self.beacon_mode_text(&mut t);
-        self.show_toast(b"Beacon", t.as_bytes(), false);
     }
 
     /// "Off", "Manual", "Every 10 min", "Smart".
