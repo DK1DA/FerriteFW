@@ -147,10 +147,12 @@ fn help_digits_are_the_shortcut_table() {
 
 /// HOME-10 (decision 376): # on home opens the quick help on the home keys; # goes on through the help pages and
 /// round (home keys, side keys, holds, menu numbers, the manual), the hint bar naming the next; BACK goes home.
-/// While a watched slot receives, # still pauses watch (WATCH-6).
+/// While a watched slot receives, # still pauses watch (WATCH-6). HOME-10.1: home's hint bar starts with Hold SLOT
+/// Edit.
 #[test]
 fn hash_is_the_quick_help() {
     let mut t = T::new();
+    assert_eq!(t.app.screen().hints(&t.app).as_slice()[0], ("Hold SLOT", "Edit"));
     t.tap(Key::Hash);
     assert_eq!(page(&t), Page::Help(Help::HomeKeys));
     for p in [Help::SideKeys, Help::Digits, Help::MenuNos, Help::Manual, Help::HomeKeys] {

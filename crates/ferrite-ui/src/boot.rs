@@ -311,6 +311,16 @@ mod tests {
         assert!(count(&fb, 28, 140, BLUE) > 100, "the logo");
     }
 
+    /// BOOT-9.1: with every check fine, the logo screen's foot says "Press # for help" (a line of text there).
+    #[test]
+    fn the_foot_says_hash_is_help() {
+        let ok = [Check { label: "Flash", value: "", state: State::Ok }];
+        let mut fb = FrameBuffer::new();
+        draw(&mut fb, &info(None, &ok));
+        let lit = (298..320).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| fb.at(x, y) != BG).count();
+        assert!(lit > 100, "the help line: {lit} pixels");
+    }
+
     /// SETUP-11: the owner card with only a name has no contact block (no rule, no "If found"); with a phone or an
     /// email it has. The callsign shows in capitals.
     #[test]
