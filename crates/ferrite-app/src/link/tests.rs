@@ -1218,7 +1218,7 @@ fn ui_readback_screens() {
     let ui = pc.ui();
     let lines: Vec<_> = ui.lines().collect();
     assert!(lines[0].starts_with("screen Home") && lines[1].starts_with("state frame=") && lines[2].starts_with("bar lock=0"));
-    assert!(lines.last().unwrap().starts_with("hints \"SLOT\""), "{ui}");
+    assert!(lines.last().unwrap().starts_with("hints \"Hold ABC\""), "{ui}");
     assert!(lines[3].starts_with("card A active=1 head=\"VFO") && lines[3].contains(" freq=146.52000 "), "{ui}");
     assert!(ui.len() > MAX_PAYLOAD, "home is longer than one answer, so it pages");
     let mut term = std::string::String::new();

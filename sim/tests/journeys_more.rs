@@ -166,7 +166,7 @@ fn gps_power_backoff_and_beacon_wake() {
     for _ in 0..120 {
         coarse(&mut r, 500, |_| {});
         if matches!(r.sim.device().gps_phase, GpsPhase::Standby(_)) {
-            r.press(Key::Hash).wait(300);
+            r.run("hold MENU; press 0; wait 300ms"); // the Status page (MENU 0 0)
             seen = r.text().contains("sleep");
             break;
         }

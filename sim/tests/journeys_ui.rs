@@ -130,7 +130,7 @@ fn toast_replaces_the_hint_bar() {
     assert!(toast.y0 >= 300, "the toast is in the hint bar's rows: {}", toast.y0);
     assert!(items.iter().any(|t| t.s.contains("443.475") || t.s.contains("146.520")), "frequencies still shown");
     r.wait(3200);
-    r.expect_no_text("Copied").expect_text("SLOT");
+    r.expect_no_text("Copied").expect_text("Hold ABC"); // the hint bar back
 }
 
 /// A short press fires on release before 700 ms; a long press fires while held at 700 ms, and its release does
@@ -206,12 +206,12 @@ fn typed_ahead_keys_are_kept() {
     r.expect_screen("Frequency entry").expect_text("446.1");
 }
 
-/// # on home opens the Status page; while a watched slot is heard it pauses watch instead (KEY-17,
-/// HOME-10).
+/// # on home opens the quick help (decision 376); while a watched slot is heard it pauses watch instead (KEY-17,
+/// HOME-10, WATCH-6).
 #[test]
 fn hash_on_home() {
     let mut r = Radio::new();
-    r.run("press HASH; expect screen \"Status\"; home");
+    r.run("press HASH; expect screen \"Holds\"; home");
     r.wait(17_000); // B is heard from 20 to 22 s
     assert!(r.sim.radio().live.slots[1].squelch_open, "B heard");
     r.press(Key::Hash);
@@ -253,16 +253,16 @@ fn idle_screen_is_still() {
 }
 
 /// A key's meaning doesn't depend on a setting, the theme or the layout: hold 1 opens the band scope and #
-/// the Status page whatever the look (DISP-14, NAV-6, KEY-1).
+/// the quick help whatever the look (DISP-14, NAV-6, KEY-1).
 #[test]
 fn keys_mean_the_same_whatever_the_look() {
     let mut r = Radio::new();
-    r.sim.radio_mut().quiet = true; // nothing heard, so # always means the Status page
+    r.sim.radio_mut().quiet = true; // nothing heard, so # always means the quick help
     for layout in 0..3 {
         for theme in 0..3 {
             r.sim.app_mut().settings_mut().theme = theme;
             r.wait(200);
-            r.run("hold 1; expect screen \"Scope\"; home; press HASH; expect screen \"Status\"; home");
+            r.run("hold 1; expect screen \"Scope\"; home; press HASH; expect screen \"Holds\"; home");
         }
         let _ = layout;
         r.event(Event::Layout);

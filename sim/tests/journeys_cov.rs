@@ -268,7 +268,7 @@ fn radio_refusal_shows_the_refused_screen() {
 #[test]
 fn speaker_mic_on_status_page() {
     let mut r = Radio::new();
-    r.run("press HASH; expect screen \"Status\"");
+    r.run("hold MENU; press 0; expect screen \"Status\"");
     for _ in 0..12 {
         r.press(Key::Down);
     }

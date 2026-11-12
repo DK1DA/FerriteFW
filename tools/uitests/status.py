@@ -98,6 +98,8 @@ def about_pages_go_round(t):
     odd = []
     for cur, nxt in zip(pages, pages[1:]):
         label = cur.hint("<>")
+        if label is None and cur.hint("#"):
+            continue  # a help page's hint names #'s next help page (HOME-10)
         if label not in (nxt.name, nxt.title):
             odd.append(f"{cur.title}: hint {label!r}, next {nxt.name!r}")
     t.eq(odd, [], "each hint names the next page")

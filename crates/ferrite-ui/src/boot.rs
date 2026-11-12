@@ -239,7 +239,8 @@ fn paint_at(lcd: &mut impl Panel, b: &BootInfo, full: bool, t: Option<u32>) {
     };
     // Each line paints its own full width (no blank first).
     crate::widgets::field(lcd, 0, 240, 276, 298, 290, text, &crate::widgets::st(&UI_12, col, BG, Align::Center));
-    let more: &[u8] = if failed.is_some() { b"Any key: continue" } else { b"" };
+    // BOOT-9.1: the foot says # is help (HOME-10), unless a failed check needs its "any key"
+    let more: &[u8] = if failed.is_some() { b"Any key: continue" } else { b"Press # for help" };
     crate::widgets::field(lcd, 0, 240, 298, 320, 308, more, const { &crate::widgets::st(&UI_12, SUB, BG, Align::Center) });
 }
 
@@ -308,6 +309,16 @@ mod tests {
         assert!(count(&fb, 276, 298, RED) > 50, "the check's line in red");
         assert!((298..320).flat_map(|y| (0..240).map(move |x| (x, y))).any(|(x, y)| fb.at(x, y) != BG), "any key: continue");
         assert!(count(&fb, 28, 140, BLUE) > 100, "the logo");
+    }
+
+    /// BOOT-9.1: with every check fine, the logo screen's foot says "Press # for help" (a line of text there).
+    #[test]
+    fn the_foot_says_hash_is_help() {
+        let ok = [Check { label: "Flash", value: "", state: State::Ok }];
+        let mut fb = FrameBuffer::new();
+        draw(&mut fb, &info(None, &ok));
+        let lit = (298..320).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| fb.at(x, y) != BG).count();
+        assert!(lit > 100, "the help line: {lit} pixels");
     }
 
     /// SETUP-11: the owner card with only a name has no contact block (no rule, no "If found"); with a phone or an

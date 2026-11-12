@@ -40,11 +40,12 @@ fn about_pages_go_round() {
     for p in order {
         // the hint bar names the page ▶ goes to (its status bar name or its title)
         let h = t.app.screen().hints(&t.app);
-        let label = h.as_slice()[0].1;
+        let (key, label) = h.as_slice()[0];
         t.tap(Key::Right);
         assert_eq!(page(&t), p);
         let name = t.app.screen().name();
-        assert!(label == name || label == crate::screens::short_title(name), "{p:?}: the hint said {label:?}, the page is {name:?}");
+        // the help pages' hint names #'s next page instead (HOME-10)
+        assert!(key == "#" || label == name || label == crate::screens::short_title(name), "{p:?}: the hint said {label:?}, the page is {name:?}");
     }
     t.tap(Key::Left);
     assert_eq!(page(&t), Page::Checks, "◀ goes back");
@@ -136,10 +137,30 @@ fn help_digits_are_the_shortcut_table() {
         assert!(text4_width(s.as_bytes(), &UI_12) <= ACTION_W, "{s} fits");
     }
     assert_eq!(SHORTCUTS.len(), 10);
-    assert_eq!(HOLD_KEYS.map(|r| r.0), ["*", "#"]);
+    assert_eq!(HOLD_KEYS.map(|r| r.0), ["ABC", "V/M", "MENU", "BACK", "*", "#"], "the key holds (decision 376)");
     for (_, a) in HOLD_KEYS {
         assert!(text4_width(a.as_bytes(), &UI_12) <= ACTION_W, "{a} fits");
     }
     assert_eq!(crate::screens::short_title("Holds"), "Holds");
 }
 
+
+/// HOME-10 (decision 376): # on home opens the quick help on the holds; # goes on through the help pages and
+/// round (holds, home keys, side keys, menu numbers, the manual), the hint bar naming the next; BACK goes home.
+/// While a watched slot receives, # still pauses watch (WATCH-6). HOME-10.1: home's hint bar starts with Hold ABC
+/// Edit (the SLOT key, as marked).
+#[test]
+fn hash_is_the_quick_help() {
+    let mut t = T::new();
+    assert_eq!(t.app.screen().hints(&t.app).as_slice()[0], ("Hold ABC", "Edit"));
+    t.tap(Key::Hash);
+    assert_eq!(page(&t), Page::Help(Help::Digits), "the holds first");
+    for p in [Help::HomeKeys, Help::SideKeys, Help::MenuNos, Help::Manual, Help::Digits] {
+        let h = t.app.screen().hints(&t.app);
+        assert_eq!(h.as_slice()[0].0, "#");
+        t.tap(Key::Hash);
+        assert_eq!(page(&t), Page::Help(p));
+    }
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), crate::Screen::Home, "BACK: home");
+}

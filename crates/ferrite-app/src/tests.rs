@@ -488,8 +488,8 @@ fn menu_zero_and_status() {
     t.tap(Key::Exit);
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
-    t.tap(Key::Hash); // HOME-10
-    assert_eq!(t.app.screen(), Screen::Status(Status { row: 0, from_menu: false }));
+    t.tap(Key::Hash); // HOME-10 (decision 376): the quick help, not the Status page
+    assert!(matches!(t.app.screen(), Screen::Info(_)), "{:?}", t.app.screen());
     t.hold(Key::Exit); // KEY-5: hold BACK goes home
     assert_eq!(t.app.screen(), Screen::Home);
     t.tap(Key::Menu);
@@ -709,7 +709,8 @@ fn screens_draw() {
         assert!(count_px(&fb, 0, 19, |c| c != BG) > 50, "status bar");
     }
     t.tap(Key::Exit);
-    t.tap(Key::Hash);
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(0)); // MENU 0 0
     t.render(&mut fb);
     assert!(matches!(t.app.screen(), Screen::Status(_)));
     assert!(count_px(&fb, 20, 38, |c| c == BLUE) > 2000, "first row selected");
@@ -786,7 +787,8 @@ fn status_value_change_redraws_its_row_only() {
     }
     const ROW_PX: u64 = 240 * 18;
     let mut t = T::new();
-    t.tap(Key::Hash);
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(0)); // MENU 0 0
     assert!(matches!(t.app.screen(), Screen::Status(_)));
     let mut lcd = Count(FrameBuffer::new(), Vec::new(), 0, None);
     let mut dev = Device { clock_min: Some(600), gps: GpsState::Fix, gps_phase: GpsPhase::Standby(42), battery_pct: 80, ..Default::default() };
@@ -1089,8 +1091,9 @@ mod d;
 #[test]
 fn back_is_one_level_hold_back_is_home() {
     let mut t = T::new();
-    // Status page -> Watch (quick settings) -> BACK -> Status -> BACK -> home
-    t.tap(Key::Hash);
+    // Status page (MENU 0 0) -> Watch (quick settings) -> BACK -> Status -> BACK -> MENU 0 -> BACK -> home
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(0));
     assert!(matches!(t.app.screen(), Screen::Status(_)));
     for _ in 0..5 {
         t.tap(Key::Down); // Watch
@@ -1099,6 +1102,7 @@ fn back_is_one_level_hold_back_is_home() {
     assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 6 }));
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Status(s) if s.row == 5), "back to the Status page, on its row");
+    t.tap(Key::Exit);
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
     // MENU 0 0 (Status from advanced) -> BACK -> advanced -> BACK -> home
@@ -1206,18 +1210,18 @@ fn theme_change_redraws_everything() {
     let mut t = T::new();
     let mut fb = FrameBuffer::new();
     t.render(&mut fb);
-    assert_eq!(fb.at(120, 310), BG, "dark: the hint bar's ground");
+    assert_eq!(fb.at(1, 318), BG, "dark: the hint bar's ground");
     t.app.settings_mut().theme = ferrite_ui::theme::NIGHT_RED;
     t.render(&mut fb);
-    for (x, y) in [(5, 5), (120, 150), (120, 310), (60, 60)] {
+    for (x, y) in [(5, 5), (120, 150), (1, 318), (60, 60)] {
         assert_eq!(fb.at(x, y) & 0x07FF, 0, "({x}, {y}) is red only");
     }
     t.app.settings_mut().theme = ferrite_ui::theme::DAYLIGHT;
     t.render(&mut fb);
-    assert_eq!(fb.at(120, 310), ferrite_ui::gfx::WHITE, "daylight: white ground");
+    assert_eq!(fb.at(1, 318), ferrite_ui::gfx::WHITE, "daylight: white ground");
     t.app.settings_mut().theme = ferrite_ui::theme::DARK;
     t.render(&mut fb);
-    assert_eq!(fb.at(120, 310), BG);
+    assert_eq!(fb.at(1, 318), BG);
 }
 
 /// DISP-18 (strict night red): home is red or black only, nothing between but text's anti-aliasing (no dim fills,

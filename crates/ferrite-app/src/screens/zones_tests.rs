@@ -417,7 +417,7 @@ fn toast(t: &T) -> Option<String> {
 fn ok_on_a_zone_puts_the_slot_on_it() {
     let mut t = T::new();
     t.open();
-    assert_eq!(t.app.screen().hints(&t.app).as_slice(), [("OK", "Use"), ("SLOT", "Edit"), ("#", "New")]);
+    assert_eq!(t.app.screen().hints(&t.app).as_slice(), [("OK", "Use"), ("ABC", "Edit"), ("#", "New")]);
     assert!(!t.app.slot(0).on_channel(), "A starts on its VFO");
     t.tap(Key::Down); // Repeaters
     t.tap(Key::Menu);
