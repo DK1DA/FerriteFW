@@ -22,7 +22,17 @@ pub const FILL: usize = 7;
 pub const PUSH: usize = 8;
 /// Whole regions drawn in bands, everything in them included.
 pub const BANDS: usize = 9;
-pub const N: usize = 10;
+/// The status bar: its state built, compared, and drawn when it changed.
+pub const SBAR: usize = 10;
+/// The screen's own drawing (its regions built, compared, drawn), everything under it included.
+pub const SCREEN: usize = 11;
+/// The hint bar, the quick menu and a popup after the screen.
+pub const HINT: usize = 12;
+/// Home's cards, each one's whole turn (inside SCREEN): A's, B's and C's, from CARD on.
+pub const CARD: usize = 13;
+/// Of those, the APRS card's own part below its header (inside CARD).
+pub const APRS: usize = 16;
+pub const N: usize = 17;
 
 static P: [AtomicU32; N] = [const { AtomicU32::new(0) }; N];
 /// The cycle counter, a `fn() -> u32` (0: none).

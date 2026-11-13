@@ -1039,6 +1039,11 @@ pub async fn task() {
                     bringup::linef(|b| {
                         let _ = ufmt::uwrite!(b, "  prof2 /10ms: fill {} push {} bands {}", t(ferrite_ui::prof::FILL), t(ferrite_ui::prof::PUSH), t(ferrite_ui::prof::BANDS));
                     });
+                    bringup::linef(|b| {
+                        let c = ferrite_ui::prof::CARD;
+                        let _ = ufmt::uwrite!(b, "  prof3 /10ms: sbar {} screen {} (cards {} {} {}, aprs {}) hint {}", t(ferrite_ui::prof::SBAR),
+                            t(ferrite_ui::prof::SCREEN), t(c), t(c + 1), t(c + 2), t(ferrite_ui::prof::APRS), t(ferrite_ui::prof::HINT));
+                    });
                 }
             }
         }

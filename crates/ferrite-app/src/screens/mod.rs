@@ -429,6 +429,7 @@ impl App {
             qmenu::unseen(self); // the quick menu's box went with the content: drawn again whole over the screen
         }
         self.note_device(dev);
+        let t0 = ferrite_ui::prof::now();
         if self.screen.bar() && !self.lpm_home() {
             let sb = self.status_bar(live, dev);
             if self.drawn.sbar != Some(sb) {
@@ -438,6 +439,7 @@ impl App {
         } else {
             self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
+        ferrite_ui::prof::add(ferrite_ui::prof::SBAR, t0);
         let popup_gone = self.drawn.popup_gone;
         if popup_gone {
             self.drawn.popup = 0;
@@ -470,6 +472,7 @@ impl App {
         }
         // HOME-17: while the quick menu's box is up the screen under it waits, so nothing draws through the box
         // (DISP-25); a cleared screen (or one under a popup that just went) is drawn whole first, the box over it.
+        let t0 = ferrite_ui::prof::now();
         if cleared {
             // DISP-29: a new screen (or the panel woken) is drawn once, recorded, with the background only where its
             // content doesn't paint: clearing the area first sent most pixels twice. A screen too big to record (or
@@ -486,6 +489,8 @@ impl App {
             // through a band that passes straight on, so each screen's drawing is compiled once (as `fresh`'s)
             self.screen.render(self, &mut ferrite_ui::canvas::direct(lcd), &cx);
         }
+        ferrite_ui::prof::add(ferrite_ui::prof::SCREEN, t0);
+        let t0 = ferrite_ui::prof::now();
         self.render_hint(lcd);
         qmenu::draw(self, lcd);
         // A shortcut's popup sits over the screen: drawn after it every time, as the screen may have drawn under it.
@@ -500,6 +505,7 @@ impl App {
         } else {
             self.drawn.popup = 0;
         }
+        ferrite_ui::prof::add(ferrite_ui::prof::HINT, t0);
     }
 }
 

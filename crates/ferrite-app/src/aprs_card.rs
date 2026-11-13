@@ -140,11 +140,12 @@ impl App {
     pub fn heard_counts(&self, data: &dyn Data) -> (u16, u16, Option<Station>) {
         let up_s = self.now / 1000;
         let (mut boot, mut hour) = (0u16, 0u16);
-        for s in (0..data.stations()).filter_map(|i| data.station(i)) {
+        // PWR-26.13: from RAM: the counts and the newest call and age need none of the stored details
+        for s in (0..data.stations()).filter_map(|i| data.station_ram(i)) {
             boot += since_boot(&s, up_s) as u16;
             hour += in_hour(&s) as u16;
         }
-        (boot, hour, data.station(0).filter(|s| since_boot(s, up_s)))
+        (boot, hour, data.station_ram(0).filter(|s| since_boot(s, up_s)))
     }
 
     /// APRS-21, WATCH-17.3: who wins the VHF chip C shares with A or B (0 5 9 7), for the header beside the state:
@@ -157,6 +158,12 @@ impl App {
 
     /// The APRS card's texts while slot C is the APRS slot (APRS-17); None otherwise.
     pub fn aprs_card(&self, data: &dyn Data) -> Option<AprsCard> {
+        self.aprs_card_as(data, true)
+    }
+
+    /// As [`App::aprs_card`]; with `large` false the large card's own parts (the station rows, the unread messages,
+    /// the beacon's fate) are left empty: the small card is drawn every frame, and those read the store (PWR-26.13).
+    pub fn aprs_card_as(&self, data: &dyn Data, large: bool) -> Option<AprsCard> {
         let holder = self.aprs_holder()?;
         let st = data.beacon();
         let fix = data.fix();
@@ -227,7 +234,8 @@ impl App {
         let up_s = self.now / 1000;
         let mut rows = [Row::default(); 3];
         let mut rows_n = 0u8;
-        for s in (0..data.stations().min(3)).filter_map(|i| data.station(i)).take_while(|s| since_boot(s, up_s)) {
+        let rows_of = if large { data.stations().min(3) } else { 0 };
+        for s in (0..rows_of).filter_map(|i| data.station(i)).take_while(|s| since_boot(s, up_s)) {
             let r = &mut rows[rows_n as usize];
             r.call = s.call;
             age_text(s.ago_s, &mut r.age);
@@ -244,7 +252,8 @@ impl App {
         }
         // APRS-17.2.4: unread messages, the newest one's sender
         let (mut unread, mut unread_from) = (0u16, Buf::<10>::new());
-        for m in (0..data.messages().min(32)).filter_map(|i| data.message(i)).filter(|m| m.inbound && m.state == MsgState::Unread) {
+        let msgs_of = if large { data.messages().min(32) } else { 0 };
+        for m in (0..msgs_of).filter_map(|i| data.message(i)).filter(|m| m.inbound && m.state == MsgState::Unread) {
             if unread == 0 {
                 unread_from = m.peer;
             }
@@ -252,7 +261,7 @@ impl App {
         }
         // APRS-17.2.3: our last beacon this power-on and who repeated it
         let mut fate = Buf::<40>::new();
-        let fate_warn = data.beacon_sent(0).filter(|_| data.beacons_sent() > 0).is_some_and(|b| fate_text(&b, &mut fate));
+        let fate_warn = large && data.beacon_sent(0).filter(|_| data.beacons_sent() > 0).is_some_and(|b| fate_text(&b, &mut fate));
         let mut bottom_warn = st.waiting;
         let mut fix_note = nofix;
         if holder == Holder::Kiss {
