@@ -516,9 +516,10 @@ pub enum DebugReq {
     /// ([`crate::watch::TurnClock`]), zeroed after if `reset`. The Radio task answers with [`DebugAns::Turns`].
     Turns { reset: bool },
     #[cfg(feature = "bench")]
-    /// TERM-53 (a bench test): the BK4829 bus's half SCK period set (`half`, tenths of a us, RAM only) or only asked, then
-    /// `reads` rounds on each chip: its ID read, REG_48 written back unchanged and read again. Any wrong answer puts stock's 5 us back (and REG_48 as it was). Answered with [`DebugAns::Spi`].
-    Spi { half: Option<u8>, reads: u16 },
+    /// TERM-53 (a bench test): the BK4829 bus's read and write half SCK periods set (`set`, tenths of a us, RAM only),
+    /// then `reads` rounds on each chip at `half` for both: its ID read, REG_48 written in four bit patterns and read
+    /// again at stock's. The speeds and REG_48 are as before after. Answered with [`DebugAns::Spi`].
+    Spi { half: Option<u8>, reads: u16, set: Option<[u8; 2]> },
     #[cfg(feature = "bench")]
     /// TERM-42 (decision 305, a bench test): the receive AF filter override, REG_2B bits 10:8 after every FM tune
     /// (`Some(Some(bits))`), off (`Some(None)`), or only asked (`None`). RAM only. Answered with [`DebugAns::RxAf`].
@@ -689,10 +690,10 @@ pub enum DebugAns {
     Turns(crate::watch::Turns),
     #[cfg(feature = "bench")]
     /// TERM-53: the half period the reads ran at, each chip's failed rounds (u16::MAX: the chip isn't there), the
-    /// mean us an operation took, and the half period now (stock's 5 again after an error).
+    /// mean us an operation took, and the read and write half periods now.
     /// `half` and `now` in tenths of a us.
     /// `rd`: each chip's wrong IDs read at `half`; `wr`: its REG_48 writes at `half` that read back wrong at stock's.
-    Spi { half: u8, reads: u16, rd: [u16; 2], wr: [u16; 2], us: u32, now: u8 },
+    Spi { half: u8, reads: u16, rd: [u16; 2], wr: [u16; 2], us: u32, now: [u8; 2] },
     #[cfg(feature = "bench")]
     /// TERM-42: the receive AF filter override in force (REG_2B bits 10:8), None off.
     RxAf(Option<u16>),

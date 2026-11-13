@@ -734,6 +734,15 @@ fn start_chips(r: &mut Radio) {
         }
         check(Source::Radio, if n == 0 { CHECK_BK0 } else { CHECK_BK1 }, found);
     }
+    // PWR-26.12: found and set up at stock's speed; then Ferrite's, kept only if every chip reads its ID right at
+    // it eight times running.
+    use bk4829::wire::{HALF_US, ID, READ_NS, WRITE_NS};
+    r.wire.set_speeds(READ_NS, WRITE_NS);
+    let chips = r.chips;
+    let ok = (0..2u8).filter(|n| chips & 1 << n != 0).all(|n| (0..8).all(|_| r.chip(n).read(0) == ID));
+    if !ok {
+        r.wire.set_speeds(HALF_US * 1000, HALF_US * 1000);
+    }
 }
 
 #[embassy_executor::task]

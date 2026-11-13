@@ -26,13 +26,18 @@ impl Radio {
                 }
                 DebugAns::Settle(self.settle)
             }
-            // TERM-53: the bus speed test: the half period set, then ID reads of both chips; any error puts stock's back.
-            DebugReq::Spi { half, reads } => {
-                // Each chip's REG_48 (the receive AF gain), the register the writes test, read at stock's speed
-                // whatever a passed test left in force: it and the patterns' read-backs are what the test is judged by.
+            // TERM-53: the bus speed test at one half period for reads and writes, then the speeds as they were;
+            // or the speeds in force set (RAM only).
+            DebugReq::Spi { half, reads, set } => {
+                if let Some([rd, wr]) = set {
+                    self.wire.set_speeds(rd as u32 * 100, wr as u32 * 100);
+                }
+                let before = self.wire.speeds();
+                // Each chip's REG_48 (the receive AF gain), the register the writes test, read at stock's speed: it
+                // and the patterns' read-backs are what the test is judged by.
                 let stock = bk4829::wire::HALF_US * 1000;
-                let half = half.map_or(self.wire.half_ns(), |h| h as u32 * 100);
-                self.wire.set_half_ns(stock);
+                let half = half.map_or(before.0, |h| h as u32 * 100);
+                self.wire.set_speeds(stock, stock);
                 let was = [0u8, 1].map(|n| if self.chips & 1 << n != 0 { self.chip(n).read(bk4829::reg::AF_GAIN) } else { 0 });
                 // Reads (the chip's ID) and writes (REG_48 in four bit patterns) at the half period tested; each write
                 // read back at stock's, so a write is judged apart from the reads. REG_48 ends as it was.
@@ -51,11 +56,11 @@ impl Radio {
                         });
                         let (mut r, mut w) = (0u16, 0u16);
                         for i in 0..reads as usize {
-                            self.wire.set_half_ns(half);
+                            self.wire.set_speeds(half, half);
                             let mut c = self.chip(n);
                             r += (c.read(0) != bk4829::wire::ID) as u16;
                             c.write(bk4829::reg::AF_GAIN, pats[i % 4]);
-                            self.wire.set_half_ns(stock);
+                            self.wire.set_speeds(stock, stock);
                             w += (self.chip(n).read(bk4829::reg::AF_GAIN) != want[i % 4]) as u16;
                         }
                         self.chip(n).write(bk4829::reg::AF_GAIN, v);
@@ -64,22 +69,13 @@ impl Radio {
                 }
                 let ops = reads as u32 * self.chips.count_ones() * 3;
                 let us = (crate::hal::time::cycles().wrapping_sub(c0) / crate::hal::clock::mhz()).checked_div(ops).unwrap_or(0);
-                self.wire.set_half_ns(half);
-                let failed = |e: &[u16; 2]| e.iter().any(|&x| x != 0 && x != u16::MAX);
-                if failed(&rd) || failed(&wr) {
-                    // stock's speed, and each REG_48 put back as it was
-                    self.wire.set_half_ns(stock);
-                    for n in 0..2u8 {
-                        if self.chips & 1 << n != 0 {
-                            self.chip(n).write(bk4829::reg::AF_GAIN, was[n as usize]);
-                        }
-                    }
-                }
+                self.wire.set_speeds(before.0, before.1);
                 // A write at a failing speed may have hit another register: every slot's receive set-up again.
                 if reads > 0 {
                     (0..SLOTS as u8).for_each(|s| self.retune(s));
                 }
-                DebugAns::Spi { half: (half / 100) as u8, reads, rd, wr, us, now: (self.wire.half_ns() / 100) as u8 }
+                let now = self.wire.speeds();
+                DebugAns::Spi { half: (half / 100) as u8, reads, rd, wr, us, now: [(now.0 / 100) as u8, (now.1 / 100) as u8] }
             }
             // WATCH-17.1 (decision 262): the turns the chips took, read and maybe zeroed.
             DebugReq::Turns { reset } => DebugAns::Turns(self.turns.take(reset)),

@@ -1332,7 +1332,7 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Save(c) => DebugAns::Save { cycle: c.flatten(), level: Some((300, 500)), asleep: false },
         #[cfg(feature = "bench")]
-        DebugReq::Spi { half, reads } => DebugAns::Spi { half: half.unwrap_or(50), reads, rd: [0, if half == Some(10) { 3 } else { 0 }], wr: [0, 0], us: 250, now: if half == Some(10) { 50 } else { half.unwrap_or(50) } },
+        DebugReq::Spi { half, reads, set } => DebugAns::Spi { half: half.unwrap_or(30), reads, rd: [0, if half == Some(10) { 3 } else { 0 }], wr: [0, 0], us: 250, now: set.unwrap_or([30, 15]) },
         #[cfg(feature = "bench")]
         DebugReq::Turns { .. } => DebugAns::Turns(ferrite_core::watch::Turns { n: [27, 27, 0], ms: [4050, 1890, 0], steps: [40, 0, 0], step_ms: [2800, 0, 0], tunes: 94, tune_us: 470_000, tune_max_us: 9_100 }),
         #[cfg(feature = "bench")]
@@ -1984,24 +1984,30 @@ fn debug_bk_settle() {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-53: `bk spi` asks the bus's half period, `bk spi 2.5 500` sets it and runs 500 rounds on each chip (ID read, REG_48 written back and read); an error
-/// reports stock's 5 back; out of range or extra words are refused before anything is sent.
+/// TERM-53: `bk spi` asks the bus's read and write half periods, `bk spi 2.5 500` runs 500 rounds on each chip at
+/// 2.5 us (ID read, REG_48 written and read back), `bk spi use 5 5` sets the speeds; out of range or extra words are
+/// refused before anything is sent.
 #[test]
 fn debug_bk_spi() {
     let mut r = Rig::main();
     r.cmd("bk spi");
-    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: None, reads: 0 }]);
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: None, reads: 0, set: None }]);
+    assert!(r.raw().contains("bk spi: reads 3.0 us, writes 1.5 us"), "{}", r.raw());
     r.send(b"\r");
     r.cmd("bk spi 2.5 500");
-    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: Some(25), reads: 500 }]);
-    assert!(r.raw().contains("bk spi: half 2.5 us, 500 rounds a chip: chip 0 reads 0 wrong, writes 0 wrong chip 1 reads 0 wrong, writes 0 wrong; 250 us an operation; now 2.5 us"), "{}", r.raw());
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: Some(25), reads: 500, set: None }]);
+    assert!(r.raw().contains("bk spi: half 2.5 us, 500 rounds a chip: chip 0 reads 0 wrong, writes 0 wrong chip 1 reads 0 wrong, writes 0 wrong; 250 us an operation; now reads 3.0 us, writes 1.5 us"), "{}", r.raw());
     r.send(b"\r");
     r.cmd("bk spi 1");
-    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: Some(10), reads: 2000 }]);
-    assert!(r.raw().contains("chip 1 reads 3 wrong, writes 0 wrong; 250 us an operation; now 5.0 us"), "{}", r.raw());
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: Some(10), reads: 2000, set: None }]);
+    assert!(r.raw().contains("chip 1 reads 3 wrong, writes 0 wrong; 250 us an operation"), "{}", r.raw());
     r.send(b"\r");
-    assert!(!super::cmd::writes(b"bk spi") && super::cmd::writes(b"bk spi 2"));
-    for bad in ["bk spi 0", "bk spi 6", "bk spi 0.9", "bk spi 2.55", "bk spi 2.", "bk spi .5", "bk spi 2 0", "bk spi 2 6000", "bk spi 2 10 x"] {
+    r.cmd("bk spi use 5 4.5");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: None, reads: 0, set: Some([50, 45]) }]);
+    assert!(r.raw().contains("bk spi: reads 5.0 us, writes 4.5 us"), "{}", r.raw());
+    r.send(b"\r");
+    assert!(!super::cmd::writes(b"bk spi") && super::cmd::writes(b"bk spi 2") && super::cmd::writes(b"bk spi use 5 5"));
+    for bad in ["bk spi 0", "bk spi 6", "bk spi 0.9", "bk spi 2.55", "bk spi 2.", "bk spi .5", "bk spi 2 0", "bk spi 2 6000", "bk spi 2 10 x", "bk spi use", "bk spi use 3", "bk spi use 3 0.5", "bk spi use 3 2 1"] {
         r.cmd(bad);
         assert_eq!(r.serve(4, regs), vec![], "{bad}");
         r.send(b"\r");

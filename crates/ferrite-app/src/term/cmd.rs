@@ -2344,25 +2344,37 @@ fn tenths(w: &[u8]) -> Option<u32> {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-53 (a bench test): `bk spi` shows the BK4829 bus's half SCK period; `bk spi HALF [READS]` sets it (1-5 us in
-/// tenths, as 2.5; RAM only) and runs READS rounds on each chip (default 2000, at most 5000: a round on both chips at stock's speed is about 1.6 ms, and the Radio task does nothing else meanwhile): its ID read, REG_48 written back unchanged and read; a wrong answer puts stock's 5 back.
+/// TERM-53 (a bench test): `bk spi` shows the BK4829 bus's read and write half SCK periods; `bk spi use RD WR` sets
+/// them (RAM only; 1-5 us in tenths, as 2.5); `bk spi HALF [READS]` runs READS rounds on each chip at HALF for both
+/// (default 2000, at most 5000: a round on both chips at stock's speed is about 1.6 ms, and the Radio task does
+/// nothing else meanwhile): its ID read, REG_48 written in four bit patterns and read back at stock's; the speeds are
+/// as before after.
 fn spi(t: &mut Toks) -> Result<Done, No> {
-    const USAGE: Txt = txt!("bk spi [HALF [READS]]: the BK4829 bus's half SCK period, 1-5 us in tenths (2.5; 5 is stock's), then READS read and write rounds");
-    let mut half = None;
-    let mut reads = 0u16;
+    const USAGE: Txt = txt!("bk spi [HALF [READS]] | bk spi use RD WR: the BK4829 bus's half SCK period, 1-5 us in tenths (2.5; 5 is stock's): a test of READS rounds, or the read and write speeds set");
+    let speed = |t: &mut Toks| -> Result<u8, No> {
+        match t.next()? {
+            Some(Tok::Word(w)) => Ok(tenths(w).filter(|n| (10..=50).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u8),
+            _ => Err(t.say_t(USAGE)),
+        }
+    };
+    let (mut half, mut reads, mut set) = (None, 0u16, None);
     if let Some(tok) = t.next()? {
         let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
-        half = Some(tenths(w).filter(|n| (10..=50).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u8);
-        reads = 2000;
-        if let Some(tok) = t.next()? {
-            let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
-            reads = number(w).filter(|n| (1..=5_000).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u16;
+        if same(w, b"use") {
+            set = Some([speed(t)?, speed(t)?]);
+        } else {
+            half = Some(tenths(w).filter(|n| (10..=50).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u8);
+            reads = 2000;
+            if let Some(tok) = t.next()? {
+                let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
+                reads = number(w).filter(|n| (1..=5_000).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u16;
+            }
         }
     }
     if t.next()?.is_some() {
         return Err(t.say_t(USAGE));
     }
-    Ok(Done::Debug(Job::new(Kind::Spi { half, reads })))
+    Ok(Done::Debug(Job::new(Kind::Spi { half, reads, set })))
 }
 
 #[cfg(feature = "bench")]

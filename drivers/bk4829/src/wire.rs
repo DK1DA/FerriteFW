@@ -25,8 +25,10 @@ pub struct ThreeWire<K: OutPin, S: IoPin, D: Delay> {
     sda: S,
     delay: D,
     align: Align,
-    /// Half an SCK period now, ns ([`HALF_US`] unless a bench test set another).
-    half: u32,
+    /// Half an SCK period now, ns, while the chip drives SDATA: the turnaround and a read's 16 samples.
+    rd: u32,
+    /// Half an SCK period now, ns, while the MCU drives it: the select's set-up, the address, a write's data.
+    wr: u32,
 }
 
 /// REG_00 holds the chip ID.
@@ -37,26 +39,36 @@ pub const ID: u16 = 0x4829;
 /// overhead stretched it; at 120 MHz chip 0 stopped answering (Oct 12, 2026).
 pub const HALF_US: u32 = 5;
 
+/// Ferrite's read half period, ns (PWR-26.12): a read's bits come back about 2.25 us late on this board's data
+/// line, so reads are every one wrong at 2.1-2.2 us and right at 2.3 us on all three radios measured (TERM-53, Nov
+/// 12, 2026); 3 us leaves 30%.
+pub const READ_NS: u32 = 3000;
+
+/// Ferrite's write half period, ns (PWR-26.12): writes were right at every half period down to 1 us on all three
+/// radios (TERM-53); 1.5 us leaves half again.
+pub const WRITE_NS: u32 = 1500;
+
 impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     /// Leaves SCK low and SDATA released. Reads use [`Align::BeforeFall`] until [`ThreeWire::detect`].
     pub fn new(mut sck: K, mut sda: S, delay: D) -> Self {
         sck.set(false);
         sda.drive(false);
-        ThreeWire { sck, sda, delay, align: Align::BeforeFall, half: HALF_US * 1000 }
+        ThreeWire { sck, sda, delay, align: Align::BeforeFall, rd: HALF_US * 1000, wr: HALF_US * 1000 }
     }
 
     pub fn align(&self) -> Align {
         self.align
     }
 
-    /// Half an SCK period now, ns.
-    pub fn half_ns(&self) -> u32 {
-        self.half
+    /// The half SCK periods now, ns: reads, writes. Stock's ([`HALF_US`]) from [`ThreeWire::new`].
+    pub fn speeds(&self) -> (u32, u32) {
+        (self.rd, self.wr)
     }
 
-    /// A bench test's half SCK period, ns (1 us at least; [`HALF_US`] is stock's).
-    pub fn set_half_ns(&mut self, ns: u32) {
-        self.half = ns.max(1000);
+    /// The half SCK periods, ns, for reads and for writes (1 us at least; [`READ_NS`] and [`WRITE_NS`] are
+    /// Ferrite's, [`HALF_US`] stock's).
+    pub fn set_speeds(&mut self, rd: u32, wr: u32) {
+        (self.rd, self.wr) = (rd.max(1000), wr.max(1000));
     }
 
     fn address(&mut self, out: u8) {
@@ -64,9 +76,9 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
         for i in (0..8).rev() {
             self.sck.set(false);
             self.sda.set(out >> i & 1 != 0);
-            self.delay.delay_ns(self.half);
+            self.delay.delay_ns(self.wr);
             self.sck.set(true);
-            self.delay.delay_ns(self.half);
+            self.delay.delay_ns(self.wr);
         }
     }
 
@@ -74,18 +86,18 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     fn samples(&mut self, cs: &mut impl OutPin, reg: u8) -> u32 {
         self.sck.set(false);
         cs.set(false);
-        self.delay.delay_ns(self.half);
+        self.delay.delay_ns(self.wr);
         self.address(0x80 | (reg & 0x7F));
         self.sda.drive(false); // turnaround
-        self.delay.delay_ns(self.half);
+        self.delay.delay_ns(self.rd);
         let mut bits = self.sda.is_high() as u32;
         for k in 1..=16 {
             self.sck.set(false);
-            self.delay.delay_ns(if k == 1 { 2 * self.half } else { self.half });
+            self.delay.delay_ns(if k == 1 { 2 * self.rd } else { self.rd });
             bits = bits << 1 | self.sda.is_high() as u32;
             if k < 16 {
                 self.sck.set(true);
-                self.delay.delay_ns(self.half);
+                self.delay.delay_ns(self.rd);
             }
         }
         cs.set(true);
@@ -104,14 +116,14 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     pub fn write(&mut self, cs: &mut impl OutPin, reg: u8, value: u16) {
         self.sck.set(false);
         cs.set(false);
-        self.delay.delay_ns(self.half);
+        self.delay.delay_ns(self.wr);
         self.address(reg & 0x7F);
         for i in (0..16).rev() {
             self.sck.set(false);
             self.sda.set(value >> i & 1 != 0);
-            self.delay.delay_ns(self.half);
+            self.delay.delay_ns(self.wr);
             self.sck.set(true);
-            self.delay.delay_ns(self.half);
+            self.delay.delay_ns(self.wr);
         }
         self.sck.set(false);
         cs.set(true);
