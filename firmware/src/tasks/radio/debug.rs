@@ -28,27 +28,37 @@ impl Radio {
             }
             // TERM-53: the bus speed test: the half period set, then ID reads of both chips; any error puts stock's back.
             DebugReq::Spi { half, reads } => {
-                // Each chip's REG_48 (the receive AF gain) read at the speed in force, written back unchanged in the
-                // test: a write's bits through the same line, checked by reading it again.
-                let was = [0u8, 1].map(|n| if self.chips & 1 << n != 0 { self.chip(n).read(bk4829::reg::AF_GAIN) } else { 0 });
-                // Reads (the chip's ID) and writes (REG_48 with its own value) at the half period tested; each write
-                // read back at stock's, so a write is judged apart from the reads.
+                // Each chip's REG_48 (the receive AF gain), the register the writes test, read at stock's speed
+                // whatever a passed test left in force: it and the patterns' read-backs are what the test is judged by.
                 let stock = bk4829::wire::HALF_US * 1000;
                 let half = half.map_or(self.wire.half_ns(), |h| h as u32 * 100);
+                self.wire.set_half_ns(stock);
+                let was = [0u8, 1].map(|n| if self.chips & 1 << n != 0 { self.chip(n).read(bk4829::reg::AF_GAIN) } else { 0 });
+                // Reads (the chip's ID) and writes (REG_48 in four bit patterns) at the half period tested; each write
+                // read back at stock's, so a write is judged apart from the reads. REG_48 ends as it was.
                 let (mut rd, mut wr) = ([u16::MAX; 2], [u16::MAX; 2]);
                 let c0 = crate::hal::time::cycles();
                 for n in 0..2u8 {
                     if self.chips & 1 << n != 0 {
                         let v = was[n as usize];
+                        // Four bit patterns on REG_48 (its own value and three flips of it); what each reads back
+                        // when written at stock's speed is what a fast write must read back.
+                        let pats = [v, v ^ 0x5555, v ^ 0xAAAA, !v];
+                        let want = pats.map(|p| {
+                            let mut c = self.chip(n);
+                            c.write(bk4829::reg::AF_GAIN, p);
+                            c.read(bk4829::reg::AF_GAIN)
+                        });
                         let (mut r, mut w) = (0u16, 0u16);
-                        for _ in 0..reads {
+                        for i in 0..reads as usize {
                             self.wire.set_half_ns(half);
                             let mut c = self.chip(n);
                             r += (c.read(0) != bk4829::wire::ID) as u16;
-                            c.write(bk4829::reg::AF_GAIN, v);
+                            c.write(bk4829::reg::AF_GAIN, pats[i % 4]);
                             self.wire.set_half_ns(stock);
-                            w += (self.chip(n).read(bk4829::reg::AF_GAIN) != v) as u16;
+                            w += (self.chip(n).read(bk4829::reg::AF_GAIN) != want[i % 4]) as u16;
                         }
+                        self.chip(n).write(bk4829::reg::AF_GAIN, v);
                         (rd[n as usize], wr[n as usize]) = (r, w);
                     }
                 }
