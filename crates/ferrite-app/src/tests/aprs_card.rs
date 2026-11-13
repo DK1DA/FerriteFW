@@ -592,3 +592,23 @@ fn aprs_squelch_counts_in_the_readback() {
         .expect("aprs_sq line");
     assert_eq!(line, "aprs_sq opens=3 short=1 spikes=2 settle=4");
 }
+
+/// MENU-34: hold ABC on the APRS slot opens the APRS quick page, the same page whatever holds C (beacons alone,
+/// APRS mode); it no longer says "Slot C held by" (APRS-19 still refuses the slot's own changes).
+#[test]
+fn hold_abc_on_the_aprs_slot_opens_its_quick_page() {
+    use crate::screens::qgrid::Page;
+    let mut a = A::new();
+    a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() });
+    a.tick();
+    a.c_active();
+    a.press(Key::Slot, 800);
+    assert!(matches!(a.app.screen(), Screen::QGrid(g) if g.page == Page::Aprs), "{}", a.app.screen().name());
+    a.press(Key::Exit, 100);
+    assert_eq!(a.app.screen(), Screen::Home);
+    a.app.set_aprs_mode(true);
+    a.tick();
+    a.press(Key::Slot, 800);
+    assert!(matches!(a.app.screen(), Screen::QGrid(g) if g.page == Page::Aprs), "{}", a.app.screen().name());
+    assert_eq!(a.app.active(), APRS_SLOT, "the slot stays");
+}

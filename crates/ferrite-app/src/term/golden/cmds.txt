@@ -678,6 +678,7 @@
   | set 0 5 6 2 Off                   # After voice TX
   | set 0 5 6 3 Low                   # Power
   | set 0 5 6 4 Off                   # Telemetry
+  | set 0 5 6 5 All                   # Text rate
   | set 0 5 7 1 Off                   # Digipeat
   | set 0 5 7 2 WIDE1-1               # Aliases
   | set 0 5 7 3 0 s                   # Wait
@@ -938,6 +939,7 @@
   | set 0 5 6 2 Off                   # After voice TX
   | set 0 5 6 3 Low                   # Power
   | set 0 5 6 4 Off                   # Telemetry
+  | set 0 5 6 5 All                   # Text rate
   | set 0 5 7 1 Off                   # Digipeat
   | set 0 5 7 2 WIDE1-1               # Aliases
   | set 0 5 7 3 0 s                   # Wait

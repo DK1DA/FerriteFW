@@ -120,7 +120,7 @@ pub enum Job {
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
 /// bytes), then the settings added later (path, digipeater, beacon after voice with telemetry as its bit 1
-/// (APRS-54), the SSID: [`APRS_MORE`]), then the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 5, APRS-45:
+/// (APRS-54) and the beacon text's rate as bits 2-3 (APRS-50.1), the SSID: [`APRS_MORE`]), then the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 5, APRS-45:
 /// [`APRS_FX25`]), the message sound, symbol, TX delay and level, then the comment and ambiguity
 /// ([`APRS_COMMENT`]), then Mic-E ([`APRS_MIC_E`]), then auto reply ([`APRS_REPLY`]). A record from before them
 /// is shorter and reads them as their defaults.
@@ -434,9 +434,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 // APRS-26: custom keeps its value 3 from before APRSAT and ARISS (4, 5); kept only with a custom path set
                 cfg.path = if cfg.path_ok(m[0]) { m[0] } else { cfg.path };
                 cfg.digi = m[1] & 0x73;
-                // APRS-54: the after-voice byte's bit 1 is telemetry (the record's length unchanged); erased (0xFF)
-                // reads both off
-                (cfg.after_voice, cfg.telemetry) = if m[2] == 0xFF { (false, false) } else { (m[2] & 1 != 0, m[2] & 2 != 0) };
+                // APRS-54: the after-voice byte's bit 1 is telemetry, bits 2-3 the beacon text's rate (APRS-50.1; the
+                // record's length unchanged); erased (0xFF) reads all three as their defaults
+                (cfg.after_voice, cfg.telemetry, cfg.text_every) = if m[2] == 0xFF { (false, false, 0) } else { (m[2] & 1 != 0, m[2] & 2 != 0, m[2] >> 2 & 3) };
                 // APRS-30: the spare byte; erased (0xFF, a record from before it) reads as the default
                 cfg.ssid = if m[3] < 16 { m[3] } else { ferrite_app::aprs::SSID_DEFAULT };
             }
@@ -1660,7 +1660,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let c = self.aprs.get();
         p[..2].copy_from_slice(&c.f5k.to_le_bytes());
         (p[2], p[3]) = (c.beacon, c.power);
-        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2], p[APRS_MORE + 3]) = (c.path, c.digi, c.after_voice as u8 | (c.telemetry as u8) << 1, c.ssid);
+        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2], p[APRS_MORE + 3]) = (c.path, c.digi, c.after_voice as u8 | (c.telemetry as u8) << 1 | (c.text_every & 3) << 2, c.ssid);
         p[APRS_PATH..APRS_FX25].copy_from_slice(&c.custom);
         p[APRS_FX25] = c.fx25;
         p[APRS_SOUND] = c.sound;
@@ -2343,7 +2343,7 @@ mod tests {
         comment[..7].copy_from_slice(b"On foot");
         let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
         custom[..7].copy_from_slice(b"WIDE2-2");
-        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5, telemetry: true, reply: 0x21, reply_to: *b"VE7*\0\0\0\0\0", reply_text: reply_text() }
+        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5, telemetry: true, text_every: 2, reply: 0x21, reply_to: *b"VE7*\0\0\0\0\0", reply_text: reply_text() }
     }
 
     fn reply_text() -> [u8; ferrite_app::aprs::REPLY_TEXT_LEN] {

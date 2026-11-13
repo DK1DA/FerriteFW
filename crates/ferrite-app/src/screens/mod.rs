@@ -79,6 +79,7 @@ pub mod posentry;
 pub mod parts;
 pub mod pin;
 pub mod probe;
+pub mod qgrid;
 pub mod qmenu;
 pub mod quick;
 pub mod recall;
@@ -125,6 +126,8 @@ pub enum Screen {
     Home,
     Edit(edit::Edit),
     Quick(quick::Quick),
+    /// MENU-34: the APRS slot's quick page (hold ABC).
+    QGrid(qgrid::QGrid),
     Advanced(advanced::Advanced),
     Status(status::Status),
     Entry(entry::Entry),
@@ -188,6 +191,7 @@ macro_rules! each {
             }
             Screen::Edit($s) => $e,
             Screen::Quick($s) => $e,
+            Screen::QGrid($s) => $e,
             Screen::Advanced($s) => $e,
             Screen::Status($s) => $e,
             Screen::Entry($s) => $e,

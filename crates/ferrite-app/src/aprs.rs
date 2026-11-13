@@ -69,6 +69,9 @@ pub struct AprsCfg {
     pub mic_e: u8,
     /// APRS-54: telemetry (0 5 6 4): the battery, MCU temperature and beacon power after our position comment.
     pub telemetry: bool,
+    /// APRS-50.1: the beacon text on every timed or smart beacon (0), or every 2nd, 4th or 8th (1-3: 1 << n);
+    /// Beacon now and a position query's answer always carry it.
+    pub text_every: u8,
     /// APRS-57: auto reply (0 5 9 9): bit 0 on; bits 4-5 the delay, an index into [`REPLY_DELAYS_S`].
     pub reply: u8,
     /// APRS-57: who gets the reply, as typed: `*` everyone, `VE7*` every callsign starting so, else one
@@ -94,6 +97,8 @@ pub fn reply_pattern(pat: &[u8], call: &[u8]) -> bool {
 
 /// APRS-50: the comment's room.
 pub const COMMENT_LEN: usize = 40;
+/// APRS-50.1: how often the beacon text goes (0 5 6 5).
+pub const TEXT_EVERY: [&str; 4] = ["All", "1/2", "1/4", "1/8"];
 /// APRS-57: auto reply's delays (0 5 9 9), as Kenwood's: 10 s by default.
 pub const REPLY_DELAYS_S: [u16; 4] = [10, 30, 60, 120];
 pub const REPLY_DELAY_NAMES: [&str; 4] = ["10 s", "30 s", "1 min", "2 min"];
@@ -176,7 +181,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0, telemetry: false, reply: 0, reply_to: REPLY_TO_DEFAULT, reply_text: [0; REPLY_TEXT_LEN] };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0, telemetry: false, text_every: 0, reply: 0, reply_to: REPLY_TO_DEFAULT, reply_text: [0; REPLY_TEXT_LEN] };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {

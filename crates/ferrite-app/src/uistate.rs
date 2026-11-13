@@ -636,6 +636,14 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             let (path, h) = g.help(app);
             help(d, path.as_bytes(), h.load().as_bytes());
         }
+        Screen::QGrid(g) => {
+            for (i, (label, p)) in g.page.cells().iter().enumerate() {
+                let (v, dot, grey) = screens::qgrid::QGrid::value(app, cx.dev, p);
+                row(d, i as u8 + 1, label.as_bytes(), v.as_bytes(), i as u8 == g.cell, dot, grey);
+            }
+            let (path, h) = g.help(app);
+            help(d, path.as_bytes(), h.load().as_bytes());
+        }
         Screen::Options(o) => {
             let all = opts::rows(o.of);
             for (i, (label, act, _)) in all.iter().enumerate() {
@@ -1357,6 +1365,7 @@ pub fn id(s: Screen) -> &'static str {
     match s {
         Screen::Home => "Home",
         Screen::Edit(_) => "Edit",
+        Screen::QGrid(_) => "AprsQuick",
         Screen::Quick(_) => "Quick",
         Screen::Advanced(_) => "More",
         Screen::Status(_) => "Status",

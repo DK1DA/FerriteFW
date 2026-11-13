@@ -1332,3 +1332,97 @@ fn stub_rows_are_out_of_the_menu() {
     assert_eq!(crate::screens::nav::menu0(&[1, 4]), Some(Dest::RangePresets));
     assert_eq!(crate::screens::nav::menu0(&[1, 5]), Some(Dest::SkipList));
 }
+
+/// MENU-34: the arrows move across the grid and stop at its edges, a digit picks a cell, the knob changes the
+/// focused setting as its menu row does (with "* Undo", MENU-22), # resets it (MENU-18).
+#[test]
+fn quick_page_changes_settings_as_the_menu_does() {
+    use crate::screens::qgrid::Page;
+    let mut t = T::new();
+    t.app.open_screen(Page::Aprs.screen());
+    t.draw();
+    let cell = |t: &T| match t.app.screen() {
+        Screen::QGrid(g) => g.cell,
+        s => panic!("{}", s.name()),
+    };
+    t.tap(Key::Left);
+    t.tap(Key::Up);
+    assert_eq!(cell(&t), 0, "the top left stays");
+    t.tap(Key::Right);
+    t.tap(Key::Right);
+    t.tap(Key::Right);
+    assert_eq!(cell(&t), 2, "the right edge stays");
+    t.tap(Key::Down);
+    t.tap(Key::Down);
+    t.tap(Key::Down);
+    assert_eq!(cell(&t), 8);
+    t.tap(Key::Digit(2)); // Beacon, 0 5 6 1
+    assert_eq!(cell(&t), 1);
+    assert_eq!(Page::Aprs.cells()[1].1, &[5, 6, 1]);
+    let was = t.app.aprs_cfg().beacon;
+    t.app.knob(1, t.t, &t.s);
+    t.draw();
+    assert_ne!(t.app.aprs_cfg().beacon, was, "the knob changed the beacon mode");
+    assert!(t.app.screen().hints(&t.app).as_slice().iter().any(|h| h.0 == "*"), "* Undo offered");
+    t.tap(Key::Star);
+    assert_eq!(t.app.aprs_cfg().beacon, was, "undone");
+    t.app.knob(1, t.t, &t.s);
+    t.app.knob(1, t.t, &t.s);
+    t.tap(Key::Hash);
+    assert_eq!(t.app.aprs_cfg().beacon, crate::aprs::AprsCfg::DEFAULT.beacon, "# resets");
+    // OK on a frequency cell opens the menu's frequency entry (MENU-31), BACK comes back here.
+    t.tap(Key::Digit(4));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Entry(_)), "{}", t.name());
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::QGrid(_)), "{}", t.name());
+}
+
+/// MENU-34: every cell of every quick page is a wired menu setting (a live value, the menu's help line), and its
+/// label fits its cell.
+#[test]
+fn quick_page_cells_are_menu_settings() {
+    use crate::screens::qgrid::Page;
+    use ferrite_ui::gfx::text4_width;
+    use ferrite_ui::text::Buf;
+    let t = T::new();
+    for page in [Page::Aprs] {
+        assert!(page.cells().len() <= 9);
+        for (label, p) in page.cells() {
+            let mut b = Buf::<24>::new();
+            assert!(crate::screens::groups::wired(&t.app, &Device::default(), p, &mut b).is_some(), "{page:?} {label}: {p:?} is wired");
+            assert!(crate::screens::groups::entry_of(p).is_some(), "{page:?} {label}: {p:?} is a menu item");
+            let w = text4_width(label.as_bytes(), &ferrite_ui::assets::UI_12);
+            // 6 px in from the cell's left, 3 px clear of its right border
+            assert!(w <= 63, "{page:?}: {label} fits its cell ({w} px)");
+        }
+    }
+}
+
+/// MENU-34: a value too long for its cell is cut at a word break, never mid-word.
+#[test]
+fn quick_page_cuts_values_at_a_word() {
+    use crate::screens::qgrid::short;
+    assert_eq!(short(b"Off"), (b"Off".as_slice(), false));
+    assert_eq!(short(b"WIDE1-1,WIDE2-1"), (b"WIDE1-1".as_slice(), true));
+    assert_eq!(short(b"Every 10 min"), (b"Every 10".as_slice(), true));
+    assert_eq!(short(b"7 Handheld"), (b"7".as_slice(), true));
+    assert_eq!(short(b"APRS first"), (b"APRS".as_slice(), true));
+}
+
+/// MENU-34, APRS-50, TEXT-10: OK on the APRS page's "Bcn text" opens the beacon comment in the message editor,
+/// typed in T9 (predictive) by default.
+#[test]
+fn quick_page_beacon_text_is_typed_in_t9() {
+    use crate::screens::qgrid::Page;
+    let mut t = T::new();
+    assert!(t.app.set.predictive, "T9 is the default");
+    t.app.open_screen(Page::Aprs.screen());
+    t.draw();
+    t.tap(Key::Digit(7));
+    assert_eq!(Page::Aprs.cells()[6], ("Bcn text", &[5u8, 5, 3][..]));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Compose(_)), "{}", t.name());
+    assert!(t.app.set.predictive, "typed in T9");
+    t.tap(Key::Exit);
+}
