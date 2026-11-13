@@ -47,11 +47,18 @@ impl Radio {
     /// waits on a timer, so other tasks run meanwhile: the two halves are plain functions around the one wait
     /// (`ferrite_radio::chip::tune_settled` and `sleep_settled` are the same steps, host-tested).
     pub(super) async fn tune_chip(&mut self, n: u8, want: Option<(u8, Freq10)>) {
+        #[cfg(feature = "bench")]
+        let c0 = crate::hal::time::cycles();
         if let Some(ms) = self.tune_start(n, want) {
             if ms > 0 {
                 Timer::after_millis(ms as u64).await;
             }
             self.tune_finish(n);
+            // WATCH-17.4: how long a retune to a frequency took, its settle wait included
+            #[cfg(feature = "bench")]
+            if want.is_some() {
+                self.turns.tune_took(crate::hal::time::cycles().wrapping_sub(c0) / crate::hal::clock::mhz());
+            }
         }
     }
 
@@ -81,7 +88,7 @@ impl Radio {
         }
         self.tuned[n as usize] = want;
         #[cfg(feature = "bench")]
-        self.turns.tuned(now_ms() as u32, n, want.map(|(s, _)| s)); // WATCH-17.1: what the chip actually did
+        self.turns.tuned(now_ms() as u32, n, want); // WATCH-17.1, WATCH-17.4: what the chip actually did
         if want.is_none() {
             self.maybe_awake &= !(1 << n);
             self.sq_regs[n as usize] = None; // written again on waking

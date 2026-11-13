@@ -1332,7 +1332,7 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Save(c) => DebugAns::Save { cycle: c.flatten(), level: Some((300, 500)), asleep: false },
         #[cfg(feature = "bench")]
-        DebugReq::Turns { .. } => DebugAns::Turns(ferrite_core::watch::Turns { n: [27, 27, 0], ms: [4050, 1890, 0] }),
+        DebugReq::Turns { .. } => DebugAns::Turns(ferrite_core::watch::Turns { n: [27, 27, 0], ms: [4050, 1890, 0], steps: [40, 0, 0], step_ms: [2800, 0, 0], tunes: 94, tune_us: 470_000, tune_max_us: 9_100 }),
         #[cfg(feature = "bench")]
         DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
         #[cfg(feature = "bench")]
@@ -1989,7 +1989,7 @@ fn debug_bk_turns() {
     let mut r = Rig::main();
     r.cmd("bk turns");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Turns { reset: false }]);
-    assert!(r.raw().contains("bk turns: A 27 4050 ms, B 27 1890 ms, C 0 0 ms"), "{}", r.raw());
+    assert!(r.raw().contains("bk turns: A 27 4050 ms, B 27 1890 ms, C 0 0 ms; steps: A 40 2800 ms, B 0 0 ms, C 0 0 ms; tunes 94, 5000 us each, 9100 us max"), "{}", r.raw());
     r.send(b"\r");
     r.cmd("bk turns reset");
     assert!(!super::cmd::writes(b"bk turns"));

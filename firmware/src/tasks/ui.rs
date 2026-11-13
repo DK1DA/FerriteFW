@@ -529,6 +529,10 @@ pub async fn task() {
     let mut held: Option<RadioCmd> = None;
     // LINK-38: when the screen was last drawn, and whether input since wants it drawn now.
     let (mut last_draw, mut urgent) = (0u32, true);
+    // WATCH-17.4 (bench): the slots' squelch as last seen, and when one last changed until the screen next drew: the
+    // cable log's "squelch to screen" line.
+    #[cfg(feature = "bench")]
+    let (mut sq_was, mut sq_at) = (0u8, None::<u32>);
     // PWR-24.9: since when Low Power Mode has been on (None: off).
     let mut lpm_since: Option<u32> = None;
     // PWR-26.3: when the governor last had a reason for the build's speed.
@@ -994,6 +998,12 @@ pub async fn task() {
         if draw {
             app.render(&mut lcd, &live, &dev, store);
             (last_draw, urgent) = (now_ms(), false);
+            #[cfg(feature = "bench")]
+            if let Some(at) = sq_at.take() {
+                bringup::linef(|b| {
+                    let _ = ufmt::uwrite!(b, "squelch to screen {} ms, at {} MHz", now_ms().wrapping_sub(at), crate::hal::clock::mhz());
+                });
+            }
         }
         // SQL-18.3: who decides the squelch (0 9 5), for the Radio task's tick.
         ferrite_core::softsq::set_chip_decides(app.settings().sq_chip);
@@ -1112,6 +1122,14 @@ pub async fn task() {
                 app.knob(d, now_ms(), store)
             }
             Either4::Third(_) => {} // the tick, or bytes for the terminal
+        }
+        #[cfg(feature = "bench")]
+        {
+            let m = live.slots.iter().enumerate().fold(0u8, |m, (i, s)| m | (s.squelch_open as u8) << i);
+            if m != sq_was {
+                sq_was = m;
+                sq_at.get_or_insert(now_ms());
+            }
         }
         app.tick(now_ms(), &live, store);
         // SAT-6: satellite passes predicted in time slices of SAT_SLICE_US between keys and redraws (CPU-bound, not

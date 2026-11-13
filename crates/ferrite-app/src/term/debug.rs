@@ -409,6 +409,12 @@ impl Job {
                 for (s, name) in ["A", "B", "C"].into_iter().enumerate() {
                     put!(out, " {} {} {} ms{}", name, t.n[s], t.ms[s], if s < 2 { "," } else { "" });
                 }
+                // WATCH-17.4: the steps inside turns (a scan's channels), and the retunes' time
+                out.push(b"; steps:");
+                for (s, name) in ["A", "B", "C"].into_iter().enumerate() {
+                    put!(out, " {} {} {} ms{}", name, t.steps[s], t.step_ms[s], if s < 2 { "," } else { "" });
+                }
+                put!(out, "; tunes {}, {} us each, {} us max", t.tunes, t.tune_us.checked_div(t.tunes).unwrap_or(0), t.tune_max_us);
                 if reset {
                     out.push(b" (reset)");
                 }
