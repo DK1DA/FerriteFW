@@ -260,16 +260,12 @@ pub mod why {
     pub const AUDIO: u16 = 1 << 7;
     /// PWR-26.1, SAT-6: satellite passes being predicted.
     pub const PREDICT: u16 = 1 << 8;
-    /// PWR-26.11: a slot's squelch opened or closed within [`super::RX_MS`], the panel awake: its redraw at speed.
-    pub const RX: u16 = 1 << 9;
     /// Their names, bit 0 first (the cable log and the readback's `why`).
-    pub const NAMES: [&str; 10] = ["input", "decode", "scan", "mode", "tx", "alert", "link", "audio", "predict", "rx"];
+    pub const NAMES: [&str; 9] = ["input", "decode", "scan", "mode", "tx", "alert", "link", "audio", "predict"];
 }
 
 /// PWR-26.1: a key or the knob keeps the build's speed this long (as Low Power Mode's boost, PWR-24.10).
 pub const INPUT_MS: u32 = 3000;
-/// PWR-26.11: a squelch change is a reason this long (the governor's [`HOLD_MS`] then keeps the speed).
-pub const RX_MS: u32 = 100;
 /// PWR-26.3: the build's speed lasts at least this long after the last reason clears.
 pub const HOLD_MS: u32 = 1000;
 /// PWR-26.2: a byte from the cable or a connected Bluetooth device within this long makes the link live.
@@ -331,14 +327,13 @@ mod tests {
     }
 
     /// PWR-26.1: a key or the knob holds the speed for 3 s while the screen is lit; dark ends it.
-    /// PWR-26.11: a squelch change is the last reason bit, `rx`.
     #[test]
     fn governor_input() {
         assert!(input_holds(0, false) && input_holds(2_999, false));
         assert!(!input_holds(3_000, false), "3 s on");
         assert!(!input_holds(100, true), "dark screen");
-        assert_eq!(why::NAMES.len(), 10);
-        assert_eq!(why::RX, 1 << (why::NAMES.len() - 1));
+        assert_eq!(why::NAMES.len(), 9);
+        assert_eq!(why::PREDICT, 1 << (why::NAMES.len() - 1));
     }
 
     /// PWR-26.4: audio running never switches, whatever else wants; PWR-26.5: Fixed is the build's speed always;

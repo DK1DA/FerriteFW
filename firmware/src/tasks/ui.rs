@@ -529,9 +529,9 @@ pub async fn task() {
     let mut held: Option<RadioCmd> = None;
     // LINK-38: when the screen was last drawn, and whether input since wants it drawn now.
     let (mut last_draw, mut urgent) = (0u32, true);
-    // PWR-26.11: the slots' squelch as last seen, and when one last changed (a reason for the speed, and an urgent
-    // redraw). WATCH-17.4 (bench): when it changed until the screen next drew, the cable log's "squelch to screen".
-    let (mut sq_was, mut sq_changed) = (0u8, None::<u32>);
+    // PWR-26.11: the slots' squelch as last seen (a change is an urgent redraw). WATCH-17.4 (bench): when it changed
+    // until the screen next drew, the cable log's "squelch to screen".
+    let mut sq_was = 0u8;
     #[cfg(feature = "bench")]
     let mut sq_at = None::<u32>;
     // PWR-24.9: since when Low Power Mode has been on (None: off).
@@ -941,10 +941,6 @@ pub async fn task() {
         if !panel_asleep && now_ms().wrapping_sub(panel_at) < WAKE_FAST_MS {
             why |= ferrite_core::clocktree::why::INPUT;
         }
-        // PWR-26.11: a squelch change, the panel awake: its redraw at speed
-        if !panel_asleep && sq_changed.is_some_and(|t| now.wrapping_sub(t) < ferrite_core::clocktree::RX_MS) {
-            why |= ferrite_core::clocktree::why::RX;
-        }
         if why != 0 {
             clock_high_at = now;
         }
@@ -1128,12 +1124,11 @@ pub async fn task() {
             }
             Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
-        // PWR-26.11: a squelch opening or closing on any slot draws at once, at the build's speed: at rest a live
-        // change waited for PWR-26.10's 250 ms and drew at 24 MHz, so RX showed late or a short call not at all.
+        // PWR-26.11: a squelch opening or closing on any slot draws at once; at rest still at 24 MHz (receiving is
+        // common, the speed costs battery): before, it waited for PWR-26.10's 250 ms cap, so RX showed late.
         let m = live.slots.iter().enumerate().fold(0u8, |m, (i, s)| m | (s.squelch_open as u8) << i);
         if m != sq_was {
             sq_was = m;
-            sq_changed = Some(now_ms());
             urgent = true;
             #[cfg(feature = "bench")]
             sq_at.get_or_insert(now_ms());
