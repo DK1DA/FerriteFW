@@ -201,6 +201,14 @@ const IDLE_FRAME_MS: u32 = 250;
 /// PWR-26.1: a key this recent raises the clock before its commands (and beep) go to the Radio task.
 const KEY_RAISE_MS: u32 = 300;
 
+/// SELF-9.4 (bench builds): the UI task's wakes by what woke it (input, the Radio task's snapshot, its timer, an
+/// alert), counted for the cable log's 10 s line.
+#[cfg(feature = "bench")]
+static WAKES: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+/// SELF-9.4: the cycles of the UI task's passes (interrupts in them too).
+#[cfg(feature = "bench")]
+static UI_CYCLES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 #[embassy_executor::task]
 pub async fn task() {
     ferrite_ui::prof::set_clock(crate::hal::time::cycles); // bench builds: the drawing profile
@@ -543,6 +551,8 @@ pub async fn task() {
     // LINK-13.4: the DSP task codes receive audio for the PC (the cable's session listens).
     let mut listening = 0u8;
     loop {
+        #[cfg(feature = "bench")]
+        let pass_c0 = crate::hal::time::cycles();
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
             bringup::line(b"log off: the terminal has the cable");
@@ -615,6 +625,18 @@ pub async fn task() {
                 bringup::linef(|b| {
                     let _ = ufmt::uwrite!(b, "stack free {} B, cpu {}%", dev.stack_free, dev.cpu_pct.unwrap_or(0));
                 });
+                // SELF-9.4 (bench builds): who used it, ms of these 10 s (the thread's includes interrupts in it)
+                #[cfg(feature = "bench")]
+                {
+                    use core::sync::atomic::AtomicU32;
+                    static LAST: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
+                    let now = [&crate::RADIO_CYCLES, &crate::DSP_CYCLES, &crate::INPUT_CYCLES, &crate::THREAD_CYCLES, &UI_CYCLES].map(|a| a.load(Relaxed));
+                    let ms = |i: usize| now[i].wrapping_sub(LAST[i].swap(now[i], Relaxed)) / (crate::hal::clock::mhz() * 1000);
+                    let wk = WAKES.each_ref().map(|w| w.swap(0, Relaxed));
+                    bringup::linef(|b| {
+                        let _ = ufmt::uwrite!(b, "cpu ms/10s: radio {} dsp {} input {} thread {} (ui {}), at {} MHz; ui woke: input {} live {} timer {} alert {}", ms(0), ms(1), ms(2), ms(3), ms(4), crate::hal::clock::mhz(), wk[0], wk[1], wk[2], wk[3]);
+                    });
+                }
                 bringup::linef(|b| {
                     let avg = ferrite_core::txcal::battery_mv(s.raw);
                     let _ = ufmt::uwrite!(b, "battery {} mV, avg {} mV, {}%, PA1 {} avg {}", ferrite_core::txcal::battery_mv(raw), avg, s.pct, raw, s.raw);
@@ -1087,6 +1109,8 @@ pub async fn task() {
         // LINK-38: one yield a pass. During a scan the Radio task publishes on every step, so `live_rx.changed()` is
         // ready at once and an await on it never gives up the CPU: the Link task (same executor) starved, the cable
         // and Bluetooth stopped answering and the cable log stopped, until the scan ended (Oct 20, 2026).
+        #[cfg(feature = "bench")]
+        UI_CYCLES.fetch_add(crate::hal::time::cycles().wrapping_sub(pass_c0), Relaxed);
         embassy_futures::yield_now().await;
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         // SBAR-23: the alerts' arm waits for one to be there, and the alert (~3 KB) is taken in its handler: carried
@@ -1096,7 +1120,10 @@ pub async fn task() {
         // a UI pass longer than a tick never reached the keys: they waited for a quiet tick, then a press and its
         // release came together, a hold read as a short press (hold MENU opened the pass, not the options) and
         // arrows lagged and jumped (black, Nov 1, 2026). Keys are few; the snapshot is read on the next pass.
-        match select4(INPUT.receive(), live_rx.changed(), wait, ALERTS.ready_to_receive()).await {
+        let woke = select4(INPUT.receive(), live_rx.changed(), wait, ALERTS.ready_to_receive()).await;
+        #[cfg(feature = "bench")]
+        WAKES[match woke { Either4::First(_) => 0, Either4::Second(_) => 1, Either4::Third(_) => 2, Either4::Fourth(_) => 3 }].fetch_add(1, Relaxed);
+        match woke {
             Either4::Second(l) => live = l,
             // WX-4: a decoded SAME header opens the alert over any screen.
             Either4::Fourth(()) => {

@@ -55,6 +55,11 @@ const STATE_MAX: usize = 512;
 /// Saves wait this long after the last change (a turning knob doesn't wear the flash).
 pub const SAVE_DELAY_MS: u32 = 2000;
 
+/// PWR-26.14: the state is looked at for a change at most this often (its CRC is a pass over all the settings and
+/// slots; the UI task calls [`FlashStore::autosave`] up to 50 times a second): a save then comes 2-2.5 s after the
+/// last change.
+pub const SAVE_CHECK_MS: u32 = 500;
+
 /// The weather zone's first channel record (WX-1): channels 991-997 as shown, out of the way of your own numbering.
 pub const WX_FIRST: u16 = 990;
 
@@ -185,6 +190,8 @@ pub struct FlashStore<N: Nor, D: Data> {
     saved: Cell<u32>,
     seen: Cell<u32>,
     changed_at: Cell<u32>,
+    /// When the state was last looked at (PWR-26.14); None: at the next call.
+    checked_at: Cell<Option<u32>>,
     /// Writes are queued for the Storage task (the radio) instead of done at once.
     deferred: Cell<bool>,
     /// LINK-61: a raw write was made this power-on (the begin queued before it, decision 339), and the begin is
@@ -250,6 +257,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             saved: Cell::new(0),
             seen: Cell::new(0),
             changed_at: Cell::new(0),
+            checked_at: Cell::new(None),
             deferred: Cell::new(false),
             raw: Cell::new(false),
             begun: Cell::new(false),
@@ -872,10 +880,13 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.aprs_changed.set(None);
         }
         self.sat_prefs_due(Some(now));
-        let c = state_crc(app);
-        if c != self.seen.get() {
-            self.seen.set(c);
-            self.changed_at.set(now);
+        if self.checked_at.get().is_none_or(|t| now.wrapping_sub(t) >= SAVE_CHECK_MS) {
+            self.checked_at.set(Some(now));
+            let c = state_crc(app);
+            if c != self.seen.get() {
+                self.seen.set(c);
+                self.changed_at.set(now);
+            }
         }
         // HF-29: HF mode's VFOs and recent list are written on leaving it, never while tuning: nothing is
         // saved while its screen is open (power off still flushes).

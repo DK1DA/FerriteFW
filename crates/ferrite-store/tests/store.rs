@@ -137,12 +137,14 @@ fn round_trip_and_first_boot() {
     let mut b = app();
     assert!(s.restore(&mut b));
     assert_eq!(b.slot(1).ch.map(|c| c.num), a.slot(1).ch.map(|c| c.num));
-    // The save timer: nothing to save right after restoring, a save 2 s after a change.
+    // The save timer: nothing to save right after restoring, a save 2 s after a change is seen; PWR-26.14: the
+    // state is looked at every 500 ms at most, so a change at 100 is seen at 500.
     assert!(!s.autosave(0, &b));
     b.set_watch(0);
     assert!(!s.autosave(100, &b));
-    assert!(!s.autosave(2000, &b));
-    assert!(s.autosave(2100, &b));
+    assert!(!s.autosave(500, &b));
+    assert!(!s.autosave(2400, &b));
+    assert!(s.autosave(2500, &b));
     assert!(!s.flush(&b));
 }
 

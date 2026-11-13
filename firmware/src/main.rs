@@ -148,12 +148,20 @@ static INPUT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 /// drawing time from time the UI task was preempted (DISP-29; one executor preempting another counts twice).
 pub static IRQ_CYCLES: AtomicU32 = AtomicU32::new(0);
 
+/// SELF-9.4 (bench builds' cable log): the cycles each interrupt executor and the thread executor's polls took, so
+/// the CPU figure can be split by who used it.
+pub static RADIO_CYCLES: AtomicU32 = AtomicU32::new(0);
+pub static DSP_CYCLES: AtomicU32 = AtomicU32::new(0);
+pub static INPUT_CYCLES: AtomicU32 = AtomicU32::new(0);
+pub static THREAD_CYCLES: AtomicU32 = AtomicU32::new(0);
+
 #[inline(always)]
-fn counted(f: impl FnOnce(), max_us: &AtomicU32) {
+fn counted(f: impl FnOnce(), max_us: &AtomicU32, mine: &AtomicU32) {
     let c0 = hal::time::cycles();
     f();
     let c = hal::time::cycles().wrapping_sub(c0);
     IRQ_CYCLES.fetch_add(c, Relaxed);
+    mine.fetch_add(c, Relaxed);
     // APRS-56.4 (bench builds, decision 363): only while capturing: a run then holds the DSP task off its halves
     #[cfg(not(feature = "bench"))]
     let _ = max_us;
@@ -177,15 +185,15 @@ static DSP_RUN_MAX_US: AtomicU32 = AtomicU32::new(0);
 
 extern "C" fn radio_irq() {
     // SAFETY: the executor's own interrupt handler, the only place it is polled.
-    counted(|| unsafe { RADIO_EXECUTOR.on_interrupt() }, &RADIO_RUN_MAX_US)
+    counted(|| unsafe { RADIO_EXECUTOR.on_interrupt() }, &RADIO_RUN_MAX_US, &RADIO_CYCLES)
 }
 extern "C" fn dsp_irq() {
     // SAFETY: as above.
-    counted(|| unsafe { DSP_EXECUTOR.on_interrupt() }, &DSP_RUN_MAX_US)
+    counted(|| unsafe { DSP_EXECUTOR.on_interrupt() }, &DSP_RUN_MAX_US, &DSP_CYCLES)
 }
 extern "C" fn input_irq() {
     // SAFETY: as above.
-    counted(|| unsafe { INPUT_EXECUTOR.on_interrupt() }, &INPUT_RUN_MAX_US)
+    counted(|| unsafe { INPUT_EXECUTOR.on_interrupt() }, &INPUT_RUN_MAX_US, &INPUT_CYCLES)
 }
 
 // With panic=immediate-abort a panic is an undefined instruction, so it arrives here as a HardFault.
@@ -252,8 +260,10 @@ fn run_thread_executor(init: impl FnOnce(Spawner)) -> ! {
     hal::wdt::start();
     let mut settled = false;
     loop {
+        let c0 = hal::time::cycles();
         // SAFETY: polled only here and never re-entered (the pender only sets the event register).
         unsafe { executor.poll() };
+        THREAD_CYCLES.fetch_add(hal::time::cycles().wrapping_sub(c0), Relaxed); // SELF-9.4 (interrupts in it too)
         hal::wdt::feed();
         if !settled && embassy_time::Instant::now().as_millis() >= restart::SETTLED_MS {
             restart::settled();
