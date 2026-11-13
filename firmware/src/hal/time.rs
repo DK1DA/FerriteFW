@@ -21,6 +21,15 @@ pub fn delay_us(us: u32) {
     while cycles().wrapping_sub(start) < ticks {}
 }
 
+/// TERM-53: a busy wait in ns (the BK4829 bus's half period). Never inlined: inlined into the Radio task, the clock
+/// tree's speed lookup became a slow-flash table read there (slowcheck).
+#[inline(never)]
+pub fn delay_ns(ns: u32) {
+    let start = cycles();
+    let ticks = ns * clock::mhz() / 1000;
+    while cycles().wrapping_sub(start) < ticks {}
+}
+
 /// Busy wait; tasks use embassy_time::Timer instead.
 pub fn delay_ms_busy(ms: u32) {
     for _ in 0..ms {

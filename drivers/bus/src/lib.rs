@@ -44,6 +44,10 @@ pub struct Nack;
 /// timer), through the drivers' start/poll calls.
 pub trait Delay {
     fn delay_us(&mut self, us: u32);
+    /// A wait in ns; by default the us wait that covers it (an implementation with a finer clock overrides it).
+    fn delay_ns(&mut self, ns: u32) {
+        self.delay_us(ns.div_ceil(1000))
+    }
 }
 
 /// An output pin.

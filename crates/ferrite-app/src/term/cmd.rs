@@ -2334,15 +2334,25 @@ fn turns(t: &mut Toks) -> Result<Done, No> {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-53 (a bench test): `bk spi` shows the BK4829 bus's half SCK period; `bk spi HALF [READS]` sets it (1-5 us,
-/// RAM only) and runs READS rounds on each chip (default 2000, at most 5000: a round on both chips at stock's speed is about 1.6 ms, and the Radio task does nothing else meanwhile): its ID read, REG_48 written back unchanged and read; a wrong answer puts stock's 5 back.
+/// "2.5" as 25, "3" as 30: a decimal with at most one digit after the point, in tenths.
+fn tenths(w: &[u8]) -> Option<u32> {
+    match w.iter().position(|&c| c == b'.') {
+        None => number(w)?.checked_mul(10),
+        Some(i) if i + 2 == w.len() && w[i + 1].is_ascii_digit() => number(&w[..i])?.checked_mul(10)?.checked_add((w[i + 1] - b'0') as u32),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "bench")]
+/// TERM-53 (a bench test): `bk spi` shows the BK4829 bus's half SCK period; `bk spi HALF [READS]` sets it (1-5 us in
+/// tenths, as 2.5; RAM only) and runs READS rounds on each chip (default 2000, at most 5000: a round on both chips at stock's speed is about 1.6 ms, and the Radio task does nothing else meanwhile): its ID read, REG_48 written back unchanged and read; a wrong answer puts stock's 5 back.
 fn spi(t: &mut Toks) -> Result<Done, No> {
-    const USAGE: Txt = txt!("bk spi [HALF [READS]]: the BK4829 bus's half SCK period, 1-5 us (5 is stock's), then READS read and write rounds");
+    const USAGE: Txt = txt!("bk spi [HALF [READS]]: the BK4829 bus's half SCK period, 1-5 us in tenths (2.5; 5 is stock's), then READS read and write rounds");
     let mut half = None;
     let mut reads = 0u16;
     if let Some(tok) = t.next()? {
         let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
-        half = Some(number(w).filter(|n| (1..=5).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u8);
+        half = Some(tenths(w).filter(|n| (10..=50).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u8);
         reads = 2000;
         if let Some(tok) = t.next()? {
             let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };

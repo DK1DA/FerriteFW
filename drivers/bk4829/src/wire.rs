@@ -25,7 +25,7 @@ pub struct ThreeWire<K: OutPin, S: IoPin, D: Delay> {
     sda: S,
     delay: D,
     align: Align,
-    /// Half an SCK period now, us ([`HALF_US`] unless a bench test set another).
+    /// Half an SCK period now, ns ([`HALF_US`] unless a bench test set another).
     half: u32,
 }
 
@@ -42,21 +42,21 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     pub fn new(mut sck: K, mut sda: S, delay: D) -> Self {
         sck.set(false);
         sda.drive(false);
-        ThreeWire { sck, sda, delay, align: Align::BeforeFall, half: HALF_US }
+        ThreeWire { sck, sda, delay, align: Align::BeforeFall, half: HALF_US * 1000 }
     }
 
     pub fn align(&self) -> Align {
         self.align
     }
 
-    /// Half an SCK period now, us.
-    pub fn half_us(&self) -> u32 {
+    /// Half an SCK period now, ns.
+    pub fn half_ns(&self) -> u32 {
         self.half
     }
 
-    /// A bench test's half SCK period (1 us at least; [`HALF_US`] is stock's).
-    pub fn set_half_us(&mut self, us: u32) {
-        self.half = us.max(1);
+    /// A bench test's half SCK period, ns (1 us at least; [`HALF_US`] is stock's).
+    pub fn set_half_ns(&mut self, ns: u32) {
+        self.half = ns.max(1000);
     }
 
     fn address(&mut self, out: u8) {
@@ -64,9 +64,9 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
         for i in (0..8).rev() {
             self.sck.set(false);
             self.sda.set(out >> i & 1 != 0);
-            self.delay.delay_us(self.half);
+            self.delay.delay_ns(self.half);
             self.sck.set(true);
-            self.delay.delay_us(self.half);
+            self.delay.delay_ns(self.half);
         }
     }
 
@@ -74,18 +74,18 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     fn samples(&mut self, cs: &mut impl OutPin, reg: u8) -> u32 {
         self.sck.set(false);
         cs.set(false);
-        self.delay.delay_us(self.half);
+        self.delay.delay_ns(self.half);
         self.address(0x80 | (reg & 0x7F));
         self.sda.drive(false); // turnaround
-        self.delay.delay_us(self.half);
+        self.delay.delay_ns(self.half);
         let mut bits = self.sda.is_high() as u32;
         for k in 1..=16 {
             self.sck.set(false);
-            self.delay.delay_us(if k == 1 { 2 * self.half } else { self.half });
+            self.delay.delay_ns(if k == 1 { 2 * self.half } else { self.half });
             bits = bits << 1 | self.sda.is_high() as u32;
             if k < 16 {
                 self.sck.set(true);
-                self.delay.delay_us(self.half);
+                self.delay.delay_ns(self.half);
             }
         }
         cs.set(true);
@@ -104,14 +104,14 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     pub fn write(&mut self, cs: &mut impl OutPin, reg: u8, value: u16) {
         self.sck.set(false);
         cs.set(false);
-        self.delay.delay_us(self.half);
+        self.delay.delay_ns(self.half);
         self.address(reg & 0x7F);
         for i in (0..16).rev() {
             self.sck.set(false);
             self.sda.set(value >> i & 1 != 0);
-            self.delay.delay_us(self.half);
+            self.delay.delay_ns(self.half);
             self.sck.set(true);
-            self.delay.delay_us(self.half);
+            self.delay.delay_ns(self.half);
         }
         self.sck.set(false);
         cs.set(true);

@@ -410,16 +410,16 @@ impl Job {
             }
             #[cfg(feature = "bench")]
             #[cfg(feature = "bench")]
-            (Kind::Spi { .. }, DebugAns::Spi { half, reads, errs, us, now }) => {
-                put!(out, "  bk spi: half {} us, {} rounds a chip (ID, REG_48 written, read):", half, reads);
-                for (n, e) in errs.into_iter().enumerate() {
-                    if e == u16::MAX {
+            (Kind::Spi { .. }, DebugAns::Spi { half, reads, rd, wr, us, now }) => {
+                put!(out, "  bk spi: half {}.{} us, {} rounds a chip:", half / 10, half % 10, reads);
+                for n in 0..2 {
+                    if rd[n] == u16::MAX {
                         put!(out, " chip {} absent", n);
                     } else {
-                        put!(out, " chip {} {} wrong", n, e);
+                        put!(out, " chip {} reads {} wrong, writes {} wrong", n, rd[n], wr[n]);
                     }
                 }
-                put!(out, "; {} us an operation; now {} us", us, now);
+                put!(out, "; {} us an operation; now {}.{} us", us, now / 10, now % 10);
                 self.st = St::Over;
                 Step::Line
             }
