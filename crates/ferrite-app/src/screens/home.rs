@@ -195,7 +195,7 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
     use crate::aprs::Holder;
     let p = s as usize;
     let f = app.aprs_freq();
-    let Some(k) = app.aprs_card(data) else { return };
+    let Some(k) = app.aprs_card_as(data, big) else { return };
     app.drawn.meter[p] = None;
     if big {
         // APRS-17.2: the frequency at the compact cards' size, "3 heard · 11 /hr" at its right (" /hr" goes only
@@ -555,6 +555,7 @@ fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
         lcd.fill(234, y, 6, h, BG);
     };
     for s in order {
+        let t0 = ferrite_ui::prof::now();
         let p = s as usize;
         let (y, h) = card(s, app.active);
         if gaps && s != a {
@@ -582,6 +583,7 @@ fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
         if gaps && s == a {
             gap(lcd, s);
         }
+        ferrite_ui::prof::add(ferrite_ui::prof::CARD + p, t0);
     }
     if gaps {
         let (y, h) = card(SLOTS as u8 - 1, a);
@@ -842,7 +844,9 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         }
     }
     if aprs {
+        let t0 = ferrite_ui::prof::now();
         aprs_card(app, lcd, cx.store.data(), s, y, big);
+        ferrite_ui::prof::add(ferrite_ui::prof::APRS, t0);
         return;
     }
     if kind == 2 {

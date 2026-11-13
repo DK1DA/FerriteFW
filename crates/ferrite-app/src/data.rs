@@ -466,6 +466,12 @@ pub trait Data {
     fn station(&self, _i: u16) -> Option<Station> {
         None
     }
+    /// Station `i` as RAM holds it, never read from the store (PWR-26.13): the heard list's own fields (call,
+    /// symbol, position, age, count) whole, the details (path, course, comment) only where RAM keeps them. For what
+    /// is drawn every frame: counts and ages.
+    fn station_ram(&self, i: u16) -> Option<Station> {
+        self.station(i)
+    }
     /// APRS-4.5: station `i`'s stored row to fill what RAM doesn't hold: its seq and the fields to take
     /// ([`crate::aprs_live::DET_VIA`] and the others). None: RAM has it all.
     fn row_of(&self, _i: u16) -> Option<(u32, u8)> {

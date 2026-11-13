@@ -87,18 +87,38 @@ pub fn block<F: Future>(f: F) -> F::Output {
 #[derive(Clone, Copy)]
 pub struct Crc32(u32);
 
+/// One step of the reflected CRC-32 per bit of a byte, eight at a time: entry `b` is `b` shifted through all eight.
+const fn crc32_table() -> [u32; 256] {
+    let mut t = [0u32; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut c = i as u32;
+        let mut k = 0;
+        while k < 8 {
+            c = if c & 1 != 0 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
+            k += 1;
+        }
+        t[i] = c;
+        i += 1;
+    }
+    t
+}
+
+/// PWR-26.14: a byte a lookup, not eight steps (the settings' change check runs it over the whole state every UI
+/// pass); a named `static`, so it stays in the fast flash.
+static CRC32_TABLE: [u32; 256] = crc32_table();
+
 impl Crc32 {
     pub fn new() -> Self {
         Crc32(0xFFFF_FFFF)
     }
 
     pub fn update(&mut self, data: &[u8]) {
+        let mut c = self.0;
         for &b in data {
-            self.0 ^= b as u32;
-            for _ in 0..8 {
-                self.0 = if self.0 & 1 != 0 { (self.0 >> 1) ^ 0xEDB8_8320 } else { self.0 >> 1 };
-            }
+            c = CRC32_TABLE[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
         }
+        self.0 = c;
     }
 
     pub fn get(self) -> u32 {
@@ -148,6 +168,36 @@ mod tests {
         assert_eq!(c.get(), 0xCBF4_3926);
         assert_eq!(super::crc16(b"123456789"), 0x29B1);
         assert_eq!(super::Crc32::default().get(), super::Crc32::new().get());
+    }
+
+    /// PWR-26.14: the table gives what the eight steps a byte gave, for any bytes fed in any pieces (so every record
+    /// written before still checks).
+    #[test]
+    fn crc32_table_matches_the_bitwise_form() {
+        fn bitwise(data: &[u8]) -> u32 {
+            let mut c = 0xFFFF_FFFFu32;
+            for &b in data {
+                c ^= b as u32;
+                for _ in 0..8 {
+                    c = if c & 1 != 0 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
+                }
+            }
+            !c
+        }
+        let mut x = 0x1234_5678u32;
+        let data: Vec<u8> = (0..1000).map(|_| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            x as u8
+        }).collect();
+        for n in [0, 1, 2, 7, 64, 255, 256, 1000] {
+            let mut c = super::Crc32::new();
+            let (a, b) = data[..n].split_at(n / 3);
+            c.update(a);
+            c.update(b);
+            assert_eq!(c.get(), bitwise(&data[..n]), "{n} bytes");
+        }
     }
 
     /// `block` polls a future that isn't ready yet again until it is (one that wakes itself, as the radio's

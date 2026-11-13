@@ -55,6 +55,11 @@ const STATE_MAX: usize = 512;
 /// Saves wait this long after the last change (a turning knob doesn't wear the flash).
 pub const SAVE_DELAY_MS: u32 = 2000;
 
+/// PWR-26.14: the state is looked at for a change at most this often (its CRC is a pass over all the settings and
+/// slots; the UI task calls [`FlashStore::autosave`] up to 50 times a second): a save then comes 2-2.5 s after the
+/// last change.
+pub const SAVE_CHECK_MS: u32 = 500;
+
 /// The weather zone's first channel record (WX-1): channels 991-997 as shown, out of the way of your own numbering.
 pub const WX_FIRST: u16 = 990;
 
@@ -177,11 +182,16 @@ pub struct FlashStore<N: Nor, D: Data> {
     /// Recent (CHAN-25): 10 channel numbers in RAM, not saved.
     recent: ferrite_app::chan::RecentList,
     ver: Cell<u32>,
+    /// PWR-26.13: the zone names home's headers ask for every frame, each with the [`FlashStore::ver`] it was read
+    /// at (every write moves that on): one per slot, so a header doesn't read the zone's record each time.
+    znames: Cell<[(u32, ZoneId, Name); 3]>,
     mounted: Cell<Mounted>,
     /// The save timer: CRC of the state last saved, of the state last seen, and when that changed.
     saved: Cell<u32>,
     seen: Cell<u32>,
     changed_at: Cell<u32>,
+    /// When the state was last looked at (PWR-26.14); None: at the next call.
+    checked_at: Cell<Option<u32>>,
     /// Writes are queued for the Storage task (the radio) instead of done at once.
     deferred: Cell<bool>,
     /// LINK-61: a raw write was made this power-on (the begin queued before it, decision 339), and the begin is
@@ -242,10 +252,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             cver: Cell::new(0),
             recent: ferrite_app::chan::RecentList::new(),
             ver: Cell::new(0),
+            znames: Cell::new([(0, ZoneId::MAX, Name::new()); 3]),
             mounted: Cell::new(Mounted::Failed),
             saved: Cell::new(0),
             seen: Cell::new(0),
             changed_at: Cell::new(0),
+            checked_at: Cell::new(None),
             deferred: Cell::new(false),
             raw: Cell::new(false),
             begun: Cell::new(false),
@@ -285,6 +297,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     pub async fn mount_async(&self) {
         let m = self.mount_inner().await.unwrap_or(Mounted::Failed);
         self.mounted.set(m);
+        self.bump(); // what was read before (nothing) is old: the lists and the zone names (PWR-26.13) look again
     }
 
     async fn mount_inner(&self) -> Result<Mounted> {
@@ -867,10 +880,13 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.aprs_changed.set(None);
         }
         self.sat_prefs_due(Some(now));
-        let c = state_crc(app);
-        if c != self.seen.get() {
-            self.seen.set(c);
-            self.changed_at.set(now);
+        if self.checked_at.get().is_none_or(|t| now.wrapping_sub(t) >= SAVE_CHECK_MS) {
+            self.checked_at.set(Some(now));
+            let c = state_crc(app);
+            if c != self.seen.get() {
+                self.seen.set(c);
+                self.changed_at.set(now);
+            }
         }
         // HF-29: HF mode's VFOs and recent list are written on leaving it, never while tuning: nothing is
         // saved while its screen is open (power off still flushes).
@@ -2004,7 +2020,20 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
             return None;
         }
         // An earlier zone deleted (its record kept empty) or never named still exists by number.
-        Some(self.read_zone(zone).map_or_else(Name::new, |z| z.0))
+        let read = || self.read_zone(zone).map_or_else(Name::new, |z| z.0);
+        if !self.ok() {
+            return Some(read());
+        }
+        // PWR-26.13: read again only after a write (any: the version moves on with each)
+        let (v, mut c) = (self.ver.get(), self.znames.get());
+        if let Some(e) = c.iter().find(|e| e.0 == v && e.1 == zone) {
+            return Some(e.2);
+        }
+        let n = read();
+        c.rotate_right(1);
+        c[0] = (v, zone, n);
+        self.znames.set(c);
+        Some(n)
     }
 
     fn zone_len(&self, zone: ZoneId) -> u16 {
@@ -2120,6 +2149,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
             s.fx25 = r.fx25;
         }
         Some(s)
+    }
+    fn station_ram(&self, i: u16) -> Option<Station> {
+        self.extra.station(i) // PWR-26.13: without the stored row's 128-byte read
     }
     fn callsign(&self) -> Option<Buf<10>> {
         self.extra.callsign()

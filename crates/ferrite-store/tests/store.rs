@@ -137,12 +137,14 @@ fn round_trip_and_first_boot() {
     let mut b = app();
     assert!(s.restore(&mut b));
     assert_eq!(b.slot(1).ch.map(|c| c.num), a.slot(1).ch.map(|c| c.num));
-    // The save timer: nothing to save right after restoring, a save 2 s after a change.
+    // The save timer: nothing to save right after restoring, a save 2 s after a change is seen; PWR-26.14: the
+    // state is looked at every 500 ms at most, so a change at 100 is seen at 500.
     assert!(!s.autosave(0, &b));
     b.set_watch(0);
     assert!(!s.autosave(100, &b));
-    assert!(!s.autosave(2000, &b));
-    assert!(s.autosave(2100, &b));
+    assert!(!s.autosave(500, &b));
+    assert!(!s.autosave(2400, &b));
+    assert!(s.autosave(2500, &b));
     assert!(!s.flush(&b));
 }
 
@@ -1104,4 +1106,26 @@ fn a_raw_write_being_done_keeps_reads_waiting() {
     let mut c = ferrite_store::Crc32::new();
     c.update(&[0x42; 64]);
     assert_eq!(s.data_crc(at, 64), Some(c.get()));
+}
+
+/// PWR-26.13: home's headers ask for a zone's name every frame: it is read from the flash once, then kept until the
+/// store writes anything (a rename shows at once); three zones (one a slot) are kept at a time.
+#[test]
+fn zone_names_read_once_until_a_write() {
+    let s = mount(SimFlash::new());
+    for n in [&b"Local"[..], b"Events", b"Air", b"Marine"] {
+        assert!(s.add_zone(n, &ZoneCfg::default()));
+    }
+    assert_eq!(s.zone_name(1).unwrap().as_bytes(), b"Events");
+    let r0 = s.nor().reads;
+    for _ in 0..10 {
+        for z in [0, 1, 2] {
+            assert!(s.zone_name(z).is_some());
+        }
+    }
+    assert!(s.nor().reads - r0 <= 2, "zones 0 and 2 read once each, then kept: {} reads", s.nor().reads - r0);
+    assert!(s.request(Op::PutZone(1, Buf::from(b"Renamed"), ZoneCfg::default())));
+    assert_eq!(s.zone_name(1).unwrap().as_bytes(), b"Renamed");
+    assert_eq!(s.zone_name(3).unwrap().as_bytes(), b"Marine");
+    assert_eq!(s.zone_name(9), None);
 }
