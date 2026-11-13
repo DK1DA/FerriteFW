@@ -529,10 +529,11 @@ pub async fn task() {
     let mut held: Option<RadioCmd> = None;
     // LINK-38: when the screen was last drawn, and whether input since wants it drawn now.
     let (mut last_draw, mut urgent) = (0u32, true);
-    // WATCH-17.4 (bench): the slots' squelch as last seen, and when one last changed until the screen next drew: the
-    // cable log's "squelch to screen" line.
+    // PWR-26.11: the slots' squelch as last seen, and when one last changed (a reason for the speed, and an urgent
+    // redraw). WATCH-17.4 (bench): when it changed until the screen next drew, the cable log's "squelch to screen".
+    let (mut sq_was, mut sq_changed) = (0u8, None::<u32>);
     #[cfg(feature = "bench")]
-    let (mut sq_was, mut sq_at) = (0u8, None::<u32>);
+    let mut sq_at = None::<u32>;
     // PWR-24.9: since when Low Power Mode has been on (None: off).
     let mut lpm_since: Option<u32> = None;
     // PWR-26.3: when the governor last had a reason for the build's speed.
@@ -940,6 +941,10 @@ pub async fn task() {
         if !panel_asleep && now_ms().wrapping_sub(panel_at) < WAKE_FAST_MS {
             why |= ferrite_core::clocktree::why::INPUT;
         }
+        // PWR-26.11: a squelch change, the panel awake: its redraw at speed
+        if !panel_asleep && sq_changed.is_some_and(|t| now.wrapping_sub(t) < ferrite_core::clocktree::RX_MS) {
+            why |= ferrite_core::clocktree::why::RX;
+        }
         if why != 0 {
             clock_high_at = now;
         }
@@ -1123,13 +1128,15 @@ pub async fn task() {
             }
             Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
-        #[cfg(feature = "bench")]
-        {
-            let m = live.slots.iter().enumerate().fold(0u8, |m, (i, s)| m | (s.squelch_open as u8) << i);
-            if m != sq_was {
-                sq_was = m;
-                sq_at.get_or_insert(now_ms());
-            }
+        // PWR-26.11: a squelch opening or closing on any slot draws at once, at the build's speed: at rest a live
+        // change waited for PWR-26.10's 250 ms and drew at 24 MHz, so RX showed late or a short call not at all.
+        let m = live.slots.iter().enumerate().fold(0u8, |m, (i, s)| m | (s.squelch_open as u8) << i);
+        if m != sq_was {
+            sq_was = m;
+            sq_changed = Some(now_ms());
+            urgent = true;
+            #[cfg(feature = "bench")]
+            sq_at.get_or_insert(now_ms());
         }
         app.tick(now_ms(), &live, store);
         // SAT-6: satellite passes predicted in time slices of SAT_SLICE_US between keys and redraws (CPU-bound, not
