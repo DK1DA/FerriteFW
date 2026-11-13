@@ -87,6 +87,9 @@ pub enum Kind {
     /// `bk turns [reset]`: each slot's turns on a chip (WATCH-17.1).
     Turns { reset: bool },
     #[cfg(feature = "bench")]
+    /// `bk spi [HALF [READS]]`, `bk spi use RD WR`: the BK4829 bus speed test and speeds (TERM-53).
+    Spi { half: Option<u8>, reads: u16, set: Option<[u8; 2]> },
+    #[cfg(feature = "bench")]
     /// `bk rxaf [HEX|off]`: the receive AF filter override (TERM-42).
     RxAf(Option<Option<u16>>),
     #[cfg(feature = "bench")]
@@ -201,6 +204,8 @@ impl Job {
             Kind::Save(c) => DebugReq::Save(c),
             #[cfg(feature = "bench")]
             Kind::Turns { reset } => DebugReq::Turns { reset },
+            #[cfg(feature = "bench")]
+            Kind::Spi { half, reads, set } => DebugReq::Spi { half, reads, set },
             #[cfg(feature = "bench")]
             Kind::RxAf(set) => DebugReq::RxAf(set),
             #[cfg(feature = "bench")]
@@ -404,11 +409,37 @@ impl Job {
                 Step::Line
             }
             #[cfg(feature = "bench")]
+            #[cfg(feature = "bench")]
+            (Kind::Spi { .. }, DebugAns::Spi { half, reads, rd, wr, us, now }) => {
+                if reads == 0 {
+                    put!(out, "  bk spi: reads {}.{} us, writes {}.{} us", now[0] / 10, now[0] % 10, now[1] / 10, now[1] % 10);
+                    self.st = St::Over;
+                    return Step::Line;
+                }
+                put!(out, "  bk spi: half {}.{} us, {} rounds a chip:", half / 10, half % 10, reads);
+                for n in 0..2 {
+                    if rd[n] == u16::MAX {
+                        put!(out, " chip {} absent", n);
+                    } else {
+                        put!(out, " chip {} reads {} wrong, writes {} wrong", n, rd[n], wr[n]);
+                    }
+                }
+                put!(out, "; {} us an operation; now reads {}.{} us, writes {}.{} us", us, now[0] / 10, now[0] % 10, now[1] / 10, now[1] % 10);
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
             (Kind::Turns { reset }, DebugAns::Turns(t)) => {
                 out.push(b"  bk turns:");
                 for (s, name) in ["A", "B", "C"].into_iter().enumerate() {
                     put!(out, " {} {} {} ms{}", name, t.n[s], t.ms[s], if s < 2 { "," } else { "" });
                 }
+                // WATCH-17.4: the steps inside turns (a scan's channels), and the retunes' time
+                out.push(b"; steps:");
+                for (s, name) in ["A", "B", "C"].into_iter().enumerate() {
+                    put!(out, " {} {} {} ms{}", name, t.steps[s], t.step_ms[s], if s < 2 { "," } else { "" });
+                }
+                put!(out, "; tunes {}, {} us each, {} us max", t.tunes, t.tune_us.checked_div(t.tunes).unwrap_or(0), t.tune_max_us);
                 if reset {
                     out.push(b" (reset)");
                 }

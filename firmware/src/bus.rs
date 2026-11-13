@@ -49,6 +49,10 @@ impl Delay for BusyDelay {
     fn delay_us(&mut self, us: u32) {
         time::delay_us(us)
     }
+    /// TERM-53: the BK4829 bus's half period in ns, on the cycle counter.
+    fn delay_ns(&mut self, ns: u32) {
+        time::delay_ns(ns)
+    }
 }
 
 /// The SPI flash on SPI2, chip select PB12.

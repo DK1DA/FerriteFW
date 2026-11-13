@@ -183,3 +183,39 @@ fn waits_through_the_wire_delay() {
     assert_eq!(sim.borrow().chips[0].regs[0x38], 0xBEEF);
     assert_eq!(w.release().2 .0, bk4829::wire::HALF_US * (1 + 2 * 24));
 }
+
+/// PWR-26.12: the read and write half periods apart. A write is all MCU-driven: the set-up and 48 half periods at the
+/// write speed. A read's set-up and address go at the write speed (17 halves), the turnaround and the 16 samples at
+/// the read speed (33 halves: one, two for the first sample, then two for each of the other 15). Values still come
+/// back whole at the mixed speeds.
+#[test]
+fn reads_and_writes_at_their_own_speeds() {
+    use bk4829::wire::{READ_NS, WRITE_NS};
+    struct Ns(u32);
+    impl Delay for Ns {
+        fn delay_us(&mut self, us: u32) {
+            self.0 += us * 1000;
+        }
+        fn delay_ns(&mut self, ns: u32) {
+            self.0 += ns;
+        }
+    }
+    let (sim, w, mut c0, _) = bus(Align::BeforeFall);
+    c0.set(true);
+    let (sck, sda, NoDelay) = w.release();
+    let mut w = ThreeWire::new(sck, sda, Ns(0));
+    assert_eq!(w.speeds(), (5000, 5000)); // stock's until set
+    w.set_speeds(READ_NS, WRITE_NS);
+    assert_eq!(w.speeds(), (3000, 1500));
+    w.write(&mut c0, 0x38, 0xBEEF);
+    assert_eq!(sim.borrow().chips[0].regs[0x38], 0xBEEF);
+    let (sck, sda, d) = w.release();
+    assert_eq!(d.0, 49 * WRITE_NS);
+    let mut w = ThreeWire::new(sck, sda, Ns(0));
+    w.set_speeds(READ_NS, WRITE_NS);
+    assert_eq!(w.read(&mut c0, 0x38), 0xBEEF);
+    assert_eq!(w.release().2 .0, 17 * WRITE_NS + 33 * READ_NS);
+    let (_, mut w, _, _) = bus(Align::BeforeFall);
+    w.set_speeds(0, 200);
+    assert_eq!(w.speeds(), (1000, 1000)); // 1 us at least
+}

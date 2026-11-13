@@ -45,7 +45,9 @@ SLOW_TABLES = [
     (r"radio::start_chips", None, "BK4829 start-up registers (bk4829's init): once at power-on"),
     # The Radio task's own body is its start-up (the Radio struct's first state) and the wait loop; the per-tick work
     # is in Radio::tick / cmd / run, checked like everything else. Small tables only: a large one is a real table.
-    (r"^<embassy_executor::raw::TaskStorage<ferrite::tasks::radio::", (0, 128),
+    # The same body when the compiler leaves it in the task's inner closure instead of inlining it into the poll
+    # (Nov 12, 2026: an 11-byte state table moved there with the bench build's TERM-53 change).
+    (r"^<embassy_executor::raw::TaskStorage<ferrite::tasks::radio::|^ferrite::tasks::radio::__task_task::__task_task_inner_function::\{closure#0\}$", (0, 128),
      "the Radio task's start-up state: once at power-on"),
 ]
 # Constant tables that hold numbers only: never scanned for function pointers, since two neighbouring samples can

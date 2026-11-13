@@ -478,6 +478,16 @@ impl Hop {
 pub struct Turns {
     pub n: [u32; SLOTS],
     pub ms: [u32; SLOTS],
+    /// WATCH-17.4: each slot's frequency steps inside its turns (a scan step, a priority look's channel, a tune):
+    /// how many, and the ms each frequency was held before the next, so `step_ms / steps` is a scan's time per
+    /// channel.
+    pub steps: [u32; SLOTS],
+    pub step_ms: [u32; SLOTS],
+    /// WATCH-17.4: the chips' retunes to a frequency (not a sleep): how many, and how long each took from its first
+    /// register write to receive on, the settle wait included (us): the sum, and the longest.
+    pub tunes: u32,
+    pub tune_us: u32,
+    pub tune_max_us: u32,
 }
 
 /// WATCH-17.1 (decision 262, a bench measure): the turns the chips actually took, fed by the Radio task where it
@@ -487,28 +497,46 @@ pub struct Turns {
 /// is exact whatever the reads' timing. The bench builds' (`bk turns`, 40 bytes).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TurnClock {
-    on: [Option<(u8, u32)>; 2],
+    /// Each chip's slot, when its turn began, its frequency and when that frequency began.
+    on: [Option<(u8, u32, Freq10, u32)>; 2],
     t: Turns,
 }
 
 impl TurnClock {
     pub const fn new() -> Self {
-        TurnClock { on: [None; 2], t: Turns { n: [0; SLOTS], ms: [0; SLOTS] } }
+        TurnClock { on: [None; 2], t: Turns { n: [0; SLOTS], ms: [0; SLOTS], steps: [0; SLOTS], step_ms: [0; SLOTS], tunes: 0, tune_us: 0, tune_max_us: 0 } }
     }
 
-    /// Chip `chip` retuned at `now` to `slot` (None: asleep).
-    pub fn tuned(&mut self, now: u32, chip: u8, slot: Option<u8>) {
+    /// Chip `chip` retuned at `now` to `want`, a slot and its frequency (None: asleep).
+    pub fn tuned(&mut self, now: u32, chip: u8, want: Option<(u8, Freq10)>) {
         let on = &mut self.on[chip as usize & 1];
-        if on.map(|(s, _)| s) == slot {
-            return;
-        }
-        if let Some((s, since)) = *on {
-            if (s as usize) < SLOTS {
-                self.t.n[s as usize] += 1;
-                self.t.ms[s as usize] += now.wrapping_sub(since);
+        match (*on, want) {
+            (Some((s, _, f, _)), Some((w, g))) if s == w && f == g => {}
+            // WATCH-17.4: a new frequency on the same slot continues its turn and ends a step
+            (Some((s, since, _, at)), Some((w, g))) if s == w => {
+                if (s as usize) < SLOTS {
+                    self.t.steps[s as usize] += 1;
+                    self.t.step_ms[s as usize] += now.wrapping_sub(at);
+                }
+                *on = Some((s, since, g, now));
+            }
+            _ => {
+                if let Some((s, since, _, _)) = *on {
+                    if (s as usize) < SLOTS {
+                        self.t.n[s as usize] += 1;
+                        self.t.ms[s as usize] += now.wrapping_sub(since);
+                    }
+                }
+                *on = want.map(|(s, f)| (s, now, f, now));
             }
         }
-        *on = slot.map(|s| (s, now));
+    }
+
+    /// WATCH-17.4: a retune to a frequency took `us`, its settle wait included.
+    pub fn tune_took(&mut self, us: u32) {
+        self.t.tunes += 1;
+        self.t.tune_us = self.t.tune_us.saturating_add(us);
+        self.t.tune_max_us = self.t.tune_max_us.max(us);
     }
 
     /// The counts so far; `reset` zeroes them after (a turn in progress still counts whole when it ends).
@@ -529,6 +557,7 @@ mod tests {
     /// WATCH-17.1, WATCH-17: A (146.55, active) and B (147.00) both on chip 0, watch A+B, nothing heard, in the
     /// Radio task's 10 ms ticks: the turn clock fed at each retune counts turns of 150 ms on A and 70 ms on B, C
     /// none; the difference of two reads gives the same means, and a reset keeps the turn in progress whole.
+    /// WATCH-17.4: frequency steps inside a turn are counted and timed, and so are the retunes.
     #[test]
     fn turn_clock_times_the_turns() {
         let c = Cfg { set: 0b011, active: 0, freq: [mhz(146) + 55_000, mhz(147), mhz(446) + 10_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false, swap: 0 };
@@ -538,7 +567,7 @@ mod tests {
                 let out = w.tick(t, &c, [false; 2], false);
                 assert_eq!(out.chip[1], None, "B shares chip 0");
                 for n in 0..2u8 {
-                    clock.tuned(t, n, out.chip[n as usize]);
+                    clock.tuned(t, n, out.chip[n as usize].map(|s| (s, c.freq[s as usize])));
                 }
             }
         };
@@ -557,12 +586,18 @@ mod tests {
         assert!(t2.n[0] > 0 && t2.n[1] > 0);
         assert_eq!((t2.ms[0] / t2.n[0], t2.ms[1] / t2.n[1]), (ACTIVE_DWELL_MS, WATCHED_DWELL_MS), "whole turns after a reset");
         // A new frequency on the same slot continues its turn; sleep or another owner ends it.
+        // WATCH-17.4: each new frequency is a step, timed from the last; the retunes' times add up.
         let mut k = TurnClock::new();
-        k.tuned(0, 0, Some(0));
-        k.tuned(50, 0, Some(0));
-        k.tuned(100, 0, Some(9));
+        k.tuned(0, 0, Some((0, 1)));
+        k.tuned(20, 0, Some((0, 1)));
+        k.tuned(50, 0, Some((0, 2)));
+        k.tuned(65, 0, Some((0, 3)));
+        k.tuned(100, 0, Some((9, 1)));
         k.tuned(130, 0, None);
-        assert_eq!(k.take(false), Turns { n: [1, 0, 0], ms: [100, 0, 0] });
+        k.tune_took(4_000);
+        k.tune_took(2_500);
+        let want = Turns { n: [1, 0, 0], ms: [100, 0, 0], steps: [2, 0, 0], step_ms: [65, 0, 0], tunes: 2, tune_us: 6_500, tune_max_us: 4_000 };
+        assert_eq!(k.take(false), want);
     }
 
     /// TERM-29.4 (the fox-hunt measurement): a slot in `swap` is put on the other band's chip: A's 2 m on chip 1,
