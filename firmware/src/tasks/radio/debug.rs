@@ -26,6 +26,41 @@ impl Radio {
                 }
                 DebugAns::Settle(self.settle)
             }
+            // TERM-53: the bus speed test: the half period set, then ID reads of both chips; any error puts stock's back.
+            DebugReq::Spi { half, reads } => {
+                // Each chip's REG_48 (the receive AF gain) read at the speed in force, written back unchanged in the
+                // test: a write's bits through the same line, checked by reading it again.
+                let was = [0u8, 1].map(|n| if self.chips & 1 << n != 0 { self.chip(n).read(bk4829::reg::AF_GAIN) } else { 0 });
+                let half = half.map_or(self.wire.half_us(), |h| h as u32);
+                self.wire.set_half_us(half);
+                let mut errs = [u16::MAX; 2];
+                let c0 = crate::hal::time::cycles();
+                for n in 0..2u8 {
+                    if self.chips & 1 << n != 0 {
+                        let v = was[n as usize];
+                        errs[n as usize] = (0..reads)
+                            .filter(|_| {
+                                let mut c = self.chip(n);
+                                let id = c.read(0);
+                                c.write(bk4829::reg::AF_GAIN, v);
+                                id != bk4829::wire::ID || c.read(bk4829::reg::AF_GAIN) != v
+                            })
+                            .count() as u16;
+                    }
+                }
+                let ops = reads as u32 * self.chips.count_ones() * 3;
+                let us = (crate::hal::time::cycles().wrapping_sub(c0) / crate::hal::clock::mhz()).checked_div(ops).unwrap_or(0);
+                if errs.iter().any(|&e| e != 0 && e != u16::MAX) {
+                    // stock's speed, and each REG_48 put back as it was
+                    self.wire.set_half_us(bk4829::wire::HALF_US);
+                    for n in 0..2u8 {
+                        if self.chips & 1 << n != 0 {
+                            self.chip(n).write(bk4829::reg::AF_GAIN, was[n as usize]);
+                        }
+                    }
+                }
+                DebugAns::Spi { half: half as u8, reads, errs, us, now: self.wire.half_us() as u8 }
+            }
             // WATCH-17.1 (decision 262): the turns the chips took, read and maybe zeroed.
             DebugReq::Turns { reset } => DebugAns::Turns(self.turns.take(reset)),
             // TERM-42, TERM-43 (decision 305): the receive filter override and the FSK modem test.

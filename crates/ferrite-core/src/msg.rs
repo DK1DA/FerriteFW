@@ -516,6 +516,10 @@ pub enum DebugReq {
     /// ([`crate::watch::TurnClock`]), zeroed after if `reset`. The Radio task answers with [`DebugAns::Turns`].
     Turns { reset: bool },
     #[cfg(feature = "bench")]
+    /// TERM-53 (a bench test): the BK4829 bus's half SCK period set (`half`, us, RAM only) or only asked, then
+    /// `reads` rounds on each chip: its ID read, REG_48 written back unchanged and read again. Any wrong answer puts stock's 5 us back (and REG_48 as it was). Answered with [`DebugAns::Spi`].
+    Spi { half: Option<u8>, reads: u16 },
+    #[cfg(feature = "bench")]
     /// TERM-42 (decision 305, a bench test): the receive AF filter override, REG_2B bits 10:8 after every FM tune
     /// (`Some(Some(bits))`), off (`Some(None)`), or only asked (`None`). RAM only. Answered with [`DebugAns::RxAf`].
     RxAf(Option<Option<u16>>),
@@ -683,6 +687,10 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// WATCH-17.1: each slot's whole turns and their ms, before any reset.
     Turns(crate::watch::Turns),
+    #[cfg(feature = "bench")]
+    /// TERM-53: the half period the reads ran at, each chip's failed rounds (u16::MAX: the chip isn't there), the
+    /// mean us an operation took, and the half period now (stock's 5 again after an error).
+    Spi { half: u8, reads: u16, errs: [u16; 2], us: u32, now: u8 },
     #[cfg(feature = "bench")]
     /// TERM-42: the receive AF filter override in force (REG_2B bits 10:8), None off.
     RxAf(Option<u16>),

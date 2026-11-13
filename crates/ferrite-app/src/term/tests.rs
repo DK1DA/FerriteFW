@@ -1332,6 +1332,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Save(c) => DebugAns::Save { cycle: c.flatten(), level: Some((300, 500)), asleep: false },
         #[cfg(feature = "bench")]
+        DebugReq::Spi { half, reads } => DebugAns::Spi { half: half.unwrap_or(5), reads, errs: [0, if half == Some(1) { 3 } else { 0 }], us: 250, now: if half == Some(1) { 5 } else { half.unwrap_or(5) } },
+        #[cfg(feature = "bench")]
         DebugReq::Turns { .. } => DebugAns::Turns(ferrite_core::watch::Turns { n: [27, 27, 0], ms: [4050, 1890, 0], steps: [40, 0, 0], step_ms: [2800, 0, 0], tunes: 94, tune_us: 470_000, tune_max_us: 9_100 }),
         #[cfg(feature = "bench")]
         DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
@@ -1979,6 +1981,31 @@ fn debug_bk_settle() {
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     assert!(!super::cmd::writes(b"bk settle") && super::cmd::writes(b"bk settle 2") && super::cmd::writes(b"bk 0 30"));
+}
+
+#[cfg(feature = "bench")]
+/// TERM-53: `bk spi` asks the bus's half period, `bk spi 2 500` sets it and runs 500 rounds on each chip (ID read, REG_48 written back and read); an error
+/// reports stock's 5 back; out of range or extra words are refused before anything is sent.
+#[test]
+fn debug_bk_spi() {
+    let mut r = Rig::main();
+    r.cmd("bk spi");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: None, reads: 0 }]);
+    r.send(b"\r");
+    r.cmd("bk spi 2 500");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: Some(2), reads: 500 }]);
+    assert!(r.raw().contains("bk spi: half 2 us, 500 rounds a chip (ID, REG_48 written, read): chip 0 0 wrong chip 1 0 wrong; 250 us an operation; now 2 us"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bk spi 1");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Spi { half: Some(1), reads: 2000 }]);
+    assert!(r.raw().contains("chip 1 3 wrong; 250 us an operation; now 5 us"), "{}", r.raw());
+    r.send(b"\r");
+    assert!(!super::cmd::writes(b"bk spi") && super::cmd::writes(b"bk spi 2"));
+    for bad in ["bk spi 0", "bk spi 6", "bk spi 2 0", "bk spi 2 6000", "bk spi 2 10 x"] {
+        r.cmd(bad);
+        assert_eq!(r.serve(4, regs), vec![], "{bad}");
+        r.send(b"\r");
+    }
 }
 
 #[cfg(feature = "bench")]

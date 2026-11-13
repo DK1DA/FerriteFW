@@ -87,6 +87,9 @@ pub enum Kind {
     /// `bk turns [reset]`: each slot's turns on a chip (WATCH-17.1).
     Turns { reset: bool },
     #[cfg(feature = "bench")]
+    /// `bk spi [HALF [READS]]`: the BK4829 bus speed test (TERM-53).
+    Spi { half: Option<u8>, reads: u16 },
+    #[cfg(feature = "bench")]
     /// `bk rxaf [HEX|off]`: the receive AF filter override (TERM-42).
     RxAf(Option<Option<u16>>),
     #[cfg(feature = "bench")]
@@ -201,6 +204,8 @@ impl Job {
             Kind::Save(c) => DebugReq::Save(c),
             #[cfg(feature = "bench")]
             Kind::Turns { reset } => DebugReq::Turns { reset },
+            #[cfg(feature = "bench")]
+            Kind::Spi { half, reads } => DebugReq::Spi { half, reads },
             #[cfg(feature = "bench")]
             Kind::RxAf(set) => DebugReq::RxAf(set),
             #[cfg(feature = "bench")]
@@ -400,6 +405,21 @@ impl Job {
                 if let Some((us, mhz)) = l.bus {
                     put!(out, "; bus: full-screen fill {} us, {} ns a byte at {} MHz", us, us * 1000 / 153_600, mhz as u32);
                 }
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            #[cfg(feature = "bench")]
+            (Kind::Spi { .. }, DebugAns::Spi { half, reads, errs, us, now }) => {
+                put!(out, "  bk spi: half {} us, {} rounds a chip (ID, REG_48 written, read):", half, reads);
+                for (n, e) in errs.into_iter().enumerate() {
+                    if e == u16::MAX {
+                        put!(out, " chip {} absent", n);
+                    } else {
+                        put!(out, " chip {} {} wrong", n, e);
+                    }
+                }
+                put!(out, "; {} us an operation; now {} us", us, now);
                 self.st = St::Over;
                 Step::Line
             }

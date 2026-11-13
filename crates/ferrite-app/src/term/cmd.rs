@@ -1588,7 +1588,7 @@ pub fn writes(line: &[u8]) -> bool {
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
-    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf") || same(w, b"rxif") || same(w, b"hold") || same(w, b"swap")));
+    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && (same(w, b"turns") || same(w, b"rxaf") || same(w, b"rxif") || same(w, b"hold") || same(w, b"swap") || same(w, b"spi")));
     let shows = shows || same(c, b"fsk") && rest == 0; // TERM-43: `fsk` alone shows the counts
     let shows = shows || same(c, b"meter") && rest == 0; // TERM-44: `meter` alone shows the bins
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
@@ -1925,13 +1925,14 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, No> {
 
 #[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, No> {
-    const USAGE: Txt = txt!("bk CHIP REG [VALUE] (hex; 0 VHF, 1 UHF/HF), bk CHIP dump, bk settle|save|turns|rxaf|rxif|hold");
+    const USAGE: Txt = txt!("bk CHIP REG [VALUE] (hex; 0 VHF, 1 UHF/HF), bk CHIP dump, bk settle|save|turns|spi|rxaf|rxif|hold");
     let chip = match t.word_t(USAGE)? {
         b"0" => 0,
         b"1" => 1,
         w if same(w, b"settle") => return settle(t),
         w if same(w, b"save") => return bk_save(t),
         w if same(w, b"turns") => return turns(t),
+        w if same(w, b"spi") => return spi(t),
         w if same(w, b"rxaf") => return rxaf(t),
         w if same(w, b"rxif") => return rxif(t),
         w if same(w, b"hold") => return hold(t),
@@ -2330,6 +2331,28 @@ fn turns(t: &mut Toks) -> Result<Done, No> {
         return Err(t.say_t(USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::Turns { reset })))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-53 (a bench test): `bk spi` shows the BK4829 bus's half SCK period; `bk spi HALF [READS]` sets it (1-5 us,
+/// RAM only) and runs READS rounds on each chip (default 2000, at most 5000: a round on both chips at stock's speed is about 1.6 ms, and the Radio task does nothing else meanwhile): its ID read, REG_48 written back unchanged and read; a wrong answer puts stock's 5 back.
+fn spi(t: &mut Toks) -> Result<Done, No> {
+    const USAGE: Txt = txt!("bk spi [HALF [READS]]: the BK4829 bus's half SCK period, 1-5 us (5 is stock's), then READS read and write rounds");
+    let mut half = None;
+    let mut reads = 0u16;
+    if let Some(tok) = t.next()? {
+        let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
+        half = Some(number(w).filter(|n| (1..=5).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u8);
+        reads = 2000;
+        if let Some(tok) = t.next()? {
+            let Tok::Word(w) = tok else { return Err(t.say_t(USAGE)) };
+            reads = number(w).filter(|n| (1..=5_000).contains(n)).ok_or_else(|| t.say_t(USAGE))? as u16;
+        }
+    }
+    if t.next()?.is_some() {
+        return Err(t.say_t(USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Spi { half, reads })))
 }
 
 #[cfg(feature = "bench")]
