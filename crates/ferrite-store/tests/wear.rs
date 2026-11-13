@@ -52,8 +52,9 @@ fn region(sector: usize) -> &'static str {
 
 /// A heavy day on the keypad: 300 settings saves (tuning and settings changes, each 2 s after the last change),
 /// 50 channel edits, 200 logged events, 30 messages each way, 5 waypoints. Budget: the most-worn sector takes at
-/// most 160 erases a day (settings, A/B, take half the saves each), which is about 1.7 years of such days at the
-/// rated 100,000; a normal day is a fraction of this.
+/// most 60 erases a day (a channel sector, the 50 edits; 160 before decision 377, the settings' A/B pair then);
+/// each settings sector at most 30 (six saves to a sector before an erase: 25, about 11 years of such days at the
+/// rated 100,000); a normal day is a fraction of this.
 #[test]
 fn a_heavy_day_on_the_keypad() {
     let s: Store = FlashStore::mount(SimFlash::new(), NoData);
@@ -89,7 +90,9 @@ fn a_heavy_day_on_the_keypad() {
         println!("  0x{:06X} {:13} {n:4} erases ({:.1} years of such days)", sec * 4096, region(*sec), RATED as f64 / *n as f64 / 365.0);
     }
     let (sec, n) = w[0];
-    assert!(n <= 160, "0x{:06X} ({}) took {n} erases in a day", sec * 4096, region(sec));
+    assert!(n <= 60, "0x{:06X} ({}) took {n} erases in a day", sec * 4096, region(sec));
+    let set: u32 = w.iter().filter(|(s, _)| region(*s) == "settings").map(|x| x.1).max().unwrap_or(0);
+    assert!(set <= 30, "a settings sector took {set} erases (decision 377)");
     let scratch: u32 = w.iter().filter(|(s, _)| region(*s) == "scratch ring").map(|x| x.1).max().unwrap_or(0);
     assert!(scratch <= 3, "a scratch sector took {scratch} erases");
 }
