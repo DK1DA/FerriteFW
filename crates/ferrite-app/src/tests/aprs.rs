@@ -121,8 +121,11 @@ fn aprs_slot_is_locked() {
         assert!(matches!(a.app.screen(), Screen::Home), "{k:?}");
         assert!(a.app.toast_up());
     }
+    // MENU-34: hold ABC is the APRS quick page, not C's edit grid
     a.press(Key::Slot, 800);
-    assert!(matches!(a.app.screen(), Screen::Home), "no edit grid");
+    assert!(matches!(a.app.screen(), Screen::QGrid(g) if g.page == crate::screens::qgrid::Page::Aprs), "no edit grid");
+    a.tap(Key::Exit);
+    assert!(matches!(a.app.screen(), Screen::Home));
     a.app.knob(1, a.t, &a.s);
     assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { .. } | RadioCmd::SlotParam { .. })), "nothing changed C");
     assert!(a.app.greyed(Item::Mode).is_some() && a.app.greyed(Item::Power).is_none() && a.app.greyed(Item::Watch).is_none());

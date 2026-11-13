@@ -410,6 +410,8 @@ pub struct AprsLive {
     replied_at: Cell<u8>,
     beacon_last: Cell<Option<LastBeacon>>,
     beacon_now: Cell<bool>,
+    /// APRS-50.1: automatic beacons sent since power-on (wrapping), for the beacon text's rate.
+    beacons: Cell<u8>,
     /// APRS-27: a beacon owed after a voice transmission (kept to APRS-9's spacing, unlike "beacon now").
     after_voice: Cell<bool>,
     waiting: Cell<bool>,
@@ -460,6 +462,7 @@ impl AprsLive {
             replied_at: Cell::new(0),
             beacon_last: Cell::new(None),
             beacon_now: Cell::new(false),
+            beacons: Cell::new(0),
             after_voice: Cell::new(false),
             waiting: Cell::new(false),
             fix_wait: Cell::new(None),
@@ -1221,10 +1224,16 @@ impl AprsLive {
             };
             self.after_voice.set(false);
             self.fix_wait.set(None);
+            // APRS-50.1: Beacon now always carries the text; an automatic beacon the first and then every 2nd, 4th
+            // or 8th (0 5 6 5)
+            let text = self.beacon_now.get() || self.beacons.get().is_multiple_of(1 << cfg.text_every.min(3));
+            if !self.beacon_now.get() {
+                self.beacons.set(self.beacons.get().wrapping_add(1));
+            }
             self.beacon_now.set(false);
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
-            if let Some(n) = position_info(&f, cfg, self.readings.get(), &mut info, &mut dest) {
+            if let Some(n) = position_text(&f, cfg, text, self.readings.get(), &mut info, &mut dest) {
                 t.changed = true;
                 return self.framed(my, &dest, &info[..n], "Beacon", cfg, out, t);
             }
@@ -1301,9 +1310,15 @@ fn fresh(fix: Option<Fix>, cfg: &AprsCfg) -> Option<Fix> {
 /// many whole values as keep the report within [`POSITION_TAIL_MAX`] after its symbol (dropped from the end, the
 /// comment itself never cut); Mic-E's comment has no limit but the frame's, so there all of them.
 fn position_info(f: &Fix, cfg: &AprsCfg, rd: Readings, info: &mut [u8], dest: &mut [u8; 6]) -> Option<usize> {
+    position_text(f, cfg, true, rd, info, dest)
+}
+
+/// [`position_info`], with 0 5 5 3's text only when `text` (APRS-50.1: a beacon between the ones that carry it);
+/// the telemetry values go on every one.
+fn position_text(f: &Fix, cfg: &AprsCfg, text: bool, rd: Readings, info: &mut [u8], dest: &mut [u8; 6]) -> Option<usize> {
     let (vals, ends, mut k) = if cfg.telemetry { comment_values(rd, cfg.power) } else { (Buf::new(), [0; 3], 0) };
     loop {
-        let mut c = Buf::<{ crate::aprs::COMMENT_LEN + 25 }>::from(cfg.comment_text());
+        let mut c = Buf::<{ crate::aprs::COMMENT_LEN + 25 }>::from(if text { cfg.comment_text() } else { b"" });
         if k > 0 {
             if !c.is_empty() {
                 c.push(b" ");
@@ -2239,6 +2254,38 @@ mod tests {
             }
         }
         assert_eq!(beacons, 6);
+    }
+
+    /// APRS-50.1: 0 5 6 5 sends the beacon text on the first timed beacon and then every 2nd, 4th or 8th; the
+    /// others are the bare position (telemetry still on every one); Beacon now always carries it and doesn't count.
+    #[test]
+    fn beacon_text_every_nth() {
+        for (every, want) in [(0u8, [true; 8]), (1, [true, false, true, false, true, false, true, false]), (2, [true, false, false, false, true, false, false, false]), (3, [true, false, false, false, false, false, false, false])] {
+            let a = AprsLive::new();
+            let mut out = [0u8; FRAME_MAX];
+            let mut cfg = AprsCfg { beacon: 2, text_every: every, telemetry: true, ..AprsCfg::DEFAULT }; // every 2 min
+            cfg.comment[..7].copy_from_slice(b"Hiking!");
+            a.readings(7_400, Some(33), 14_439_000);
+            let mut got = std::vec::Vec::new();
+            let mut s = 100;
+            while got.len() < 8 {
+                let t = a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+                if t.len > 0 && t.what == "Beacon" {
+                    let info = sent(&out, &t);
+                    assert!(info.ends_with(b"7.4V 33C 0.5W"), "telemetry on every beacon: {info:?}");
+                    got.push(info.windows(7).any(|w| w == b"Hiking!"));
+                    if got.len() == 3 {
+                        // Beacon now between: always the text, and the count goes on as before
+                        a.beacon_now();
+                        let t = a.tick(s + 1, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+                        assert!(t.len > 0 && sent(&out, &t).windows(7).any(|w| w == b"Hiking!"), "Beacon now carries it");
+                        s += 1;
+                    }
+                }
+                s += 1;
+            }
+            assert_eq!(got, want, "0 5 6 5 = {every}");
+        }
     }
 
     /// APRS-32: a message to us heard again (the sender's retries, a second digipeater's copy) is acked every

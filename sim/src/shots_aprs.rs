@@ -124,6 +124,17 @@ pub fn run(scale: u32) {
     s.save_rx("aprsmode-card-rxmuted-big"); // "RX muted": the state wins, the priority hides
     s.press(Key::Star, 80); // \* hears it: idle shows nothing on the large card
     s.save("aprsmode-card-big");
+    // MENU-34: hold ABC on C in APRS mode: the APRS quick page
+    s.press(Key::Slot, 800);
+    s.save("qpage-aprs");
+    s.press(D(8), 80); // Text rate (APRS-50.1), turned to every 4th
+    s.app.knob(2, s.t, &s.store);
+    s.save("qpage-aprs-textrate");
+    s.app.knob(-2, s.t, &s.store);
+    s.press(Key::Exit, 80);
+    s.keys(&[Key::Menu, D(0), D(5), D(6)]); // the beacon list with 0 5 6 5
+    s.save("aprs-beacon-list");
+    s.press(Key::Exit, 800);
     s.save_rx("aprsmode-card-rx-big");
     // 0 5 9 7 A·B first: amber
     s.app.settings_mut().aprs_share = 1;
@@ -188,6 +199,10 @@ pub fn run(scale: u32) {
     s.save("aprsbeacon-card");
     s.keys(&[Key::Slot, Key::Slot]); // C
     s.save("aprsbeacon-card-big");
+    // MENU-34: hold ABC on C held by beacons: the same APRS quick page
+    s.press(Key::Slot, 800);
+    s.save("qpage-aprs-beacons");
+    s.press(Key::Exit, 80);
     // KISS on Bluetooth: "APRS KISS", the port and the frames counted.
     s.app.settings_mut().bt = true;
     s.app.settings_mut().kiss_port = 2;

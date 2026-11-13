@@ -210,6 +210,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry(concat!("After voice TX|Off|", txtc!("Beacon after you talk."))),
         Entry(concat!("Power|Low|", txtc!("Beacon and message power."))),
         Entry(concat!("Telemetry|Off|", txtc!("Battery, temperature, power in the comment."))),
+        Entry(concat!("Text rate|All|", txtc!("How often timed beacons carry your beacon text."))),
     ]),
     ((5, 7), &[
         Entry(concat!("Digipeat|Off|", txtc!("Relay others' packets."))),
@@ -358,6 +359,15 @@ pub(crate) fn memo(g: u8, sub: u8) -> Option<usize> {
     }
 }
 
+/// The menu item at path `p` (MENU 0 g i, or MENU 0 g s i): its name, its shown value and its help line.
+pub(crate) fn entry_of(p: &[u8]) -> Option<Entry> {
+    match *p {
+        [g, i] => items(g, 0).get((i as usize).checked_sub(1)?).copied(),
+        [g, s, i] => items(g, s).get((i as usize).checked_sub(1)?).copied(),
+        _ => None,
+    }
+}
+
 pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
     if sub == 0 {
         return GROUP_ITEMS[(g as usize).clamp(1, 9) - 1];
@@ -465,7 +475,7 @@ pub(crate) fn all_values() -> std::vec::Vec<([u8; 3], std::vec::Vec<std::string:
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 97 + cfg!(feature = "bench") as usize] = [
+static SETTINGS: [Setting; 98 + cfg!(feature = "bench") as usize] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -502,6 +512,7 @@ static SETTINGS: [Setting; 97 + cfg!(feature = "bench") as usize] = [
     field!([5, 6, 2], special),
     field!([5, 6, 3], special),
     field!([5, 6, 4], special), // APRS-54: telemetry
+    field!([5, 6, 5], special), // APRS-50.1: the beacon text's rate
     field!([5, 7, 1], special),
     field!([5, 7, 2], special),
     field!([5, 7, 3], special),
@@ -821,6 +832,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, app.aprs_cfg().telemetry as u8);
             app.aprs_cfg().telemetry
         }
+        [5, 6, 5] => {
+            pick(b, &crate::aprs::TEXT_EVERY, app.aprs_cfg().text_every);
+            app.aprs_cfg().text_every != 0
+        }
         // The group rows show their setting too (APRS-26).
         [5, 9, 1] => {
             b.set(app.aprs_cfg().path_name());
@@ -1034,6 +1049,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [5, 6, 3] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
         [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
         [5, 6, 4] => app.set_aprs(crate::aprs::AprsCfg { telemetry: !app.aprs_cfg().telemetry, ..app.aprs_cfg() }),
+        [5, 6, 5] => app.set_aprs(crate::aprs::AprsCfg { text_every: cycle(app.aprs_cfg().text_every, d, 4), ..app.aprs_cfg() }),
         [5, 9, 1] => {
             let c = app.aprs_cfg();
             app.set_aprs(crate::aprs::AprsCfg { path: c.path_step(d), ..c });
@@ -1147,6 +1163,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 6, 3] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
         [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
         [5, 6, 4] => app.set_aprs(crate::aprs::AprsCfg { telemetry: false, ..app.aprs_cfg() }),
+        [5, 6, 5] => app.set_aprs(crate::aprs::AprsCfg { text_every: 0, ..app.aprs_cfg() }),
         [5, 9, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
         [5, 7, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
@@ -1329,17 +1346,7 @@ impl Group {
     /// The knob or ◀▶: change the highlighted value, or say why it can't.
     fn turn(self, app: &mut App, d: i32) {
         let (p, pl) = self.path(self.row);
-        if let Some(why) = greyed(app, &p[..pl]) {
-            app.show_toast(self.items()[self.row as usize].name().as_bytes(), why.as_bytes(), false);
-        } else {
-            let p = &p[..pl];
-            // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
-            let was = shown(app, p);
-            // Dry TX (TX-48) isn't a setting: no undo either.
-            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [7, 7, 1] | [7, 7, 2] | [8, 8, 5]) && shown(app, p) != was {
-                app.keep_set_undo(p, d, was);
-            }
-        }
+        turn_path(app, &p[..pl], self.items()[self.row as usize].name(), d);
     }
 
     /// Row `i` as drawn: its name, the value it shows, the changed-from-default dot and whether it is greyed
@@ -1400,56 +1407,76 @@ impl Group {
     /// OK (or its digit) on the highlighted row: its screen, its list, or (OK only) a toggle.
     fn open(self, app: &mut App, ok: bool) {
         let (p, pl) = self.path(self.row);
-        let p = &p[..pl];
-        if let Some(why) = greyed(app, p) {
-            return app.show_toast(self.items()[self.row as usize].name().as_bytes(), why.as_bytes(), false);
+        open_path(app, &p[..pl], self.items()[self.row as usize].name(), ok);
+    }
+}
+
+/// The knob or ◀▶ on setting `p` (named `name` in a toast): change it, or say why it can't. A menu row and a quick
+/// page's cell (MENU-34) both turn this way.
+pub(crate) fn turn_path(app: &mut App, p: &[u8], name: &str, d: i32) {
+    if let Some(why) = greyed(app, p) {
+        app.show_toast(name.as_bytes(), why.as_bytes(), false);
+    } else {
+        // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
+        let was = shown(app, p);
+        // Dry TX (TX-48) isn't a setting: no undo either.
+        if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [7, 7, 1] | [7, 7, 2] | [8, 8, 5]) && shown(app, p) != was {
+            app.keep_set_undo(p, d, was);
         }
-        match p {
-            [8, 6, 1] => {
-                super::setup::callsign(app);
+    }
+}
+
+/// OK (or its digit) on setting `p`: its screen, its list, or (OK only) a toggle. A menu row and a quick page's
+/// cell (MENU-34) both open this way.
+pub(crate) fn open_path(app: &mut App, p: &[u8], name: &str, ok: bool) {
+    if let Some(why) = greyed(app, p) {
+        return app.show_toast(name.as_bytes(), why.as_bytes(), false);
+    }
+    match p {
+        [8, 6, 1] => {
+            super::setup::callsign(app);
+        }
+        // OK on Text edits it (16 characters); the knob still picks off, callsign or text.
+        [7, 3, 2] if ok && app.set.pon == 2 => {
+            app.text = Buf::from(app.set.pon_text.as_bytes());
+            app.open(Dest::Text(super::text::TextFor::PowerOn));
+        }
+        // OK types the capcode (DEC-4), the clock (GPS-23) or the custom path (APRS-26); the knob still
+        // changes 0 6 6's format.
+        [4, 2, 3] => {
+            app.text = Buf::new();
+            if app.set.pocsag_cap != 0 {
+                let _ = uwrite!(app.text, "{}", app.set.pocsag_cap);
             }
-            // OK on Text edits it (16 characters); the knob still picks off, callsign or text.
-            [7, 3, 2] if ok && app.set.pon == 2 => {
-                app.text = Buf::from(app.set.pon_text.as_bytes());
-                app.open(Dest::Text(super::text::TextFor::PowerOn));
-            }
-            // OK types the capcode (DEC-4), the clock (GPS-23) or the custom path (APRS-26); the knob still
-            // changes 0 6 6's format.
-            [4, 2, 3] => {
-                app.text = Buf::new();
-                if app.set.pocsag_cap != 0 {
-                    let _ = uwrite!(app.text, "{}", app.set.pocsag_cap);
+            app.open(Dest::Text(super::text::TextFor::Capcode));
+        }
+        [6, 6] if ok => {
+            app.text = Buf::new();
+            app.open(Dest::Text(super::text::TextFor::Clock));
+        }
+        [5, 9, 2] => {
+            app.text = Buf::from(app.aprs_custom_path());
+            app.open(Dest::Text(super::text::TextFor::AprsPath));
+        }
+        // APRS-50: the comment in the message editor (40 characters, multi-tap or predictive)
+        [5, 5, 3] => {
+            app.text.clear();
+            app.open_screen(crate::Screen::Compose(super::msgs::Compose::comment_edit()));
+        }
+        // MENU-31: a frequency setting opens the frequency entry box; the knob still steps it.
+        [5, 4] => super::entry::open_setting(app, super::entry::FreqSet::Aprs),
+        [4, 2, 2] => super::entry::open_setting(app, super::entry::FreqSet::Pager),
+        _ => {
+            if let Some(d) = nav::menu0(p) {
+                app.open(d);
+                restore_row(app); // MENU-24: a third-level list on its last item
+            } else if ok && !change(app, p, 1) {
+                let mut b = Buf::<20>::new();
+                b.push(b"MENU 0");
+                for x in p {
+                    let _ = uwrite!(b, " {}", x);
                 }
-                app.open(Dest::Text(super::text::TextFor::Capcode));
-            }
-            [6, 6] if ok => {
-                app.text = Buf::new();
-                app.open(Dest::Text(super::text::TextFor::Clock));
-            }
-            [5, 9, 2] => {
-                app.text = Buf::from(app.aprs_custom_path());
-                app.open(Dest::Text(super::text::TextFor::AprsPath));
-            }
-            // APRS-50: the comment in the message editor (40 characters, multi-tap or predictive)
-            [5, 5, 3] => {
-                app.text.clear();
-                app.open_screen(crate::Screen::Compose(super::msgs::Compose::comment_edit()));
-            }
-            // MENU-31: a frequency setting opens the frequency entry box; the knob still steps it.
-            [5, 4] => super::entry::open_setting(app, super::entry::FreqSet::Aprs),
-            [4, 2, 2] => super::entry::open_setting(app, super::entry::FreqSet::Pager),
-            _ => {
-                if let Some(d) = nav::menu0(p) {
-                    app.open(d);
-                    restore_row(app); // MENU-24: a third-level list on its last item
-                } else if ok && !change(app, p, 1) {
-                    let mut b = Buf::<20>::new();
-                    b.push(b"MENU 0");
-                    for x in p {
-                        let _ = uwrite!(b, " {}", x);
-                    }
-                    app.show_toast(b.as_bytes(), b"setting comes next", false);
-                }
+                app.show_toast(b.as_bytes(), b"setting comes next", false);
             }
         }
     }
