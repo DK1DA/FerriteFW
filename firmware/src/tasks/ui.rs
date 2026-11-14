@@ -618,7 +618,7 @@ pub async fn task() {
         if let Some(s) = shown {
             let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
             dev.battery_mv = mv.max(0) as u16;
-            (dev.battery_pct, dev.battery_low, dev.battery_cutoff) = (s.pct, s.low, s.cutoff);
+            (dev.battery_pct, dev.battery_low, dev.battery_cutoff, dev.battery_charging) = (s.pct, s.low, s.cutoff, s.charging);
             app.battery(s.pct); // PWR-24.3: Low Power Mode's Auto
             // The cable log (TERM-28): the battery every 10 s (no charger-detect input is known on this board):
             // the reading now, the averaged one the % comes from, and the %.
@@ -678,6 +678,9 @@ pub async fn task() {
                 bringup::linef(|b| {
                     let avg = ferrite_core::txcal::battery_mv(s.raw);
                     let _ = ufmt::uwrite!(b, "battery {} mV, avg {} mV, {}%, PA1 {} avg {}", ferrite_core::txcal::battery_mv(raw), avg, s.pct, raw, s.raw);
+                    if s.charging {
+                        b.push(b", charging"); // PWR-22.4
+                    }
                 });
                 // SBAR-20: the MCU temperature's raw counts and what they give.
                 let t = crate::chan::MCU_TEMP.load(Relaxed);

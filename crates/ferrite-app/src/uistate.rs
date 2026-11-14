@@ -478,6 +478,9 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "battery", cx.dev.battery_pct as u32);
         kn(l, "low", b.battery_low as u32);
         kn(l, "cutoff", b.battery_cutoff as u32);
+        if b.charging {
+            kn(l, "charging", 1); // PWR-22.4, SBAR-9.2: only while charging
+        }
         kn(l, "dry", b.dry as u32); // TX-48, SBAR-22
         kn(l, "lpm", b.lpm as u32); // PWR-24, SBAR-24
         if b.sat != 0 {
