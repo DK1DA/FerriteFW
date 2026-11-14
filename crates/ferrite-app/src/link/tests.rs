@@ -930,6 +930,51 @@ fn tune_keeps_the_screen_and_channel_only() {
     assert!(text(&a).contains("PIN-5"), "{}", text(&a));
 }
 
+/// LINK-68: `TUNE` op 6 sets a slot on, muted or off as \* does (HOME-15, HOME-15.1), any slot, the active one
+/// kept; `STATE` shows it (64 muted, 128 off); off leaves the watch (WATCH-2.1). The APRS slot mutes (APRS-2's
+/// "Mute speaker for APRS" follows) but is never off; 3 or more is a bad argument.
+#[test]
+fn tune_mute_and_off() {
+    use ferrite_core::link::{state as m, tune as t};
+    use ferrite_core::msg::RadioCmd;
+    let mut pc = Pc::new(true);
+    let active = pc.app.active();
+    let b = (active + 1) % 3;
+    let flags = |pc: &mut Pc, s: u8| pc.ask(msg::STATE, &[]).1[m::RADIO_LEN + s as usize * m::SLOT_LEN];
+    while pc.app.pop_cmd().is_some() {}
+    let (s, a) = pc.ask(msg::TUNE, &[b, t::QUIET, 1]);
+    assert_eq!((s, a[0]), (0, b), "answered as SLOT reads it");
+    assert_eq!(flags(&mut pc, b) & (m::MUTED | m::OFF), m::MUTED);
+    assert_eq!(pc.app.active(), active, "the active slot stays");
+    assert_eq!(pc.ask(msg::TUNE, &[b, t::QUIET, 2]).0, 0);
+    assert_eq!(flags(&mut pc, b) & (m::MUTED | m::OFF), m::OFF);
+    let mut sent_off = false;
+    while let Some(c) = pc.app.pop_cmd() {
+        sent_off |= c == RadioCmd::SlotOff(1 << b);
+        if let RadioCmd::Watch(w) = c {
+            assert_eq!(w & 1 << b, 0, "an off slot leaves the watch");
+        }
+    }
+    assert!(sent_off, "the Radio task told");
+    assert_eq!(pc.ask(msg::TUNE, &[b, t::QUIET, 0]).0, 0);
+    assert_eq!(flags(&mut pc, b) & (m::MUTED | m::OFF), 0);
+    for q in [3u8, 255] {
+        assert_eq!(pc.ask(msg::TUNE, &[b, t::QUIET, q]).0, Status::BadArg as u8);
+    }
+    assert_eq!(pc.ask(msg::TUNE, &[b, t::QUIET]).0, Status::BadArg as u8);
+    // the APRS slot (C in APRS mode): muted turns on "Mute speaker for APRS"; off is refused, nothing changed
+    pc.app.set.aprs_mode = true;
+    assert!(pc.app.aprs_slot(2));
+    assert_eq!(pc.ask(msg::TUNE, &[2, t::QUIET, 1]).0, 0);
+    assert!(pc.app.set.aprs_mute);
+    let (s, a) = pc.ask(msg::TUNE, &[2, t::QUIET, 2]);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).contains("never off"), "{}", text(&a));
+    assert_eq!(flags(&mut pc, 2) & (m::MUTED | m::OFF), m::MUTED);
+    assert_eq!(pc.ask(msg::TUNE, &[2, t::QUIET, 0]).0, 0);
+    assert!(!pc.app.set.aprs_mute);
+}
+
 /// LINK-69: `BEACON` sends a beacon now as the radio's Beacon now does, with its checks: refused with APRS and
 /// beacons off, while KISS holds the APRS slot, and without a callsign; nothing asked of the APRS task then.
 #[test]

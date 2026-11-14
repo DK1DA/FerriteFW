@@ -391,6 +391,8 @@ pub mod tune {
     pub const ZONE: u8 = 4;
     /// u8: 1 starts a scan as SIDE2 does (the scan screen opens), 0 stops it.
     pub const SCAN: u8 = 5;
+    /// u8: 0 on, 1 muted, 2 off: the slot's quick mute and off as \* sets them (HOME-15, HOME-15.1), on any slot.
+    pub const QUIET: u8 = 6;
 }
 
 /// `SLOT`'s mask (LINK-33): which fields follow, in this order.

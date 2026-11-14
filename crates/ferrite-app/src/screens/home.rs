@@ -624,15 +624,47 @@ fn quick_mute(app: &mut App) {
             (b" unmuted", b"")
         }
     };
+    quiet_sent(app, a, word, then);
+}
+
+/// LINK-68: slot `s` straight to `want` (0 on, 1 muted, 2 off) with \*'s effects, from the link: the APRS slot is
+/// never off (checked by the caller); off ends a latched monitor. Nothing changes, nothing is said.
+pub(crate) fn set_quiet(app: &mut App, s: u8, want: u8) {
+    let bit = 1 << s;
+    let was = if app.off & bit != 0 { 2 } else if app.mute & bit != 0 { 1 } else { 0 };
+    if want == was {
+        return;
+    }
+    app.star_at = 0;
+    (app.mute, app.off) = match want {
+        0 => (app.mute & !bit, app.off & !bit),
+        1 => (app.mute | bit, app.off & !bit),
+        _ => (app.mute & !bit, app.off | bit),
+    };
+    if want == 2 && app.monitor & bit != 0 {
+        app.monitor &= !bit;
+        app.out.push(RadioCmd::Monitor { slot: s, on: false });
+    }
+    let word: &[u8] = match (want, was) {
+        (1, _) => b" muted",
+        (2, _) => b" off",
+        (_, 2) => b" on",
+        _ => b" unmuted",
+    };
+    quiet_sent(app, s, word, b"");
+}
+
+/// HOME-15: a slot's new mute and off to the Radio task and the watch, and the toast.
+fn quiet_sent(app: &mut App, s: u8, word: &[u8], then: &[u8]) {
     app.send_mute();
     app.out.push(RadioCmd::SlotOff(app.off));
     app.out.push(RadioCmd::Watch(app.watch_mask())); // WATCH-2.1: an off slot's turns go to the others
-    if a == crate::aprs::APRS_SLOT && app.set.aprs_mode {
-        app.set.aprs_mute = app.mute & bit != 0; // APRS-2: \* on C in APRS mode is 0 5 9 6
+    if s == crate::aprs::APRS_SLOT && app.set.aprs_mode {
+        app.set.aprs_mute = app.mute & 1 << s != 0; // APRS-2: \* on C in APRS mode is 0 5 9 6
     }
     let mut t = Buf::<16>::new();
     t.set(b"Slot ");
-    t.push(&[b'A' + a]);
+    t.push(&[b'A' + s]);
     t.push(word);
     app.show_toast(t.as_bytes(), then, false);
 }
