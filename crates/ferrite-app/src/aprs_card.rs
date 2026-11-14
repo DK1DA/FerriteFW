@@ -216,6 +216,7 @@ impl App {
                 self.beacon_mode_text(&mut m);
                 let pos: &str = match fix {
                     Some(f) if f.age_s == crate::gpsdata::FIXED_AGE => "fixed pos",
+                    Some(f) if f.phone => "phone pos (not sent)", // GPS-3.1: never beaconed
                     Some(_) => "GPS fix",
                     None => "no fix",
                 };

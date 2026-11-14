@@ -89,6 +89,21 @@ pub enum ChanWrite {
     EraseAll,
 }
 
+/// LINK-71: the lists a write changes: bit 0 the channels, 1 the zones, 2 the range presets ([`ChannelStore::lists_versions`]).
+pub const LISTS_CHANNELS: u8 = 1;
+pub const LISTS_ZONES: u8 = 2;
+pub const LISTS_PRESETS: u8 = 4;
+
+impl ChanWrite {
+    /// LINK-71: the lists this write may change.
+    pub fn lists(&self) -> u8 {
+        match self {
+            ChanWrite::DeleteZone(_) | ChanWrite::EraseAll => LISTS_CHANNELS | LISTS_ZONES, // a zone's channels go to none
+            _ => LISTS_CHANNELS,
+        }
+    }
+}
+
 impl Channel {
     pub fn name(&self) -> &[u8] {
         let n = self.name.iter().position(|&c| c == 0).unwrap_or(16);
@@ -242,6 +257,19 @@ pub trait ChannelStore {
     /// heard station doesn't count.
     fn chan_version(&self) -> u32 {
         self.data().version()
+    }
+
+    /// LINK-71: a hash of each list as stored (the channels, the zones, the range presets): it changes when the
+    /// list does and is the same across restarts when nothing was written. A store without them says the lists
+    /// never change.
+    fn lists_versions(&self) -> [u32; 3] {
+        [0; 3]
+    }
+
+    /// LINK-71: list sector `i`'s hash (`READ_MANY` of [`ferrite_core::link::what::LIST_HASH`]: 0-63 the channels,
+    /// 63 a sector; 64-68 the zones, 127 a sector; 69 the range presets). None past the last, or without them.
+    fn sector_hash(&self, _i: u16) -> Option<u32> {
+        None
     }
 
     /// A channel and its position, when it has one (Nearby, the zones page: CHAN-15, CHAN-29). A store with records

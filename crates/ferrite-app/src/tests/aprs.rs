@@ -177,14 +177,13 @@ fn kiss_on_makes_c_the_aprs_slot() {
     let c = a.cmds();
     assert!(!a.app.aprs_slot(APRS_SLOT));
     assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: own }) && c.contains(&RadioCmd::Watch(0)), "{c:?}");
-    // The cable's KISS (0 9 2 3) does it too, and APRS mode keeps C when KISS goes off.
-    a.app.set.kiss_port = 0;
-    a.app.set.cable_port = 3;
+    // The cable's KISS (0 5 8 on Cable) does it too, and APRS mode keeps C when KISS goes off.
+    a.app.set.kiss_port = 1;
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT));
     assert_eq!(a.app.greyed(Item::Mode), Some("Slot C held by KISS"));
     a.mode(true);
-    a.app.set.cable_port = 0;
+    a.app.set.kiss_port = 0;
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT), "APRS mode still has C");
 }
@@ -339,7 +338,7 @@ fn beacon_modes_in_order() {
 }
 
 fn fix(lat: i32, speed_kmh: u16, heading: u16) -> Option<Fix> {
-    Some(Fix { pos: Pos { lat, lon: -794_000_000 }, three_d: true, alt_m: 0, speed_kmh, heading, hdop_x10: 9, used: 8, age_s: 1, utc_s: 0 })
+    Some(Fix { pos: Pos { lat, lon: -794_000_000 }, three_d: true, alt_m: 0, speed_kmh, heading, hdop_x10: 9, used: 8, age_s: 1, utc_s: 0, phone: false })
 }
 
 /// APRS-24: smart beacons on the one curve (decision 271): parked 30 min, a walk every 500 m, 10 km/h on 3 min.

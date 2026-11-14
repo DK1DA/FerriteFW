@@ -129,7 +129,7 @@ const G6: [Entry; 9] = [
     Entry(concat!("Fixed position|None|", txtc!("Used when there is no fix."))),
 ];
 const G7: [Entry; 9] = [
-    Entry(concat!("Theme|Dark|", txtc!("Dark, daylight or night red."))),
+    Entry(concat!("Theme|Dark|", txtc!("Dark, daylight, night red or cyberpunk."))),
     Entry(concat!("Layout|Watch|", txtc!("What home shows."))),
     Entry(concat!("Display|Bars|", txtc!("S-meter, power-on message, boot screen."))),
     Entry(concat!("Backlight|15 s|", txtc!("Timeout, brightness, wake."))),
@@ -242,7 +242,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((7, 5), &[
         Entry(concat!("Key beep|On|", txtc!("Beep on key presses."))),
-        Entry(concat!("Beep volume|3|", txtc!("1-5."))),
+        Entry(concat!("Beep volume|3|", txtc!("Low, mid or high."))),
         Entry(concat!("Alert tones|On|", txtc!("Tones for alerts."))),
         Entry(concat!("Arrival tone|On|", txtc!("A tone on reaching a waypoint."))),
         Entry(concat!("Message sound|Packet|", txtc!("Sound for a message to you."))),
@@ -284,7 +284,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ((9, 2), &[
         Entry(concat!("Bluetooth|Off|", txtc!("The Bluetooth link to the web app."))),
         Entry(concat!("Link status||", txtc!("Cable and Bluetooth now."))),
-        Entry(concat!("Cable port|Auto|", txtc!("Link, terminal or KISS."))),
+        Entry(concat!("Cable port|Auto|", txtc!("Auto, link or terminal; KISS is 0 5 8."))),
     ]),
     ((9, 3), &[
         Entry(concat!("PIN lock|Off|", txtc!("Ask for the PIN at power on, or unlock too."))),

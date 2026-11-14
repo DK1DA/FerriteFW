@@ -226,7 +226,7 @@ fn nearby_row_only_with_a_fix_and_positions() {
     assert!(nearby_line(&t).is_some(), "show hidden");
     // The fixed position stands in for a fix (GPS-3): the store's fix answers for both.
     t.app.set.show_hidden = false;
-    t.s.fix.set(Some(Fix { pos: Pos { lat: 455_454_000, lon: -757_283_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: u16::MAX, utc_s: 0 }));
+    t.s.fix.set(Some(Fix { pos: Pos { lat: 455_454_000, lon: -757_283_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: u16::MAX, utc_s: 0, phone: false }));
     for n in [9, 11, 14, 16, 17] {
         t.s.request(crate::data::Op::Hide(n, false));
     }

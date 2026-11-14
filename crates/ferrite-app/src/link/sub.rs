@@ -27,8 +27,11 @@ use ferrite_ui::text::Buf;
 /// 4, decision 347) the message sound (APRS-6.1), symbol (APRS-47), TX delay (APRS-48), TX level (APRS-49), the
 /// comment (APRS-50), ambiguity (APRS-51), Mic-E (APRS-52) and telemetry (APRS-54): every MENU 0 5 value, so
 /// Console needs no terminal for them; then (0.8.2) auto reply (APRS-57): on and the delay, the pattern, the
-/// reply, at [`APRS_REPLY_AT`]. A shorter record (Console before them) keeps the radio's values past its end.
-pub const APRS_REC: usize = APRS_REPLY_AT + 1 + crate::aprs::REPLY_TO_LEN + crate::aprs::REPLY_TEXT_LEN;
+/// reply, at [`APRS_REPLY_AT`]; then (0.8.5) the beacon text rate (APRS-50.1, 0 5 6 5: 0 all, 1 every 2nd, 2 every 4th,
+/// 3 every 8th) at [`APRS_TEXT_AT`]. A shorter record (Console before them) keeps the radio's values past its end.
+pub const APRS_REC: usize = APRS_TEXT_AT + 1;
+/// APRS-50.1: where the beacon text rate is in the record (the record before it ends here).
+pub const APRS_TEXT_AT: usize = APRS_REPLY_AT + 1 + crate::aprs::REPLY_TO_LEN + crate::aprs::REPLY_TEXT_LEN;
 /// APRS-57: where auto reply starts in the record: its byte (bit 0 on, bits 4-5 the delay), the pattern (9, zero-
 /// padded), the reply (45, zero-padded). The record before it (protocol 4, decision 347) ends here.
 pub const APRS_REPLY_AT: usize = APRS_V1 + 4 + COMMENT_LEN + 3;
@@ -71,11 +74,15 @@ pub struct Sub {
     state: [u32; 4],
     state_at: u32,
     state_all: bool,
+    /// LINK-71: the lists' write counts as last told, as last seen, and when they last moved.
+    lists: [u32; 3],
+    lists_seen: [u32; 3],
+    lists_at: u32,
 }
 
 impl Sub {
     pub const fn new() -> Self {
-        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, log: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false, state: [0; 4], state_at: 0, state_all: false }
+        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, log: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false, state: [0; 4], state_at: 0, state_all: false, lists: [0; 3], lists_seen: [0; 3], lists_at: 0 }
     }
 }
 
@@ -130,7 +137,7 @@ fn watched(d: &dyn crate::data::Data) -> ([(u16, u8); WATCHED], u16) {
 impl Session {
     /// `SUBSCRIBE` (LINK-46): the mask, then optionally the UI's least gap (100 ms units) and flags.
     pub(super) fn subscribe<S: ChannelStore>(&mut self, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
-        let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI | ev::SUB_LOG | ev::SUB_STATE) == 0) else { return Status::BadArg };
+        let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI | ev::SUB_LOG | ev::SUB_STATE | ev::SUB_LISTS) == 0) else { return Status::BadArg };
         let texts = p.get(2).is_some_and(|f| f & ev::TEXTS != 0);
         let renew = p.get(2).is_some_and(|f| f & ev::RENEW != 0) && mask == self.sub.mask && texts == self.sub.texts;
         let gap = match p.get(1) {
@@ -142,7 +149,7 @@ impl Session {
             let d = st.data();
             let (msgs, msgs_n) = watched(d);
             let ui_start = mask & ev::SUB_UI != 0;
-            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, log: log_top(d), ui_at: now, ui_start, texts, state_all: mask & ev::SUB_STATE != 0, ..Sub::new() };
+            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, log: log_top(d), ui_at: now, ui_start, texts, state_all: mask & ev::SUB_STATE != 0, lists: st.lists_versions(), lists_seen: st.lists_versions(), ..Sub::new() };
         }
         self.sub.gap_ms = gap;
         o.put(&[mask, DICT_VERSION]);
@@ -228,6 +235,9 @@ impl Session {
         }
         if self.sub.mask & ev::SUB_STATE != 0 {
             self.state_event(app, st, dev, live, now, out);
+        }
+        if self.sub.mask & ev::SUB_LISTS != 0 {
+            self.lists_event(st, now, out);
         }
         if let Some(t) = ui.filter(|_| self.sub.mask & ev::SUB_UI != 0) {
             let since = now.wrapping_sub(self.sub.ui_at);
@@ -330,6 +340,29 @@ impl Session {
         self.sub.dirty = true; // look again: more may be waiting
     }
 
+    /// LINK-71: a list stored to since it was last told, once the writing has been quiet for
+    /// [`ev::LISTS_QUIET_MS`] (a `WRITE_MANY` of many records: one event): what, then the lists generation; one list
+    /// a call (channels, zones, then presets), the rest next time.
+    fn lists_event<S: ChannelStore>(&mut self, st: &S, now: u32, out: &mut dyn Sink) {
+        use ferrite_core::link::what;
+        let v = st.lists_versions();
+        if v != self.sub.lists_seen {
+            (self.sub.lists_seen, self.sub.lists_at) = (v, now);
+            return;
+        }
+        if v == self.sub.lists || now.wrapping_sub(self.sub.lists_at) < ev::LISTS_QUIET_MS {
+            return;
+        }
+        let Some(i) = (0..3).find(|&i| v[i] != self.sub.lists[i]) else { return };
+        let mut p = [0u8; 6];
+        p[0] = ev::LISTS;
+        p[1] = [what::CHANNEL, what::ZONE, what::PRESET][i];
+        p[2..6].copy_from_slice(&super::lists_gen(st).to_le_bytes());
+        if self.emit(&p, out) {
+            self.sub.lists[i] = v[i];
+        }
+    }
+
     /// One `EVENT` frame out: false (nothing sent) if `out` lacks room for it and an answer after it.
     /// LINK-67: the radio state's parts that changed since they were last sent, at most every UI gap (the whole
     /// record after a subscription).
@@ -424,26 +457,45 @@ fn message_len(m: &Message) -> usize {
     3 + 4 + 1 + m.peer.len() + 1 + m.text.len()
 }
 
-/// `HEARD` (LINK-44): from index p[0]; the count, then as many stations as fit.
+/// `HEARD` (LINK-44): from index p[0]; the count, then as many stations as fit. LINK-70: p[1..3], when there, a
+/// maximum age (u16, minutes; 0 none): only the stations heard within it, the count and the index among them.
 pub(super) fn heard<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
     heard_at(st, p, o).0
 }
 
-/// [`heard`], and for a stream (LINK-50) the index to go on from when stations are left.
+/// [`heard`], and for a stream (LINK-50) the index (among the stations within the age) to go on from when stations
+/// are left.
 pub(super) fn heard_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Option<u16>) {
     let d = st.data();
-    let n = d.stations();
+    let all = d.stations();
+    let max_s = match p {
+        [_, a, b, ..] => u16::from_le_bytes([*a, *b]) as u32 * 60,
+        _ => 0,
+    };
+    // LINK-70: the age from RAM (no stored row read for a station left out); a station whose age isn't known (from
+    // before a restart, before GPS time dated it) is never within one
+    let within = |i: u16| max_s == 0 || d.station_ram(i).is_some_and(|s| s.ago_s != crate::data::AGO_UNKNOWN && s.ago_s <= max_s);
+    let n = if max_s == 0 { all } else { (0..all).filter(|&i| within(i)).count() as u16 };
     o.put(&[n.min(255) as u8]);
-    let mut i = p.first().copied().unwrap_or(0) as u16;
-    while i < n {
+    let from = p.first().copied().unwrap_or(0) as u16;
+    let (mut k, mut i) = (0u16, 0u16); // k: the index among those within; i: in the whole list
+    while i < all && k < from {
+        k += within(i) as u16;
+        i += 1;
+    }
+    while i < all {
+        if !within(i) {
+            i += 1;
+            continue;
+        }
         let Some(s) = d.station(i) else { break };
         if o.n + station_len(&s) > MAX_PAYLOAD {
             break;
         }
         station(o, &s);
-        i += 1;
+        (i, k) = (i + 1, k + 1);
     }
-    (Status::Ok, Some(i).filter(|&i| i < n.min(255) && i > p.first().copied().unwrap_or(0) as u16))
+    (Status::Ok, Some(k).filter(|&k| k < n.min(255) && k > from))
 }
 
 /// `MSGS` (LINK-44): from index (u16); the count (u16), then as many messages as fit, newest first.
@@ -582,13 +634,14 @@ pub(super) fn aprs_record(app: &App, w: &mut Window) {
     w.put(&[c.reply]); // APRS-57
     w.put(&c.reply_to);
     w.put(&c.reply_text);
+    w.put(&[c.text_every]); // APRS-50.1
 }
 
 /// A whole APRS record written (LINK-43): checked as MENU 0 5's editors check each value, then kept as they keep
 /// it (written back at the next tick, slot C retuned when it is the APRS slot). Nothing changes if any value is
 /// refused.
 pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
-    if rec.len() != APRS_REC && rec.len() != APRS_REPLY_AT && rec.len() != APRS_V1 && rec.len() != APRS_V1 - 1 {
+    if rec.len() != APRS_REC && rec.len() != APRS_TEXT_AT && rec.len() != APRS_REPLY_AT && rec.len() != APRS_V1 && rec.len() != APRS_V1 - 1 {
         return Status::BadArg;
     }
     let invalid = |o: &mut Out, why: &str| {
@@ -624,9 +677,16 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
             return invalid(o, "ambiguity, Mic-E or telemetry out of range");
         }
     }
-    // APRS-57: auto reply, as its page checks it: the pattern capitals, digits, - and *; the reply printable.
+    // APRS-50.1: the beacon text rate, as 0 5 6 5 steps it
     if rec.len() == APRS_REC {
-        let r = &rec[APRS_REPLY_AT..];
+        if rec[APRS_TEXT_AT] > 3 {
+            return invalid(o, "text rate: 0-3 (all, every 2nd, 4th or 8th)");
+        }
+        c.text_every = rec[APRS_TEXT_AT];
+    }
+    // APRS-57: auto reply, as its page checks it: the pattern capitals, digits, - and *; the reply printable.
+    if rec.len() >= APRS_TEXT_AT {
+        let r = &rec[APRS_REPLY_AT..APRS_TEXT_AT];
         let (to, text) = r[1..].split_at(crate::aprs::REPLY_TO_LEN);
         let field = |t: &[u8], ok: &dyn Fn(u8) -> bool| {
             let n = t.iter().position(|&b| b == 0).unwrap_or(t.len());

@@ -208,7 +208,7 @@ fn power_cuts_during_a_sync() {
 // ---- the link (LINK-63 – LINK-65) ----
 
 use ferrite_app::link::Session;
-use ferrite_core::link::{self as wire, caps2, msg, what, MAX_WIRE};
+use ferrite_core::link::{self as wire, msg, what, MAX_WIRE};
 use ferrite_core::msg::{Device, LiveAll};
 
 struct Wire(Vec<u8>);
@@ -252,7 +252,7 @@ fn many(w: u8, recs: &[(u16, &[u8])]) -> Vec<u8> {
     p
 }
 
-/// LINK-63, LINK-64, LINK-65: the HELLO says caps2::SATS; satellites written by `WRITE_MANY` (clear, records, info) and
+/// LINK-63, LINK-64, LINK-65: satellites written by `WRITE_MANY` (clear, records, info) and
 /// read back by `READ_MANY`; a 10 m transponder refused (SAT-13); the same record again writes nothing; `CLOCK`
 /// sets and reads the clock.
 #[test]
@@ -261,9 +261,8 @@ fn over_the_link() {
     let mut a = app();
     let mut link = Session::new(true);
     let mut now = 1_000;
-    let (st, hello) = ask(&mut a, &mut link, &s, &mut now, msg::HELLO, &[3, b'T']);
+    let (st, _) = ask(&mut a, &mut link, &s, &mut now, msg::HELLO, &[ferrite_core::link::PROTOCOL, b'T']);
     assert_eq!(st, 0);
-    assert!(hello.len() >= 4 && hello[3] & caps2::SATS != 0, "{hello:?}");
     let list: Vec<Sat> = (0..3).map(|i| sat(27_600 + i, 846_000_000)).collect();
     assert_eq!(ask(&mut a, &mut link, &s, &mut now, msg::WRITE_MANY, &many(what::SAT, &[(wire::ADD, &[])])).0, 0);
     for (k, x) in list.iter().enumerate() {

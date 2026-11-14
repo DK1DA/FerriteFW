@@ -207,7 +207,6 @@ impl Ports {
         let mode = if port == Port::Cable { app.set.cable_port } else { 0 };
         match link::route(mode, self.links[port.i()].active(now), b) {
             Route::Link => To::Link(port),
-            Route::Drop => To::Kiss,
             Route::Term => {
                 if port != self.owner {
                     if port == Port::Bt && self.term.on() {

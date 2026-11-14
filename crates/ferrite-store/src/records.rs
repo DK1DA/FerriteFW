@@ -43,6 +43,44 @@ pub fn ch_addr(num: u16) -> u32 {
     CHANNELS.start + n / CH_PER_SECTOR * SECTOR + n % CH_PER_SECTOR * CH_LEN as u32
 }
 
+/// LINK-71: the lists' flash sectors, hashed one by one: 64 of channels (63 a sector), 5 of zones (127 a sector),
+/// then the range presets' (their 16 records, not the DTMF memories after them in that sector).
+pub const CH_SECTORS: usize = 64;
+pub const ZONE_SECTORS: usize = 5;
+pub const LIST_SECTORS: usize = CH_SECTORS + ZONE_SECTORS + 1;
+const _: () = assert!((CHANNELS.end - CHANNELS.start) / SECTOR == CH_SECTORS as u32);
+const _: () = assert!((ZONES.end - ZONES.start) / SECTOR == ZONE_SECTORS as u32);
+
+/// LINK-71: the list sector (as [`LIST_SECTORS`] counts them) a write at `addr` changes, if any.
+pub fn list_sector(addr: u32) -> Option<usize> {
+    if CHANNELS.contains(&addr) {
+        Some(((addr - CHANNELS.start) / SECTOR) as usize)
+    } else if ZONES.contains(&addr) {
+        Some(CH_SECTORS + ((addr - ZONES.start) / SECTOR) as usize)
+    } else if (PRESETS.start..PRESETS.start + MAX_PRESETS as u32 * PRESET_LEN as u32).contains(&addr) {
+        Some(CH_SECTORS + ZONE_SECTORS)
+    } else {
+        None
+    }
+}
+
+/// LINK-71: a held record into its sector's hash (FNV-1a over its index, then its bytes): the same records give
+/// the same hash, whatever was written or restarted in between.
+pub fn hash_mix(h: u32, idx: u16, rec: &[u8]) -> u32 {
+    let mut h = h;
+    for &b in idx.to_le_bytes().iter().chain(rec) {
+        h = (h ^ b as u32).wrapping_mul(0x0100_0193);
+    }
+    h
+}
+pub const HASH0: u32 = 0x811C_9DC5;
+
+/// LINK-71: whether channel record `b` counts in its sector's hash: as the mount counts it (its byte 19 written,
+/// then [`ch_valid`]), so the hash made at the mount and one made later agree.
+pub fn ch_held(b: &[u8; CH_LEN]) -> bool {
+    b[CH_ZONE_LO + 1] != 0xFF && ch_valid(b)
+}
+
 /// Whether a record holds a channel: a good CRC, this format, an RX frequency, and a zone that can be (one of the
 /// zones, or none).
 pub fn ch_valid(b: &[u8; CH_LEN]) -> bool {

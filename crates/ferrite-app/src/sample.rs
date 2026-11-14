@@ -188,6 +188,8 @@ pub struct Sample {
     presets: [Cell<Option<RangePreset>>; 16],
     /// Each preset place's skipped frequencies (SCAN-10, LINK-58): they stay with the preset in its place.
     preset_skips: [Cell<[Freq10; 48]>; 16],
+    /// LINK-71: the channels', zones' and presets' write counts, as the radio's store keeps them.
+    lists: Cell<[u32; 3]>,
     dtmf: [Cell<Option<Dtmf>>; DTMF_MEMS as usize],
     dtmf_names: [Cell<Buf<10>>; DTMF_MEMS as usize],
     events_read: Cell<u32>,
@@ -244,6 +246,7 @@ impl Sample {
         Sample {
             chans: core::array::from_fn(|i| Cell::new(CHANNELS.get(i).copied())),
             recent: crate::chan::RecentList::new(),
+            lists: Cell::new([0; 3]),
             zones: Cell::new(ZONES_AT_START as ZoneId),
             zone_cfg: core::array::from_fn(|z| Cell::new(zc(z))),
             zone_names: core::array::from_fn(|z| Cell::new(Name::from(ZONES[z]))),
@@ -281,7 +284,7 @@ impl Sample {
             kiss: Cell::new((0, 0)),
             heard_cleared: Cell::new(false),
             version: Cell::new(1),
-            fix: Cell::new(Some(Fix { pos: HERE, three_d: true, alt_m: 74, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 9, age_s: 1, utc_s: 18 * 3600 + 32 * 60 + 5 })),
+            fix: Cell::new(Some(Fix { pos: HERE, three_d: true, alt_m: 74, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 9, age_s: 1, utc_s: 18 * 3600 + 32 * 60 + 5, phone: false })),
             call: Cell::new(Some(txt("VA7FER-9"))),
             pos_set: core::array::from_fn(|_| Cell::new(None)),
             no_positions: Cell::new(false),
@@ -322,8 +325,20 @@ impl Sample {
         found
     }
 
+    /// LINK-71: the lists a write changed, counted as the radio's store counts them.
+    fn lists_moved(&self, which: u8) {
+        let mut l = self.lists.get();
+        for (i, v) in l.iter_mut().enumerate() {
+            if which & 1 << i != 0 {
+                *v = v.wrapping_add(1);
+            }
+        }
+        self.lists.set(l);
+    }
+
     /// A channel write from the app ([`crate::App::pop_write`]), as the Storage task does it in SPI flash.
     pub fn apply(&self, w: ChanWrite) {
+        self.lists_moved(w.lists());
         match w {
             ChanWrite::Put { ch, from } => {
                 for c in &self.chans {
@@ -419,6 +434,22 @@ impl Sample {
 }
 
 impl ChannelStore for Sample {
+    fn lists_versions(&self) -> [u32; 3] {
+        self.lists.get()
+    }
+
+    /// The simulator's lists aren't in sectors: every sector of a list says that list's count, so a phone reading
+    /// against the simulator reads the whole list again after a change.
+    fn sector_hash(&self, i: u16) -> Option<u32> {
+        let l = self.lists.get();
+        match i {
+            0..64 => Some(l[0]),
+            64..69 => Some(l[1]),
+            69 => Some(l[2]),
+            _ => None,
+        }
+    }
+
     fn queue_write(&self, w: ChanWrite) -> bool {
         self.apply(w); // at once, as its writes always are
         true
@@ -618,6 +649,7 @@ impl Data for Sample {
     }
 
     fn request(&self, op: Op) -> bool {
+        self.lists_moved(op.lists());
         let edit = |num: u16, f: &dyn Fn(&mut Channel)| match self.slot_of(num) {
             Some(cell) => {
                 let mut c = cell.get();

@@ -26,11 +26,14 @@ pub struct Flash<N: Nor> {
     /// A record being programmed in place, and its bytes.
     pending: Cell<Option<(u32, usize)>>,
     pend: RefCell<[u8; PEND_MAX]>,
+    /// LINK-71: the list sectors ([`crate::records::list_sector`]) written since their hash was last made: one bit
+    /// each, all at first.
+    stale: Cell<u128>,
 }
 
 impl<N: Nor> Flash<N> {
     pub fn new(nor: N) -> Self {
-        Flash { nor: RefCell::new(nor), redirect: Cell::new(None), scratch: Cell::new(0), pending: Cell::new(None), pend: RefCell::new([0xFF; PEND_MAX]) }
+        Flash { nor: RefCell::new(nor), redirect: Cell::new(None), scratch: Cell::new(0), pending: Cell::new(None), pend: RefCell::new([0xFF; PEND_MAX]), stale: Cell::new(u128::MAX) }
     }
 
     pub fn into_inner(self) -> N {
@@ -115,8 +118,40 @@ impl<N: Nor> Flash<N> {
         Ok(())
     }
 
+    /// LINK-71: a write at `addr` (`len` bytes) changes the list sectors it touches; marked before it starts and
+    /// again when done, so a hash made while it ran is made again.
+    fn mark(&self, addr: u32, len: usize) {
+        for a in [addr, addr + len.saturating_sub(1) as u32] {
+            if let Some(k) = crate::records::list_sector(a) {
+                self.stale.set(self.stale.get() | 1 << k);
+            }
+        }
+    }
+
+    /// LINK-71: list sectors to hash again (a read that failed, or the mount's own hashes taken back off).
+    pub fn mark_stale(&self, sectors: u128) {
+        self.stale.set(self.stale.get() | sectors);
+    }
+
+    /// LINK-71: the mount made these sectors' hashes itself: not stale.
+    pub fn fresh(&self, sectors: u128) {
+        self.stale.set(self.stale.get() & !sectors);
+    }
+
+    /// LINK-71: the list sectors to hash again, now cleared.
+    pub fn take_stale(&self) -> u128 {
+        self.stale.replace(0)
+    }
+
     /// Programs `data` at `addr` (erased bytes), page by page; all-erased pieces are skipped.
     pub async fn program(&self, addr: u32, data: &[u8]) -> Result {
+        self.mark(addr, data.len());
+        let r = self.program_pages(addr, data).await;
+        self.mark(addr, data.len());
+        r
+    }
+
+    async fn program_pages(&self, addr: u32, data: &[u8]) -> Result {
         let mut a = addr;
         let mut rest = data;
         while !rest.is_empty() {
@@ -132,8 +167,11 @@ impl<N: Nor> Flash<N> {
     }
 
     pub async fn erase(&self, addr: u32) -> Result {
+        self.mark(addr, 1);
         self.nor.borrow_mut().start_erase(addr)?;
-        self.wait().await
+        let r = self.wait().await;
+        self.mark(addr, 1);
+        r
     }
 
     /// Erases a sector that readers should see as erased from the start (settings reset).

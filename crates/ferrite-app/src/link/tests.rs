@@ -170,7 +170,8 @@ fn hello_and_info() {
 /// 3 tx with Dry TX on (TX-48), from the firmware's features (`Device::tx_built`) and the switch, with bit 7 set when
 /// the bench commands are in (`Device::bench`, TERM-38): the tx-bench build answers 0x83 from power-on (TX-48.1).
 /// 2 is the retired tx-dry build's (decision 193), still named for an older radio.
-/// LINK-35.2: HELLO ends with the capability byte (STREAM, the write window).
+/// LINK-35.2: HELLO ends with the capability byte (decision 385: compression, audio, the line commands), the layouts
+/// and the lists generation.
 #[test]
 fn hello_and_info_give_the_build() {
     use ferrite_core::link::build;
@@ -189,7 +190,9 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | ferrite_core::link::caps2::BEACON | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }, 3, 3], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS; POSITION, LINK-53; LISTS, LINK-54 - LINK-57), then the second byte (PRESET_SKIPS, LINK-58; DATA, LINK-59; SATS, LINK-63; RADIO, LINK-66; LINE_CMDS, decision 347; STATE, LINK-67; BEACON, LINK-69), then the layouts (LINK-62)");
+        let cmds = if cfg!(feature = "line-cmds") { ferrite_core::link::caps::LINE_CMDS } else { 0 };
+        let g = super::lists_gen(&pc.st).to_le_bytes();
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::AUDIO | cmds, 3, 3, g[0], g[1], g[2], g[3]], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (decision 385: no LZ, not asked; AUDIO, the cable; the line commands by build), then the layouts (LINK-62) and the lists hash (LINK-71)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 8;
         let c = v + 1 + a[v] as usize;
@@ -432,7 +435,20 @@ fn cable_routing() {
     assert_eq!(route(0, true, b'\r'), Route::Link, "a link session keeps the port");
     assert_eq!(route(1, false, b'\r'), Route::Link);
     assert_eq!(route(2, true, 0), Route::Term);
-    assert_eq!(route(3, false, 0), Route::Drop);
+}
+
+/// Decision 386: 0 9 2 3 has no KISS any more (0 5 8 is KISS's one switch); a radio saved with it (3) comes back
+/// with KISS on the cable by 0 5 8 and the cable port on Auto, as it behaved.
+#[test]
+fn cable_port_kiss_moves_to_kiss_tnc() {
+    let mut s = crate::settings::Settings::DEFAULT;
+    s.cable_port = 3;
+    s.sanitize();
+    assert_eq!((s.cable_port, s.kiss_port), (0, 1));
+    assert!(s.kiss_on_cable());
+    s.cable_port = 9;
+    s.sanitize();
+    assert_eq!(s.cable_port, crate::settings::Settings::DEFAULT.cable_port);
 }
 
 // ---- Remote PTT (LINK-20) ----

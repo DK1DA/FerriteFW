@@ -185,6 +185,9 @@ pub struct FlashStore<N: Nor, D: Data> {
     /// PWR-26.13: the zone names home's headers ask for every frame, each with the [`FlashStore::ver`] it was read
     /// at (every write moves that on): one per slot, so a header doesn't read the zone's record each time.
     znames: Cell<[(u32, ZoneId, Name); 3]>,
+    /// LINK-71: each list sector's hash ([`crate::records::LIST_SECTORS`]), made again when the flash says a write
+    /// touched it ([`crate::io::Flash::take_stale`]).
+    pub(crate) hashes: RefCell<[u32; LIST_SECTORS]>,
     mounted: Cell<Mounted>,
     /// The save timer: CRC of the state last saved, of the state last seen, and when that changed.
     saved: Cell<u32>,
@@ -253,6 +256,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             recent: ferrite_app::chan::RecentList::new(),
             ver: Cell::new(0),
             znames: Cell::new([(0, ZoneId::MAX, Name::new()); 3]),
+            hashes: RefCell::new([HASH0; LIST_SECTORS]),
             mounted: Cell::new(Mounted::Failed),
             saved: Cell::new(0),
             seen: Cell::new(0),
@@ -331,6 +335,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         // Decision 333: the channels counted, each zone's count checked against its record (a wrong one is
         // written again once things are quiet); the slots' lists are built when the App names their zones.
         self.mount_counts()?;
+        self.rehash(); // LINK-71: the zones' and presets' sectors (the channels' came with the counts)
         self.counts_at.set(self.first_dirty().map(|_| 0));
         *self.lists.borrow_mut() = [Members::empty(FREE), Members::empty(FREE), Members::empty(FREE)];
         self.slot_zones.set([FREE; 3]);
@@ -658,6 +663,54 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     fn bump(&self) {
         self.ver.set(self.ver.get().wrapping_add(1));
+    }
+
+    /// LINK-71: the list sectors written since their hash was made, hashed again from what they hold now (a
+    /// sector's held records, each with its index). A read that fails leaves the sector to be made next time.
+    pub(crate) fn rehash(&self) {
+        let stale = self.f.take_stale();
+        if stale == 0 {
+            return;
+        }
+        let mut again = 0u128;
+        for k in (0..LIST_SECTORS).filter(|&k| stale & 1 << k != 0) {
+            match self.sector_hash_of(k) {
+                Ok(h) => self.hashes.borrow_mut()[k] = h,
+                Err(_) => again |= 1 << k,
+            }
+        }
+        self.f.mark_stale(again);
+    }
+
+    fn sector_hash_of(&self, k: usize) -> Result<u32> {
+        let mut h = HASH0;
+        if k < CH_SECTORS {
+            let mut b = [0u8; CH_LEN];
+            for num in (k as u32 * CH_PER_SECTOR..(k as u32 + 1) * CH_PER_SECTOR).filter(|&n| n < MAX_CHANNELS as u32) {
+                self.f.read(ch_addr(num as u16), &mut b)?;
+                if ch_held(&b) {
+                    h = hash_mix(h, num as u16, &b);
+                }
+            }
+        } else if k < CH_SECTORS + ZONE_SECTORS {
+            let mut r = [0u8; ZONE_LEN];
+            let first = (k - CH_SECTORS) as u32 * ZONES_PER_SECTOR;
+            for z in (first..first + ZONES_PER_SECTOR).filter(|&z| z < MAX_ZONES as u32) {
+                self.f.read(zone_addr(z as ZoneId), &mut r)?;
+                if zone_decode(&r).is_some() {
+                    h = hash_mix(h, z as u16, &r);
+                }
+            }
+        } else {
+            let mut b = [0u8; PRESET_LEN];
+            for i in 0..MAX_PRESETS {
+                self.f.read(preset_addr(i), &mut b)?;
+                if preset_decode(&b).is_some() {
+                    h = hash_mix(h, i as u16, &b);
+                }
+            }
+        }
+        Ok(h)
     }
 
     // ---- the queue (the radio) ----
@@ -2096,6 +2149,18 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
         self.cver.get()
     }
 
+    fn lists_versions(&self) -> [u32; 3] {
+        self.rehash();
+        let h = self.hashes.borrow();
+        let fold = |r: core::ops::Range<usize>| h[r].iter().fold(HASH0, |a, &x| hash_mix(a, 0, &x.to_le_bytes()));
+        [fold(0..CH_SECTORS), fold(CH_SECTORS..CH_SECTORS + ZONE_SECTORS), fold(CH_SECTORS + ZONE_SECTORS..LIST_SECTORS)]
+    }
+
+    fn sector_hash(&self, i: u16) -> Option<u32> {
+        self.rehash();
+        self.hashes.borrow().get(i as usize).copied()
+    }
+
     fn located(&self, num: u16) -> Option<(Channel, Pos)> {
         if num >= MAX_CHANNELS || self.peek_empty(num) {
             return None;
@@ -2168,6 +2233,10 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn beacon_sent(&self, i: u16) -> Option<ferrite_app::data::SentBeacon> {
         self.extra.beacon_sent(i)
     }
+    /// APRS-17.2: the KISS card's counts (RAM, kept by the APRS task's [`RadioData`](ferrite_app::radio_data::RadioData)).
+    fn kiss_counts(&self) -> (u16, u16) {
+        self.extra.kiss_counts()
+    }
     fn messages(&self) -> u16 {
         (0..self.msgs.len()).filter(|&i| self.msgs.seq(i).is_some_and(|s| !self.gone(s))).count() as u16
     }
@@ -2206,6 +2275,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
     fn fix(&self) -> Option<Fix> {
         self.extra.fix()
+    }
+    fn phone_position(&self, p: ferrite_app::data::PhonePos) {
+        self.extra.phone_position(p);
     }
     fn sats(&self) -> u8 {
         self.extra.sats()
@@ -2368,6 +2440,17 @@ mod tests {
     use crate::sim::SimFlash;
 
     type Store = FlashStore<SimFlash, NoData>;
+
+    /// APRS-17.2: the KISS card's counts reach the screens through the store (they stayed 0 on the radio while the
+    /// store didn't pass them on: fix-batch, black, Oct 22).
+    #[test]
+    fn kiss_counts_pass_through() {
+        let s = FlashStore::mount(SimFlash::new(), ferrite_app::radio_data::RadioData::default());
+        s.extra.kiss_sent();
+        s.extra.kiss_heard();
+        s.extra.kiss_heard();
+        assert_eq!(Data::kiss_counts(&s), (1, 2));
+    }
 
     /// Every APRS setting set to something other than its default.
     fn full_cfg() -> AprsCfg {

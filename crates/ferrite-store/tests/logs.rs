@@ -20,7 +20,7 @@ impl Data for Tasks {
         Some(Buf::from(b"VA7FER-9"))
     }
     fn fix(&self) -> Option<Fix> {
-        Some(Fix { pos: Pos { lat: 454_000_000, lon: -757_000_000 }, three_d: true, alt_m: 70, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 8, age_s: 1, utc_s: 0 })
+        Some(Fix { pos: Pos { lat: 454_000_000, lon: -757_000_000 }, three_d: true, alt_m: 70, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 8, age_s: 1, utc_s: 0, phone: false })
     }
     fn stations(&self) -> u16 {
         1

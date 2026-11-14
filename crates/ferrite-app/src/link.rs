@@ -435,7 +435,7 @@ impl Session {
                 (st_, st_ == Status::Ok && next > first && next < end.min(n))
             }
             msg::HEARD => {
-                let (st_, next) = sub::heard_at(st, &s.p[..1], &mut o);
+                let (st_, next) = sub::heard_at(st, &s.p[..3], &mut o); // the index, then LINK-70's age
                 if let Some(i) = next {
                     s.p[0] = i as u8;
                 }
@@ -581,6 +581,7 @@ impl Session {
             msg::TUNE => tune(app, st, p, &mut o),
             // LINK-69: a beacon now, as the radio's own; transmits, so a PIN lock's Bluetooth needs AUTH first
             // (LINK-30, as every request)
+            msg::PHONE_POS => phone_pos(st, p, &mut o), // LINK-72
             msg::BEACON if !p.is_empty() => Status::BadArg,
             msg::BEACON => match crate::screens::opts::send_beacon(app, st) {
                 Ok(()) => Status::Ok,
@@ -741,10 +742,14 @@ impl Session {
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
-        let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
-        let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS | ferrite_core::link::caps::POSITION | ferrite_core::link::caps::LISTS, ferrite_core::link::caps2::PRESET_SKIPS | ferrite_core::link::caps2::DATA | ferrite_core::link::caps2::SATS | ferrite_core::link::caps2::RADIO | ferrite_core::link::caps2::STATE | ferrite_core::link::caps2::BEACON | if cfg!(feature = "line-cmds") { ferrite_core::link::caps2::LINE_CMDS } else { 0 }]); // LINK-35.2: two bytes
+        // LINK-35.2 (decision 385): only what differs by build or session; everything else every radio has
+        use ferrite_core::link::caps;
+        let lz = if self.lz { caps::LZ } else { 0 };
+        let audio = if self.by == crate::remote::BY_CABLE { caps::AUDIO } else { 0 };
+        let cmds = if cfg!(feature = "line-cmds") { caps::LINE_CMDS } else { 0 };
+        o.put(&[lz | audio | cmds]);
         layouts(st, o); // LINK-62
+        o.put(&lists_gen(st).to_le_bytes()); // LINK-71
         Status::Ok
     }
 
@@ -909,18 +914,15 @@ impl Session {
 pub enum Route {
     Term,
     Link,
-    /// KISS mode has the port (chapter 26): neither the terminal nor the link reads it.
-    Drop,
 }
 
-/// TERM-2: the cable port setting (0 9 2 3: auto, link, terminal, KISS) decides; in auto a link frame (its
+/// TERM-2: the cable port setting (0 9 2 3: auto, link, terminal) decides; in auto a link frame (its
 /// 0x00 delimiter: the web app sends one before its first frame) takes the port, and keeps it while frames
 /// keep coming ([`ACTIVE_MS`]); anything else is the terminal's, which starts on a typed Enter.
 pub fn route(cable_port: u8, link_active: bool, b: u8) -> Route {
     match cable_port {
         1 => Route::Link,
         2 => Route::Term,
-        3 => Route::Drop,
         _ if link_active || b == 0 => Route::Link,
         _ => Route::Term,
     }
@@ -1150,6 +1152,27 @@ fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status
     Status::Ok
 }
 
+/// LINK-72 (decision 388): the phone's position, kept for GPS-3.1 (used locally while fresh, never beaconed).
+fn phone_pos<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    let [a, b, c, d, e, f, g, h, i, j, k, l, m, n] = *p else { return Status::BadArg };
+    let (lat, lon) = (i32::from_le_bytes([a, b, c, d]), i32::from_le_bytes([e, f, g, h]));
+    let alt = i16::from_le_bytes([i, j]);
+    let (acc_m, age_s) = (u16::from_le_bytes([k, l]), u16::from_le_bytes([m, n]));
+    if lat.unsigned_abs() > 900_000_000 || lon.unsigned_abs() > 1_800_000_000 {
+        o.put(b"position out of range");
+        return Status::Invalid;
+    }
+    let pos = crate::data::Pos { lat, lon };
+    st.data().phone_position(crate::data::PhonePos { pos, alt_m: (alt != 0x7FFF).then_some(alt), acc_m, age_s });
+    Status::Ok
+}
+
+/// LINK-71: the lists hash: changes when a channel, zone or range preset stored changes; the same across restarts
+/// when nothing was written.
+pub(crate) fn lists_gen<S: ChannelStore>(st: &S) -> u32 {
+    st.lists_versions().iter().fold(0x811C_9DC5u32, |a, &v| v.to_le_bytes().iter().fold(a, |h, &b| (h ^ b as u32).wrapping_mul(0x0100_0193)))
+}
+
 /// LINK-62, UPD-16 (decision 333): the layout this firmware stores, then the one the chip's data is in (the same
 /// when all is well; another: Console finishes the update), a byte each.
 fn layouts<S: ChannelStore>(st: &S, o: &mut Out) {
@@ -1315,6 +1338,7 @@ fn settings_record(app: &App, w: &mut Window) -> usize {
 /// The radio record (LINK-66): Watch, Battery Save, then the position the radio would use (GPS-3) and its fix.
 fn radio_record(app: &App, fix: Option<crate::data::Fix>, w: &mut Window) {
     let (kind, pos, age) = match fix {
+        Some(f) if f.phone => (4, Some(f.pos), f.age_s), // GPS-3.1: the phone's (LINK-72)
         Some(f) if f.age_s != crate::gpsdata::FIXED_AGE => (if f.three_d { 3 } else { 2 }, Some(f.pos), f.age_s),
         _ => (0, (app.set.fixed_on).then_some(app.set.fixed), 0xFFFF),
     };
@@ -1449,6 +1473,11 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             None => return Status::NotFound,
         },
         what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS | what::SAT | what::SAT_INFO => return lists::record(st, w, idx, win), // LINK-54 – LINK-56, LINK-58, LINK-63, LINK-64
+        // LINK-71: a list sector's hash
+        what::LIST_HASH => match st.sector_hash(idx).filter(|_| idx < what::LIST_SECTORS) {
+            Some(h) => win.put(&h.to_le_bytes()),
+            None => return Status::NotFound,
+        },
         _ => return Status::BadArg,
     }
     Status::Ok
@@ -1485,6 +1514,7 @@ fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
         what::ZONE => Some(st.zones()),
         what::PRESET => Some(st.data().presets() as u16),
         what::CONTACT => Some(st.data().contacts()),
+        what::LIST_HASH => Some(what::LIST_SECTORS), // LINK-71
         _ => lists::indexes(st, w),
     }
 }
@@ -1497,6 +1527,7 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
         what::CHANNEL | what::POSITION => st.zone_of(i).is_some(),
         what::ZONE => st.zone_name(i).is_some(),
         what::CONTACT => i < st.data().contacts(),
+        what::LIST_HASH => true,
         what::QUICK | what::WAYPOINT | what::DTMF | what::PRESET_SKIPS | what::SAT | what::SAT_INFO => lists::held(st, w, i),
         _ => st.data().preset(i as u8).is_some(),
     }
@@ -1813,7 +1844,7 @@ pub mod state;
 mod sub;
 pub mod z;
 /// LINK-43: the APRS record's length, for Ferrite Console (which reads its layout from this crate).
-pub use sub::{APRS_REC, APRS_REPLY_AT};
+pub use sub::{APRS_REC, APRS_REPLY_AT, APRS_TEXT_AT};
 
 #[cfg(test)]
 pub(crate) mod tests;
