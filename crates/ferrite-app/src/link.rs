@@ -1128,6 +1128,10 @@ fn tune<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status
             &[on @ (0 | 1)] => Some(Tune::Scan(on == 1)),
             _ => None,
         },
+        t::QUIET => match arg {
+            &[q @ 0..=2] => Some(Tune::Quiet(q)),
+            _ => None,
+        },
         _ => None,
     };
     let Some(what) = what else { return Status::BadArg };

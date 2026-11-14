@@ -66,6 +66,8 @@ pub enum Tune {
     Zone(u16),
     /// SIDE2: start (true) or stop a scan.
     Scan(bool),
+    /// \*'s quick mute and off (HOME-15, HOME-15.1): 0 on, 1 muted, 2 off.
+    Quiet(u8),
 }
 
 /// A slot as the PC sees it.
@@ -215,11 +217,22 @@ impl App {
         if self.radio.keyed.is_some() {
             return Err("transmitting: nothing changes while keyed (TX-22)");
         }
-        if self.aprs_slot(s) {
-            return Err(self.aprs_held());
-        }
         if self.set.chan_only && s != self.active {
             return Err("channel-only mode: only the active slot can change (PIN-5)");
+        }
+        // LINK-68: on, muted or off as \* sets them, on any slot; the APRS slot mutes (APRS-2), never off
+        if let Tune::Quiet(q) = t {
+            if q == 2 && self.aprs_slot(s) {
+                return Err("the APRS slot is never off (HOME-15.1)");
+            }
+            if q == 2 && self.scan_mask & 1 << s != 0 {
+                return Err("the slot is scanning: stop the scan first");
+            }
+            home::set_quiet(self, s, q);
+            return Ok(());
+        }
+        if self.aprs_slot(s) {
+            return Err(self.aprs_held());
         }
         let scanning = self.scan_mask & 1 << s != 0;
         if scanning && !matches!(t, Tune::Scan(_)) {
@@ -289,7 +302,7 @@ impl App {
                 }
                 return Ok(());
             }
-            Tune::Scan(_) => {}
+            Tune::Scan(_) | Tune::Quiet(_) => {}
         }
         self.active = was;
         Ok(())
