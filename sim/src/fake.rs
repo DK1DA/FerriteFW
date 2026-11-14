@@ -765,7 +765,6 @@ pub fn device_at(secs: u64) -> Device {
         battery_pct: 82,
         battery_low: false,
         battery_cutoff: false,
-        battery_charging: false,
         mcu_temp: Some(24),
         // SBAR-23, SELF-9.1, SELF-9.2: sample numbers, as the radio's (the simulator has no stack to paint or idle to count)
         stack_free: 52_000,

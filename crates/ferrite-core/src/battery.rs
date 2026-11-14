@@ -10,19 +10,6 @@
 
 use crate::txcal::Gauge;
 
-/// PWR-22.4: charging is judged on one-minute means of the average over this many minutes.
-pub const CHARGE_WINDOW_MIN: usize = 8;
-/// PWR-22.4: the window's rise, in PA1 counts (about 3 mV each), that says charging: black on its charger climbed
-/// about 1 count a minute with ±2 of noise (Nov 13, 2026); each half of the window must rise too, so one step up
-/// (the screen going dark, a squelch closing) isn't charging.
-pub const CHARGE_RISE: u32 = 6;
-/// PWR-22.4: each half of the window rises at least this much.
-pub const CHARGE_HALF_RISE: u32 = 2;
-/// PWR-22.4: charging ends when the minute's mean falls this far below its highest since charging began (the
-/// charger taken off), or when it hasn't risen for [`CHARGE_FLAT_MIN`] minutes (full).
-pub const CHARGE_DROP: u32 = 6;
-pub const CHARGE_FLAT_MIN: u32 = 15;
-
 /// The percentage at t0..t5, then at [`FULL_MV`].
 pub const KNOT_PCT: [u8; 7] = [0, 5, 15, 30, 45, 65, 100];
 /// A full 2S Li-ion pack at rest under the receiver's load, mV (Alex measured 8.14 V on a full charge, Oct 16, 2026;
@@ -100,76 +87,6 @@ pub struct Shown {
     pub low: bool,
     /// Below the first: the transmit cut-off (PWR-20).
     pub cutoff: bool,
-    /// PWR-22.4: the battery is charging, judged from a sustained rise (no charger input is known on this board).
-    pub charging: bool,
-}
-
-/// PWR-22.4: charging from the averaged reading's one-minute means: a steady rise over [`CHARGE_WINDOW_MIN`]
-/// minutes starts it; a fall from its peak or [`CHARGE_FLAT_MIN`] minutes without a new one ends it.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Charge {
-    /// The minute being summed (x16 readings) and how many readings so far.
-    sum: u32,
-    n: u32,
-    started: Option<u32>,
-    /// The last minutes' means (x16), oldest first; `len` of them filled.
-    means: [u32; CHARGE_WINDOW_MIN + 1],
-    len: usize,
-    pub charging: bool,
-    /// While charging: the highest mean and the minute count since it was reached.
-    peak: u32,
-    flat: u32,
-}
-
-impl Charge {
-    /// A transmission: its sag and recovery would read as a rise, so the window starts again and the peak is
-    /// taken afresh.
-    pub fn keyed(&mut self) {
-        (self.sum, self.n, self.started, self.len) = (0, 0, None, 0);
-        self.peak = 0;
-    }
-
-    /// One averaged reading (x16) at `now` ms.
-    pub fn sample(&mut self, avg16: u32, now: u32) {
-        let start = *self.started.get_or_insert(now);
-        self.sum += avg16;
-        self.n += 1;
-        if now.wrapping_sub(start) < 60_000 {
-            return;
-        }
-        let mean = self.sum / self.n;
-        (self.sum, self.n, self.started) = (0, 0, Some(now));
-        self.minute(mean);
-    }
-
-    fn minute(&mut self, mean: u32) {
-        if self.len == self.means.len() {
-            self.means.copy_within(1.., 0);
-            self.len -= 1;
-        }
-        self.means[self.len] = mean;
-        self.len += 1;
-        if self.charging {
-            if mean > self.peak {
-                (self.peak, self.flat) = (mean, 0);
-            } else {
-                self.flat += 1;
-            }
-            if self.peak != 0 && (mean + CHARGE_DROP * 16 <= self.peak || self.flat >= CHARGE_FLAT_MIN) {
-                self.charging = false;
-                self.len = 0; // a fresh window before it can start again
-            } else if self.peak == 0 {
-                self.peak = mean; // after a transmission
-            }
-            return;
-        }
-        if self.len == self.means.len() {
-            let (a, m, b) = (self.means[0], self.means[CHARGE_WINDOW_MIN / 2], self.means[CHARGE_WINDOW_MIN]);
-            if b >= a + CHARGE_RISE * 16 && m >= a + CHARGE_HALF_RISE * 16 && b >= m + CHARGE_HALF_RISE * 16 {
-                (self.charging, self.peak, self.flat) = (true, b, 0);
-            }
-        }
-    }
 }
 
 /// The average and what it shows; fed every UI pass with the latest PA1 reading.
@@ -185,7 +102,6 @@ pub struct Battery {
     rise_since: Option<u32>,
     /// When the first reading came (PWR-22.3's settling window).
     first: Option<u32>,
-    charge: Charge,
 }
 
 impl Battery {
@@ -194,7 +110,6 @@ impl Battery {
         if keyed {
             self.hold_until = Some(now.wrapping_add(HOLD_MS));
             self.rise_since = None;
-            self.charge.keyed();
         }
         let held = self.hold_until.is_some_and(|t| (t.wrapping_sub(now) as i32) > 0);
         if !held {
@@ -208,9 +123,6 @@ impl Battery {
             // a few seconds' average: each reading moves it a third of the way (about 5 s at one per 2 s)
             let a = self.avg.map_or(r, |a| (2 * a + r) / 3);
             self.avg = Some(a);
-            if !settling {
-                self.charge.sample(a, now); // PWR-22.4
-            }
             let a = ((a + 8) >> 4) as u16;
             match self.shown {
                 // falls with the average; rises only once it has stayed higher for RISE_MS
@@ -229,7 +141,7 @@ impl Battery {
         }
         let raw = self.shown?;
         let v = raw >> 4;
-        Some(Shown { raw, pct: percent(g, raw), low: v < g.0[1] as u16, cutoff: v < g.0[0] as u16, charging: self.charge.charging })
+        Some(Shown { raw, pct: percent(g, raw), low: v < g.0[1] as u16, cutoff: v < g.0[0] as u16 })
     }
 }
 
@@ -244,82 +156,6 @@ mod tests {
         assert_eq!(tier(90, true), 2);
     }
     use super::*;
-    extern crate std;
-    use std::{vec, vec::Vec};
-
-    /// Black on its charger, Nov 13, 2026: the averaged PA1 reading's one-minute means from the cable log
-    /// (bench-results/charging-nov13), the charger put on just before the first.
-    const ON_CHARGER: [u32; 32] = [
-        2600, 2610, 2613, 2614, 2613, 2632, 2632, 2633, 2634, 2636, 2637, 2638, 2640, 2641, 2642, 2643, 2645, 2646,
-        2646, 2649, 2649, 2650, 2651, 2653, 2654, 2655, 2657, 2657, 2658, 2660, 2660, 2662,
-    ];
-
-    fn minutes(c: &mut Charge, means: &[u32]) -> Vec<bool> {
-        means.iter().map(|m| {
-            c.minute(m * 16);
-            c.charging
-        }).collect()
-    }
-
-    /// PWR-22.4: the real charge reads as charging within the window (9 minutes' means) and stays so.
-    #[test]
-    fn charging_seen_on_the_real_curve() {
-        let mut c = Charge::default();
-        let seen = minutes(&mut c, &ON_CHARGER);
-        let first = seen.iter().position(|&x| x).expect("never seen charging");
-        assert_eq!(first, CHARGE_WINDOW_MIN, "as soon as the window is full");
-        assert!(seen[first..].iter().all(|&x| x), "stays charging while it climbs");
-    }
-
-    /// PWR-22.4: not charging: a slow discharge, flat with noise, and one step up (a load ending) then flat.
-    #[test]
-    fn no_charging_without_a_steady_rise() {
-        let falling: Vec<u32> = (0..40).map(|i| 2600 - i / 3).collect();
-        let noisy: Vec<u32> = (0..40).map(|i| 2600 + [0, 2, 1, 3, 0, 2][i % 6]).collect();
-        let step: Vec<u32> = (0..40).map(|i| if i < 12 { 2590 } else { 2605 }).collect();
-        for m in [falling, noisy, step] {
-            let mut c = Charge::default();
-            assert!(minutes(&mut c, &m).iter().all(|&x| !x), "{m:?}");
-        }
-    }
-
-    /// PWR-22.4: charging ends when the charger comes off (a fall from the peak) or the rise stops (full).
-    #[test]
-    fn charging_ends() {
-        let mut c = Charge::default();
-        minutes(&mut c, &ON_CHARGER);
-        assert!(c.charging);
-        minutes(&mut c, &[2662, 2640]);
-        assert!(!c.charging, "taken off the charger");
-        let mut c = Charge::default();
-        minutes(&mut c, &ON_CHARGER);
-        let flat = vec![2662; CHARGE_FLAT_MIN as usize - 1];
-        minutes(&mut c, &flat);
-        assert!(c.charging, "a short flat stretch still charging");
-        minutes(&mut c, &[2662]);
-        assert!(!c.charging, "full: no rise for 15 minutes");
-    }
-
-    /// PWR-22.4: a transmission starts the window again, so its recovery isn't a rise; Battery feeds it per sample.
-    #[test]
-    fn charging_through_battery_and_keyed() {
-        let mut c = Charge::default();
-        minutes(&mut c, &ON_CHARGER[..CHARGE_WINDOW_MIN]);
-        c.keyed();
-        minutes(&mut c, &ON_CHARGER[CHARGE_WINDOW_MIN..2 * CHARGE_WINDOW_MIN]);
-        assert!(!c.charging, "the window started again at the key-up");
-        minutes(&mut c, &[ON_CHARGER[2 * CHARGE_WINDOW_MIN]]);
-        assert!(c.charging);
-        // through Battery: readings every 2 s rising one count a minute
-        let g = Gauge::defaults();
-        let mut b = Battery::default();
-        let mut last = None;
-        for i in 0..(20 * 30) {
-            let now = i * SAMPLE_MS;
-            last = b.update(&g, (2600 + i / 30) as u16, now, false);
-        }
-        assert!(last.unwrap().charging);
-    }
 
     fn raw_mv(mv: u32) -> u16 {
         (mv * 160 / 482) as u16

@@ -338,7 +338,6 @@ impl App {
             battery_low: dev.battery_low,
             battery_tier: ferrite_core::battery::tier(dev.battery_pct, dev.battery_low || dev.battery_cutoff),
             battery_cutoff: dev.battery_cutoff,
-            charging: dev.battery_charging, // SBAR-9.2
             blink_off: dev.battery_cutoff && (self.now / 500) % 2 == 1,
             alerts_paused: hf && self.set.same_on(),
             dry: self.dry_tx(), // SBAR-22, TX-48
