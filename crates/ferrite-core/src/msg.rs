@@ -921,6 +921,21 @@ impl Default for XbLive {
 }
 
 impl LiveAll {
+    /// PWR-26.15: only the signal levels or the receiver's power-save sleep (read by the cable log alone) moved since
+    /// `old`, with no squelch open, no scan, nothing keyed and no exclusive mode: nothing the UI acts on at once (the
+    /// levels are drawn on its next pass).
+    pub fn levels_only(&self, old: &LiveAll) -> bool {
+        if self.tx.keyed || !matches!(self.mode, ModeLive::Off) || self.slots.iter().any(|s| s.squelch_open || s.scanning) {
+            return false;
+        }
+        let mut a = *self;
+        a.rx_asleep = old.rx_asleep;
+        for (s, o) in a.slots.iter_mut().zip(&old.slots) {
+            s.rssi = o.rssi;
+        }
+        a == *old
+    }
+
     /// The (slot, position) a channel scan asks for, if any ([`LiveAll::want`]).
     pub fn wanted(&self) -> Option<(u8, u16)> {
         self.want.checked_sub(1).map(|w| ((w >> 12) as u8, w & crate::scan::POS_MAX))
@@ -1238,5 +1253,37 @@ mod debug_tests {
         assert!(bk_write_refused(0x34, 0).is_some());
         assert!(bk_write_refused(0x80, 0).is_some());
         assert!(bk_write_refused(0x47, 0x6142).is_none());
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    /// PWR-26.15: RSSI jitter and the receiver's sleep don't wake a pass; a squelch, a scan, a key-up, a mode or
+    /// any other change does.
+    #[test]
+    fn levels_only_wakes() {
+        let old = LiveAll::default();
+        let mut l = old;
+        l.slots[1].rssi = -100;
+        l.rx_asleep = true;
+        assert!(l.levels_only(&old));
+        assert!(old.levels_only(&old));
+        let mut o = l;
+        o.slots[0].squelch_open = true;
+        assert!(!o.levels_only(&old));
+        let mut o = l;
+        o.slots[2].scanning = true;
+        assert!(!o.levels_only(&old));
+        let mut o = l;
+        o.tx.keyed = true;
+        assert!(!o.levels_only(&old));
+        let mut o = l;
+        o.slots[0].freq = 14_550_000;
+        assert!(!o.levels_only(&old));
+        let mut o = l;
+        o.want = 1;
+        assert!(!o.levels_only(&old));
     }
 }
