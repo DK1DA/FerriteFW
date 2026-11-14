@@ -28,6 +28,10 @@ use ferrite_ui::gfx::BG;
 /// KEY-3, KEY-4), rarely otherwise (toasts, undo, timeouts, the clock), so the MCU sleeps.
 const TICK_HELD_MS: u64 = 20;
 const TICK_IDLE_MS: u64 = 250;
+/// PWR-26.15: the idle tick while the screen is dark (nothing on it to update), and the housekeeping's turn (battery,
+/// APRS, decoders, GPS, autosave, an idle link) at any speed.
+const TICK_DARK_MS: u64 = 1000;
+const HOUSE_MS: u32 = 1000;
 /// PWR-26.1: how long after the panel wakes the build's speed holds for its whole redraw.
 const WAKE_FAST_MS: u32 = 1_000;
 
@@ -201,6 +205,9 @@ const IDLE_FRAME_MS: u32 = 250;
 /// PWR-26.1: a key this recent raises the clock before its commands (and beep) go to the Radio task.
 const KEY_RAISE_MS: u32 = 300;
 
+/// SELF-9.4 (bench builds): the UI pass's cycles by section (the cable log's `ui pass` line every 10 s).
+#[cfg(feature = "bench")]
+static PASS: [core::sync::atomic::AtomicU32; 8] = [const { core::sync::atomic::AtomicU32::new(0) }; 8];
 /// SELF-9.4 (bench builds): the UI task's wakes by what woke it (input, the Radio task's snapshot, its timer, an
 /// alert), counted for the cable log's 10 s line.
 #[cfg(feature = "bench")]
@@ -546,6 +553,7 @@ pub async fn task() {
     let mut lpm_since: Option<u32> = None;
     // PWR-26.3: when the governor last had a reason for the build's speed.
     let mut clock_high_at = 0u32;
+    let mut house_at = 0u32; // PWR-26.15
     // SAT-6: a prediction under way: when it started (ms) and the slices' time so far (us), for its log line.
     let mut predict_at: Option<(u32, u64)> = None;
     // LINK-13.4: the DSP task codes receive audio for the PC (the cable's session listens).
@@ -553,6 +561,12 @@ pub async fn task() {
     loop {
         #[cfg(feature = "bench")]
         let pass_c0 = crate::hal::time::cycles();
+        #[cfg(feature = "bench")]
+        let mut sec_c = pass_c0;
+        #[cfg(feature = "bench")]
+        macro_rules! sec { ($i:expr) => {{ let c = crate::hal::time::cycles(); PASS[$i].fetch_add(c.wrapping_sub(sec_c), Relaxed); sec_c = c; }} }
+        #[cfg(not(feature = "bench"))]
+        macro_rules! sec { ($i:expr) => {} }
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
             bringup::line(b"log off: the terminal has the cable");
@@ -567,6 +581,12 @@ pub async fn task() {
             }
             logged.1 = Instant::now();
         }
+        // PWR-26.15: the housekeeping's turn, once a second
+        let house = now_ms().wrapping_sub(house_at) >= HOUSE_MS;
+        if house {
+            house_at = now_ms();
+        }
+        let mut fed = false;
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
         // The cable first, then Bluetooth (its bytes only while 0 9 2 1 has the module on). The cable's wait while
         // its log has it (TERM-28: the first byte ends the log, above); Bluetooth's never do.
@@ -580,6 +600,7 @@ pub async fn task() {
             let held = port == Port::Cable && bringup::ON.load(Relaxed) || port == Port::Bt && bt_busy;
             while !held && ports.ready_for(port) {
                 let Some(b) = ring.get() else { break };
+                fed = true;
                 match ports.route(&app, port, b, now_ms()) {
                     ferrite_app::ports::To::Kiss => aprs.kiss_in(b), // KISS has this port (chapter 26)
                     to => ports.feed(&mut app, store, &dev, &live, to, b, now_ms()),
@@ -591,8 +612,9 @@ pub async fn task() {
         }
         // Every pass, bring-up log or not (inside the `!bringup::ON` branch they never updated About). PWR-20: the battery from the Radio task's PA1 reading, with the user trim (10 mV steps).
         let raw = crate::chan::BATTERY_RAW.load(Relaxed);
-        // PWR-22: the percentage on this radio's gauge, averaged, held while keyed and after, slow to rise.
-        let shown = battery.update(&gauge, raw, now_ms(), live.tx.keyed);
+        // PWR-22: the percentage on this radio's gauge, averaged, held while keyed and after, slow to rise
+        // (sampled every 2 s: PWR-26.15's once a second is enough; keyed always, for the hold).
+        let shown = if house || live.tx.keyed { battery.update(&gauge, raw, now_ms(), live.tx.keyed) } else { None };
         if let Some(s) = shown {
             let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
             dev.battery_mv = mv.max(0) as u16;
@@ -634,7 +656,14 @@ pub async fn task() {
                     let ms = |i: usize| now[i].wrapping_sub(LAST[i].swap(now[i], Relaxed)) / (crate::hal::clock::mhz() * 1000);
                     let wk = WAKES.each_ref().map(|w| w.swap(0, Relaxed));
                     bringup::linef(|b| {
-                        let _ = ufmt::uwrite!(b, "cpu ms/10s: radio {} dsp {} input {} thread {} (ui {}), at {} MHz; ui woke: input {} live {} timer {} alert {}", ms(0), ms(1), ms(2), ms(3), ms(4), crate::hal::clock::mhz(), wk[0], wk[1], wk[2], wk[3]);
+                        let _ = ufmt::uwrite!(b, "cpu ms/10s: radio {} dsp {} input {} thread {} (ui {}), at {} MHz", ms(0), ms(1), ms(2), ms(3), ms(4), crate::hal::clock::mhz());
+                    });
+                    bringup::linef(|b| {
+                        let _ = ufmt::uwrite!(b, "ui woke: input {} live {} timer {} alert {}", wk[0], wk[1], wk[2], wk[3]);
+                    });
+                    let ps = PASS.each_ref().map(|a| a.swap(0, Relaxed) / (crate::hal::clock::mhz() * 1000));
+                    bringup::linef(|b| {
+                        let _ = ufmt::uwrite!(b, "ui pass ms/10s: in {} link {} aprs {} store {} gps {} draw {} rest {} tick {}", ps[0], ps[1], ps[2], ps[3], ps[4], ps[5], ps[6], ps[7]);
                     });
                 }
                 bringup::linef(|b| {
@@ -652,6 +681,7 @@ pub async fn task() {
                 }
             }
         }
+        sec!(0); // ports in, battery
         dev.selftest.chips = live.chips;
         // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
         let t = crate::chan::MCU_TEMP.load(Relaxed);
@@ -672,7 +702,10 @@ pub async fn task() {
             ports.set_bt_fast(crate::hal::uart::rate(crate::report::UART_BT) >= ferrite_core::link::BT_FAST);
             // Decisions 290, 331: the DSP task, which preempts this one, puts its audio frames into TERM_OUT only while
             // no frame of the session's is half written: `Out` holds the flag for each frame's copy, not the poll.
-            ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true));
+            // PWR-26.15: an idle link (no bytes, no session, nothing waiting) once a second
+            if fed || house || ports.busy() || ports.live(&app, now_ms()) {
+                ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true));
+            }
             if cable_free {
                 crate::hal::uart::tx_ring(crate::report::UART_CPS, &TERM_OUT); // decision 290: the interrupt sends it
             }
@@ -830,11 +863,18 @@ pub async fn task() {
                 TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn
             }
         }
+        sec!(1); // link poll
         // TERM-28.1: only the bring-up build (no store) holds them; the normal build's cable log never does.
         if !(cfg!(feature = "bringup") && bringup::ON.load(Relaxed)) {
-            aprs.poll(&mut app, store, &live, &dev, now_ms());
-            decode.poll(&mut app, store, &live);
+            // PWR-26.15: once a second, or at once when a frame or a page waits
+            if house || aprs.due() {
+                aprs.poll(&mut app, store, &live, &dev, now_ms());
+            }
+            if house || !super::dsp::PAGES.is_empty() {
+                decode.poll(&mut app, store, &live);
+            }
         }
+        sec!(2); // aprs, decode
         // PWR-26.1: a key just in raises the clock here, before its commands go: its beep, started by the Radio task
         // at once, holds any switch until it ends (PWR-26.4), so the governor below found audio busy and the key's
         // redraw ran at 24 MHz (HF mode's open about 800 ms on black, Nov 4, 2026). Not in Fixed (always the
@@ -855,7 +895,9 @@ pub async fn task() {
         while let Some(w) = app.pop_write() {
             store.apply(w);
         }
-        store.autosave(now_ms(), &app);
+        if house {
+            store.autosave(now_ms(), &app); // PWR-26.15: its 2 s delay doesn't need more
+        }
         store::wake(store);
         // PWR-17: the power switch off (PE0 high, twice 50 ms apart): "Saving...", the radio off, the pending
         // writes, then the power hold released; if the switch is back on by then, a reset, as stock does.
@@ -909,7 +951,11 @@ pub async fn task() {
                 cortex_m::peripheral::SCB::sys_reset();
             }
         }
-        gps.step(&mut app, store, &mut dev);
+        sec!(3); // radio cmds, store
+        if house {
+            gps.step(&mut app, store, &mut dev); // PWR-26.15: fixes come once a second
+        }
+        sec!(4); // gps
         // LINK-38: a redraw for live changes alone at most every FRAME_MIN_MS. During a scan the Radio task reports
         // every step and each scan page redraw is ~14 KB (12-17 ms): back to back they left the Link task (same
         // executor) a turn only between draws, too little to answer the link or carry the cable log. Keys and the
@@ -1028,6 +1074,7 @@ pub async fn task() {
                 });
             }
         }
+        sec!(5); // clock, draw
         // SQL-18.3: who decides the squelch (0 9 5), for the Radio task's tick.
         ferrite_core::softsq::set_chip_decides(app.settings().sq_chip);
         ferrite_core::watch::set_aprs_first(app.settings().aprs_share == 0); // WATCH-17.3
@@ -1083,7 +1130,7 @@ pub async fn task() {
         let leds = app.leds(&live, &dev);
         LED_RED.write(leds.red == LED_ACTIVE_HIGH);
         LED_GREEN.write(leds.green == LED_ACTIVE_HIGH);
-        let mut period = if down != 0 || ports.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        let mut period = if down != 0 || ports.busy() { TICK_HELD_MS } else if asleep { TICK_DARK_MS } else { TICK_IDLE_MS };
         if !draw && !asleep {
             period = period.min(frame_min.saturating_sub(since).max(1) as u64); // the frame held back, drawn on time
         }
@@ -1109,10 +1156,12 @@ pub async fn task() {
         // LINK-38: one yield a pass. During a scan the Radio task publishes on every step, so `live_rx.changed()` is
         // ready at once and an await on it never gives up the CPU: the Link task (same executor) starved, the cable
         // and Bluetooth stopped answering and the cable log stopped, until the scan ended (Oct 20, 2026).
+        sec!(6); // lights, period
+        #[cfg(feature = "bench")]
+        let _ = sec_c;
         #[cfg(feature = "bench")]
         UI_CYCLES.fetch_add(crate::hal::time::cycles().wrapping_sub(pass_c0), Relaxed);
         embassy_futures::yield_now().await;
-        let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         // SBAR-23: the alerts' arm waits for one to be there, and the alert (~3 KB) is taken in its handler: carried
         // in this select's result it sized a temporary in the UI task's frame for every pass.
         // KEY-25: input first. The select returns the first ready arm, and the Radio task republishes the snapshot
@@ -1120,7 +1169,16 @@ pub async fn task() {
         // a UI pass longer than a tick never reached the keys: they waited for a quiet tick, then a press and its
         // release came together, a hold read as a short press (hold MENU opened the pass, not the options) and
         // arrows lagged and jumped (black, Nov 1, 2026). Keys are few; the snapshot is read on the next pass.
-        let woke = select4(INPUT.receive(), live_rx.changed(), wait, ALERTS.ready_to_receive()).await;
+        // PWR-26.15: a snapshot where only the levels moved (nothing open, scanning or keyed) is kept, not a pass:
+        // the levels draw on the next timed pass. Before, RSSI jitter woke 3-4 passes a second at rest.
+        let deadline = Instant::now() + Duration::from_millis(period);
+        let woke = loop {
+            let wait = select(Timer::at(deadline), TERM_WAKE.wait());
+            match select4(INPUT.receive(), live_rx.changed(), wait, ALERTS.ready_to_receive()).await {
+                Either4::Second(l) if l.levels_only(&live) => live = l,
+                w => break w,
+            }
+        };
         #[cfg(feature = "bench")]
         WAKES[match woke { Either4::First(_) => 0, Either4::Second(_) => 1, Either4::Third(_) => 2, Either4::Fourth(_) => 3 }].fetch_add(1, Relaxed);
         match woke {
@@ -1165,7 +1223,11 @@ pub async fn task() {
             #[cfg(feature = "bench")]
             sq_at.get_or_insert(now_ms());
         }
+        #[cfg(feature = "bench")]
+        let tc = crate::hal::time::cycles();
         app.tick(now_ms(), &live, store);
+        #[cfg(feature = "bench")]
+        PASS[7].fetch_add(crate::hal::time::cycles().wrapping_sub(tc), Relaxed);
         // SAT-6: satellite passes predicted in time slices of SAT_SLICE_US between keys and redraws (CPU-bound, not
         // one small slice a tick); the cable log's speed line when it ends.
         if app.sat_busy() {

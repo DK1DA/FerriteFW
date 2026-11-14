@@ -98,6 +98,12 @@ impl Aprs {
         self.seed as u8
     }
 
+    /// PWR-26.15: something waits for this turn now (a frame heard, a KISS frame, one being sent), not only on the
+    /// once-a-second turn.
+    pub fn due(&self) -> bool {
+        self.busy() || self.kiss_queued || self.kiss_q.is_some() || !APRS_RX.is_empty()
+    }
+
     /// A frame is being keyed or played: the UI task turns faster meanwhile.
     pub fn busy(&self) -> bool {
         !matches!(self.tx, Tx::Idle)
