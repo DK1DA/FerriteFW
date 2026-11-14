@@ -82,12 +82,12 @@ import struct
 import sys
 import time
 
-PROTOCOL = 3
+PROTOCOL = 1  # decision 385: protocol 1 as 0.9 first releases it; until then no older one is kept
 HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE, UI = (
     0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
 USED, READ_MANY, WRITE_MANY, LOG_READ = 0x15, 0x17, 0x18, 0x40  # LINK-39 - LINK-42
 STREAM, STREAM_MORE = 0x19, 0x1A  # LINK-50
-CAP_STREAM, CAP_WINDOW, CAP_LZ, CAP_DELETE_MANY = 1, 2, 4, 8  # LINK-35.2: HELLO's caps byte, after the build byte
+CAP_LZ, CAP_AUDIO, CAP_LINE_CMDS = 1, 2, 4  # LINK-35.2: HELLO's caps byte, after the build byte (decision 385)
 Z = 0x7D  # LINK-51: a compressed frame (| 0x80 for an answer): the inner type, the frame count, the coded payload
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND, MSG_STOP = 0x50, 0x51, 0x52, 0x53, 0x54, 0x55  # LINK-43 - LINK-49
@@ -97,17 +97,14 @@ AUDIO_RAW = 0x58  # LINK-13.9: the bench's raw stream
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
 CONTACT = 6  # APRS-42
 POSITION = 7  # LINK-53: a channel's position by number, <ii lat, lon in 1e-7 degree; b"" clears it
-CAP_POSITION = 64  # LINK-53: HELLO's caps say POSITION
 DATA_READ, DATA_WRITE = 0x61, 0x62  # LINK-59, LINK-60 (decision 333): the SPI data range raw (writes: the cable only)
 CLOCK = 0x63  # LINK-65 (decision 340): set or read the radio's clock
 STATE, TUNE = 0x34, 0x35  # LINK-67, LINK-68 (decision 373): the radio state record, a slot tuned by command
 BEACON = 0x36  # LINK-69: a beacon now, as the radio's own
-CAP2_DATA = 2  # LINK-59: HELLO's second caps byte says the raw data messages and the layout bytes (LINK-62)
+PHONE_POS = 0x37  # LINK-72: the phone's position (GPS-3.1: used locally, never beaconed)
 QUICK, WAYPOINT, DTMF = 8, 9, 10  # LINK-54 - LINK-56: flags + text; name(16) <ii lat, lon, source; len + symbols + name
 WP_ADD = 0xFFFF  # LINK-55: WRITE_MANY's index for a new waypoint
-CAP_LISTS = 128  # LINK-54 - LINK-57: HELLO's caps say QUICK, WAYPOINT, DTMF and SUBSCRIBE's log
 PRESET_SKIPS = 11  # LINK-58: a range preset's skipped frequencies, <I each (10 Hz), 0-48; b"" clears
-CAP2_PRESET_SKIPS = 1  # LINK-35.2: HELLO's second caps byte
 ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT, POSITION, QUICK, WAYPOINT, DTMF, PRESET_SKIPS)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
 # SUBSCRIBE's mask and flags, EVENT's kinds (Appendix G)
 SUB_HEARD, SUB_MSGS, SUB_UI, SUB_LOG, RENEW = 1, 2, 4, 8, 1
@@ -322,6 +319,7 @@ class Link:
     def __init__(self, port):
         self.p, self.seq = port, 0
         self.caps = 0  # LINK-35.2, from the HELLO answer (note_hello)
+        self.streams = True
         self.window = 1  # LINK-41.1: WRITE_MANY frames in flight, 2 once HELLO says the radio takes them
         # LINK-51: compression, asked for in every HELLO (FERRITE_LZ=0: never), on when the answer grants it
         self.want_lz = os.environ.get("FERRITE_LZ", "1") != "0"
@@ -404,13 +402,17 @@ class Link:
         return self.note_hello(self.ok(HELLO, bytes([PROTOCOL, 1 if self.want_lz else 0]) + bytes(7) + name))
 
     def note_hello(self, hello):
-        """LINK-35.2: what the radio can do beyond protocol 2, from HELLO's answer (version text, build, caps)."""
+        """LINK-35.2: HELLO's answer (version text, build, caps, layouts, lists generation): what this session
+        has (compression), from protocol 1's caps byte; everything else every radio has (decision 385)."""
+        if hello[0] != PROTOCOL:
+            raise ProtocolError(hello[0])
         rest = text(hello[3:])[1]
         caps = rest[1] if len(rest) > 1 else 0
-        self.caps = caps if not os.environ.get("FERRITE_NO_STREAM") else caps & ~CAP_STREAM
+        self.caps = caps
+        self.streams = not os.environ.get("FERRITE_NO_STREAM")
         import linkz
         self.lz = (linkz.Lz(linkz.UP), linkz.Lz(linkz.DOWN), [0, 0]) if caps & CAP_LZ else None
-        self.window = int(os.environ.get("FERRITE_WINDOW", "2" if rest[1:2] and rest[1] & CAP_WINDOW else "1"))
+        self.window = int(os.environ.get("FERRITE_WINDOW", "2"))
         return hello
 
     def stream(self, ty, payload=b"", timeout=None):
@@ -553,7 +555,7 @@ class Link:
         [(index, record)], and the requests it took."""
         if count is None:
             count = (4000 if what in (CHANNEL, POSITION) else 4096) - first
-        if self.caps & CAP_STREAM:
+        if self.streams:
             out, end, asks = [], first + count, 0
             while first < end:
                 asks += 1
@@ -645,7 +647,7 @@ class Link:
     def delete_many(self, what, idxs):
         """LINK-41.2: channels deleted several to a WRITE_MANY (records of length 0) when the radio says it can;
         else one DELETE each. How many went."""
-        if what == CHANNEL and self.caps & CAP_DELETE_MANY:
+        if what == CHANNEL:
             return self.write_many(CHANNEL, [(i, b"") for i in idxs])
         for i in idxs:
             self.ok(DELETE, struct.pack("<BH", what, i))
@@ -734,6 +736,14 @@ def remote_ptt(link, seconds, slot):
                     print(ended)
         print("unkeyed: KEY off answered" if done else "KEY off sent; no answer within 3 s")
     return 1 if ended else 0
+
+
+class ProtocolError(OSError):
+    """The radio speaks another link protocol (decision 385: none older is kept until 0.9)."""
+
+    def __init__(self, got):
+        self.got = got
+        super().__init__(f"the radio speaks link protocol {got}, this tool {PROTOCOL}: update the radio or the tool")
 
 
 class RadioError(Exception):
@@ -901,7 +911,7 @@ class Radio:
 
     def ui_text(self, what=0):
         """What the screen shows, as the radio's text (0 the state, 1 the key names)."""
-        if self.link.caps & CAP_STREAM:
+        if self.link.streams:
             for _ in range(3):
                 try:
                     return "".join(a[1:].decode("utf-8", "replace") for a in self.link.stream(UI, bytes([what])))  # LINK-50

@@ -11,8 +11,9 @@ const SCAN_WAKE_OFF: bool = true;
 const BCAST_LDO_ON: bool = true;
 
 impl Radio {
-    pub(super) fn chip(&mut self, n: u8) -> Bk4829<bk4829::wire::Chip<'_, Out, Io, BusyDelay, Out>> {
-        Bk4829::new(self.wire.chip(&mut self.cs[n as usize]))
+    /// Chip `n`, every register write through its shadow (PWR-26.16).
+    pub(super) fn chip(&mut self, n: u8) -> Bk4829<super::shadow::Shadowed<'_, bk4829::wire::Chip<'_, Out, Io, BusyDelay, Out>>> {
+        Bk4829::new(super::shadow::Shadowed { bus: self.wire.chip(&mut self.cs[n as usize]), shadow: &mut self.shadow[n as usize] })
     }
 
     pub(super) fn has(&self, n: u8) -> bool {

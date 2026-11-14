@@ -1,4 +1,5 @@
-//! Input sampler: the knob every millisecond, the keys every 10 ms (debounced; press and release). It
+//! Input sampler: the knob every 2 ms, the keys every 10 ms (debounced; press and release); while the screen is
+//! dark, one turn every 25 ms for both (PWR-26.17: a key or knob step there only wakes it; PTT acts). It
 //! runs on its own interrupt executor, above the Radio task's, so neither a slow redraw nor a busy scan makes it
 //! miss a knob step or a key;
 //! the UI task owns what the keys mean.
@@ -9,10 +10,10 @@
 
 use crate::board::{ACC_DET, ENC_A, ENC_B, KEY_DIRECT0, KEY_DIRECT1, KEY_DRIVE, KEY_PTT, KEY_SENSE, KEY_SIDE1, KEY_SIDE2};
 use crate::bus::{BusyDelay, In, Out};
-use crate::chan::{Input, ACCESSORY, INPUT, RADIO};
+use crate::chan::{Input, ACCESSORY, INPUT, RADIO, SCREEN_DARK};
 use crate::hal::gpio::Mode;
 use core::sync::atomic::Ordering::Relaxed;
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Instant, Timer};
 use ferrite_core::acc::AccDet;
 use ferrite_core::msg::RadioCmd;
 use ferrite_core::keys::{CODE_PTT_A, CODE_PTT_B, CODE_PTT_VFO, DIRECT, GROUND_ROW, ROWS};
@@ -21,6 +22,14 @@ use keypad::{Encoder, Keys, Matrix};
 /// Quadrature steps per click: 2 on the RT-950 Pro's channel knob (20 clicks a turn; with 4, only every other
 /// click counted on the radio, Oct 12, 2026).
 const PER_DETENT: i8 = 2;
+
+/// PWR-26.17: after a knob step seen in the slow turn, the full speed for this long (ms), whatever the screen.
+const FAST_AFTER_MS: u32 = 1000;
+/// PWR-26.17: the turn: the knob's pins (a fast spin changes them about every 8 ms), and the keys' scan.
+const KNOB_MS: u32 = 2;
+const KEYS_MS: u32 = 10;
+/// The dark screen's one turn for both: a key is seen in 25-50 ms (two readings to debounce).
+const DARK_MS: u32 = 25;
 
 #[embassy_executor::task]
 pub async fn task() {
@@ -51,14 +60,27 @@ pub async fn task() {
     // tried again on the next poll.
     let mut acc = AccDet::new();
     let mut told = false;
-    let mut ticker = Ticker::every(Duration::from_millis(1));
-    let mut tick = 0u32;
+    // PWR-26.17: the knob every 2 ms (was 1: 1000 wakes a second were about 5 % of the CPU at 24 MHz); while the
+    // screen is dark one turn every 25 ms for keys and knob. The knob isn't decoded there: any change on its pins is
+    // one step, which only wakes the screen (DISP-22's wake), and the full speed follows for FAST_AFTER_MS.
+    let (mut ms, mut keys_at, mut fast_until) = (0u32, 0u32, 0u32);
+    let mut ab = (ENC_A.read(), ENC_B.read());
+    let mut next = Instant::now();
     loop {
-        let d = enc.update(ENC_A.read(), ENC_B.read());
-        if d != 0 {
+        let slow = SCREEN_DARK.load(Relaxed) && ms.wrapping_sub(fast_until) as i32 >= 0;
+        let now_ab = (ENC_A.read(), ENC_B.read());
+        let d = enc.update(now_ab.0, now_ab.1);
+        if slow {
+            if now_ab != ab {
+                let _ = INPUT.try_send(Input::Knob(1));
+                fast_until = ms.wrapping_add(FAST_AFTER_MS);
+            }
+        } else if d != 0 {
             let _ = INPUT.try_send(Input::Knob(d));
         }
-        if tick.is_multiple_of(10) {
+        ab = now_ab;
+        if ms.wrapping_sub(keys_at) as i32 >= 0 {
+            keys_at = ms.wrapping_add(if slow { DARK_MS } else { KEYS_MS });
             let mut raw = matrix.scan(&mut BusyDelay);
             for (p, code) in ptt {
                 if !p.read() {
@@ -70,8 +92,13 @@ pub async fn task() {
             });
             acc_poll(&mut acc, &mut told);
         }
-        tick = tick.wrapping_add(1);
-        ticker.next().await;
+        let step = if slow { DARK_MS } else { KNOB_MS };
+        ms = ms.wrapping_add(step);
+        next += Duration::from_millis(step as u64);
+        if next < Instant::now() {
+            next = Instant::now(); // behind (a long interrupt): no burst of turns to catch up
+        }
+        Timer::at(next).await;
     }
 }
 

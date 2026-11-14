@@ -139,6 +139,10 @@ impl Data for RadioData {
         self.gps.fix()
     }
 
+    fn phone_position(&self, p: crate::data::PhonePos) {
+        self.gps.set_phone(p);
+    }
+
     fn sats(&self) -> u8 {
         self.gps.sats()
     }
@@ -191,6 +195,7 @@ pub fn fix_of(g: &GpsFix, now_ms: u32) -> Option<Fix> {
         used: g.used,
         age_s: (now_ms.wrapping_sub(g.at_ms) / 1000).min(u16::MAX as u32) as u16,
         utc_s: g.unix % 86_400,
+        phone: false,
     })
 }
 

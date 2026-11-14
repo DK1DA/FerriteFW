@@ -83,6 +83,7 @@ mod fskbench;
 #[cfg(all(feature = "bench", feature = "tx"))]
 mod synthbench;
 mod tune;
+pub(crate) mod shadow;
 mod tick;
 mod same;
 mod dtmf;
@@ -229,6 +230,8 @@ struct Radio {
     si: Si4732<SiBus>,
     wire: Wire,
     cs: [Out; 2],
+    /// PWR-26.16: each chip's register shadow, kept by [`Radio::chip`]'s writes.
+    shadow: [shadow::Shadow; 2],
     chips: u8,
     live: LiveAll,
     save: RxSleep,
@@ -756,6 +759,7 @@ pub async fn task() {
         si: Si4732::new(SiBus(bus), SI4732_ADDR),
         wire: ThreeWire::new(Out(BK_SCK), Io(BK_SDA), BusyDelay),
         cs: [Out(BK_CS[0]), Out(BK_CS[1])],
+        shadow: Default::default(),
         chips: 0,
         live: LiveAll::default(),
         save: RxSleep::new(DEFAULT_SAVE, now_ms()),

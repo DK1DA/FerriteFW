@@ -198,6 +198,16 @@ pub struct Waypoint {
     pub src: WpSrc,
 }
 
+/// GPS-3.1 (LINK-72): a position from the phone: where, its altitude (None unknown) and accuracy in metres, and
+/// how old it was when sent (s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PhonePos {
+    pub pos: Pos,
+    pub alt_m: Option<i16>,
+    pub acc_m: u16,
+    pub age_s: u16,
+}
+
 /// The latest fix (GPS-2): consumers see its age.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fix {
@@ -211,6 +221,8 @@ pub struct Fix {
     pub age_s: u16,
     /// UTC seconds of the day.
     pub utc_s: u32,
+    /// GPS-3.1 (decision 388): the phone's position (LINK-72), not the radio's own: used here, never beaconed.
+    pub phone: bool,
 }
 
 /// A satellite in view.
@@ -420,6 +432,22 @@ pub enum Op {
     SatPrefs(u32, ferrite_core::sat::data::Prefs),
 }
 
+impl Op {
+    /// LINK-71: the lists this request may change ([`crate::chan::LISTS_CHANNELS`] and the others); 0 for the logs,
+    /// messages and other records.
+    pub fn lists(&self) -> u8 {
+        use crate::chan::{LISTS_CHANNELS as C, LISTS_PRESETS as P, LISTS_ZONES as Z};
+        match self {
+            Op::DeleteChannel(_) | Op::Skip(..) | Op::Hide(..) | Op::Move(..) | Op::Renumber(..) => C,
+            Op::DeleteZone(_) => C | Z, // its channels go to no zone
+            Op::NewZone | Op::Zone(..) | Op::RenameZone(..) | Op::PutZone(..) => Z,
+            Op::Preset(..) | Op::NewPreset | Op::PutPreset(..) | Op::DeletePreset(_) | Op::PresetSkips { .. } => P,
+            Op::Wipe => C | Z | P,
+            _ => 0,
+        }
+    }
+}
+
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
 /// exist yet costs nothing.
 /// SETUP-13: the callsign APRS sends as fits an AX.25 address: 1-6 characters before the SSID (a longer one, kept
@@ -544,6 +572,9 @@ pub trait Data {
     fn fix(&self) -> Option<Fix> {
         None
     }
+    /// GPS-3.1 (LINK-72): the phone's position, as the link's `POSITION` gives it: used while fresh when the radio
+    /// has no fix of its own (never beaconed). A store without GPS data ignores it.
+    fn phone_position(&self, _p: PhonePos) {}
     fn sats(&self) -> u8 {
         0
     }

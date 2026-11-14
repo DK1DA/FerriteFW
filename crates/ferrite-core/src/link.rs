@@ -6,10 +6,10 @@
 //! payload, little-endian. The PC sends requests (types 0x01-0x7F); the radio answers each one with type | 0x80,
 //! the same seq, and a payload that starts with a [`Status`] byte: every frame is acknowledged (LINK-1).
 
-/// The protocol version in `HELLO` and its answer. 2: no approval tokens; `AUTH` with the radio's PIN (decision 104).
-/// 3 (decision 333): zone numbers are 2 bytes (the channel record, `INFO`'s zone count), a zone record ends with
-/// its channel count, and the raw SPI data messages (`DATA_READ`, `DATA_WRITE`) are there.
-pub const PROTOCOL: u8 = 3;
+/// The protocol version in `HELLO` and its answer (decision 385): 1, as Ferrite 0.9 will first release it. Until then
+/// it changes without a new number and nothing older is kept: the radio and its apps go out together (0.8.5 reset
+/// the old 3 to 1 and dropped the capability bits for what every radio has). A client refuses another number.
+pub const PROTOCOL: u8 = 1;
 /// The most payload in a frame (BLE chunks stay small: LINK-16).
 pub const MAX_PAYLOAD: usize = 240;
 /// The most body bytes: type, seq, payload, CRC.
@@ -109,7 +109,7 @@ pub mod msg {
     /// frame lost on the way shows as a gap, and the PC asks again from the last it has): [`STREAM_MORE`] (| ANSWER) while more follow,
     /// `STREAM` (| ANSWER) for the last, each payload exactly the inner request's answer would be. Frames go only
     /// while the port has room, so the stream is flow-controlled by the link itself; any new request from the PC
-    /// ends it. `bad argument` for another type. Only from radios that say [`caps::STREAM`] in `HELLO`.
+    /// ends it. `bad argument` for another type.
     pub const STREAM: u8 = 0x19;
     /// A `STREAM` answer that more follow (radio to PC only, with [`super::ANSWER`]).
     pub const STREAM_MORE: u8 = 0x1A;
@@ -143,16 +143,20 @@ pub mod msg {
     /// byte: 0 the state, 1 the key names (`ui keys`).
     pub const UI: u8 = 0x33;
     /// The radio's state as one fixed record (LINK-67, decision 373): the radio, then each slot ([`super::state`]);
-    /// no payload. Also pushed by `SUBSCRIBE`'s [`super::event::SUB_STATE`]. Radios that say caps2
-    /// [`super::caps2::STATE`].
+    /// no payload. Also pushed by `SUBSCRIBE`'s [`super::event::SUB_STATE`].
     pub const STATE: u8 = 0x34;
     /// Tunes a slot by command (LINK-68, decision 373): the slot, an op ([`super::tune`]) and its argument, through
     /// the keypad's paths and checks; answered as `SLOT`'s read, or `invalid` and the reason (nothing changed).
     pub const TUNE: u8 = 0x35;
     /// Sends a position beacon now (LINK-69), as the radio's Beacon now does (APRS-17.8, the same checks): no
     /// payload; `invalid` and the reason when it can't ("APRS and beacons off", "KISS on: the app sends", no
-    /// callsign). Radios that say caps2 [`super::caps2::BEACON`].
+    /// callsign).
     pub const BEACON: u8 = 0x36;
+    /// The phone's position (LINK-72, decision 388): latitude, longitude (i32 each, 1e-7 degree), altitude (i16,
+    /// metres; 0x7FFF unknown), accuracy (u16, metres), age (u16, seconds when sent). The radio uses it while fresh
+    /// when it has no fix of its own (GPS-3.1), for Nearby, distances and the map; never on air. 14 bytes, else
+    /// `bad argument`; out of range `invalid`.
+    pub const PHONE_POS: u8 = 0x37;
     /// Events this session wants pushed (LINK-46): a [`super::event`] mask (0 ends them), then optionally the UI's
     /// least gap in 100 ms units and flags ([`super::event::RENEW`]). Answer: the mask, the Live View dictionary's
     /// version, the next UI sequence number.
@@ -161,7 +165,9 @@ pub mod msg {
     /// answer) with the session's own event counter as its seq, the payload an [`super::event`] kind and its bytes
     /// (LINK-46). Sent by the PC as a request: answered `unknown type` as any other.
     pub const EVENT: u8 = 0x51;
-    /// The APRS heard list (LINK-44): from an index (u8); the count, then as many stations as fit.
+    /// The APRS heard list (LINK-44): from an index (u8); the count, then as many stations as fit. LINK-70: then
+    /// optionally a maximum age (u16, minutes; 0 none): the count, the stations and the index are then those heard
+    /// within it.
     pub const HEARD: u8 = 0x52;
     /// APRS messages, in and out, newest first (LINK-44): from an index (u16); the count (u16), then as many as fit.
     pub const MSGS: u8 = 0x53;
@@ -199,7 +205,7 @@ pub mod msg {
     /// The radio's clock (LINK-65, GPS-23): with a payload, UTC seconds (u32) set it as 0 6 6 does by hand (GPS time
     /// takes over at the next fix while 0 6 6 says "from GPS"); empty, it is read. The answer either way: UTC seconds
     /// now (u32, 0 while the radio has no time), then its source (u8: 0 none, 1 GPS, 2 set by hand or the link).
-    /// Only from radios that say [`super::caps2::SATS`].
+    /// Only from
     pub const CLOCK: u8 = 0x63;
 }
 
@@ -240,53 +246,17 @@ pub mod data {
     }
 }
 
-/// What a radio can do beyond protocol 2, the byte after `HELLO`'s build byte (LINK-35.2); absent: none.
+/// `HELLO`'s capability byte, after the build (LINK-35.2): only what differs by build or by session (decision 385;
+/// everything else in the protocol every radio has).
 pub mod caps {
-    /// `STREAM` (LINK-50).
-    pub const STREAM: u8 = 1;
-    /// Two `WRITE_MANY` frames may be in flight (LINK-41.1): the receive rings hold a whole second frame.
-    pub const WINDOW: u8 = 2;
     /// This session's frames are compressed from the `HELLO` answer on (LINK-51): set only when the `HELLO` asked
     /// (bit 0 of its first reserved byte) and the radio's one compression block was free.
-    pub const LZ: u8 = 4;
-    /// `WRITE_MANY` deletes channels (a record of length 0, LINK-41.2).
-    pub const DELETE_MANY: u8 = 8;
+    pub const LZ: u8 = 1;
     /// `AUDIO` (LINK-13.4): receive audio over this port (the cable only).
-    pub const AUDIO: u8 = 16;
-    /// The readback with the screen as drawn (LINK-19.5): `UI` what=3, and `SUBSCRIBE`'s [`super::event::TEXTS`].
-    pub const TEXTS: u8 = 32;
-    /// Channel positions by `READ_MANY` and `WRITE_MANY` of [`super::what::POSITION`] (LINK-53, decision 325).
-    pub const POSITION: u8 = 64;
-    /// The quick messages, waypoints and DTMF memories by `READ_MANY` and `WRITE_MANY` ([`super::what::QUICK`],
-    /// [`super::what::WAYPOINT`], [`super::what::DTMF`]) and `SUBSCRIBE`'s event log ([`super::event::SUB_LOG`]):
-    /// LINK-54 – LINK-57, decision 327. The byte's last bit: a capability after these goes in a second byte after
-    /// this one (a client that reads only the first sees none of them).
-    pub const LISTS: u8 = 128;
-}
-
-/// The second capability byte, after [`caps`]' (LINK-35.2); absent: none of these.
-pub mod caps2 {
-    /// A range preset's skipped frequencies by `READ_MANY` and `WRITE_MANY` of [`super::what::PRESET_SKIPS`]
-    /// (LINK-58, decision 329).
-    pub const PRESET_SKIPS: u8 = 1;
-    /// Protocol 3 (decision 333): 2-byte zone numbers, the zone record's channel count, `USED` in parts, and the raw
-    /// data messages `DATA_READ` and `DATA_WRITE` (LINK-59 – LINK-62); `HELLO` and `INFO` end with the layout
-    /// versions (the firmware's, the chip's).
-    pub const DATA: u8 = 2;
-    /// Satellite mode's records (LINK-63 – LINK-65, decision 340): [`super::what::SAT`], [`super::what::SAT_INFO`]
-    /// by `READ_MANY` and `WRITE_MANY`, and [`super::msg::CLOCK`].
-    pub const SATS: u8 = 4;
-    /// Decision 347: the [`super::what::RADIO`] record, and the APRS record with every MENU 0 5 value (LINK-43), so
-    /// Console needs no line commands.
-    pub const RADIO: u8 = 8;
+    pub const AUDIO: u8 = 2;
     /// The line commands answer: `CMD` (LINK-34) and the terminal's command line. Without it (a user build,
     /// decision 347) `CMD` is refused and Console uses the records alone.
-    pub const LINE_CMDS: u8 = 16;
-    /// The radio state message and the tuning commands (LINK-67, LINK-68; decision 373): [`super::msg::STATE`],
-    /// [`super::msg::TUNE`] and `SUBSCRIBE`'s [`super::event::SUB_STATE`].
-    pub const STATE: u8 = 32;
-    /// [`super::msg::BEACON`]: a beacon now from the link (LINK-69).
-    pub const BEACON: u8 = 64;
+    pub const LINE_CMDS: u8 = 4;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -295,16 +265,16 @@ pub mod event {
     pub const SUB_HEARD: u8 = 1;
     pub const SUB_MSGS: u8 = 2;
     pub const SUB_UI: u8 = 4;
-    /// New event log entries (LINK-57): only from a radio that says [`super::caps::LISTS`].
+    /// New event log entries (LINK-57).
     pub const SUB_LOG: u8 = 8;
-    /// The radio state (LINK-67): [`STATE`] events with the parts that changed; only from a radio that says caps2
-    /// [`super::caps2::STATE`].
+    /// The radio state (LINK-67): [`STATE`] events with the parts that changed.
     pub const SUB_STATE: u8 = 16;
+    /// The channels, zones or range presets changed (LINK-71): [`LISTS`] events.
+    pub const SUB_LISTS: u8 = 32;
     /// `SUBSCRIBE`'s flags bit: keep the Live View stream as it is (a keepalive); without it a UI subscription starts
     /// over with the whole state.
     pub const RENEW: u8 = 1;
-    /// `SUBSCRIBE`'s flags bit: the Live View carries the screen as drawn, its `t` lines (LINK-19.5); only from a
-    /// radio that says [`super::caps::TEXTS`].
+    /// `SUBSCRIBE`'s flags bit: the Live View carries the screen as drawn, its `t` lines (LINK-19.5).
     pub const TEXTS: u8 = 2;
     /// Kinds: a station heard (the count, then the station as `HEARD` gives it).
     pub const HEARD: u8 = 1;
@@ -320,6 +290,11 @@ pub mod event {
     /// [`super::state::PART_SLOT`]), then those parts in that order, as `STATE`'s record lays them out. The first
     /// after a subscription has them all.
     pub const STATE: u8 = 6;
+    /// LINK-71: the channels ([`super::what::CHANNEL`]), zones or range presets changed: what (u8), then the new lists
+    /// generation (u32), as `HELLO` ends with it. Once writing has been quiet for [`LISTS_QUIET_MS`]: one for a
+    /// `WRITE_MANY` of many records.
+    pub const LISTS: u8 = 7;
+    pub const LISTS_QUIET_MS: u32 = 500;
     /// The UI's least gap by default: Bluetooth 500 ms, the cable 200 ms; at least 100 ms.
     pub const UI_GAP_BT_MS: u32 = 500;
     pub const UI_GAP_CABLE_MS: u32 = 200;
@@ -543,10 +518,10 @@ pub mod what {
     pub const CONTACT: u8 = 6;
     /// A channel's position by channel number, 0-999 (LINK-53, decision 325): latitude and longitude (i32 each,
     /// little-endian, 1e-7 degree, north and east positive), 8 bytes. `READ_MANY` gives only the channels that have
-    /// one; a `WRITE_MANY` record of length 0 clears it. Only from radios that say [`super::caps::POSITION`].
+    /// one; a `WRITE_MANY` record of length 0 clears it. Only from
     pub const POSITION: u8 = 7;
     /// A quick message, 0-8 (LINK-54, TEXT-7): flags (bit 0 [`super::QUICK_OWN`]: the owner's own text; clear: the
-    /// factory text), then the text (0-67 bytes). Only from radios that say [`super::caps::LISTS`].
+    /// factory text), then the text (0-67 bytes). Only from
     pub const QUICK: u8 = 8;
     /// A waypoint, newest first, 0-255 (LINK-55, GPS-10): name (16 bytes, 0-padded), latitude and longitude (i32
     /// each, 1e-7 degree), source (u8: 0 marked, 1 APRS, 2 link, 3 grid): [`super::WAYPOINT_LEN`] bytes. A
@@ -557,7 +532,7 @@ pub mod what {
     pub const DTMF: u8 = 10;
     /// A range preset's skipped frequencies (LINK-58, SCAN-10), by the preset's index (as [`PRESET`]): u32 each, 10 Hz,
     /// 0-48 of them. `READ_MANY` lists the presets that have any; a `WRITE_MANY` record replaces the list (length 0
-    /// clears it). Only from radios that say [`super::caps2::PRESET_SKIPS`].
+    /// clears it). Only from
     pub const PRESET_SKIPS: u8 = 11;
     /// A satellite, 0-31 (LINK-63, SAT-2): the record of `ferrite_core::sat::wire` ([`super::SAT_LEN`] bytes: status,
     /// flags, transponders used, catalogue number, name, elements, five transponders). `READ_MANY` lists the ones
@@ -575,9 +550,14 @@ pub mod what {
     /// index into `tonegen::CHIMES`), latitude and longitude (i32 each, 1e-7 degree, north and east positive; the
     /// fixed position when there is no fix and it is on, GPS-3), the fix's age in seconds (u16, 0xFFFF none):
     /// [`super::RADIO_LEN`] bytes. A write takes Watch and Battery Save, and the message sound when it is 4 bytes
-    /// or more, each as the menu changes it; the fix and position are ignored. Only from radios that say
-    /// [`super::caps2::RADIO`].
+    /// or more, each as the menu changes it; the fix and position are ignored.
     pub const RADIO: u8 = 14;
+    /// LINK-71: the lists' sector hashes, read only (`READ_MANY`): index 0-63 the channel sectors (channels
+    /// 63 × i to 63 × i + 62), 64-68 the zone sectors (127 each), 69 the range presets; each a u32 that changes when
+    /// that sector's records do, the same across restarts. A phone re-reads only the sectors whose hash moved.
+    pub const LIST_HASH: u8 = 15;
+    /// How many [`LIST_HASH`] indexes there are.
+    pub const LIST_SECTORS: u16 = 70;
 }
 
 /// A satellite record's length (LINK-63).

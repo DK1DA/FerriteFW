@@ -34,6 +34,12 @@ fn json_str(s: &str) -> String {
 
 /// One screen: its name, what the firmware drew there (top to bottom) and the readback.
 fn entry(name: &str, r: &mut Radio) -> String {
+    // HOME-8: home waits under a popup, so its cards on the panel can be older than the readback (a scan moved on):
+    // one whole frame drawn first, so the texts and the readback are the same moment.
+    if r.sim.screen_name() == "Home" && r.sim.readback().lines().any(|l| l.starts_with("popup ")) {
+        r.sim.app_mut().redraw_all();
+        r.wait(common::FRAME);
+    }
     let texts: Vec<String> = r.sim.screen_texts().into_iter().map(|t| json_str(&t.s)).collect();
     // LINK-19.5: drawing the screen again for the texts changes nothing in the App
     let before = r.sim.app_bytes();

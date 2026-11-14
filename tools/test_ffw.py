@@ -160,7 +160,8 @@ class FakeRadio:
     def __init__(self, layouts=(3, 3)):
         self.chip = bytearray(b"\xff" * (4 << 20))
         self.ops, self.n, self.stamped = [], 0, False
-        self.hello = bytes([1, 2, 1]) + b"Ferrite\0" + bytes([0, 0, 2]) + bytes(layouts)
+        # protocol 1's HELLO answer: protocol, max payload, may go on, version, build, caps, layouts, lists generation
+        self.hello = bytes([1, 240, 1, 7]) + b"Ferrite" + bytes([1, 0]) + bytes(layouts) + bytes(4)
 
     def ask(self, ty, p):
         self.n += 1
