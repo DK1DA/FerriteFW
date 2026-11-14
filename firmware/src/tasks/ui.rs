@@ -661,6 +661,15 @@ pub async fn task() {
                     bringup::linef(|b| {
                         let _ = ufmt::uwrite!(b, "ui woke: input {} live {} timer {} alert {}", wk[0], wk[1], wk[2], wk[3]);
                     });
+                    // PWR-26.16: the BK4829 bus's reads, writes and writes skipped by the shadow, in these 10 s
+                    static BK_LAST: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+                    let bk = core::array::from_fn::<u32, 3, _>(|i| {
+                        let n = crate::tasks::radio::shadow::COUNTS[i].load(Relaxed);
+                        n.wrapping_sub(BK_LAST[i].swap(n, Relaxed))
+                    });
+                    bringup::linef(|b| {
+                        let _ = ufmt::uwrite!(b, "bk bus /10s: reads {} writes {} skipped {}", bk[0], bk[1], bk[2]);
+                    });
                     let ps = PASS.each_ref().map(|a| a.swap(0, Relaxed) / (crate::hal::clock::mhz() * 1000));
                     bringup::linef(|b| {
                         let _ = ufmt::uwrite!(b, "ui pass ms/10s: in {} link {} aprs {} store {} gps {} draw {} rest {} tick {}", ps[0], ps[1], ps[2], ps[3], ps[4], ps[5], ps[6], ps[7]);
@@ -984,6 +993,7 @@ pub async fn task() {
                 urgent = true;
             }
             (panel_asleep, panel_at) = (want_sleep, now_ms());
+            crate::chan::SCREEN_DARK.store(want_sleep, Relaxed); // PWR-26.17
         }
         // PWR-24.9, PWR-26: the MCU clock. In Low Power Mode 24 MHz after LPM_CLOCK_MS (and the boost after
         // input, PWR-24.10; transmit stays at 24 MHz); otherwise the governor: 24 MHz at rest, the build's speed
