@@ -184,6 +184,10 @@ const ROWS: [(&str, Val<()>); 20] = [
     }),
     ("Battery", |c, b| {
         let d = c.dev;
+        if d.battery_charging {
+            b.set(b"Charging"); // PWR-22.4: the charger's voltage reads high, so no percentage meanwhile
+            return TEXT;
+        }
         let _ = uwrite!(b, "{}%", d.battery_pct); // volts are on About
         if d.battery_cutoff {
             RED

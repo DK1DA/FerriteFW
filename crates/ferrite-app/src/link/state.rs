@@ -38,7 +38,8 @@ fn radio<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &LiveAll, b: &m
     let flags = if app.radio.keyed.is_some() || live.tx.keyed { m::TX } else { 0 }
         | if app.dry_tx() { m::DRY } else { 0 }
         | if app.locked() { m::LOCKED } else { 0 }
-        | if dev.battery_low { m::BATTERY_LOW } else { 0 };
+        | if dev.battery_low { m::BATTERY_LOW } else { 0 }
+        | if dev.battery_charging { m::CHARGING } else { 0 };
     let gps = match dev.gps {
         GpsState::Off => 0,
         GpsState::Searching => 1,

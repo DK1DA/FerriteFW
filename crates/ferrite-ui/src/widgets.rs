@@ -889,6 +889,8 @@ pub struct StatusBar {
     pub battery_low: bool,
     /// SBAR-9.1: the fill's colour, `ferrite_core::battery::tier`'s (0 green, 1 amber, 2 red).
     pub battery_tier: u8,
+    /// SBAR-9.2: a bolt over the battery while it charges (PWR-22.4).
+    pub charging: bool,
     pub battery_cutoff: bool,
     /// The cut-off blink's off phase.
     pub blink_off: bool,
@@ -914,8 +916,8 @@ impl StatusBar {
     }
 
     fn right_eq(&self, o: &Self) -> bool {
-        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_tier, self.battery_cutoff, self.blink_off, self.dry, self.lpm, self.sat)
-            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_tier, o.battery_cutoff, o.blink_off, o.dry, o.lpm, o.sat)
+        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_tier, self.battery_cutoff, self.blink_off, self.dry, self.lpm, self.sat, self.charging)
+            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_tier, o.battery_cutoff, o.blink_off, o.dry, o.lpm, o.sat, o.charging)
     }
 
     /// Draws what differs from `old` (everything with None).
@@ -999,6 +1001,8 @@ impl StatusBar {
     }
 
     fn draw_right(&self, lcd: &mut impl Panel) {
+        /// SBAR-9.2: the bolt's rows inside the battery's body (row from y 6, first x, width).
+        const BOLT: [(i32, i32, i32); 8] = [(0, 222, 3), (1, 221, 3), (2, 220, 3), (3, 218, 7), (4, 220, 3), (5, 219, 3), (6, 218, 3), (7, 218, 2)];
         lcd.fill(142, 0, 98, SBAR_H - 1, BG);
         // Battery at the right edge (SBAR-9): body 17 x 10 and a nub.
         // SBAR-9.1: green above 80 %, amber to 31 %, red at 30 % and below; the outline red with it.
@@ -1014,6 +1018,16 @@ impl StatusBar {
             lcd.fill(229, 8, 2, 4, c);
             let bars = if self.battery_cutoff { 1 } else { self.battery.clamp(1, 4) as i32 };
             lcd.fill(214, 7, bars * 13 / 4, 6, fillc);
+            if self.charging {
+                // SBAR-9.2: a bolt across the body, cut out in the background with a text-colour core so it reads
+                // over the fill and the empty part alike
+                for (dy, x0, w) in BOLT {
+                    lcd.fill(x0 - 1, 6 + dy, w + 2, 1, BG);
+                }
+                for (dy, x0, w) in BOLT {
+                    lcd.fill(x0, 6 + dy, w, 1, TEXT);
+                }
+            }
         }
         let mut x = 212;
         // SBAR-8: on with nothing connected grey, connected blue; night red has only red, so there connected is the
@@ -1247,6 +1261,29 @@ mod tests {
         assert_eq!(bar(2, false, false), (m(RED), m(RED)));
         assert_eq!(bar(0, true, false), (m(RED), m(RED)));
         assert_eq!(bar(0, true, true), (BG, BG), "the blink's off phase");
+    }
+
+    /// SBAR-9.2: while charging a bolt crosses the battery, in the text colour with a background edge, over the
+    /// fill and the empty part alike; without charging the body is as before.
+    #[test]
+    fn status_bar_charging_bolt() {
+        let draw = |tier: u8, bars: u8, charging: bool| {
+            let mut fb = FrameBuffer::new();
+            StatusBar { battery: bars, battery_tier: tier, charging, ..Default::default() }.draw(&mut fb, None);
+            fb
+        };
+        let m = crate::theme::map;
+        for (tier, bars) in [(0, 4), (1, 2), (2, 1)] {
+            let on = draw(tier, bars, true);
+            assert_eq!(on.at(219, 9), m(TEXT), "the bolt's bar, tier {tier}");
+            assert_eq!(on.at(224, 6), m(TEXT), "its top");
+            assert_eq!(on.at(217, 9), BG, "its edge");
+            let off = draw(tier, bars, false);
+            assert_ne!(off.at(219, 9), m(TEXT));
+            if let Some(dir) = std::env::var_os("FERRITE_SHOT") {
+                on.write_ppm(&std::path::Path::new(&dir).join(std::format!("bolt-{tier}.ppm"))).unwrap();
+            }
+        }
     }
 
     /// SBAR-2: the clock as hh:mm with Z when it is UTC; with no time, the callsign in its place.

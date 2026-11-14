@@ -379,11 +379,13 @@ pub mod state {
     pub const PART_RADIO: u8 = 1;
     pub const PART_SLOT: u8 = 2;
     pub const PART_ALL: u8 = 0x0F;
-    /// The radio's flags: transmitting, Dry TX on (MENU 0 8 8 5), the keys locked, the battery low.
+    /// The radio's flags: transmitting, Dry TX on (MENU 0 8 8 5), the keys locked, the battery low, charging
+    /// (PWR-22.4).
     pub const TX: u8 = 1;
     pub const DRY: u8 = 2;
     pub const LOCKED: u8 = 4;
     pub const BATTERY_LOW: u8 = 8;
+    pub const CHARGING: u8 = 16;
     /// A slot's flags.
     pub const ON_CHANNEL: u8 = 1;
     pub const SCANNING: u8 = 2;
