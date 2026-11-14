@@ -1129,3 +1129,34 @@ fn zone_names_read_once_until_a_write() {
     assert_eq!(s.zone_name(3).unwrap().as_bytes(), b"Marine");
     assert_eq!(s.zone_name(9), None);
 }
+
+/// LINK-71: the lists hash is made from what is stored: the same after a restart with nothing written; one channel
+/// written changes the channel list's hash and exactly one sector hash (its own, 63 channels a sector), and writing
+/// it back as it was puts both back; a zone renamed changes the zones' hash alone; `sector_hash` covers 70 sectors.
+#[test]
+fn lists_hashes_follow_the_contents() {
+    let f = seeded();
+    let s = mount(f);
+    let lists = s.lists_versions();
+    let sectors: Vec<u32> = (0..70).map(|i| s.sector_hash(i).unwrap()).collect();
+    assert_eq!(s.sector_hash(70), None);
+    let s = mount(unmount(s));
+    assert_eq!(s.lists_versions(), lists, "a restart with nothing written: the same hashes");
+    assert_eq!((0..70).map(|i| s.sector_hash(i).unwrap()).collect::<Vec<_>>(), sectors);
+    let old = s.get(130).expect("the seeded radio has channel 130");
+    let mut c = old;
+    c.rx = c.rx.wrapping_add(2500);
+    assert!(s.apply(ChanWrite::Put { ch: c, from: None }));
+    let now: Vec<u32> = (0..70).map(|i| s.sector_hash(i).unwrap()).collect();
+    let moved: Vec<usize> = (0..70).filter(|&i| now[i] != sectors[i]).collect();
+    assert_eq!(moved, vec![130 / 63], "only channel 130's sector");
+    let l2 = s.lists_versions();
+    assert!(l2[0] != lists[0] && l2[1] == lists[1] && l2[2] == lists[2], "the channels' hash alone");
+    assert!(s.apply(ChanWrite::Put { ch: old, from: None }));
+    assert_eq!(s.lists_versions(), lists, "written back as it was: the hash as it was");
+    assert!(s.request(Op::RenameZone(1, Name::from(b"Renamed".as_slice()))));
+    let l3 = s.lists_versions();
+    assert!(l3[0] == lists[0] && l3[1] != lists[1] && l3[2] == lists[2], "a zone renamed: the zones' hash alone");
+    let s = mount(unmount(s));
+    assert_eq!(s.lists_versions(), l3, "and the same after a restart");
+}

@@ -359,3 +359,43 @@ fn big_transfers_flash_the_led() {
     assert_eq!(got[0].1, [Status::NotAuthorised as u8], "LINK-30: no stream before AUTH");
     assert!(!bt.app.transferring());
 }
+
+/// LINK-70: `HEARD` with a maximum age: the count and the stations are those heard within it, newest first, the
+/// index counting among them; 0 is no limit; a `STREAM` of it gives what asking once does; a station whose age isn't
+/// known is never within one.
+#[test]
+fn heard_by_age() {
+    use crate::data::AGO_UNKNOWN;
+    let mut pc = Pc::new(true);
+    let d = pc.st.data();
+    let all: Vec<(Buf<10>, u32)> = (0..d.stations()).filter_map(|i| d.station(i)).map(|s| (s.call, s.ago_s)).collect();
+    let within: Vec<&Buf<10>> = all.iter().filter(|(_, a)| *a != AGO_UNKNOWN && *a <= 3600).map(|(c, _)| c).collect();
+    assert!(!within.is_empty() && within.len() < all.len(), "the sample has stations both sides of an hour");
+    let calls = |a: &[u8]| {
+        // each station: flags, call (length, text), symbol, age, times, [position], [course], [altitude], path, comment
+        let mut v = Vec::new();
+        let mut i = 1;
+        while i < a.len() {
+            let f = a[i];
+            let n = a[i + 1] as usize;
+            v.push(a[i + 2..i + 2 + n].to_vec());
+            i += 2 + n + 1 + 4 + 2 + if f & 1 != 0 { 8 } else { 0 } + if f & 2 != 0 { 4 } else { 0 } + if f & 4 != 0 { 4 } else { 0 };
+            i += 1 + a[i] as usize;
+            i += 1 + a[i] as usize;
+        }
+        v
+    };
+    let (s, a) = pc.ask(msg::HEARD, &[0, 60, 0]);
+    assert_eq!(s, 0);
+    assert_eq!(a[0] as usize, within.len(), "the count is those within the hour");
+    let got = calls(&a);
+    assert_eq!(got, within.iter().take(got.len()).map(|c| c.as_bytes().to_vec()).collect::<Vec<_>>());
+    let (_, b) = pc.ask(msg::HEARD, &[1, 60, 0]);
+    assert_eq!(calls(&b)[0], within[1].as_bytes(), "the index counts among those within");
+    let (_, z) = pc.ask(msg::HEARD, &[0, 0, 0]);
+    assert_eq!(z[0] as usize, all.len(), "0: no limit");
+    let (_, plain) = pc.ask(msg::HEARD, &[0]);
+    assert_eq!(z, plain, "as without an age");
+    let got = stream(&mut pc, 92, &[msg::HEARD, 0, 60, 0]);
+    assert_eq!(&got[0].1[1..], &a[..], "a stream's first frame is what asking once gives");
+}

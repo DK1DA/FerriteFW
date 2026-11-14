@@ -13,6 +13,8 @@ use ferrite_core::msg::{GpsFix, GpsSky, GpsState};
 
 /// The age a stand-in fix from the fixed position carries (GPS-3): "Mark here" refuses it, as it isn't a fix.
 pub const FIXED_AGE: u16 = u16::MAX;
+/// GPS-3.1 (decision 388): the phone's position counts while younger than this (Pocket sends one about every 30 s).
+pub const PHONE_FRESH_MS: u32 = 120_000;
 
 /// A fix older than this is not shown as current (the position page turns its age amber past 10 s, GPS-15).
 pub const STALE_MS: u32 = 10_000;
@@ -127,7 +129,7 @@ impl GpsAuto {
 /// and the alarm, a real fix from `data`; [`crate::App::gps_cfg`] then says what the GPS task does.
 pub fn auto_step(app: &mut crate::App, data: &dyn Data, alarm: bool, now: u32) {
     let n = needs(app, alarm);
-    let fix = data.fix().is_some_and(|f| f.age_s != FIXED_AGE);
+    let fix = data.fix().is_some_and(|f| f.age_s != FIXED_AGE && !f.phone); // the radio's own fix (GPS-3.1)
     let (mode, lpm) = (app.settings().gps, app.low_power());
     app.gps_auto.step(now, mode, lpm, n, fix);
 }
@@ -165,6 +167,8 @@ pub struct GpsData {
     now: Cell<u32>,
     /// The fixed position (0 6 9), used when there is no fix (GPS-3).
     fixed: Cell<Option<Pos>>,
+    /// GPS-3.1: the phone's last position and when it was taken (the [`GpsData::now`] clock).
+    phone: Cell<Option<(crate::data::PhonePos, u32)>>,
     ver: Cell<u32>,
 }
 
@@ -182,6 +186,7 @@ impl GpsData {
             sky: Cell::new(GpsSky { n: 0, sat: [ferrite_core::msg::SkySat { prn: 0, snr: 0, elev: 0, azim_2: 0, flags: 0 }; 16] }),
             now: Cell::new(0),
             fixed: Cell::new(None),
+            phone: Cell::new(None),
             ver: Cell::new(0),
         }
     }
@@ -204,6 +209,18 @@ impl GpsData {
             self.sky.set(s);
             self.bump();
         }
+    }
+
+    /// GPS-3.1 (LINK-72): the phone's position, taken `age_s` before now.
+    pub fn set_phone(&self, p: crate::data::PhonePos) {
+        let at = self.now.get().wrapping_sub(p.age_s as u32 * 1000);
+        self.phone.set(Some((p, at)));
+        self.bump();
+    }
+
+    /// GPS-3.1: the phone's position while fresh ([`PHONE_FRESH_MS`]), and its age now (s).
+    fn phone_fresh(&self) -> Option<(crate::data::PhonePos, u32)> {
+        self.phone.get().map(|(p, at)| (p, self.now.get().wrapping_sub(at))).filter(|&(_, ms)| ms < PHONE_FRESH_MS).map(|(p, ms)| (p, ms / 1000))
     }
 
     /// The fixed position from the settings (None: none set).
@@ -383,10 +400,15 @@ impl Data for GpsData {
                 used: f.used,
                 age_s: age.min(u16::MAX as u32) as u16,
                 utc_s: self.utc_now().map_or(0, |u| u % 86_400),
+                phone: false,
             });
         }
+        // GPS-3.1 (decision 388): then the phone's, while fresh, marked as the phone's (never beaconed)
+        if let Some((p, age)) = self.phone_fresh() {
+            return Some(Fix { pos: p.pos, three_d: p.alt_m.is_some(), alt_m: p.alt_m.unwrap_or(0) as i32, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: age.min(u16::MAX as u32 - 1) as u16, utc_s: 0, phone: true });
+        }
         // GPS-3: the fixed position stands in, as an old 2D fix with nothing heard.
-        self.fixed.get().map(|pos| Fix { pos, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: FIXED_AGE, utc_s: 0 })
+        self.fixed.get().map(|pos| Fix { pos, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: FIXED_AGE, utc_s: 0, phone: false })
     }
 
     fn sats(&self) -> u8 {
@@ -443,6 +465,37 @@ mod tests {
         g.set_fix(GpsFix::default()); // GPS off
         assert!(g.fix().is_none());
         assert_eq!(g.state().0, GpsState::Off);
+    }
+
+    /// GPS-3.1 (decision 388): the phone's position comes after the radio's own fix and before the fixed position,
+    /// marked as the phone's, while younger than 2 minutes (its age when sent counts); it never counts as the radio's
+    /// own fix for GPS Auto; the beacon never takes it (the fixed position instead, or none).
+    #[test]
+    fn phone_position_between_the_fix_and_the_fixed() {
+        use crate::data::PhonePos;
+        let g = GpsData::new();
+        g.tick(100_000);
+        let fixed = Pos { lat: 1, lon: 2 };
+        g.set_fixed(Some(fixed));
+        let ph = Pos { lat: 491_000_000, lon: -1_231_000_000 };
+        g.set_phone(PhonePos { pos: ph, alt_m: Some(40), acc_m: 8, age_s: 10 });
+        let f = g.fix().unwrap();
+        assert_eq!((f.pos, f.phone, f.age_s, f.alt_m, f.three_d), (ph, true, 10, 40, true), "the phone's before the fixed");
+        g.tick(209_000); // 119 s old
+        assert!(g.fix().unwrap().phone);
+        g.tick(211_000); // 121 s old: stale
+        assert_eq!(g.fix().unwrap().pos, fixed, "stale: the fixed position again");
+        g.set_phone(PhonePos { pos: ph, alt_m: None, acc_m: 8, age_s: 0 });
+        g.set_fix(fix_at(211_000));
+        g.tick(211_000);
+        assert!(!g.fix().unwrap().phone, "the radio's own fix wins");
+        // the beacon: never the phone's
+        let app = crate::App::new(crate::tests::set(), crate::tests::alert());
+        let phone_fix = Some(crate::data::Fix { phone: true, ..g.fix().unwrap() });
+        assert!(app.beacon_fix(phone_fix).is_none(), "no fixed position: no position to beacon");
+        app.set.fixed_on = true;
+        app.set.fixed = fixed;
+        assert_eq!(app.beacon_fix(phone_fix).map(|f| (f.pos, f.phone)), Some((fixed, false)), "the fixed position instead");
     }
 
     /// GPS-3: with no current fix, position users take the fixed position, or none; a current fix wins.
@@ -576,7 +629,7 @@ mod tests {
             0
         }
         fn fix(&self) -> Option<Fix> {
-            self.0.then_some(Fix { pos: Pos { lat: 1, lon: 2 }, three_d: true, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 6, age_s: 1, utc_s: 0 })
+            self.0.then_some(Fix { pos: Pos { lat: 1, lon: 2 }, three_d: true, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 6, age_s: 1, utc_s: 0, phone: false })
         }
     }
 

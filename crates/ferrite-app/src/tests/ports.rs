@@ -392,18 +392,18 @@ impl Pc {
 /// frame with the wrong count is dropped, and a new `HELLO` starts both ends over. LINK-41.2: a `WRITE_MANY` record
 /// of length 0 deletes the channel.
 #[test]
-/// (The caps byte is the fourth from last: the second caps byte, LINK-58, then the two layout bytes, LINK-62, end the
+/// (The caps byte is the seventh from last: the two layout bytes, LINK-62, and the lists generation, LINK-71, end the
 /// answer.)
 fn compression_first_come_first_served() {
     use ferrite_core::link::caps;
     let mut r = Rig::new();
-    let mut hello = std::vec![2u8, 1, 0, 0, 0, 0, 0, 0, 0];
+    let mut hello = std::vec![wire::PROTOCOL, 1, 0, 0, 0, 0, 0, 0, 0];
     hello.extend_from_slice(b"test");
     let (s, a) = r.ask_full(Port::Cable, msg::HELLO, &hello);
     assert_eq!(s, 0);
-    assert!(a.iter().rev().nth(3).is_some_and(|c| c & caps::LZ != 0), "granted: {a:?}");
+    assert!(a.iter().rev().nth(6).is_some_and(|c| c & caps::LZ != 0), "granted: {a:?}");
     let (_, b) = r.ask_full(Port::Bt, msg::HELLO, &hello);
-    assert!(b.iter().rev().nth(3).is_some_and(|c| c & caps::LZ == 0), "taken: Bluetooth runs plain");
+    assert!(b.iter().rev().nth(6).is_some_and(|c| c & caps::LZ == 0), "taken: Bluetooth runs plain");
     // the cable's session, compressed
     let mut pc = Pc::new();
     let mut got = Vec::new();
@@ -451,7 +451,7 @@ fn compression_first_come_first_served() {
     assert!(r.cable.0.is_empty(), "dropped");
     // a new HELLO starts both over
     let (s, a) = r.ask_full(Port::Cable, msg::HELLO, &hello);
-    assert!(s == 0 && a.iter().rev().nth(3).is_some_and(|c| c & caps::LZ != 0));
+    assert!(s == 0 && a.iter().rev().nth(6).is_some_and(|c| c & caps::LZ != 0));
     let mut pc = Pc::new();
     r.send(Port::Cable, &pc.request(msg::INFO, 23, &[]));
     let mut out = core::mem::take(&mut r.cable.0);
@@ -459,11 +459,11 @@ fn compression_first_come_first_served() {
     // the cable's session ends (a HELLO not asking): Bluetooth may have it now
     hello[1] = 0;
     let (_, a) = r.ask_full(Port::Cable, msg::HELLO, &hello);
-    assert!(a.iter().rev().nth(3).is_some_and(|c| c & caps::LZ == 0));
+    assert!(a.iter().rev().nth(6).is_some_and(|c| c & caps::LZ == 0));
     r.poll();
     hello[1] = 1;
     let (_, b) = r.ask_full(Port::Bt, msg::HELLO, &hello);
-    assert!(b.iter().rev().nth(3).is_some_and(|c| c & caps::LZ != 0), "Bluetooth gets it now");
+    assert!(b.iter().rev().nth(6).is_some_and(|c| c & caps::LZ != 0), "Bluetooth gets it now");
 }
 
 /// LINK-13.4, LINK-13.5: receive audio to the PC: the cable only, never on by itself; while the cable's session
@@ -664,11 +664,12 @@ fn a_waiting_frame_holds_its_port() {
     assert!(r.p.ready_for(Port::Bt) && r.p.ready());
 }
 
-/// TERM-2, KISS-6: the cable port set to KISS (0 9 2 3): every cable byte is KISS's, none the terminal's.
+/// TERM-2, KISS-6: KISS on the cable (0 5 8 on Cable; 0 9 2 3 has no KISS since decision 386): every cable byte is
+/// KISS's, none the terminal's.
 #[test]
 fn cable_port_kiss_drops_to_kiss() {
     let mut r = Rig::new();
-    r.app.set.cable_port = 3;
+    r.app.set.kiss_port = 1;
     assert_eq!(r.send(Port::Cable, b"\r:"), [To::Kiss; 2]);
     assert!(!r.p.term.on());
 }

@@ -96,7 +96,7 @@ fn loopback_beacon_through_dac_and_adc() {
     use ferrite_core::audio::{afsk_tx, to_dac, uafsk};
     let tx = AprsLive::new();
     tx.beacon_now();
-    let fix = Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 8, age_s: 0, utc_s: 0 };
+    let fix = Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 8, age_s: 0, utc_s: 0, phone: false };
     let mut out = [0u8; FRAME_MAX];
     let t = tx.tick(0, ferrite_app::aprs_live::Sending::All, true, b"VE3XYZ-7", Some(fix), &AprsCfg::DEFAULT, &mut out);
     assert_eq!(t.what, "Beacon");

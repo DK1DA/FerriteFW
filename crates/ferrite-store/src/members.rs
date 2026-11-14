@@ -384,6 +384,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let mut per = [0u16; MAX_ZONES as usize];
         let (mut all, mut loose) = (0u16, 0u16);
         let mut b = [0u8; CH_LEN];
+        // LINK-71: each channel sector's hash from the same reads (as `rehash` makes it: `ch_held`)
+        let mut h = [HASH0; CH_SECTORS];
         for num in 0..MAX_CHANNELS {
             let mut p = [0xFFu8; 2];
             self.f.raw_read(ch_addr(num) + CH_ZONE_LO as u32, &mut p)?;
@@ -394,6 +396,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             if !ch_valid(&b) {
                 continue;
             }
+            let k = num as usize / CH_PER_SECTOR as usize;
+            h[k] = hash_mix(h[k], num, &b);
             all += 1;
             match zkey(ch_zone(&b)) {
                 NO_ZONE => loose += 1,
@@ -402,6 +406,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         self.count.set(all);
         self.loose.set(loose);
+        self.hashes.borrow_mut()[..CH_SECTORS].copy_from_slice(&h);
+        self.f.fresh((1u128 << CH_SECTORS) - 1);
         self.dirty.set([0; DIRTY_WORDS]);
         let mut r = [0u8; ZONE_LEN];
         for z in 0..self.zones.get() {

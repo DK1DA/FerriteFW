@@ -1546,7 +1546,7 @@ mod tests {
     }
 
     fn fix() -> Fix {
-        Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 10, used: 8, age_s: 0, utc_s: 0 }
+        Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 10, used: 8, age_s: 0, utc_s: 0, phone: false }
     }
 
     /// APRS-4.5: the details (path, course, altitude, comment, FX.25) stay in RAM for the stations heard most

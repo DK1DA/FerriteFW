@@ -362,12 +362,13 @@ def spi_parts(m, entries):
 DATA_READ, DATA_WRITE = 0x61, 0x62
 OK, BUSY = 0, 7
 PROGRAM_MAX = 64
-CAP2_DATA = 2   # HELLO's second capability byte: the raw data messages and the layouts (LINK-35.2)
-
-
 def hello_layouts(hello):
-    """LINK-62: (the layout the firmware stores, the one the chip's data is in), from HELLO's answer."""
-    return (hello[-2], hello[-1]) if len(hello) >= 2 else (0, 0)
+    """LINK-62: (the layout the firmware stores, the one the chip's data is in), from HELLO's answer: after the
+    version text, the build and the capability byte (protocol 1, decision 385)."""
+    if len(hello) < 4:
+        return (0, 0)
+    t = hello[4 + hello[3]:]
+    return (t[2], t[3]) if len(t) >= 4 else (0, 0)
 
 
 def write_parts(ask, hello, parts, say=print, busy_s=15.0, clock=None):

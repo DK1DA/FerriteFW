@@ -166,6 +166,18 @@ fn aprs_settings_record() {
     b[..2].copy_from_slice(&(30_000_500u32 / 500).to_le_bytes()[..2]);
     assert_eq!(pc.aprs_write(&b).0, Status::Invalid as u8);
     assert_eq!(pc.aprs_write(&b[..20]).0, Status::BadArg as u8, "the whole record");
+    // APRS-50.1 (0.8.5): the beacon text rate is the record's last byte; a record without it keeps the radio's
+    let t = crate::link::APRS_TEXT_AT;
+    let mut b = pc.aprs_rec();
+    assert_eq!(b.len(), t + 1);
+    b[t] = 2; // every 4th
+    assert_eq!(pc.aprs_write(&b).0, 0);
+    assert_eq!(pc.app.aprs_cfg().text_every, 2);
+    assert_eq!(pc.aprs_rec()[t], 2);
+    assert_eq!(pc.aprs_write(&b[..t]).0, 0);
+    assert_eq!(pc.app.aprs_cfg().text_every, 2, "a record without it keeps it");
+    b[t] = 4;
+    assert_eq!(pc.aprs_write(&b).0, Status::Invalid as u8, "text rate past every 8th");
 }
 
 /// LINK-44: the heard list and the messages read in answers that hold whole records, from any index.
@@ -271,7 +283,7 @@ fn aprs_events() {
     pc.aprs_second();
     pc.aprs_second();
     assert!(pc.events(2000).is_empty());
-    assert_eq!(pc.ask(msg::SUBSCRIBE, &[0x20]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::SUBSCRIBE, &[0x40]).0, Status::BadArg as u8);
 }
 
 #[derive(Default)]
@@ -503,4 +515,60 @@ fn radio_state_events() {
     assert_eq!((e[0][1], e[0].len()), (m::PART_SLOT << 1, 2 + m::SLOT_LEN));
     assert_eq!(e[0][2] & m::OPEN, m::OPEN);
     assert_eq!(i16::from_le_bytes([e[0][13], e[0][14]]), -93);
+}
+
+/// LINK-71: `HELLO` ends with the lists generation; subscribed to the lists, a burst of channel writes is
+/// one event once writing has been quiet for 500 ms (what 2, the generation `HELLO` then gives), a zone renamed
+/// another (what 3); a write that changes no list (a message) says nothing.
+#[test]
+fn lists_generation_and_events() {
+    use crate::chan::{channel, ChanWrite, NO_ZONE};
+    use ferrite_core::link::PROTOCOL;
+    use crate::data::Op;
+    let mut pc = Pc::new(false);
+    let gen_of = |a: &[u8]| {
+        let n = a.len();
+        u32::from_le_bytes([a[n - 4], a[n - 3], a[n - 2], a[n - 1]])
+    };
+    let (_, h) = pc.ask(msg::HELLO, &[PROTOCOL]);
+    let g0 = gen_of(&h);
+    assert_eq!(pc.ask(msg::SUBSCRIBE, &[ev::SUB_LISTS]).0, 0);
+    assert!(pc.events(1000).is_empty(), "nothing stored: nothing to say");
+    for n in 0..20u16 {
+        pc.st.apply(ChanWrite::Put { ch: channel(500 + n, NO_ZONE, 14_600_000 + n as u32 * 1250, "Ch", crate::slot::DEFAULT_CFG), from: None });
+    }
+    let e = pc.events(200);
+    assert!(e.is_empty(), "not before the writing has been quiet 500 ms: {e:?}");
+    let e = pc.events(600);
+    assert_eq!(e.len(), 1, "one event for the burst: {e:?}");
+    assert_eq!(e[0][..2], [ev::LISTS, what::CHANNEL]);
+    let g1 = u32::from_le_bytes([e[0][2], e[0][3], e[0][4], e[0][5]]);
+    assert_ne!(g1, g0);
+    assert!(pc.st.request(Op::RenameZone(0, crate::chan::Name::from(b"Renamed".as_slice()))));
+    let e = pc.events(1000);
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0][1], what::ZONE);
+    let g2 = u32::from_le_bytes([e[0][2], e[0][3], e[0][4], e[0][5]]);
+    assert_ne!(g2, g1);
+    pc.ask(msg::MSG_SEND, &send_payload(b"VE3KPW", b"Test"));
+    assert!(!pc.events(1000).iter().any(|e| e[0] == ev::LISTS), "a message isn't a list");
+    let (_, h) = pc.ask(msg::HELLO, &[PROTOCOL]);
+    assert_eq!(gen_of(&h), g2, "HELLO gives the generation the last event did");
+}
+
+/// LINK-72: `PHONE_POS` takes 14 bytes (latitude, longitude, altitude, accuracy, age); a short one is a bad argument,
+/// a latitude past 90 degrees invalid. (What the radio does with it: gpsdata's GPS-3.1 test.)
+#[test]
+fn phone_position_message() {
+    let mut pc = Pc::new(false);
+    let mut p = std::vec::Vec::new();
+    p.extend_from_slice(&491_000_000i32.to_le_bytes());
+    p.extend_from_slice(&(-1_231_000_000i32).to_le_bytes());
+    p.extend_from_slice(&0x7FFFi16.to_le_bytes());
+    p.extend_from_slice(&8u16.to_le_bytes());
+    p.extend_from_slice(&5u16.to_le_bytes());
+    assert_eq!(pc.ask(msg::PHONE_POS, &p).0, 0);
+    assert_eq!(pc.ask(msg::PHONE_POS, &p[..13]).0, Status::BadArg as u8);
+    p[..4].copy_from_slice(&910_000_000i32.to_le_bytes());
+    assert_eq!(pc.ask(msg::PHONE_POS, &p).0, Status::Invalid as u8);
 }

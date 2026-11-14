@@ -1,10 +1,8 @@
 //! The owner's lists over the link (LINK-54 – LINK-56, decision 327): the quick messages (TEXT-7), the waypoints
 //! (GPS-10) and the DTMF memories with their names (DTMF-12), by `READ_MANY` and `WRITE_MANY` as the channels go,
 //! each record checked as the radio's own editors check it and written through the store's queue only when it
-//! changes. Only from radios whose `HELLO` says [`ferrite_core::link::caps::LISTS`]; older ones answer `bad argument`.
-//! A range preset's skipped frequencies (LINK-58, SCAN-10) go the same way, from radios whose second caps byte says
-//! [`ferrite_core::link::caps2::PRESET_SKIPS`]. Satellite mode's records (LINK-63, LINK-64, SAT-2) too, from radios
-//! that say [`ferrite_core::link::caps2::SATS`].
+//! changes. A range preset's skipped frequencies (LINK-58, SCAN-10) go the same way, and satellite mode's records
+//! (LINK-63, LINK-64, SAT-2) too.
 
 use super::{name_of, request, Out, Window};
 use crate::chan::ChannelStore;

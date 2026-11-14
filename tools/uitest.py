@@ -267,6 +267,11 @@ class State:
             else:
                 line += f" offset {w['kv'].get('offset', 'off')}"
             try:
+                # The VFO's step isn't in the `slot` line, so a step left by a test (hold 9's copy of a 12.5 kHz
+                # channel, VFO-23) went unseen and the next test on this simulator stepped 12.5 kHz (Nov 13, 2026:
+                # knob_steps_and_bands saw 146.545). Through another band first: coming back brings the band's
+                # step and mode for the region (NAV-2), then the line puts the rest back.
+                self.r.cmd(f"slot {L} vfo {'146.52' if float(w['freq']) >= 400 else '446.0'}")
                 self.r.cmd(line)
                 put.append(line)
             except fl.RadioError as e:

@@ -617,7 +617,7 @@ impl SimCore {
             let gps_on = ferrite_app::gpsdata::cfg(app.settings(), app.gps_auto().powered()).on;
             let set = app.settings();
             if !gps_on {
-                let fix = set.fixed_on.then_some(ferrite_app::data::Fix { pos: set.fixed, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: ferrite_app::gpsdata::FIXED_AGE, utc_s: 0 });
+                let fix = set.fixed_on.then_some(ferrite_app::data::Fix { pos: set.fixed, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: ferrite_app::gpsdata::FIXED_AGE, utc_s: 0, phone: false });
                 if store.extra.fix.get() != fix {
                     store.extra.fix.set(fix);
                 }

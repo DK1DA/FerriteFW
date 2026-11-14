@@ -61,6 +61,7 @@ jobs:
           cargo fw-clippy -q --features tx -- -D warnings
           cargo fw-clippy -q --features tx-bench -- -D warnings
           cargo fw-clippy -q --features bench -- -D warnings
+          python3 tools/thirdparty.py --check # the release's licence notices match what the image links
       - name: Sim UI tests
         run: python3 tools/uitest.py --sim auto -j "$(nproc)" --results target/ci-ui
 
@@ -122,6 +123,7 @@ jobs:
           # Only the tx build ships, so the report drops the build from its name.
           cp target/build-report-tx.html target/out/build-report.html
           cp target/build-report-tx.json target/out/build-report.json
+          cp THIRD-PARTY-LICENSES.md target/out/
       - uses: https://code.forgejo.org/forgejo/upload-artifact@v4
         with:
           name: ferrite-images.zip # the download is a zip; Forgejo names the file after this
@@ -135,7 +137,7 @@ jobs:
           API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets
         run: |
           cd target/out
-          for f in *.ffw *.btf *.minisig SHA256SUMS build-report.html; do # build-report.json: the run's download only
+          for f in *.ffw *.btf *.minisig SHA256SUMS build-report.html THIRD-PARTY-LICENSES.md; do # build-report.json: the run's download only
             curl -sSf -X POST -H "Authorization: token $TOKEN" -F "attachment=@$f" "$API?name=$f" > /dev/null
             echo "attached $f"
           done

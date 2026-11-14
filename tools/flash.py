@@ -345,6 +345,9 @@ def write_spi(a, parts):
             break
         except ferrite_link.RadioError as e:
             sys.exit(f"the radio refused the link ({e}): with a PIN lock, pass --pin")
+        except ferrite_link.ProtocolError as e:
+            sys.exit(f"Ferrite answered with link protocol {e.got}, these tools speak {ferrite_link.PROTOCOL} (decision 385):"
+                     " write the parts with that release's own tools/flash.py --parts-only")
         except (TimeoutError, OSError, SystemExit):
             if time.monotonic() > end:
                 sys.exit("no answer from Ferrite on the cable: once it runs, write the parts with --parts-only")

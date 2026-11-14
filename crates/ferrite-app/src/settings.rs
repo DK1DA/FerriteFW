@@ -107,7 +107,7 @@ pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 /// Boot screen (0 7 3 3).
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
 /// The cable port (0 9 2 3, TERM-2): auto picks from the first bytes; the others force one.
-pub const CABLE_PORTS: [&str; 4] = ["Auto", "Link", "Terminal", "KISS"];
+pub const CABLE_PORTS: [&str; 3] = ["Auto", "Link", "Terminal"]; // KISS on the cable is 0 5 8 alone (decision 386)
 /// 0 5 8's values (KISS-6): which port is the KISS TNC.
 pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
 /// 0 5 9 7 (WATCH-17.3, decision 295): who wins a chip shared with the APRS slot. 0, the default, APRS first.
@@ -425,9 +425,9 @@ pub const COORD_FORMATS: [&str; 4] = ["Decimal", "DDM", "DMS", "Grid square"];
 pub const SAME_CODES: usize = 8;
 
 impl Settings {
-    /// KISS-6: the cable carries raw KISS (0 9 2 3 on KISS, or 0 5 8 on Cable).
+    /// KISS-6: the cable carries raw KISS (0 5 8 on Cable).
     pub fn kiss_on_cable(&self) -> bool {
-        self.cable_port == 3 || self.kiss_port == 1
+        self.kiss_port == 1
     }
 
     /// KISS-5, KISS-6: Bluetooth carries raw KISS (0 5 8 on Bluetooth).
@@ -557,6 +557,13 @@ impl Settings {
     /// which overflowed on a bad record (found in the settings table refactor). Most other list
     /// settings are read modulo their list and need nothing here.
     pub fn sanitize(&mut self) {
+        // Decision 386: 0 9 2 3's KISS (3) did what 0 5 8 on Cable does: a radio saved with it keeps KISS on the cable
+        if self.cable_port == 3 {
+            (self.cable_port, self.kiss_port) = (0, 1);
+        }
+        if self.cable_port as usize >= CABLE_PORTS.len() {
+            self.cable_port = Self::DEFAULT.cable_port;
+        }
         if self.fm_agc > AGC_MAX {
             self.fm_agc = Self::DEFAULT.fm_agc;
         }

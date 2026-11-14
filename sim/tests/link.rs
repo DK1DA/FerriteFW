@@ -109,8 +109,7 @@ fn a_layout_2_chip_waits_for_console() {
     }
     assert_eq!(sim.screen_name(), "Update", "D25");
     let a = ask(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
-    assert_eq!(&a[a.len() - 2..], &[3, 2], "this firmware's layout, the chip's");
-    assert!(a[a.len() - 3] & ferrite_core::link::caps2::DATA != 0);
+    assert_eq!(&a[a.len() - 6..a.len() - 4], &[3, 2], "this firmware's layout, the chip's");
     let rd = |addr: u32, n: u8| {
         let mut p = vec![READ];
         p.extend_from_slice(&addr.to_le_bytes());
@@ -149,7 +148,7 @@ fn a_layout_2_chip_waits_for_console() {
         assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 9, &e)[0], 4, "{at:#x}: refused");
     }
     let a = ask(&mut sim, &mut t, msg::HELLO, 9, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
-    assert_eq!(&a[a.len() - 2..], &[3, 255], "LINK-61: half moved until the stamp");
+    assert_eq!(&a[a.len() - 6..a.len() - 4], &[3, 255], "LINK-61: half moved until the stamp");
     let mut crc = vec![CRC];
     crc.extend_from_slice(&0x1_0000u32.to_le_bytes());
     crc.extend_from_slice(&64u32.to_le_bytes());
@@ -169,7 +168,7 @@ fn a_layout_2_chip_waits_for_console() {
     }
     assert_eq!(sim.store().layout_found(), None);
     let a = ask(&mut sim, &mut t, msg::HELLO, 14, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
-    assert_eq!(&a[a.len() - 2..], &[3, 3]);
+    assert_eq!(&a[a.len() - 6..a.len() - 4], &[3, 3]);
     let r = ask(&mut sim, &mut t, msg::DATA_READ, 15, &rd(0x1_0000, 64));
     assert_eq!(&r[1..], &rec[..], "what Console wrote is there");
 }
@@ -199,7 +198,7 @@ fn a_power_cut_right_after_the_stamp_loses_nothing() {
         sim.step(t);
     }
     let a = ask(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
-    assert_eq!(&a[a.len() - 2..], &[3, 2]);
+    assert_eq!(&a[a.len() - 6..a.len() - 4], &[3, 2]);
     let w = |op: u8, at: u32, rest: &[u8]| {
         let mut p = vec![op];
         p.extend_from_slice(&at.to_le_bytes());
@@ -218,7 +217,7 @@ fn a_power_cut_right_after_the_stamp_loses_nothing() {
     }
     assert_eq!(sim.screen_name(), "Update", "D25: waiting for Console, not a first boot");
     let a = ask(&mut sim, &mut t, msg::HELLO, 6, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
-    assert_eq!(&a[a.len() - 2..], &[3, 255], "half moved: only Console's copy finishes it");
+    assert_eq!(&a[a.len() - 6..a.len() - 4], &[3, 255], "half moved: only Console's copy finishes it");
     let r = ask(&mut sim, &mut t, msg::DATA_READ, 7, &w(READ, 0x1_0000, &[64]));
     assert_eq!(&r[1..], &rec[..], "nothing formatted");
     assert_eq!(ask(&mut sim, &mut t, msg::DATA_WRITE, 8, &[STAMP, 3, 0])[0], 0);
@@ -227,7 +226,7 @@ fn a_power_cut_right_after_the_stamp_loses_nothing() {
         sim.step(t);
     }
     let a = ask(&mut sim, &mut t, msg::HELLO, 9, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
-    assert_eq!(&a[a.len() - 2..], &[3, 3], "stamped");
+    assert_eq!(&a[a.len() - 6..a.len() - 4], &[3, 3], "stamped");
     let r = ask(&mut sim, &mut t, msg::DATA_READ, 10, &w(READ, 0x1_0000, &[64]));
     assert_eq!(&r[1..], &rec[..]);
 }
