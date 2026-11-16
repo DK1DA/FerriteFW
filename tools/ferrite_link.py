@@ -739,7 +739,7 @@ def remote_ptt(link, seconds, slot):
 
 
 class ProtocolError(OSError):
-    """The radio speaks another link protocol (decision 385: none older is kept until 0.9)."""
+    """The radio speaks another link protocol (decisions 385, 401: no older one is kept; from 0.9 each wire-format change raises the number)."""
 
     def __init__(self, got):
         self.got = got
