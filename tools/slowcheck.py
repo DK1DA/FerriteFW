@@ -94,14 +94,25 @@ def main(elf, verbose):
     dis = run("arm-none-eabi-objdump", "-d", "--no-show-raw-insn", *[x for s in code for x in ("-j", s)], elf)
     start, edges, lits, cur = {}, collections.defaultdict(set), collections.defaultdict(set), None
     pool, pc_loads = {}, []
+    # A tbb/tbh's table follows it as data (objdump shows its offset bytes as .word): never pointers. Its bytes once
+    # read as one function's address, a false SLOW CALL (Radio::param, Nov 16, 2026).
+    table = False
     for l in dis.splitlines():
         m = re.match(r"^([0-9a-f]+) <(.*)>:", l)
         if m:
             cur = m.group(2)
             start[cur] = int(m.group(1), 16)
+            table = False
             continue
         if cur is None:
             continue
+        if re.search(r"\stb[bh](?:\.w)?\s", l):
+            table = True
+            continue
+        if table:
+            if re.match(r"^\s*[0-9a-f]+:\s+\.(?:word|short|byte)\b", l):
+                continue
+            table = False
         m = re.search(r"\s(?:b\w*|cbn?z)(?:\.w|\.n)?\s+(?:\S+, )?[0-9a-f]+ <([^>+]*)>", l)
         if m and m.group(1) != cur:
             edges[cur].add(m.group(1))

@@ -227,7 +227,7 @@ mod tests {
         assert!(SimFlash::from_image(&[0; 300]).mem.iter().all(|&b| b == 0xFF), "an image from another layout");
         let mut b = [0u8; 2];
         assert!(f.read(0x10_0000, &mut b).is_ok() && b == [0xFF; 2]);
-        assert!(f.start_erase(0x10_0000).is_err() && f.start_program(0x10_0000, &[0]).is_err());
+        assert!(f.start_erase(0x0C_0000).is_err() && f.start_program(0x0C_0000, &[0]).is_err());
     }
 
     /// The power off: every call fails, nothing changes, until it is back on.
@@ -253,5 +253,14 @@ mod tests {
     #[should_panic(expected = "outside the simulated flash")]
     fn the_update_area_is_outside_the_simulated_chip() {
         SimFlash::at(UPDATE_AREA.start);
+    }
+
+    /// Decision 404: the stock bootloader's fonts (its update screen's "UPDATE") are never written: the simulated
+    /// flash fails the test that tries.
+    #[test]
+    #[should_panic(expected = "write outside the writable ranges")]
+    fn the_bootloader_fonts_are_never_written() {
+        let mut f = SimFlash::new();
+        let _ = f.start_erase(0x15_C000);
     }
 }
