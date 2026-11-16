@@ -4,8 +4,8 @@
 //! layout's data over the link, keeps it on the PC, translates it, writes the new layout and stamps its version
 //! in the layout header last. A firmware that finds another layout's header leaves the data alone (UPD-16).
 //!
-//! Ferrite writes only inside [`WRITABLE`]: the data range less factory calibration and the bootloader's update
-//! area, so neither can be written by any bug above the flash driver (uradio `w25q`), which refuses everything
+//! Ferrite writes only inside [`WRITABLE`]: the data range less factory calibration, the bootloader's fonts and its
+//! update area, so none of them can be written by any bug above the flash driver (uradio `w25q`), which refuses everything
 //! else. The first 64 KB block holds calibration, so it is only ever erased a 4 KB sector at a time (INST-7: the
 //! driver has no block erase at all).
 
@@ -60,8 +60,15 @@ pub const TEXT_PACK: Range<u32> = 0x09_0000..0x0A_0000;
 pub const MAILBOX: Range<u32> = 0x0A_0000..0x0B_0000;
 /// Predictive text's words (decision 345): an SPI part, with room for a bigger dictionary.
 pub const DICTIONARY: Range<u32> = 0x0B_0000..0x0C_0000;
-/// Free, in one run (what goes here is for a later decision).
-pub const FREE: Range<u32> = 0x0C_0000..0x1C_0000;
+/// Free (what goes here is for a later decision).
+pub const FREE: Range<u32> = 0x0C_0000..0x0E_0000;
+/// The stock bootloader's fonts (decision 404): its update screen draws "UPDATE" and its messages with the GB2312
+/// glyphs from 0x0E0000 (75 bytes each, to 0x15BED0) and the ASCII ones at 0x15C000 (39 bytes each), read from here
+/// at every update (rt950pro_bootloader.bin 0x08002212, 0x08002232). Never written: not in [`WRITABLE`]. An SSTV
+/// test build put pictures here and black's update screen lost its text (Nov 16, 2026).
+pub const BOOT_FONTS: Range<u32> = 0x0E_0000..0x15_D000;
+/// Free, past the bootloader's fonts.
+pub const FREE_HIGH: Range<u32> = 0x15_D000..0x1C_0000;
 /// Language packs: English plus one other at a time (planned).
 pub const LANGUAGES: Range<u32> = 0x1C_0000..0x24_0000;
 /// The boot animation and custom screens (planned).
@@ -87,16 +94,17 @@ pub const V2_HEADER: Range<u32> = 0x02_C000..0x02_D000;
 pub const LAYOUT_MOVING: u16 = 255;
 
 /// Everything Ferrite may erase or program: the data range (the layout header to the end of the scratch ring)
-/// less calibration. The update area is past its end. The link's raw data writes (`DATA_WRITE`, LINK-60) are held
-/// to the same ranges.
-pub static WRITABLE: [Range<u32>; 2] = [LAYOUT_HEADER.start..CALIBRATION.start, CALIBRATION.end..UPDATE_AREA.start];
+/// less calibration and the bootloader's fonts. The update area is past its end. The link's raw data writes
+/// (`DATA_WRITE`, LINK-60) and the way back to stock (`STOCK_RESTORE`) are held to the same ranges.
+pub static WRITABLE: [Range<u32>; 3] =
+    [LAYOUT_HEADER.start..CALIBRATION.start, CALIBRATION.end..BOOT_FONTS.start, BOOT_FONTS.end..UPDATE_AREA.start];
 
 /// The data range the link's raw data reads cover (LINK-59): the whole chip below the update area, calibration
 /// included (read only; a backup has it).
 pub const DATA: Range<u32> = 0..UPDATE_AREA.start;
 
 /// Every region in address order, with its name as the developer page and the build report show it.
-pub const REGIONS: [(&str, Range<u32>); 27] = [
+pub const REGIONS: [(&str, Range<u32>); 29] = [
     ("Layout header", LAYOUT_HEADER),
     ("Settings and slots", SETTINGS),
     ("User trims", TRIMS),
@@ -118,6 +126,8 @@ pub const REGIONS: [(&str, Range<u32>); 27] = [
     ("Packet mailbox (held)", MAILBOX),
     ("Dictionary", DICTIONARY),
     ("Free", FREE),
+    ("Stock bootloader's fonts (kept)", BOOT_FONTS),
+    ("Free", FREE_HIGH),
     ("Language packs", LANGUAGES),
     ("Boot animation and screens", SCREENS),
     ("Fonts", FONTS),
@@ -145,13 +155,16 @@ mod tests {
     #[test]
     fn protected_ranges_are_not_writable() {
         for w in &WRITABLE {
-            for p in [CALIBRATION, UPDATE_AREA] {
+            for p in [CALIBRATION, BOOT_FONTS, UPDATE_AREA] {
                 assert!(!overlaps(w, &p), "{w:x?} overlaps {p:x?}");
             }
         }
         assert!(writable(0, 0x1000) && writable(0xE000, 0x1000) && writable(0x2F_F000, 0x1000));
         assert!(!writable(0xE000, 0x1001) && !writable(0xF000, 1) && !writable(0xFFFF, 2) && !writable(0x30_0000, 1));
         assert!(!writable(0x2F_FFFF, 2) && !writable(u32::MAX, 2), "no wrap");
+        // decision 404: the bootloader's fonts, its ASCII glyphs ("UPDATE") at 0x15C000 above all
+        assert!(!writable(0x0E_0000, 1) && !writable(0x15_C000, 0x1000) && !writable(0x0D_F000, 0x2000));
+        assert!(writable(0x0D_F000, 0x1000) && writable(0x15_D000, 0x1000));
     }
 
     /// Decision 333's table: the regions tile the chip from 0 to 4 MB in order, each on a sector boundary; the
@@ -165,7 +178,7 @@ mod tests {
         for (n, r) in &REGIONS {
             assert!(r.start % 4096 == 0 && r.end % 4096 == 0, "{n}: sector aligned");
         }
-        for r in [CHANNELS, HEARD, MESSAGES, WAYPOINTS, TEXT_PACK, MAILBOX, DICTIONARY, FREE, LANGUAGES, SCREENS, FONTS, EVENT_LOG, SCRATCH_RING, UPDATE_AREA] {
+        for r in [CHANNELS, HEARD, MESSAGES, WAYPOINTS, TEXT_PACK, MAILBOX, DICTIONARY, FREE, BOOT_FONTS, LANGUAGES, SCREENS, FONTS, EVENT_LOG, SCRATCH_RING, UPDATE_AREA] {
             assert_eq!(r.start % 0x1_0000, 0, "{r:x?}: on a 64 KB boundary");
         }
         assert_eq!(CALIBRATION, 0xF000..0x1_0000, "calibration stays at stock's address");
@@ -176,7 +189,7 @@ mod tests {
         assert_eq!((sectors(&CONTACTS) * 127, sectors(&WAYPOINTS) * 127), (1016, 2032));
         assert_eq!((sectors(&HEARD) * 31, sectors(&MESSAGES) * 31, sectors(&EVENT_LOG) * 31), (496, 496, 992));
         assert_eq!(sectors(&SCRATCH_RING), 32);
-        assert_eq!((SSB_PATCH.len(), LANGUAGES.len(), FREE.len()), (16 << 10, 512 << 10, 1024 << 10));
+        assert_eq!((SSB_PATCH.len(), LANGUAGES.len(), FREE.len() + FREE_HIGH.len()), (16 << 10, 512 << 10, (1024 << 10) - BOOT_FONTS.len()));
         assert!(!overlaps(&V2_HEADER, &LAYOUT_HEADER) && CHANNELS.contains(&V2_HEADER.start), "layout 2's header sits where channels go now");
         assert_eq!(DATA.end, UPDATE_AREA.start);
     }
