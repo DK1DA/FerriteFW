@@ -140,7 +140,7 @@ still leave one). On noise that is about one bit in 85. Dire Wolf's files decode
 
 ```sh
 cargo test -p ufx25                                                        # RS and framing (no files needed)
-crates/ufx25/tools/interop.sh infamy@host                                  # Dire Wolf both ways
+crates/ufx25/tools/interop.sh USER@HOST                                  # Dire Wolf both ways
 cargo test --release -p ufx25 --test interop -- --ignored --nocapture      # the decode side, once the WAVs exist
 ```
 

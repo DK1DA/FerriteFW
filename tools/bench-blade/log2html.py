@@ -1,6 +1,6 @@
 import re, html
-md = open('/Users/infamy/Code/ferritefw/docs/research/bk4829-bench-log.md').read()
-page = '/private/tmp/claude-501/-Users-infamy-Code-rt950pro/6e3a761c-8ad1-4445-8144-aa17805e9947/scratchpad/audio-limits.html'
+md = open(__import__('sys').argv[1]).read()
+page = __import__('os').environ.get('BENCH_DIR', '.') + '/audio-limits.html'
 def inline(t):
     t = html.escape(t, quote=False)
     t = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', t)

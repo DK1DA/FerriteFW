@@ -1,7 +1,7 @@
 """airtone.py CAP.u8 [HZ]: the transmitted audio's level at HZ (default 740), per second, from a bladecap capture."""
 import sys
 import numpy as np
-sys.path.insert(0, "/Users/infamy/Code/ferritefw/ferrite/tools")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 import sdrtx
 raw = np.fromfile(sys.argv[1], np.uint8); hz = float(sys.argv[2]) if len(sys.argv) > 2 else 740.0
 iq = (raw.astype(np.float32) - 127.5).reshape(-1, 2); z = iq[:, 0] + 1j * iq[:, 1]

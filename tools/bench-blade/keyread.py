@@ -1,7 +1,7 @@
 """keyread.py PORT SECONDS [TONE.wav] [CMD ...]: one session: key (remote PTT), every 0.5 s run `bk 1 64` and `bk 1 30`
 (plus any CMDs once at the start), play TONE.wav on this Mac from 2 s in, unkey."""
 import sys, time, subprocess
-sys.path.insert(0, "/Users/infamy/Code/ferritefw/ferrite/tools")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 import ferrite_link as fl
 port, secs = sys.argv[1], float(sys.argv[2]); wav = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3].endswith(".wav") else None
 cmds = [c for c in sys.argv[3:] if not c.endswith(".wav") and not c.startswith("@")]

@@ -3,9 +3,9 @@ Description=APRS monitor: RTL-SDR on 144.390 into Direwolf (receive only)
 After=network-online.target
 
 [Service]
-User=infamy
+User=YOU
 Environment=APRS_FREQ=144.39M GAIN=40 PPM=0
-ExecStart=/home/infamy/aprsmon/run.sh
+ExecStart=/home/YOU/aprsmon/run.sh
 Restart=always
 RestartSec=10
 

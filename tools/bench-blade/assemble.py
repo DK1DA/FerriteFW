@@ -1,4 +1,4 @@
-S='/private/tmp/claude-501/-Users-infamy-Code-rt950pro/6e3a761c-8ad1-4445-8144-aa17805e9947/scratchpad'
+S=__import__('os').environ.get('BENCH_DIR', '.') + ''
 import re
 old=open(S+'/audio-limits.html').read()
 css=old[old.index('<style>'):old.index('</style>')+8]
