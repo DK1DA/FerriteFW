@@ -2,7 +2,7 @@
 the tone from 1 s in, and for each step its lines then `af` READS times; unkey; PLAN's 'post' lines. Prints, per step,
 the PA2 swing ((max-min)/2 counts) and the crossings' frequency."""
 import sys, time, subprocess, re, json
-sys.path.insert(0, "/Users/infamy/Code/ferritefw/ferrite/tools")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 import ferrite_link as fl
 port, wav, plan = sys.argv[1], sys.argv[2], json.load(open(sys.argv[3]))
 TC = float(sys.argv[4]) if len(sys.argv) > 4 else time.time()
