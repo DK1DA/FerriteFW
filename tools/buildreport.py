@@ -200,7 +200,7 @@ def spi_map():
     def addr(e):  # REGION.start or REGION.end
         n, edge = e.strip().split(".")
         return at[n][edge]
-    w = re.search(r"pub static WRITABLE: \[Range<u32>; \d+\] = \[(.*?)\];", src, re.S).group(1)
+    w = re.search(r"pub static WRITABLE: \[Range<u32>; \d+\] =\s*\[(.*?)\];", src, re.S).group(1)
     writable = [tuple(addr(x) for x in part.split("..")) for part in w.split(",") if ".." in part]
     for r in regions:
         r["writable"] = any(a <= r["start"] and r["end"] <= b for a, b in writable)
