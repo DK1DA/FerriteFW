@@ -2,7 +2,7 @@ name: release
 # Runs only when a release is published (or by hand from the Actions tab), so the one worker isn't busy on every
 # push. Everything runs here, the sim UI tests too (no Xeon to share them with): slower, but complete. Two files go
 # out: the user build (tx) as one update file, ferrite-VERSION.ffw (decision 335: the image and its SPI parts, signed
-# inside), and Console's backup reader, with the build report.
+# inside), Console's backup reader and its restorer (Back to stock without Ferrite), with the build report.
 # The receive-only and tx-bench images aren't built here (tx-bench is for local bench work only).
 on:
   release:
@@ -71,13 +71,14 @@ jobs:
         run: |
           tools/mkbtf.sh tx
           tools/mkbtf.sh reader
+          tools/mkbtf.sh restorer # Back to stock without Ferrite running (BACKUP-13)
           # The release tag without a leading v (v0.9 -> ferrite-0.9.btf); a run by hand uses the commit.
           tag="${{ github.event.release.tag_name }}"
           ver="${tag#v}"
           mkdir -p target/out
           # the .btf goes inside the .ffw (anyone with another flasher can unzip it)
           cp target/ferrite-tx.ffw "target/out/ferrite-${ver:-$(git rev-parse --short HEAD)}.ffw"
-          cp target/ferrite-reader.btf target/out/
+          cp target/ferrite-reader.btf target/ferrite-restorer.btf target/out/
       # Signed with minisign once the MINISIGN_KEY secret is set (the secret key file's contents, made without a
       # password: minisign -G -W; the public key ships in Console): the .ffw's manifest (its signature goes inside, as
       # manifest.minisig, UPD-21), then the reader image and SHA256SUMS (a .minisig beside each). SHA256SUMS is made

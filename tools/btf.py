@@ -116,7 +116,24 @@ def marker_describe(m):
     return f"not a stock marker ({m.hex().upper()}): left erased on the way back"
 
 
-def stock_restore_image(img, marker=None):
+# BACKUP-12.3 (decision 406): stock's 24 main-menu tiles (58x58 RGB565) in MCU flash from 0x08080000, past every
+# stock image; factory-written, and every Ferrite image writes over them.
+ICONS_ADDR = 0x08080000
+ICONS_LEN = 24 * 58 * 58 * 2
+ICONS_OFF = ICONS_ADDR - 0x08003000
+
+
+def icons_plausible(b):
+    """Stock's tiles, not erased flash or a Ferrite image's code: pictures repeat a pixel along a row (Console's
+    `icons_plausible`: more than 5 % of halfwords, Ferrite's code about 0.1 %)."""
+    if b is None or len(b) != ICONS_LEN or all(x == 0xFF for x in b):
+        return False
+    px = [b[i] | b[i + 1] << 8 for i in range(0, len(b), 2)]
+    same = sum(1 for i in range(1, len(px)) if px[i] == px[i - 1] and px[i] != 0xFFFF)
+    return same * 20 > len(px)
+
+
+def stock_restore_image(img, marker=None, icons=None):
     """The stock image for the way back (BACKUP-12): padded with 0xFF through the first 2 KB page of 0x080F0000 so
     the bootloader erases it (no Ferrite code is left in the word stock reads), with the saved marker's 16 bytes put
     back at its start when they are a stock marker. Anything else saved is left erased. An image already that long is
@@ -127,6 +144,8 @@ def stock_restore_image(img, marker=None):
     out = bytearray(img) + b"\xFF" * (end - len(img))
     if len(img) <= MARKER_OFF and marker_word(marker):
         out[MARKER_OFF:MARKER_OFF + MARKER_LEN] = marker[:MARKER_LEN]
+    if len(img) <= ICONS_OFF and icons_plausible(icons):  # BACKUP-12.3
+        out[ICONS_OFF:ICONS_OFF + ICONS_LEN] = icons
     return bytes(out)
 
 
@@ -199,6 +218,19 @@ def selftest(stock_dir=None):
         print("FAIL a stock image that already covers the page goes as it is"); fails += 1
     if check_image(img + b"\xFF" * (APP_MAX - len(img))) or not check_image(img + b"\xFF" * (APP_MAX + 1 - len(img))):
         print("FAIL the 1,012 KB limit"); fails += 1
+    # BACKUP-12.3: stock's menu tiles go into the padding at 0x7D000; erased flash or code don't.
+    tiles = bytearray()
+    for t in range(24):
+        for y in range(58):
+            for x in range(58):
+                px = (0xF800 ^ t) if 16 <= x < 42 and 16 <= y < 42 else 0x0841
+                tiles += px.to_bytes(2, "little")
+    code = bytes((i * 2654435761 >> 13) & 0xFF for i in range(ICONS_LEN))
+    r = stock_restore_image(b"\x11" * 0x1000, None, bytes(tiles))
+    if ICONS_OFF != 0x7D000 or r[ICONS_OFF:ICONS_OFF + ICONS_LEN] != tiles or not icons_plausible(bytes(tiles)):
+        print("FAIL menu icons into the padding"); fails += 1
+    if icons_plausible(code) or stock_restore_image(b"\x11" * 0x1000, None, code)[ICONS_OFF:ICONS_OFF + 4] != b"\xff" * 4:
+        print("FAIL code taken as menu icons"); fails += 1
     for root, _, files in os.walk(stock_dir) if stock_dir else []:
         for f in sorted(files):
             if not f.upper().endswith(".BTF"):
