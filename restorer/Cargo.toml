@@ -1,0 +1,37 @@
+[package]
+name = "ferrite-restorer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The restorer image: Ferrite Console loads it through the stock bootloader to write a radio's backup back when Ferrite isn't running (BACKUP-13), then the stock firmware goes on"
+
+[[bin]]
+name = "ferrite-restorer"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrite-core.workspace = true
+ferrite-ui.workspace = true
+# The restore's requests carried out on the chip: the same code Ferrite's own way back runs (firmware tasks/restore.rs).
+ferrite-store.workspace = true
+# The flash guard (SAFE-1, SAFE-2): programs and erases only inside ferrite_core::layout::WRITABLE.
+ferrite-radio.workspace = true
+ufmt.workspace = true
+uradio-bus.workspace = true
+st7789.workspace = true
+w25q.workspace = true
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = { version = "0.7.5", features = ["set-sp", "set-vtor", "device"] }
+critical-section = "1.2"
+# The firmware's HAL (firmware/src/hal, shared by path) is built whole; these are what its other parts use.
+embassy-sync.workspace = true
+embassy-time = "0.5"
+embassy-time-driver = { version = "0.2", features = ["tick-hz-2_000"] }
+embassy-time-queue-utils = "0.3"
+
+[lints]
+workspace = true

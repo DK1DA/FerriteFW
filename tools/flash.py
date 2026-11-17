@@ -26,7 +26,7 @@ writes the update area, not even to clear it, so restore stock and update it the
 The MCU's top 64 KB (0x080F0000, stock's marker sector: decision 338, BACKUP-12) holds one word only stock firmware
 writes (UV85 or BJ90, the model name on stock's info page); a Ferrite image past 948 KB overwrites it. Its first 16
 bytes are recorded at backup time in `marker.bin` beside the backup (fw/tools/backup.py, read with the reader's or
-hwtest's `mdump 0x080F0000 16`; or `--marker FILE`). A stock image (neither Ferrite nor the reader) goes padded with
+hwtest's `mdump 0x080F0000 16`; or `--marker FILE`). A stock image (neither Ferrite, the reader nor the restorer) goes padded with
 0xFF through 0x080F07FF, the bootloader erasing that page, and the recorded word put back when it is a stock marker;
 without a record the page is left erased (stock then shows its default model name). `--as-is` sends a file unchanged.
 
@@ -179,6 +179,7 @@ def check_backup(path):
 
 
 READER_MARK = b"fdump <addr> <len>"
+RESTORER_MARK = b"Ferrite restorer: BACK13"  # restorer/src/main.rs (BACKUP-13): sent as it is, as the reader
 
 
 def load_marker(path):
@@ -274,7 +275,7 @@ def main():
         sys.exit("refusing to flash:\n  " + "\n  ".join(errs))
     mpath = marker_path(a)
     marker = load_marker(mpath)
-    stock = FERRITE_MARK not in img and READER_MARK not in img
+    stock = FERRITE_MARK not in img and READER_MARK not in img and RESTORER_MARK not in img
     if stock and not a.as_is:                  # BACKUP-12: the way back covers 0x080F0000's first page
         img = btf.stock_restore_image(img, marker)
         is_btf = False                         # repacked with the zero key below

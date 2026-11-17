@@ -13,6 +13,8 @@
 #   tools/mkbtf.sh reader     # target/ferrite-reader.btf: the read-only reader image Ferrite Console backs a radio
 #                             #   up with (reader/, decision 264; replaced fw/apps/hwtest's). All of it runs from the
 #                             #   zero-wait flash (reader/memory.x checks), so no fast-flash audit.
+#   tools/mkbtf.sh restorer   # target/ferrite-restorer.btf: Back to stock for a radio not running Ferrite
+#                             #   (restorer/, BACKUP-13): writes the backup back inside WRITABLE only.
 #
 # The bench commands are the `bench` cargo feature (decision 151, TERM-38): the firmware's `bringup` and `tx-bench`
 # features turn it on (firmware/Cargo.toml). The receive and tx images leave them out; their terminal says "not in
@@ -31,7 +33,8 @@ case "$1" in
     tx) name=ferrite-tx build="fw --features tx" ;;
     tx-bench) name=ferrite-txbench build="fw --features tx-bench" ;; # tx + bench, Dry TX on at power-on
     reader) name=ferrite-reader build="fw-reader" elf=ferrite-reader ;;
-    *) echo "usage: $0 [bringup | tx | tx-bench | reader] [clock-24 | clock-48 | clock-96 | clock-144 | clock-192 | clock-240 | no-vt100]" >&2; exit 2 ;;
+    restorer) name=ferrite-restorer build="fw-restorer" elf=ferrite-restorer ;; # Back to stock without Ferrite (BACKUP-13)
+    *) echo "usage: $0 [bringup | tx | tx-bench | reader | restorer] [clock-24 | clock-48 | clock-96 | clock-144 | clock-192 | clock-240 | no-vt100]" >&2; exit 2 ;;
 esac
 case "$2" in
     "") ;;
@@ -44,7 +47,7 @@ case "$2" in
         case "$build" in *--features*) build="$build,sat-predict --no-default-features" ;; *) build="$build --features sat-predict --no-default-features" ;; esac ;;
     *) echo "unknown clock or variant: $2" >&2; exit 2 ;;
 esac
-[ "$elf" = ferrite-reader ] && [ -n "$2" ] && { echo "the reader has no clock builds" >&2; exit 2; }
+[ "$elf" != ferrite ] && [ -n "$2" ] && { echo "the reader and the restorer have no clock builds" >&2; exit 2; }
 cargo $build
 if [ "$elf" = ferrite ]; then
     # The fast-flash audit must pass: its last line, or the whole report and a stop when it fails.
@@ -52,13 +55,13 @@ if [ "$elf" = ferrite ]; then
     echo "$check" | tail -1
 fi
 bin=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
-if [ "$elf" = ferrite-reader ]; then
+if [ "$elf" != ferrite ]; then
     # BACKUP-9.6: the reader's stack is what static memory leaves of the 96 KB. Too little and it faults at start-up,
     # and a radio stuck there needs its battery pulled to reach the bootloader (Oct 23). Keep 20 KB at least.
     used=$("$bin/llvm-size" -A "target/thumbv7em-none-eabihf/release/$elf" | awk '$1==".data"||$1==".bss"||$1==".uninit"{s+=$2} END{print s+0}')
     left=$((96 * 1024 - used))
-    [ "$left" -ge $((20 * 1024)) ] || { echo "reader: static RAM $used bytes leaves $left for the stack (need 20480)" >&2; exit 1; }
-    echo "reader RAM: $used static, $left stack"
+    [ "$left" -ge $((20 * 1024)) ] || { echo "$elf: static RAM $used bytes leaves $left for the stack (need 20480)" >&2; exit 1; }
+    echo "$elf RAM: $used static, $left stack"
 fi
 "$bin/llvm-objcopy" -O binary "target/thumbv7em-none-eabihf/release/$elf" "target/$name.bin"
 python3 tools/btf.py pack "target/$name.bin" "target/$name.btf"

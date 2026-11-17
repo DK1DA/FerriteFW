@@ -21,6 +21,8 @@ fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none
 fw-bringup = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size", "--features", "bringup"]
 # The reader image Ferrite Console backs a radio up with (decision 264): target/thumbv7em-none-eabihf/release/ferrite-reader
 fw-reader = ["build", "--release", "-p", "ferrite-reader", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size"]
+fw-restorer = ["build", "--release", "-p", "ferrite-restorer", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size"]
+fw-restorer-clippy = ["clippy", "--release", "-p", "ferrite-restorer", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size"]
 fw-reader-clippy = ["clippy", "--release", "-p", "ferrite-reader", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size"]
 # Screens rendered on the PC: target/sim/*.png
 sim = ["run", "-p", "ferrite-sim", "--"]

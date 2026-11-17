@@ -20,7 +20,9 @@ fn now_ms() -> u32 {
 }
 
 fn screen(lcd: &mut impl Panel, note: &[u8]) {
-    let b = BootInfo { version: VERSION, callsign: None, line: Some(b"Back to stock: keep the cable in"), owner: None, checks: &[], note: Some(note) };
+    // The line holds about 24 characters in its font ("Back to stock: keep the cable in" was cut, Nov 16, 2026):
+    // the cable goes in the status line below.
+    let b = BootInfo { version: VERSION, callsign: None, line: Some(b"Back to stock"), owner: None, checks: &[], note: Some(note) };
     boot::draw(lcd, &b);
 }
 
@@ -48,7 +50,7 @@ pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8, leds: boo
     while !store.idle() {
         Timer::after_millis(10).await;
     }
-    screen(lcd, b"Restoring stock data");
+    screen(lcd, b"Restoring: keep the cable in");
     let (chip, ranges, uid) = (store.nor().size(), store::WRITE_OK, crate::hal::sys::uid());
     let mut ans = [0u8; MAX_PAYLOAD];
     let n = start(&mut *store.nor(), chip, ranges, uid, &mut ans).await;
