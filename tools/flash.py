@@ -44,6 +44,7 @@ The block count is (file blocks - 1), as Radtel's updater sends it: the bootload
 everything but the last block, which .BTF files leave plain.
 """
 import argparse
+import json
 import os
 import struct
 import sys
@@ -154,12 +155,34 @@ FERRITE_MARK = b"Ferrite terminal"
 CAL, SECTOR, UPDATE_AREA = 0xF000, 0x1000, 0x300000
 
 
+def read_backup(path):
+    """A backup's parts: (SPI flash, marker 16 bytes or None, menu icons or None). A .fbin (decision 407: a zip of
+    manifest.json, spi.bin and icons.bin, each checked by the manifest's SHA-256) or a plain whole-chip .bin."""
+    import hashlib
+    import zipfile
+    raw = open(path, "rb").read()
+    if not raw.startswith(b"PK\x03\x04"):
+        return raw, None, None
+    with zipfile.ZipFile(path) as z:
+        m = json.loads(z.read("manifest.json"))
+        if m.get("format") != "ferrite-backup":
+            sys.exit(f"{path}: not a Ferrite backup (.fbin)")
+        spi = z.read("spi.bin")
+        if hashlib.sha256(spi).hexdigest() != m["spi"]["sha256"]:
+            sys.exit(f"{path}: its spi.bin doesn't match its manifest (a damaged file)")
+        icons = z.read("icons.bin") if "icons.bin" in z.namelist() else None
+        if icons is not None and (not m.get("icons") or hashlib.sha256(icons).hexdigest() != m["icons"]["sha256"]):
+            sys.exit(f"{path}: its icons.bin doesn't match its manifest (a damaged file)")
+    marker = bytes.fromhex(m["marker"]) if m.get("marker") else None
+    return spi, marker, icons
+
+
 def check_backup(path):
     """Problems with a whole-chip backup (empty list: fine), and a line describing it."""
     import hashlib
     import zlib
     try:
-        b = open(path, "rb").read()
+        b = read_backup(path)[0]
     except OSError as e:
         return [f"can't read the backup: {e}"], ""
     errs = []
@@ -278,10 +301,15 @@ def main():
         sys.exit("refusing to flash:\n  " + "\n  ".join(errs))
     mpath = marker_path(a)
     marker = load_marker(mpath)
+    fb_marker, fb_icons = read_backup(a.backup)[1:] if a.backup and os.path.exists(a.backup) else (None, None)
+    if marker is None and fb_marker is not None:  # a .fbin carries its own (decision 407)
+        marker, mpath = fb_marker, a.backup
     stock = FERRITE_MARK not in img and READER_MARK not in img and RESTORER_MARK not in img
     if stock and not a.as_is:                  # BACKUP-12: the way back covers 0x080F0000's first page
         ipath = a.icons or (os.path.join(os.path.dirname(os.path.abspath(a.backup)), "icons.bin") if a.backup else None)
         icons = open(ipath, "rb").read() if ipath and os.path.exists(ipath) else None
+        if icons is None and fb_icons is not None:  # a .fbin carries them (decision 407)
+            icons, ipath = fb_icons, a.backup
         if icons is not None and not btf.icons_plausible(icons):
             sys.exit(f"{ipath}: not stock's menu icons ({btf.ICONS_LEN} bytes of tiles expected)")
         img = btf.stock_restore_image(img, marker, icons)
