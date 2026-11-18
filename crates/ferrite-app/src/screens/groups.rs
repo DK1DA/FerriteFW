@@ -1212,6 +1212,31 @@ pub(crate) fn agc_text(v: u8, b: &mut Buf<24>) {
     }
 }
 
+/// CAL-20.4: the check that locked transmit, and where for a curve check ("Power order: VHF 5, Mid").
+pub(crate) fn cal_fault_text(f: ferrite_core::msg::CalFault, at: [u8; 3], b: &mut Buf<40>) {
+    use ferrite_core::msg::CalFault::*;
+    let row = ["UHF", "VHF", "200 MHz", "HF"][at[0] as usize % 4];
+    let lvl = ["Low", "Mid", "High"][at[2] as usize % 3];
+    b.clear();
+    let _ = match f {
+        None => uwrite!(b, "Passed"),
+        PaCurve => uwrite!(b, "Power byte: {} {}, {}", row, at[1], lvl),
+        LevelOrder => uwrite!(b, "Power order: {} {}, {}", row, at[1], lvl),
+        Windows => uwrite!(b, "TX windows"),
+        Trim => uwrite!(b, "Crystal trim"),
+        ToneGain => uwrite!(b, "Sub-tone gain"),
+        Unchecked => uwrite!(b, "Store not ready"),
+    };
+}
+
+/// [`cal_text`], with CAL-20.4's "couldn't check" apart from a sector that changed.
+pub(crate) fn cal_label(t: &ferrite_core::msg::SelfTest) -> &'static str {
+    if t.cal == CalState::CrcMismatch && t.cal_fault == ferrite_core::msg::CalFault::Unchecked {
+        return "Not checked: locked";
+    }
+    cal_text(t.cal)
+}
+
 pub(crate) fn cal_text(c: CalState) -> &'static str {
     match c {
         CalState::Unknown => "Not checked",

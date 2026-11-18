@@ -784,6 +784,8 @@ pub fn device_at(secs: u64) -> Device {
             flash_id: 0xEF_4016,
             flash_mb: 4,
             cal: CalState::Ok,
+            cal_fault: Default::default(),
+            cal_at: [0; 3],
             chips: 3,
             si4732: true,
             si_rev: *b"6000D", // SELF-5: a sample

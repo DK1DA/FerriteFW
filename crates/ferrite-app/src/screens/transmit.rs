@@ -657,7 +657,18 @@ impl View for TxRefused {
                 (a, more) = match (t.mcu_ok, t.cal) {
                     (false, _) => (Buf::from(b"Transmit is locked: the MCU isn't the one this radio has.".as_slice()), b"The check:".as_slice()),
                     (_, CalState::Blank) => (Buf::from(b"Transmit is locked: the calibration is blank.".as_slice()), b"The check:".as_slice()),
-                    (_, CalState::Invalid) => (Buf::from(b"Transmit is locked: a calibration value failed its check.".as_slice()), b"The check:".as_slice()),
+                    (_, CalState::Invalid) => {
+                        // CAL-20.4: which check, and where
+                        let mut w = Buf::<40>::new();
+                        super::groups::cal_fault_text(t.cal_fault, t.cal_at, &mut w);
+                        let mut x = Buf::<96>::new();
+                        let _ = uwrite!(x, "Transmit is locked: a calibration value failed its check ({}).", super::lists::Txt(w.as_bytes()));
+                        (x, b"The check:".as_slice())
+                    }
+                    (_, CalState::CrcMismatch) if t.cal_fault == ferrite_core::msg::CalFault::Unchecked => (
+                        Buf::from(b"Transmit is locked: the calibration couldn't be checked (the store isn't ready).".as_slice()),
+                        b"Turn the radio off and on. The check:".as_slice(),
+                    ),
                     (_, CalState::CrcMismatch) => (
                         Buf::from(b"Transmit is locked: the calibration changed since Ferrite first read it.".as_slice()),
                         b"OK on About uses it as it is, if it checks out:".as_slice(),

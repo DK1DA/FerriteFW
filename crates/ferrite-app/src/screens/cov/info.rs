@@ -121,3 +121,30 @@ fn accepting_a_changed_calibration() {
     assert!(matches!(t.app.screen, Screen::Info(Info { page: Page::About })), "back on About");
     assert_eq!(t.toast(), "Calibration / checking");
 }
+
+/// CAL-20.4: the Calibration page names the check that failed and where; a CRC that couldn't be checked reads
+/// "Not checked", not "Changed", and About offers no OK for it.
+#[test]
+fn calibration_page_names_the_check() {
+    use ferrite_core::msg::CalFault;
+    let mut t = T::ready();
+    healthy(&mut t);
+    assert!(page(&mut t, Page::Calibration).contains("Passed"));
+    t.dev.selftest.cal = CalState::Invalid;
+    for (f, at, text) in [
+        (CalFault::LevelOrder, [1, 5, 1], "Power order: VHF 5, Mid"),
+        (CalFault::PaCurve, [3, 3, 0], "Power byte: HF 3, Low"),
+        (CalFault::Windows, [0; 3], "TX windows"),
+        (CalFault::Trim, [0; 3], "Crystal trim"),
+        (CalFault::ToneGain, [0; 3], "Sub-tone gain"),
+    ] {
+        (t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (f, at);
+        let s = page(&mut t, Page::Calibration);
+        assert!(s.contains(text), "{f:?}: {s}");
+    }
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault) = (CalState::CrcMismatch, CalFault::Unchecked);
+    let s = page(&mut t, Page::Calibration);
+    assert!(s.contains("Store not ready") && !s.contains("Changed"), "{s}");
+    page(&mut t, Page::About);
+    assert!(!t.app.cal_changed, "nothing to accept");
+}

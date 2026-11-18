@@ -202,6 +202,36 @@ impl TxCal {
         Ok(c)
     }
 
+    /// CAL-20.4: where [`TxCal::read`] found a curve fault ([`Fault::PaCurve`] or [`Fault::LevelOrder`]): the row
+    /// (0 UHF, 1 VHF, 2 200 MHz, 3 HF), the entry and the level (0 Low, 1 Mid, 2 High; for the order, the lower
+    /// of the two that aren't rising). None for a sector without one.
+    pub fn curve_fault_at(b: &[u8; READ_LEN]) -> Option<[u8; 3]> {
+        // (row id, the sector's offset of its High row, the step between levels, entries reached)
+        let rows = [(0u8, 0x10 * UHF, 0x40, 13usize), (1, 0x10 * VHF, 0x40, 16), (2, 0x10 * R200, 0x40, 12), (3, 0x190, 0x10, 12)];
+        // stock's order: level 0 is High, so Low is at 2 steps
+        let at = |base: usize, step: usize, lvl: usize, i: usize| b[base + step * (2 - lvl) + i];
+        for &(id, base, step, n) in &rows {
+            for i in 0..n {
+                for lvl in 0..3 {
+                    let v = at(base, step, lvl, i);
+                    if v == 0 || v == 0xFF {
+                        return Some([id, i as u8, lvl as u8]);
+                    }
+                }
+            }
+        }
+        for &(id, base, step, n) in &rows {
+            for i in 0..n {
+                for lvl in 0..2 {
+                    if at(base, step, lvl, i) >= at(base, step, lvl + 1, i) {
+                        return Some([id, i as u8, lvl as u8]);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// CAL-11, TX-1: `f` lies in one of this radio's enabled TX windows, low <= f < high as stock checks it
     /// (0x0800BD8C). 18-64 MHz is a window on any valid sector (TX-41): stock's loader replaces the windows with
     /// 18-64 MHz in its HF work mode (settings +0x62 == 0), so the sector's own windows never hold HF.
@@ -358,6 +388,20 @@ mod tests {
     use super::*;
 
     use super::testing::{curve, hf_curve, sector};
+
+    /// CAL-20.4: where a curve check failed: an erased byte in HF's Mid row, then a level out of order on VHF.
+    #[test]
+    fn curve_fault_located() {
+        let mut b = sector(GAUGE_DEFAULT);
+        assert_eq!(TxCal::curve_fault_at(&b), None);
+        b[0x190 + 0x10 + 3] = 0xFF; // HF, stock's level 1 (Mid), entry 3
+        assert_eq!(TxCal::read(&b), Err(Fault::PaCurve));
+        assert_eq!(TxCal::curve_fault_at(&b), Some([3, 3, 1]));
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x40 + 0x10 * VHF + 5] = b[0x10 * VHF + 5]; // VHF entry 5: Mid equal to High
+        assert_eq!(TxCal::read(&b), Err(Fault::LevelOrder));
+        assert_eq!(TxCal::curve_fault_at(&b), Some([1, 5, 1]));
+    }
 
     /// TX-13, CAL-4, CAL-5: calibration is checked, never replaced: an erased sector or a hole in a used row locks
     /// transmit instead of falling back to built-in curves.

@@ -73,7 +73,7 @@ fn the_lock_names_its_check() {
     t.dev.selftest.mcu_ok = true;
     for (cal, text) in [
         (CalState::Blank, "the calibration is blank."),
-        (CalState::Invalid, "a calibration value failed its check."),
+        (CalState::Invalid, "a calibration value failed its check (Passed)."),
         (CalState::CrcMismatch, "the calibration changed since Ferrite first read it."),
     ] {
         t.dev.selftest.cal = cal;
@@ -83,6 +83,17 @@ fn the_lock_names_its_check() {
         t.shows(text);
     }
     t.shows("OK on About uses it as it is, if it checks out:");
+    // CAL-20.4: which value, and the store not ready
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Invalid, ferrite_core::msg::CalFault::LevelOrder, [1, 5, 1]);
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("(Power order: VHF 5, Mid).");
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault) = (CalState::CrcMismatch, ferrite_core::msg::CalFault::Unchecked);
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("couldn't be checked");
     t.dev.selftest.mcu_ok = false;
     t.app.screen = Screen::Home;
     t.draw();
