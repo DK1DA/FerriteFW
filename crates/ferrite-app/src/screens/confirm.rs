@@ -37,6 +37,8 @@ pub enum Ask {
     ToneTx(u16),
     /// Hold 9 on a channel (KEY-23): the active slot's channel to its VFO (VFO-23).
     CopyToVfo,
+    /// CAL-20: OK on About while the calibration reads "Changed": use the sector as it is now.
+    AcceptCal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -71,6 +73,12 @@ pub(crate) fn words(ask: Ask) -> (&'static str, Option<Txt>, Txt, &'static str) 
         Ask::DeleteZone(_) => ("Delete this zone?", None, txt!("Its channels: they move to no zone and stay in All."), "Delete"),
         Ask::DeletePreset(_) => ("Delete this range?", Some(txt!("Its skipped frequencies too.")), txt!("Every other range preset, and the channels."), "Delete"),
         Ask::ToneTx(_) => ("Set the TX tone too?", None, txt!("The RX tone is already set. BACK leaves TX as it is."), "Set"),
+        Ask::AcceptCal => (
+            "Use the calibration as it is?",
+            Some(txt!("Ferrite's record of it. It changed since Ferrite first read it: another firmware may have written it.")),
+            txt!("The calibration, read only. Each value is checked first: it is used only if all of them pass."),
+            "Use it",
+        ),
         Ask::CopyToVfo => (
             "Copy to VFO?",
             Some(txt!("The VFO's frequency and settings: the channel's take their place.")),
@@ -149,6 +157,13 @@ impl View for Confirm {
                     app.back();
                     super::home::copy_to_vfo(app);
                 }
+                // CAL-20: the store checks the sector and records it; About shows the outcome (Valid or Invalid).
+                Ask::AcceptCal => {
+                    app.back();
+                    if store.data().request(Op::AcceptCal) {
+                        app.show_toast(b"Calibration", b"checking", false);
+                    }
+                }
             },
             (Key::Exit, Press::Short) if matches!(self.ask, Ask::ToneTx(_)) => {
                 super::probe::applied(app, app.active, b"RX tone set");
@@ -222,7 +237,7 @@ impl View for Confirm {
                 tone_text(t, &mut b);
                 what.set(b.as_bytes());
             }
-            Ask::Reset { .. } => {}
+            Ask::Reset { .. } | Ask::AcceptCal => {}
         }
         if app.dirty(R_TOP, Mix::new().any(&self.ask).h(&what).h(&title).get()) {
             lcd.fill(0, 21, 240, 279, BG);

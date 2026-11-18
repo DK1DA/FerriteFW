@@ -308,13 +308,14 @@ impl Default for Gauge {
     }
 }
 
-#[cfg(test)]
-mod tests {
+/// A sector that passes every check (CAL-6), for tests here and in the store's (CAL-20); unused in the firmware.
+#[doc(hidden)]
+pub mod testing {
     use super::*;
 
     /// The factory-default calibration's tuning block and TX windows (0xF210-0xF24F; identical on both test
     /// radios): 136-174, 400-520, 200-260 and 330-400 MHz, all enabled; no crystal trim (byte 11 0xFF).
-    const FACTORY_F210: [u8; 0x40] = [
+    pub const FACTORY_F210: [u8; 0x40] = [
         0x37, 0x46, 0x3e, 0x1f, 0x1f, 0x28, 0x2a, 0x2a, 0x2a, 0x01, 0x08, 0xff, 0x00, 0x00, 0xff, 0xff, //
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, //
         0x01, 0x01, 0x36, 0x01, 0x74, 0x01, 0x04, 0x00, 0x05, 0x20, 0x01, 0x02, 0x00, 0x02, 0x60, 0xff, //
@@ -323,17 +324,17 @@ mod tests {
 
     /// The test sector's PA curve entry for stock's level `l` (0 High), row `r`, index `i`: High above Mid above
     /// Low at every index, as a real sector (TX-14).
-    fn curve(l: usize, r: usize, i: usize) -> u8 {
+    pub fn curve(l: usize, r: usize, i: usize) -> u8 {
         (180 - l * 40 + r * 4 + i) as u8
     }
 
     /// The HF rows' entries, the same way.
-    fn hf_curve(l: usize, i: usize) -> u8 {
+    pub fn hf_curve(l: usize, i: usize) -> u8 {
         (140 - l * 40 + i) as u8
     }
 
     /// A sector with the curves above, the gauge given, and the factory-default tuning block and windows.
-    fn sector(gauge: [u8; 7]) -> [u8; READ_LEN] {
+    pub fn sector(gauge: [u8; 7]) -> [u8; READ_LEN] {
         let mut b = [0x55u8; READ_LEN];
         for l in 0..3 {
             for r in 0..4 {
@@ -350,6 +351,13 @@ mod tests {
         b[0x210..0x250].copy_from_slice(&FACTORY_F210);
         b
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use super::testing::{curve, hf_curve, sector};
 
     /// TX-13, CAL-4, CAL-5: calibration is checked, never replaced: an erased sector or a hole in a used row locks
     /// transmit instead of falling back to built-in curves.

@@ -475,6 +475,8 @@ impl View for Info {
                 let d = if e.key == Key::Right { 1 } else { -1 };
                 app.screen = Screen::Info(Info { page: CYCLE[(i + d).rem_euclid(CYCLE.len() as i32) as usize] });
             }
+            // CAL-20: the calibration reads "Changed": OK asks to use it as it is now
+            (Page::About, Key::Menu) if app.cal_changed => super::confirm::ask(app, super::confirm::Ask::AcceptCal),
             (Page::SsbConfirm, Key::Menu) => {
                 app.back();
                 app.show_toast(b"SSB patch", b"in use", false);
@@ -493,6 +495,7 @@ impl View for Info {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let d = def(self.page);
+        app.cal_changed = cx.dev.selftest.cal == ferrite_core::msg::CalState::CrcMismatch; // CAL-20: OK's action
         app.new_page(lcd, Mix::new().any(&self.page).get());
         if let Page::Help(h) = self.page {
             return help::render(app, lcd, h);
@@ -528,7 +531,10 @@ impl View for Info {
         }
     }
 
-    fn hints(self, _: &App) -> Hints {
+    fn hints(self, app: &App) -> Hints {
+        if self.page == Page::About && app.cal_changed {
+            return Hints::new(&[("OK", "Calibration"), (ARROWS_LR, "System"), ("BACK", "Back")]); // CAL-20
+        }
         Hints::new(def(self.page).hints)
     }
 }

@@ -12,7 +12,7 @@ use ferrite_app::slot::DEFAULT_CFG;
 use ferrite_app::App;
 use ferrite_store::sim::SimFlash;
 use ferrite_store::store::Mounted;
-use ferrite_store::FlashStore;
+use ferrite_store::{block, FlashStore};
 use ferrite_ui::text::Buf;
 
 type Store = FlashStore<SimFlash, NoData>;
@@ -1159,4 +1159,41 @@ fn lists_hashes_follow_the_contents() {
     assert!(l3[0] == lists[0] && l3[1] != lists[1] && l3[2] == lists[2], "a zone renamed: the zones' hash alone");
     let s = mount(unmount(s));
     assert_eq!(s.lists_versions(), l3, "and the same after a restart");
+}
+
+/// CAL-20.3: the power cut at every step of accepting the calibration: the store mounts with its records, and the
+/// check is either still Changed (accept again) or Same; never a format.
+#[test]
+fn accepting_the_calibration_through_a_power_cut() {
+    use ferrite_core::layout::CALIBRATION;
+    use ferrite_core::txcal::{testing::sector, CalCrc};
+    let mut f = seeded();
+    let at = SimFlash::at(CALIBRATION.start);
+    let good = sector([0x81, 0x87, 0x8E, 0x93, 0x98, 0xA0, 0xBB]);
+    f.mem[at..at + good.len()].copy_from_slice(&good);
+    let s = mount(f);
+    assert_eq!(block(s.check_cal()), CalCrc::Recorded);
+    let mut f = unmount(s);
+    f.mem[at + 0x10] ^= 1;
+    let s = mount(f.clone());
+    let (count, n0) = (s.count(), s.nor().ops);
+    assert!(block(s.accept_cal()));
+    let ops = s.nor().ops - n0;
+    assert!(ops > 0);
+    for k in 0..=ops {
+        let s = mount(f.clone());
+        let at = s.nor().ops + k;
+        s.nor().cut_at = Some(at);
+        let _ = block(s.accept_cal());
+        let mut g = unmount(s);
+        (g.cut_at, g.dead) = (None, false);
+        let s = mount(g);
+        assert_eq!((s.mounted(), s.count()), (Mounted::Ok, count), "cut at op {k}");
+        let c = block(s.check_cal());
+        assert!(matches!(c, CalCrc::Changed | CalCrc::Same), "cut at op {k}: {c:?}");
+        if c == CalCrc::Changed {
+            assert!(block(s.accept_cal()), "accepted again after the cut at op {k}");
+            assert_eq!(block(s.check_cal()), CalCrc::Same);
+        }
+    }
 }

@@ -59,8 +59,35 @@ fn every_refusal_has_a_reason_and_maybe_a_fix() {
     t.shows("It transmits again in a few minutes.");
     refused(&mut t, Refusal::RelayMismatch);
     t.shows("Keep RX and TX on the same side of 64 MHz.");
+    t.dev.selftest.mcu_ok = true;
     refused(&mut t, Refusal::Locked);
     t.shows("Which check failed:");
+}
+
+/// CAL-20.1 (issue #40): the lock names the check that failed, as About does: the MCU, a blank or invalid
+/// calibration, or one changed since Ferrite first read it (with how to use it as it is).
+#[test]
+fn the_lock_names_its_check() {
+    use ferrite_core::msg::CalState;
+    let mut t = T::ready();
+    t.dev.selftest.mcu_ok = true;
+    for (cal, text) in [
+        (CalState::Blank, "the calibration is blank."),
+        (CalState::Invalid, "a calibration value failed its check."),
+        (CalState::CrcMismatch, "the calibration changed since Ferrite first read it."),
+    ] {
+        t.dev.selftest.cal = cal;
+        t.app.screen = Screen::Home;
+        t.draw();
+        refused(&mut t, Refusal::Locked);
+        t.shows(text);
+    }
+    t.shows("OK on About uses it as it is, if it checks out:");
+    t.dev.selftest.mcu_ok = false;
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("the MCU isn't the one this radio has.");
 }
 
 /// TX-20.1: out of band, the reason names the nearest band with its edges (as short as they go: "24.89"), and

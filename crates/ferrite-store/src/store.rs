@@ -44,6 +44,11 @@ use ferrite_ui::text::Buf;
 pub const HEADER_MAGIC: u32 = 0x5452_5246; // "FRRT"
 /// Where in the layout header the calibration's CRC is (CAL-7).
 const CAL_CRC_AT: usize = 6;
+/// CAL-20: the CRCs the owner accepted since, appended from here in the header's sector (erased after the header):
+/// the last one written counts. Appended, never erased, so a power cut can't lose the header (a word cut short reads
+/// as another CRC: transmit stays locked until accepted again). A format clears them with the header.
+const CAL_ACCEPT_AT: u32 = 0x100;
+const CAL_ACCEPT_END: u32 = SECTOR;
 /// 3: decision 333's map ([`ferrite_core::layout`]). A chip with no Ferrite header and none of Ferrite's records is
 /// formatted (a first install, INST-6); one with another layout's header, a migration mark, or records without a
 /// header is left alone until Console finishes the update (UPD-16, decision 339).
@@ -189,6 +194,9 @@ pub struct FlashStore<N: Nor, D: Data> {
     /// touched it ([`crate::io::Flash::take_stale`]).
     pub(crate) hashes: RefCell<[u32; LIST_SECTORS]>,
     mounted: Cell<Mounted>,
+    /// CAL-20: the owner asked to accept the calibration since the firmware last looked, and whether it was
+    /// ([`FlashStore::take_cal_accepted`]).
+    cal_accepted: Cell<Option<bool>>,
     /// The save timer: CRC of the state last saved, of the state last seen, and when that changed.
     saved: Cell<u32>,
     seen: Cell<u32>,
@@ -258,6 +266,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             znames: Cell::new([(0, ZoneId::MAX, Name::new()); 3]),
             hashes: RefCell::new([HASH0; LIST_SECTORS]),
             mounted: Cell::new(Mounted::Failed),
+            cal_accepted: Cell::new(None),
             saved: Cell::new(0),
             seen: Cell::new(0),
             changed_at: Cell::new(0),
@@ -518,11 +527,61 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Err(_) => CalCrc::Unknown,
             };
         }
-        if u32::from_le_bytes(rec) == now {
+        // CAL-20: the last CRC the owner accepted, over the one recorded at install
+        let Ok((last, _)) = self.cal_accepted_list() else { return CalCrc::Unknown };
+        if last.unwrap_or(u32::from_le_bytes(rec)) == now {
             CalCrc::Same
         } else {
             CalCrc::Changed
         }
+    }
+
+    /// CAL-20: the last accepted CRC, if any, and the next free slot's address (None: the list is full).
+    fn cal_accepted_list(&self) -> Result<(Option<u32>, Option<u32>)> {
+        let mut last = None;
+        let mut buf = [0u8; 64];
+        let mut a = LAYOUT_HEADER.start + CAL_ACCEPT_AT;
+        while a < LAYOUT_HEADER.start + CAL_ACCEPT_END {
+            self.f.raw_read(a, &mut buf)?;
+            for (i, w) in buf.as_chunks::<4>().0.iter().enumerate() {
+                let w = u32::from_le_bytes(*w);
+                if w == u32::MAX {
+                    return Ok((last, Some(a + i as u32 * 4)));
+                }
+                last = Some(w);
+            }
+            a += buf.len() as u32;
+        }
+        Ok((last, None))
+    }
+
+    /// CAL-20: the owner's "use the calibration as it is now" after CAL-7 locked transmit for a changed sector.
+    /// Only a sector that passes every CAL-6 check is accepted (a corrupted one stays locked); its CRC is appended
+    /// to the accepted list. False when it isn't accepted.
+    pub async fn accept_cal(&self) -> bool {
+        if !matches!(self.mounted.get(), Mounted::Ok | Mounted::FirstBoot) {
+            return false;
+        }
+        let mut b = [0xFFu8; ferrite_core::txcal::READ_LEN];
+        let ok = self.accept_checked(&mut b).await;
+        self.cal_accepted.set(Some(ok));
+        ok
+    }
+
+    async fn accept_checked(&self, b: &mut [u8; ferrite_core::txcal::READ_LEN]) -> bool {
+        let cal = ferrite_core::layout::CALIBRATION;
+        if self.f.raw_read(cal.start, b).is_err() || ferrite_core::txcal::TxCal::read(b).is_err() {
+            return false;
+        }
+        let Ok(now) = self.f.crc(cal.start, cal.end - cal.start) else { return false };
+        let Ok((_, Some(slot))) = self.cal_accepted_list() else { return false };
+        self.f.program(slot, &now.to_le_bytes()).await.is_ok()
+    }
+
+    /// CAL-20: the owner's acceptance since the last call, and whether it went through (the firmware reads the
+    /// calibration again, or says it is invalid).
+    pub fn take_cal_accepted(&self) -> Option<bool> {
+        self.cal_accepted.take()
     }
 
     /// A blank chip, or stock's data (a first install, INST-6): every area this firmware uses erased (blank ones
@@ -1468,7 +1527,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
             Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
             Op::Dtmf(i, _) | Op::DtmfName(i, _) => i < DTMF_MEMS,
-            Op::Wipe | Op::ReadAll | Op::ClearLog | Op::MessagesReadAll | Op::ClearMessages | Op::ClearHeard => true,
+            Op::Wipe | Op::ReadAll | Op::ClearLog | Op::MessagesReadAll | Op::ClearMessages | Op::ClearHeard | Op::AcceptCal => true,
             Op::Quick(i, _) => (i as usize) < ferrite_app::words::QUICK,
             _ => return self.sat_accepts(op),
         })
@@ -1484,6 +1543,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         match op {
             Op::DeleteChannel(n) => self.delete(n).await,
             Op::Wipe => self.wipe().await,
+            Op::AcceptCal => {
+                if self.accept_cal().await { Ok(()) } else { Err(NorError) }
+            }
             Op::Skip(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_SKIP } else { c.flags & !ferrite_app::chan::FLAG_SKIP }).await,
             Op::Hide(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_HIDDEN } else { c.flags & !ferrite_app::chan::FLAG_HIDDEN }).await,
             Op::Move(n, z) if !self.room(z, n) => Err(NorError),

@@ -96,3 +96,28 @@ fn si4732_revision() {
     let s = page(&mut t, Page::About);
     assert!(s.contains("rev ?"), "an unprintable byte: {s}");
 }
+
+/// CAL-20.1, CAL-20.2 (issue #40): a calibration changed since install shows "Changed" (not "Valid"), and About's OK asks to
+/// use it as it is; OK there sends the request to the store and says it is checking. Without the change, OK on
+/// About does nothing.
+#[test]
+fn accepting_a_changed_calibration() {
+    use crate::screens::confirm::{Ask, Confirm};
+    let mut t = T::ready();
+    healthy(&mut t);
+    page(&mut t, Page::About);
+    t.reads("hints \"<>\" \"System\" \"BACK\" \"Back\"");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen, Screen::Info(_)), "nothing to accept");
+    t.dev.selftest.cal = CalState::CrcMismatch;
+    let s = page(&mut t, Page::About);
+    assert!(s.contains("Changed: TX locked") && s.contains("Locked: calibration"), "{s}");
+    t.reads("hints \"OK\" \"Calibration\"");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen, Screen::Confirm(Confirm { ask: Ask::AcceptCal, .. })));
+    t.draw();
+    t.shows("Use the calibration as it is?");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen, Screen::Info(Info { page: Page::About })), "back on About");
+    assert_eq!(t.toast(), "Calibration / checking");
+}

@@ -617,7 +617,7 @@ impl View for TxRefused {
         }
     }
 
-    fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         if !app.dirty(1, Mix::new().any(&self).get()) {
             return;
         }
@@ -650,9 +650,20 @@ impl View for TxRefused {
                 a.set(b"The battery is below the transmit cut-off.");
                 more = b"Charge it or fit a fresh one. Its level:";
             }
+            // CAL-20 (issue #40): which check, so the owner isn't told "Ready" on About and "locked" here
             Refusal::Locked => {
-                a.set(b"Transmit is locked: a calibration or hardware check failed.");
-                more = b"Which check failed:";
+                use ferrite_core::msg::CalState;
+                let t = &cx.dev.selftest;
+                (a, more) = match (t.mcu_ok, t.cal) {
+                    (false, _) => (Buf::from(b"Transmit is locked: the MCU isn't the one this radio has.".as_slice()), b"The check:".as_slice()),
+                    (_, CalState::Blank) => (Buf::from(b"Transmit is locked: the calibration is blank.".as_slice()), b"The check:".as_slice()),
+                    (_, CalState::Invalid) => (Buf::from(b"Transmit is locked: a calibration value failed its check.".as_slice()), b"The check:".as_slice()),
+                    (_, CalState::CrcMismatch) => (
+                        Buf::from(b"Transmit is locked: the calibration changed since Ferrite first read it.".as_slice()),
+                        b"OK on About uses it as it is, if it checks out:".as_slice(),
+                    ),
+                    _ => (Buf::from(b"Transmit is locked: a calibration or hardware check failed.".as_slice()), b"Which check failed:".as_slice()),
+                };
             }
             Refusal::InProgress => a.set(b"Another transmission is in progress."),
             Refusal::NoCallsign => {

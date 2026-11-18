@@ -326,6 +326,8 @@ pub struct App {
     /// SAFE-14: the "PTT stuck" popup has shown this power-on.
     pub(crate) stuck_shown: bool,
     pub(crate) virtual_ptt: bool,
+    /// CAL-20: About last drew the calibration as "Changed" (OK asks to use it as it is).
+    pub(crate) cal_changed: bool,
     /// LINK-19: the keys the link holds and its long press ([`remote::RemoteKeys`]); a remote key's input is being
     /// handled now (it never transmits: [`App::remote_tx_refused`]).
     pub(crate) rkeys: remote::RemoteKeys,
@@ -491,6 +493,7 @@ impl App {
             tx_cut: false,
             stuck_shown: false,
             virtual_ptt: false,
+            cal_changed: false,
             rkeys: remote::RemoteKeys::default(),
             remote_in: false,
             refusal_beeps: 0,
