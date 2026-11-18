@@ -110,11 +110,17 @@ impl Channel {
         &self.name[..n]
     }
 
-    /// An HF channel (CHAN-26): below 64 MHz, HF mode's, on the SI4732 or chip 1 through the relay. It opens HF
-    /// mode on it; a home slot never sits on one, and no slot scan stops on one (SAFE-20: a scan never moves the
-    /// relay; the SI4732 is HF mode's).
+    /// An HF channel (CHAN-26): below 64 MHz, on the SI4732 or chip 1 through the relay. No slot scan stops on one
+    /// (SAFE-20: a scan never moves the relay; the SI4732 is HF mode's).
     pub fn is_hf(&self) -> bool {
         self.rx < HF_TOP
+    }
+
+    /// CHAN-26.1 (issue #41): HF mode's alone: below 18 MHz (AM, USB, LSB, CW on the SI4732). Recalling one opens
+    /// HF mode on it, and a home slot never sits on one. 18-64 MHz (FM or AM on chip 1 through the relay) is a home
+    /// slot's as its VFO's is (VFO-21, HF-22): a CB zone is reached with ◀▶ like any other.
+    pub fn hf_mode_only(&self) -> bool {
+        self.rx < crate::screens::hf::CHIP1_FROM
     }
 
     /// Left out of every scan (CHAN-4, SCAN-9).

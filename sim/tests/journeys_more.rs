@@ -209,3 +209,56 @@ fn gps_nmea_set_follows_wakes_and_screens() {
     coarse(&mut r, 70_000, |_| {});
     assert_eq!(r.sim.gps().unwrap().sets().last().unwrap().1, "$PCAS03,1,0,5,5,1,0,0,0*02");
 }
+
+/// Issue #41, CHAN-26.1: a CB zone (26.965, 27.005 MHz) is a home slot's like any other: ◀▶ reaches it, leaves it
+/// and comes back to it, ▲▼ steps its channels, and the zones page (hold V/M) puts the slot on it. Below 18 MHz
+/// stays HF mode's (`hf_channels`). It read "No channels / HF or hidden only" coming back with ◀▶.
+#[test]
+fn cb_zone_on_a_home_slot() {
+    use ferrite_app::chan::{Channel, ChannelStore};
+    use ferrite_app::data::ZoneCfg;
+    let mut r = Radio::new();
+    {
+        let s = r.sim.store();
+        let z = s.zones();
+        assert!(s.add_zone(b"CB", &ZoneCfg { shown: true, ..ZoneCfg::default() }));
+        for (num, f, name) in [(100u16, 2_696_500, "CB 1"), (101, 2_700_500, "CB 3")] {
+            let mut n = [0u8; 16];
+            n[..name.len()].copy_from_slice(name.as_bytes());
+            let c = Channel { num, zone: z, rx: f, name: n, cfg: ferrite_app::slot::DEFAULT_CFG, flags: 0, tones: 0 };
+            assert!(s.put_with_position(c, None));
+        }
+    }
+    r.wait(300);
+    r.press(Key::VfoMem).wait(300); // A to channel mode
+    let mut found = false;
+    for _ in 0..12 {
+        r.press(Key::Right).wait(300);
+        if r.has("26.965") {
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "◀▶ reaches the CB zone:\n{}", r.text());
+    r.press(Key::Down).wait(300);
+    r.expect_text("27.005");
+    r.press(Key::Right).wait(300);
+    r.expect_no_text("27.005");
+    r.press(Key::Left).wait(300);
+    r.expect_no_text("No channels");
+    assert!(r.has("26.965") || r.has("27.005"), "back in the CB zone:\n{}", r.text());
+    // the zones page: OK on CB
+    r.press(Key::Right).wait(300);
+    r.hold(Key::VfoMem).wait(300);
+    r.expect_screen("Zones");
+    for _ in 0..40 {
+        if r.text().lines().any(|l| l.contains("> CB") || l.starts_with("CB")) {
+            break;
+        }
+        r.press(Key::Down).wait(100);
+    }
+    r.press(Key::Menu).wait(300);
+    r.expect_screen("Home");
+    r.expect_no_text("No channels");
+    assert!(r.has("26.965") || r.has("27.005"), "the zones page put A on CB:\n{}", r.text());
+}

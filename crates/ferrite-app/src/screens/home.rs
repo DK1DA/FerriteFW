@@ -1021,9 +1021,9 @@ pub(crate) fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) 
             return;
         }
         let mut p = (pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n);
-        // CHAN-26: HF channels are HF mode's; stepping goes past them
+        // CHAN-26: channels below 18 MHz are HF mode's; stepping goes past them
         for _ in 0..n {
-            if app.zat(store, z, p as u16).is_some_and(|c| !c.is_hf()) {
+            if app.zat(store, z, p as u16).is_some_and(|c| !c.hf_mode_only()) {
                 break;
             }
             p = (p + d.signum()).rem_euclid(n);
@@ -1138,9 +1138,9 @@ pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
     }
 }
 
-/// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26); Local's nearest (CHAN-34).
+/// The first channel in a zone a home slot can sit on: not one below 18 MHz (CHAN-26); Local's nearest (CHAN-34).
 pub(crate) fn first_slot_channel(app: &App, store: &impl ChannelStore, z: ZoneId) -> Option<u16> {
-    (0..app.zlen(store, z)).find(|&i| app.zat(store, z, i).is_some_and(|c| !c.is_hf()))
+    (0..app.zlen(store, z)).find(|&i| app.zat(store, z, i).is_some_and(|c| !c.hf_mode_only()))
 }
 
 fn toggle_vfo(app: &mut App, store: &impl ChannelStore) {

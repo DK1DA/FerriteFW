@@ -905,10 +905,10 @@ impl View for Zones {
 /// Where OK on zone `z` puts the active slot (CHAN-27, decision 178): its position in the zone. The slot's own last
 /// channel there when it was last on this zone (`zone` and `pos` stay while it is on its VFO), else the zone's first
 /// channel a slot can sit on in number order (CHAN-10): listed (CHAN-24: hidden ones only with "show hidden") and
-/// not an HF channel (CHAN-26). None: no such channel.
+/// not one below 18 MHz (CHAN-26). None: no such channel.
 pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: ZoneId) -> Option<u16> {
     let hidden = app.set.show_hidden;
-    let usable = |p: u16| app.zat(store, z, p).is_some_and(|c| !c.is_hf() && listed(&c, hidden));
+    let usable = |p: u16| app.zat(store, z, p).is_some_and(|c| !c.hf_mode_only() && listed(&c, hidden));
     let s = app.slot(app.active);
     if s.zone == z && s.ch.is_some() && usable(s.pos) {
         return Some(s.pos);
@@ -931,7 +931,7 @@ fn accept(app: &mut App, store: &impl ChannelStore, z: ZoneId) {
         } else if app.zlen(store, z) == 0 {
             app.show_toast(b"No channels", b"in this zone", false)
         } else {
-            app.show_toast(b"No channels", b"HF or hidden only", false)
+            app.show_toast(b"No channels", b"<18 MHz or hidden", false) // CHAN-26.1: below 18 MHz is HF mode's
         };
     };
     let s = *app.slot(a);

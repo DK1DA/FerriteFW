@@ -870,7 +870,7 @@ impl App {
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
     pub fn set_channel(&mut self, slot: u8, zone: ZoneId, pos: u16, store: &impl ChannelStore) {
         match self.zat(store, zone, pos) {
-            Some(c) if c.is_hf() => screens::hf::recall(self, &c), // CHAN-26: HF mode's, not a slot's
+            Some(c) if c.hf_mode_only() => screens::hf::recall(self, &c), // CHAN-26: HF mode's, not a slot's
             Some(c) => {
                 let s = &mut self.slots[slot as usize % SLOTS];
                 (s.zone, s.pos, s.ch, s.vfo_mode) = (zone, pos, Some(c), false);

@@ -510,7 +510,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
     if e.to == EntryFor::Channel {
         let Some(num) = e.number() else { return };
         match store.by_num(num) {
-            Some((c, _)) if c.is_hf() => super::hf::recall(app, &c), // CHAN-26
+            Some((c, _)) if c.hf_mode_only() => super::hf::recall(app, &c), // CHAN-26
             Some((c, pos)) => {
                 let a = app.active as usize;
                 let s = &mut app.slots[a];
