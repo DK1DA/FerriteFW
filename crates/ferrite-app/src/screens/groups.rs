@@ -1031,6 +1031,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             } else {
                 crate::settings::region_at(cycle(crate::settings::region_row(s.region), d, REGION_LIST.len()))
             };
+            app.region_start(); // VFO-25: off the US factory frequencies
             app.region_steps(); // VFO-18
         }
         // 0.1 ms steps up to 1 ms, then 1 ms steps to 10 ms (stock's dwell, the default).

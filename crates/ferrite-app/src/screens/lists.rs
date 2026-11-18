@@ -42,6 +42,20 @@ impl App {
         self.reconcile_mode(); // MODE-2
     }
 
+    /// VFO-25: a slot still on its factory frequency (A 146.520, B 443.475: US frequencies) that the chosen region
+    /// refuses moves to 145.500 or 433.500, in band in every region. Users who chose the UK in setup found every
+    /// key-up refused (Nov 17, 2026). A frequency the user tuned is never touched.
+    pub(crate) fn region_start(&mut self) {
+        use ferrite_core::freq::mhz;
+        let region = self.set.tx_region();
+        for (i, (factory, start)) in [(mhz(146) + 52_000, mhz(145) + 50_000), (mhz(443) + 47_500, mhz(433) + 50_000)].into_iter().enumerate() {
+            let s = &mut self.slots[i];
+            if s.vfo_mode && s.vfo == factory && ferrite_core::txplan::check(factory, region, false).is_err() {
+                s.vfo = start;
+            }
+        }
+    }
+
     /// The region changed (setup, 0 9 4): a VFO on 2 m or 1.25 m still on a region default step takes the new
     /// region's (VFO-18), and a VFO in FM or NFM on an FM band the region's mode (SETUP-7). A step the user picked
     /// is left alone.

@@ -303,6 +303,7 @@ impl View for Setup {
             // OK on a region chooses it and goes on: no region is chosen for you (SETUP-3).
             (Key::Menu, Short) if ask == Ask::Region && self.row < REGION_ROWS => {
                 app.set.region = crate::settings::region_at(self.row);
+                app.region_start(); // VFO-25: off the US factory frequencies
                 app.region_steps(); // VFO-18
                 if single {
                     self.finish(app);

@@ -33,6 +33,8 @@ const V_BANDS: u8 = 6;
 pub(crate) const V_BROADCAST: u8 = 6;
 const V_RECENT: u8 = 7;
 const V_NEARBY: u8 = 8;
+/// The Nearby view's rows: the nearest this many (each found in one pass, CHAN-15).
+const NEAR_MAX: usize = 64;
 /// The band views' edges (CHAN-14: "2 m, 70 cm, air, marine"; BCR-31: broadcast FM, 76-108 MHz, the bands of every
 /// region, BCR-21).
 const BAND_VIEWS: [(Freq10, Freq10); 5] =
@@ -95,7 +97,7 @@ impl<S: ChannelStore> ViewOf<'_, S> {
             0 => self.store.zone_len(self.zone),
             V_RECENT => (0..RECENT_MAX).take_while(|&r| self.recent(r).is_some()).count() as u16,
             V_NEARBY if self.store.data().fix().is_none() => 0,
-            V_NEARBY => (0..self.store.count()).filter(|&i| self.store.by_number(i).is_some_and(|c| self.store.position(c.num).is_some())).count() as u16,
+            V_NEARBY => self.nearby_count(),
             _ => self.store.count(),
         }
     }
@@ -128,26 +130,28 @@ impl<S: ChannelStore> ViewOf<'_, S> {
     }
 
 
-    /// Nearby: the r-th nearest channel with a position, and its distance and bearing (CHAN-15). Each step
-    /// finds the next by (distance, number), so nothing is sorted in RAM.
+    /// Nearby: the r-th nearest listed channel with a position, and its distance and bearing (CHAN-15): one pass
+    /// over the channels keeping the r + 1 nearest (zones' `nearest`), in a buffer on this frame's stack. It found
+    /// each next one by another pass over every channel, so a row cost r passes and opening the list (each row
+    /// looked at) about N^3: a few hundred channels with positions held the UI task long enough for the watchdog to
+    /// restart the radio (users' reports, Nov 17, 2026). The list is the nearest [`NEAR_MAX`].
+    #[inline(never)]
     fn nearest(&self, r: u16) -> Option<(Channel, (u32, u16))> {
-        let here = self.store.data().fix()?.pos;
-        let mut prev: Option<(u32, u16)> = None;
-        let mut found = None;
-        for _ in 0..=r {
-            found = None;
-            for c in (0..self.store.count()).filter_map(|i| self.store.by_number(i)) {
-                let Some(p) = self.store.position(c.num) else { continue };
-                let db = dist_bearing(here, p);
-                let key = (db.0, c.num);
-                if prev.is_none_or(|p| key > p) && found.is_none_or(|(f, (fd, _)): (Channel, (u32, u16))| key < (fd, f.num)) {
-                    found = Some((c, db));
-                }
-            }
-            let (c, (d, _)) = found?;
-            prev = Some((d, c.num));
+        let r = r as usize;
+        if r >= NEAR_MAX {
+            return None;
         }
-        found
+        let here = self.store.data().fix()?.pos;
+        let mut buf = [None; NEAR_MAX];
+        super::zones::nearest(self.store, here, self.hidden, &mut buf[..=r]);
+        let n = buf[r]?;
+        Some((self.store.get(n.num)?, (n.m, n.deg)))
+    }
+
+    /// How many rows the Nearby view has: the listed channels with a position, the nearest [`NEAR_MAX`] of them.
+    fn nearby_count(&self) -> u16 {
+        let Some(here) = self.store.data().fix().map(|f| f.pos) else { return 0 };
+        super::zones::nearest(self.store, here, self.hidden, &mut []).min(NEAR_MAX as u16)
     }
 }
 
@@ -564,4 +568,78 @@ pub(crate) fn after_delete(b: Browse, store: &impl ChannelStore, hidden: bool) -
     let v = view_of(store, &b, hidden);
     let cur = Cursor { sel: b.cur.sel.min(v.n().saturating_sub(1)), ..b.cur }.shown(v.n(), ROWS2, &|i| v.keep(i));
     Browse { mode: Mode::List, cur, ..b }
+}
+
+#[cfg(test)]
+mod nearby_cost {
+    use super::*;
+    use crate::chan::{Channel, Name, ZoneId};
+    use crate::data::{Data, Fix, Pos};
+    use core::cell::Cell;
+
+    /// 400 channels, each with a position, and a count of the position lookups.
+    struct Many {
+        fix: Option<Fix>,
+        looks: Cell<u32>,
+    }
+    const N: u16 = 400;
+    impl Data for Many {
+        fn fix(&self) -> Option<Fix> {
+            self.fix
+        }
+    }
+    impl ChannelStore for Many {
+        fn zones(&self) -> ZoneId {
+            1
+        }
+        fn zone_name(&self, _: ZoneId) -> Option<Name> {
+            None
+        }
+        fn zone_len(&self, _: ZoneId) -> u16 {
+            N
+        }
+        fn zone_at(&self, _: ZoneId, i: u16) -> Option<Channel> {
+            self.get(i)
+        }
+        fn count(&self) -> u16 {
+            N
+        }
+        fn get(&self, num: u16) -> Option<Channel> {
+            (num < N).then_some(Channel { num, zone: 0, rx: 14_500_000, name: [b'x'; 16], cfg: crate::slot::DEFAULT_CFG, flags: 0, tones: 0 })
+        }
+        fn by_number(&self, i: u16) -> Option<Channel> {
+            self.get(i)
+        }
+        fn position(&self, num: u16) -> Option<Pos> {
+            self.looks.set(self.looks.get() + 1);
+            // spread out, in no order of distance: number k is (k * 37 mod 400) steps away
+            (num < N).then(|| Pos { lat: 450_000_000 + ((num as i32 * 37) % N as i32) * 10_000, lon: -757_000_000 })
+        }
+        fn data(&self) -> &dyn Data {
+            self
+        }
+    }
+
+    /// CHAN-15: a few hundred channels with positions hung the radio on opening Nearby (users' reports, Nov 17,
+    /// 2026: the watchdog restarted it). Opening the view and reading its first rows costs one pass over the
+    /// channels a row, not a pass per row before it; and the order is still nearest first.
+    #[test]
+    fn nearby_opens_in_passes_not_cubes() {
+        let here = Pos { lat: 450_000_000, lon: -757_000_000 };
+        let s = Many { fix: Some(Fix { pos: here, ..crate::sample::Sample::sample_fix().unwrap() }), looks: Cell::new(0) };
+        let b = nearby_view(&s, false);
+        let v = view_of(&s, &b, false);
+        assert_eq!(v.n(), NEAR_MAX as u16);
+        let mut last = 0;
+        for r in 0..10 {
+            let (c, (m, _)) = v.nearest(r).unwrap();
+            assert!(m >= last, "nearest first");
+            last = m;
+            assert_eq!((c.num as u32 * 37) % N as u32, r as u32, "row {r}");
+        }
+        assert!(v.nearest(NEAR_MAX as u16).is_none(), "the nearest {NEAR_MAX} only");
+        // opening (count + first row) and ten rows: about 13 passes of MAX_CHANNELS lookups; the old way was
+        // about 55 passes for these rows alone and grew with the square of the row
+        assert!(s.looks.get() < 16 * crate::chan::MAX_CHANNELS as u32, "{} lookups", s.looks.get());
+    }
 }
