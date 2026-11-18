@@ -429,6 +429,12 @@ pub struct App {
     /// The zones page's Nearby row (CHAN-29): the nearest positioned channel, found again only when the fix moved
     /// about 100 m or the channels changed. 12 bytes.
     pub(crate) near: screens::zones::NearCache,
+    /// The Nearby view's rows (CHAN-15).
+    pub(crate) near_list: screens::zones::NearList,
+    /// The channel browser's header count and what it was counted for (0: none yet).
+    pub(crate) view_count: (u32, u16),
+    /// The browser picker's band view counts and the records' version they were counted for (0: none yet).
+    pub(crate) band_counts: (u32, [u16; 5]),
     /// The Local zone (CHAN-34): its channels, nearest first, found again only when the position moved about 1 km,
     /// the channels or the range changed. 112 bytes.
     pub(crate) local: local::Local,
@@ -536,6 +542,9 @@ impl App {
             contact_call: Buf::new(),
             back: [None; BACK_DEPTH],
             near: screens::zones::NearCache::NONE,
+            near_list: screens::zones::NearList::NONE,
+            view_count: (0, 0),
+            band_counts: (0, [0; 5]),
             local: local::Local::OFF,
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false, popup: 0 },
             radio: screens::activity::RadioUi::new(),

@@ -112,7 +112,7 @@ impl View for Confirm {
                     app.show_toast(l.as_bytes(), b"deleted", false);
                     app.back();
                     if let Screen::Browse(b) = app.screen {
-                        app.screen = Screen::Browse(super::browse::after_delete(b, store, app.set.show_hidden));
+                        app.screen = Screen::Browse(super::browse::after_delete(b, store, app));
                     }
                 }
                 Ask::DeleteZone(z) => {

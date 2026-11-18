@@ -161,7 +161,10 @@ fn ram_is_small() {
     // broadcast slot took the broadcast, for the sleep timer (BCR-5, decision 352: 4 bytes), 8 with padding, to 1992;
     // the shortcut popup as last drawn on home, so home waits under it (HOME-8: 4 bytes), 8 with padding, to 2000;
     // auto reply's settings in the App's AprsCfg (APRS-57: on and delay, the pattern, the 45-character reply), 56
-    assert!(n <= 2056, "App is {n} bytes");
+    // to 2056; the Nearby view's rows found once, not per draw (CHAN-15, Nov 17, 2026: 32 channel numbers, their
+    // count and what they were found for), 72, to 2128; the channel browser's counts kept between redraws (its view's,
+    // 8, and the picker's band views', 16: a full radio counted 4000 records a redraw), 24, to 2152
+    assert!(n <= 2152, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
