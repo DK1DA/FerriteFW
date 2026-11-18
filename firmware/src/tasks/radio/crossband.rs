@@ -214,7 +214,8 @@ impl Radio {
             return log(b"xb refused ", r as u32);
         }
         // TX-11 (TX audit F16): the PA lookup refuses outside its rows.
-        let Some(pa) = self.tx.cal.and_then(|c| c.dac(f, power)) else {
+        // CAL-6.1: a band whose curves failed a check refuses as one without a curve does
+        let Some(pa) = self.tx.cal.and_then(|c| c.pa(f, power).ok()) else {
             x.rep.refused(now);
             return log(b"xb refused: no PA curve there", 0);
         };

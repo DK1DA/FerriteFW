@@ -73,6 +73,8 @@ pub(crate) fn tx_lock(dev: &Device) -> Option<&'static str> {
         Some("Locked: MCU check")
     } else if t.cal != CalState::Ok {
         Some("Locked: calibration")
+    } else if let Some(row) = super::groups::band_locked(t) {
+        Some(["UHF locked", "VHF locked", "200 MHz locked", "HF locked"][row as usize % 4]) // CAL-6.1: the rest transmits
     } else if dev.battery_cutoff {
         Some("Battery too low")
     } else {

@@ -474,10 +474,10 @@ fn accepting_a_changed_calibration() {
     assert_eq!(block(s.check_cal()), CalCrc::Same);
     let s = mount(unmount(s));
     assert_eq!(block(s.check_cal()), CalCrc::Same, "kept across a restart");
-    // a sector that fails CAL-6 (an erased PA byte) stays locked
+    // a sector that fails CAL-6 (a sub-tone gain over 0x7F; a curve fault locks its band only, CAL-6.1) stays locked
     let mut f = unmount(s);
     let mut bad = changed;
-    bad[0] = 0xFF;
+    bad[0x211] = 0x90;
     put(&mut f, &bad);
     let s = mount(f);
     assert_eq!(block(s.check_cal()), CalCrc::Changed);

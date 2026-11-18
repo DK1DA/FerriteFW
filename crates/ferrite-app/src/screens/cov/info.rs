@@ -132,7 +132,7 @@ fn calibration_page_names_the_check() {
     assert!(page(&mut t, Page::Calibration).contains("Passed"));
     t.dev.selftest.cal = CalState::Invalid;
     for (f, at, text) in [
-        (CalFault::LevelOrder, [1, 5, 1], "Power order: VHF 5, Mid"),
+        (CalFault::LevelOrder, [1, 5, 0], "Power order: VHF 5"),
         (CalFault::PaCurve, [3, 3, 0], "Power byte: HF 3, Low"),
         (CalFault::Windows, [0; 3], "TX windows"),
         (CalFault::Trim, [0; 3], "Crystal trim"),
@@ -142,6 +142,11 @@ fn calibration_page_names_the_check() {
         let s = page(&mut t, Page::Calibration);
         assert!(s.contains(text), "{f:?}: {s}");
     }
+    // CAL-6.1: a band's curve fault: the sector Valid, that band locked, About says which
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Ok, CalFault::LevelOrder, [3, 1, 0]);
+    let s = page(&mut t, Page::Calibration);
+    assert!(s.contains("HF TX locked") && s.contains("Power order: HF 1"), "{s}");
+    assert!(page(&mut t, Page::About).contains("HF locked"));
     (t.dev.selftest.cal, t.dev.selftest.cal_fault) = (CalState::CrcMismatch, CalFault::Unchecked);
     let s = page(&mut t, Page::Calibration);
     assert!(s.contains("Store not ready") && !s.contains("Changed"), "{s}");

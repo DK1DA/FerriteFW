@@ -214,10 +214,8 @@ fn read_calibration(store: &store::Store, flash: bool, cal_ok: bool, mcu_ok: boo
         use ferrite_core::msg::CalState;
         use ferrite_core::txcal::CalCrc;
         let sector = if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) };
-        let (state, fault) = match (&sector, cal_crc) {
+        let (state, mut fault) = match (&sector, cal_crc) {
             (Err(Fault::Blank), _) => (CalState::Blank, 0),
-            (Err(Fault::PaCurve), _) => (CalState::Invalid, 1),
-            (Err(Fault::LevelOrder), _) => (CalState::Invalid, 2),
             (Err(Fault::Windows), _) => (CalState::Invalid, 3),
             (Err(Fault::Trim), _) => (CalState::Invalid, 4),
             (Err(Fault::ToneGain), _) => (CalState::Invalid, 5),
@@ -226,7 +224,13 @@ fn read_calibration(store: &store::Store, flash: bool, cal_ok: bool, mcu_ok: boo
             (Ok(_), CalCrc::Unknown) => (CalState::CrcMismatch, 6),
             (Ok(_), CalCrc::Same | CalCrc::Recorded) => (CalState::Ok, 0),
         };
-        let at = if matches!(fault, 1 | 2) { TxCal::curve_fault_at(&b).unwrap_or([0; 3]) } else { [0; 3] };
+        // CAL-6.1: a curve fault locks its band only: the sector stands (Valid), the fault and where for About
+        let mut at = [0; 3];
+        if fault == 0 && sector.is_ok() {
+            if let Some((f, w)) = TxCal::curve_fault_at(&b) {
+                (fault, at) = (if f == Fault::PaCurve { 1 } else { 2 }, w);
+            }
+        }
         CAL_FAULT.store(u32::from_le_bytes([fault, at[0], at[1], at[2]]), Relaxed);
         CAL_VERDICT.store(cal_code(state), Relaxed);
         crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));

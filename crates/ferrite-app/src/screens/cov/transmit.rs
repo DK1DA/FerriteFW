@@ -84,11 +84,18 @@ fn the_lock_names_its_check() {
     }
     t.shows("OK on About uses it as it is, if it checks out:");
     // CAL-20.4: which value, and the store not ready
-    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Invalid, ferrite_core::msg::CalFault::LevelOrder, [1, 5, 1]);
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Invalid, ferrite_core::msg::CalFault::Windows, [0; 3]);
     t.app.screen = Screen::Home;
     t.draw();
     refused(&mut t, Refusal::Locked);
-    t.shows("(Power order: VHF 5, Mid).");
+    t.shows("(TX windows).");
+    // CAL-6.1: a band's curves: the sector valid, that band locked, the rest transmits
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Ok, ferrite_core::msg::CalFault::LevelOrder, [3, 1, 0]);
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("locked on this band");
+    t.shows("The other bands transmit.");
     (t.dev.selftest.cal, t.dev.selftest.cal_fault) = (CalState::CrcMismatch, ferrite_core::msg::CalFault::Unchecked);
     t.app.screen = Screen::Home;
     t.draw();

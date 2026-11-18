@@ -151,8 +151,11 @@ impl Radio {
             return self.refuse(slot, r);
         }
         // TX-11 (TX audit F16): the PA lookup refuses outside its rows, before anything is touched.
-        let Some(pa) = self.tx.cal.and_then(|c| c.dac(f, req.power)) else {
-            return self.refuse(slot, Refusal::NotCalibrated);
+        // CAL-6.1: a band whose curves failed a check is locked (the rest of the radio transmits).
+        let pa = match self.tx.cal.map(|c| c.pa(f, req.power)) {
+            Some(Ok(pa)) => pa,
+            Some(Err(why)) => return self.refuse(slot, why),
+            None => return self.refuse(slot, Refusal::NotCalibrated),
         };
         // The chip for the TX frequency: tuned there with the slot's tone, before the plan keys it.
         let n = Sel::tx(f).chip();

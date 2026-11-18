@@ -192,8 +192,11 @@ impl Radio {
         if let Err(why) = self.tx.seq.check(&req, &self.path, now) {
             return self.refuse(SAT_SLOT, why);
         }
-        let Some(pa) = self.tx.cal.and_then(|c| c.dac(f, r.power)) else {
-            return self.refuse(SAT_SLOT, Refusal::NotCalibrated);
+        // CAL-6.1: a band whose curves failed a check is locked; outside every row, not calibrated
+        let pa = match self.tx.cal.map(|c| c.pa(f, r.power)) {
+            Some(Ok(pa)) => pa,
+            Some(Err(why)) => return self.refuse(SAT_SLOT, why),
+            None => return self.refuse(SAT_SLOT, Refusal::NotCalibrated),
         };
         if !self.has(n) {
             return self.refuse(SAT_SLOT, Refusal::Locked);

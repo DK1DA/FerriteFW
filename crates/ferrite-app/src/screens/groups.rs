@@ -1221,7 +1221,7 @@ pub(crate) fn cal_fault_text(f: ferrite_core::msg::CalFault, at: [u8; 3], b: &mu
     let _ = match f {
         None => uwrite!(b, "Passed"),
         PaCurve => uwrite!(b, "Power byte: {} {}, {}", row, at[1], lvl),
-        LevelOrder => uwrite!(b, "Power order: {} {}, {}", row, at[1], lvl),
+        LevelOrder => uwrite!(b, "Power order: {} {}", row, at[1]), // CAL-6.1: Low not below High
         Windows => uwrite!(b, "TX windows"),
         Trim => uwrite!(b, "Crystal trim"),
         ToneGain => uwrite!(b, "Sub-tone gain"),
@@ -1229,10 +1229,19 @@ pub(crate) fn cal_fault_text(f: ferrite_core::msg::CalFault, at: [u8; 3], b: &mu
     };
 }
 
+/// CAL-6.1: the band row a curve fault locks (the sector valid, that band only), if any.
+pub(crate) fn band_locked(t: &ferrite_core::msg::SelfTest) -> Option<u8> {
+    use ferrite_core::msg::CalFault::{LevelOrder, PaCurve};
+    (t.cal == CalState::Ok && matches!(t.cal_fault, PaCurve | LevelOrder)).then_some(t.cal_at[0])
+}
+
 /// [`cal_text`], with CAL-20.4's "couldn't check" apart from a sector that changed.
 pub(crate) fn cal_label(t: &ferrite_core::msg::SelfTest) -> &'static str {
     if t.cal == CalState::CrcMismatch && t.cal_fault == ferrite_core::msg::CalFault::Unchecked {
         return "Not checked: locked";
+    }
+    if let Some(row) = band_locked(t) {
+        return ["UHF TX locked", "VHF TX locked", "200 MHz TX locked", "HF TX locked"][row as usize % 4]; // CAL-6.1
     }
     cal_text(t.cal)
 }

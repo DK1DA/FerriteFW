@@ -657,6 +657,14 @@ impl View for TxRefused {
                 (a, more) = match (t.mcu_ok, t.cal) {
                     (false, _) => (Buf::from(b"Transmit is locked: the MCU isn't the one this radio has.".as_slice()), b"The check:".as_slice()),
                     (_, CalState::Blank) => (Buf::from(b"Transmit is locked: the calibration is blank.".as_slice()), b"The check:".as_slice()),
+                    // CAL-6.1: the sector stands; this band's curves failed a check
+                    (_, CalState::Ok) if super::groups::band_locked(t).is_some() => {
+                        let mut w = Buf::<40>::new();
+                        super::groups::cal_fault_text(t.cal_fault, t.cal_at, &mut w);
+                        let mut x = Buf::<96>::new();
+                        let _ = uwrite!(x, "Transmit is locked on this band: its calibration failed a check ({}).", super::lists::Txt(w.as_bytes()));
+                        (x, b"The other bands transmit. The check:".as_slice())
+                    }
                     (_, CalState::Invalid) => {
                         // CAL-20.4: which check, and where
                         let mut w = Buf::<40>::new();
