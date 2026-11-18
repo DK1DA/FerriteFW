@@ -382,9 +382,13 @@ impl Radio {
                 }
             }
         }
-        // Battery Save: anything open or scanning keeps the receivers awake. Broadcast doesn't (BCR-19): the
-        // BK4829s keep the level's cycle for the slots watched, and the sleep step leaves the SI4732 playing.
-        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning);
+        // Battery Save: anything open or scanning keeps the receivers awake. So does broadcast FM while a slot other
+        // than the broadcast slot needs a BK4829 (BCR-19, decision 413): each BK4829 wake and sleep clicked in the
+        // broadcast (every 300 ms once the 10 s hold after a key ran out), as stock avoids by skipping Battery Save in
+        // its broadcast modes. With no such slot the BK4829s stay asleep for the whole broadcast: nothing switches.
+        let broadcast = self.si.mode().is_some() && self.hf.is_none() && self.bcast_slot.is_some();
+        let others = (self.watch_set | 1 << self.active) & !self.bcast_slot.map_or(0, |b| 1 << b) != 0;
+        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning) || broadcast && others;
         // SQL-8: the squelch opening or closing holds the receiver on for 10 s.
         let a = self.save.squelch(now_ms(), self.live.slots.iter().any(|s| s.squelch_open));
         self.apply(a).await;
