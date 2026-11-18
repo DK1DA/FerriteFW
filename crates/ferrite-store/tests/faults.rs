@@ -444,3 +444,58 @@ fn ssb_patch_with_the_chip_gone() {
         assert_eq!(mount(g).ssb_check(), Ok(None), "record byte {off} damaged");
     }
 }
+
+/// CAL-20, CAL-20.2: a calibration sector changed since install locks transmit (CAL-7); the owner's "use it as it is now"
+/// appends its CRC and the check passes again, across a remount; a sector failing CAL-6 is never accepted; a second
+/// change locks again and can be accepted again; a format clears the list with the header.
+#[test]
+fn accepting_a_changed_calibration() {
+    use ferrite_core::layout::CALIBRATION;
+    use ferrite_core::txcal::{testing::sector, CalCrc};
+    let mut f = populated();
+    let put = |f: &mut SimFlash, b: &[u8]| {
+        let at = SimFlash::at(CALIBRATION.start);
+        f.mem[at..at + b.len()].copy_from_slice(b);
+    };
+    let good = sector([0x81, 0x87, 0x8E, 0x93, 0x98, 0xA0, 0xBB]);
+    put(&mut f, &good);
+    let s = mount(f);
+    assert_eq!(block(s.check_cal()), CalCrc::Recorded);
+    // another firmware rewrote a byte (a valid sector still)
+    let mut f = unmount(s);
+    let mut changed = good;
+    changed[0x10] = changed[0x10].wrapping_add(1);
+    put(&mut f, &changed);
+    let s = mount(f);
+    assert_eq!(block(s.check_cal()), CalCrc::Changed);
+    assert_eq!(s.take_cal_accepted(), None);
+    assert!(s.request(Op::AcceptCal));
+    assert_eq!(s.take_cal_accepted(), Some(true), "the firmware reads it again");
+    assert_eq!(block(s.check_cal()), CalCrc::Same);
+    let s = mount(unmount(s));
+    assert_eq!(block(s.check_cal()), CalCrc::Same, "kept across a restart");
+    // a sector that fails CAL-6 (a sub-tone gain over 0x7F; a curve fault locks its band only, CAL-6.1) stays locked
+    let mut f = unmount(s);
+    let mut bad = changed;
+    bad[0x211] = 0x90;
+    put(&mut f, &bad);
+    let s = mount(f);
+    assert_eq!(block(s.check_cal()), CalCrc::Changed);
+    assert!(!block(s.accept_cal()));
+    assert_eq!(s.take_cal_accepted(), Some(false), "the firmware says it is invalid");
+    assert_eq!(block(s.check_cal()), CalCrc::Changed);
+    // changed again, accepted again: the newest entry counts
+    let mut f = unmount(s);
+    let mut again = good;
+    again[0x20] = again[0x20].wrapping_add(1);
+    put(&mut f, &again);
+    let s = mount(f);
+    assert_eq!(block(s.check_cal()), CalCrc::Changed);
+    assert!(block(s.accept_cal()));
+    assert_eq!(block(s.check_cal()), CalCrc::Same);
+    // the original sector again: changed from the accepted one
+    let mut f = unmount(s);
+    put(&mut f, &good);
+    let s = mount(f);
+    assert_eq!(block(s.check_cal()), CalCrc::Changed);
+}

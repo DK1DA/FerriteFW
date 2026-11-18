@@ -919,6 +919,7 @@ impl Data for Sample {
                 self.aprs.clear_heard();
                 true
             }
+            Op::AcceptCal => true, // the sample has no calibration lock
             Op::Wipe => {
                 self.chans.iter().for_each(|c| c.set(None));
                 self.zones.set(0);

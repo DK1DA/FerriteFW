@@ -243,7 +243,7 @@ impl App {
         let target = match t {
             Tune::Channel(num) => match store.by_num(num) {
                 None => return Err("no channel by that number"),
-                Some((c, _)) if c.is_hf() => return Err("an HF channel: HF mode recalls it (CHAN-26)"),
+                Some((c, _)) if c.hf_mode_only() => return Err("below 18 MHz: HF mode recalls it (CHAN-26)"),
                 Some(found) => Some(found),
             },
             Tune::Step(_) if sl.on_channel() && self.zlen(store, sl.zone) == 0 => return Err("the slot's zone is empty"),

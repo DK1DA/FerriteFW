@@ -59,8 +59,53 @@ fn every_refusal_has_a_reason_and_maybe_a_fix() {
     t.shows("It transmits again in a few minutes.");
     refused(&mut t, Refusal::RelayMismatch);
     t.shows("Keep RX and TX on the same side of 64 MHz.");
+    t.dev.selftest.mcu_ok = true;
     refused(&mut t, Refusal::Locked);
     t.shows("Which check failed:");
+}
+
+/// CAL-20.1 (issue #40): the lock names the check that failed, as About does: the MCU, a blank or invalid
+/// calibration, or one changed since Ferrite first read it (with how to use it as it is).
+#[test]
+fn the_lock_names_its_check() {
+    use ferrite_core::msg::CalState;
+    let mut t = T::ready();
+    t.dev.selftest.mcu_ok = true;
+    for (cal, text) in [
+        (CalState::Blank, "the calibration is blank."),
+        (CalState::Invalid, "a calibration value failed its check (Passed)."),
+        (CalState::CrcMismatch, "the calibration changed since Ferrite first read it."),
+    ] {
+        t.dev.selftest.cal = cal;
+        t.app.screen = Screen::Home;
+        t.draw();
+        refused(&mut t, Refusal::Locked);
+        t.shows(text);
+    }
+    t.shows("OK on About uses it as it is, if it checks out:");
+    // CAL-20.4: which value, and the store not ready
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Invalid, ferrite_core::msg::CalFault::Windows, [0; 3]);
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("(TX windows).");
+    // CAL-6.1: a band's curves: the sector valid, that band locked, the rest transmits
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Ok, ferrite_core::msg::CalFault::LevelOrder, [3, 1, 0]);
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("locked on this band");
+    t.shows("The other bands transmit.");
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault) = (CalState::CrcMismatch, ferrite_core::msg::CalFault::Unchecked);
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("couldn't be checked");
+    t.dev.selftest.mcu_ok = false;
+    t.app.screen = Screen::Home;
+    t.draw();
+    refused(&mut t, Refusal::Locked);
+    t.shows("the MCU isn't the one this radio has.");
 }
 
 /// TX-20.1: out of band, the reason names the nearest band with its edges (as short as they go: "24.89"), and

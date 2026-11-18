@@ -546,7 +546,7 @@ fn offset_cell(app: &mut App) {
 /// Hold 0: the active slot to the home channel, in channel mode, from VFO or any zone (CHAN-19, CHAN-20).
 fn home_channel(app: &mut App, store: &impl ChannelStore) {
     match app.set.home_ch.and_then(|n| store.by_num(n)) {
-        Some((c, _)) if c.is_hf() => super::hf::recall(app, &c), // CHAN-26
+        Some((c, _)) if c.hf_mode_only() => super::hf::recall(app, &c), // CHAN-26
         Some((c, pos)) => {
             let a = app.active as usize;
             let s = &mut app.slots[a];

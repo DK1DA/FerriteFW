@@ -345,6 +345,9 @@ impl Dtmf {
 /// Requests to the record's owner. `request` answers false when refused (no such record, queue full).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Op {
+    /// CAL-20: use the calibration sector as it is now (CAL-7 locked transmit for a changed one): accepted only when
+    /// it passes every CAL-6 check.
+    AcceptCal,
     /// The event log: one event read, all read, everything gone.
     Read(u16),
     ReadAll,

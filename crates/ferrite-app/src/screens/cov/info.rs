@@ -96,3 +96,60 @@ fn si4732_revision() {
     let s = page(&mut t, Page::About);
     assert!(s.contains("rev ?"), "an unprintable byte: {s}");
 }
+
+/// CAL-20.1, CAL-20.2 (issue #40): a calibration changed since install shows "Changed" (not "Valid"), and About's OK asks to
+/// use it as it is; OK there sends the request to the store and says it is checking. Without the change, OK on
+/// About does nothing.
+#[test]
+fn accepting_a_changed_calibration() {
+    use crate::screens::confirm::{Ask, Confirm};
+    let mut t = T::ready();
+    healthy(&mut t);
+    page(&mut t, Page::About);
+    t.reads("hints \"<>\" \"System\" \"BACK\" \"Back\"");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen, Screen::Info(_)), "nothing to accept");
+    t.dev.selftest.cal = CalState::CrcMismatch;
+    let s = page(&mut t, Page::About);
+    assert!(s.contains("Changed: TX locked") && s.contains("Locked: calibration"), "{s}");
+    t.reads("hints \"OK\" \"Calibration\"");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen, Screen::Confirm(Confirm { ask: Ask::AcceptCal, .. })));
+    t.draw();
+    t.shows("Use the calibration as it is?");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen, Screen::Info(Info { page: Page::About })), "back on About");
+    assert_eq!(t.toast(), "Calibration / checking");
+}
+
+/// CAL-20.4: the Calibration page names the check that failed and where; a CRC that couldn't be checked reads
+/// "Not checked", not "Changed", and About offers no OK for it.
+#[test]
+fn calibration_page_names_the_check() {
+    use ferrite_core::msg::CalFault;
+    let mut t = T::ready();
+    healthy(&mut t);
+    assert!(page(&mut t, Page::Calibration).contains("Passed"));
+    t.dev.selftest.cal = CalState::Invalid;
+    for (f, at, text) in [
+        (CalFault::LevelOrder, [1, 5, 0], "Power order: VHF 5"),
+        (CalFault::PaCurve, [3, 3, 0], "Power byte: HF 3, Low"),
+        (CalFault::Windows, [0; 3], "TX windows"),
+        (CalFault::Trim, [0; 3], "Crystal trim"),
+        (CalFault::ToneGain, [0; 3], "Sub-tone gain"),
+    ] {
+        (t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (f, at);
+        let s = page(&mut t, Page::Calibration);
+        assert!(s.contains(text), "{f:?}: {s}");
+    }
+    // CAL-6.1: a band's curve fault: the sector Valid, that band locked, About says which
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault, t.dev.selftest.cal_at) = (CalState::Ok, CalFault::LevelOrder, [3, 1, 0]);
+    let s = page(&mut t, Page::Calibration);
+    assert!(s.contains("HF TX locked") && s.contains("Power order: HF 1"), "{s}");
+    assert!(page(&mut t, Page::About).contains("HF locked"));
+    (t.dev.selftest.cal, t.dev.selftest.cal_fault) = (CalState::CrcMismatch, CalFault::Unchecked);
+    let s = page(&mut t, Page::Calibration);
+    assert!(s.contains("Store not ready") && !s.contains("Changed"), "{s}");
+    page(&mut t, Page::About);
+    assert!(!t.app.cal_changed, "nothing to accept");
+}

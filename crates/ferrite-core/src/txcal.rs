@@ -137,7 +137,13 @@ pub struct TxCal {
     tone: [u8; 2],
     /// CAL-12: the factory crystal trim k (0 for none), for the transmit frequency ([`TxCal::tx_word`]).
     trim: i16,
+    /// CAL-6.1 (decision 412, issue #40): the band rows whose curves failed a check, a bit per [`ROW_NAMES`] row:
+    /// transmit is locked on that band only ([`TxCal::pa`]).
+    bad: u8,
 }
+
+/// CAL-6.1: the band rows the curve checks cover, as [`TxCal::curve_fault_at`] and the `bad` bits number them.
+pub const ROW_NAMES: [&str; 4] = ["UHF", "VHF", "200 MHz", "HF"];
 
 /// TONE-16's step around the calibration's sub-tone level: stock's "high" adds 0x0F to the CTCSS byte and 0x14 to
 /// the DCS byte (0x0800A490, 0x0800D3EC, when its 0x20000C34+0x1A flag is set); Ferrite's Low takes the same off.
@@ -168,7 +174,7 @@ impl TxCal {
         if tone.iter().any(|&g| g > 0x7F) {
             return Err(Fault::ToneGain);
         }
-        let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4], tone, trim: valid_trim(b) };
+        let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4], tone, trim: valid_trim(b), bad: 0 };
         for (l, level) in c.pa.iter_mut().enumerate() {
             for (r, row) in level.iter_mut().enumerate() {
                 let at = 0x40 * l + 0x10 * r;
@@ -179,20 +185,11 @@ impl TxCal {
             let at = 0x190 + 0x10 * l;
             row.copy_from_slice(&b[at..at + 16]);
         }
-        // The entries the lookup can reach where transmit is allowed: UHF 0-12, VHF 0-15, 200-300 0-11 (200-260
-        // MHz), HF 0-11, every level.
-        let bad = |v: &[u8]| v.iter().any(|&x| x == 0 || x == 0xFF);
-        let reached = c.pa.iter().any(|l| bad(&l[UHF][..13]) || bad(&l[VHF]) || bad(&l[R200][..12]))
-            || c.hf.iter().any(|r| bad(&r[..12]));
-        if reached {
-            return Err(Fault::PaCurve);
-        }
-        // TX-14, CAL-6 (TX audit F8): Low < Mid < High at every entry those rows reach (stock's order: 0 High).
-        let rising = |a: &[u8], b: &[u8], n: usize| a[..n].iter().zip(&b[..n]).all(|(x, y)| x < y);
-        let ordered = |row: usize, n: usize| rising(&c.pa[2][row], &c.pa[1][row], n) && rising(&c.pa[1][row], &c.pa[0][row], n);
-        if !ordered(UHF, 13) || !ordered(VHF, 16) || !ordered(R200, 12) || !rising(&c.hf[2], &c.hf[1], 12) || !rising(&c.hf[1], &c.hf[0], 12) {
-            return Err(Fault::LevelOrder);
-        }
+        // CAL-6.1 (decision 412, issue #40): a curve the bands reach with a 0x00 or 0xFF entry (CAL-10), or with Low
+        // not below High, locks transmit on its band only; the rest of the radio transmits. It locked every band:
+        // a radio whose HF High row was tuned below its flat Mid (8 bytes, a legitimate sector) couldn't key on 2 m.
+        // Mid isn't checked against either: a Mid above High only gives that level more drive.
+        c.bad = Self::curve_faults(b);
         if b[WINDOWS_AT[0]] == 0xFF {
             return Err(Fault::Windows);
         }
@@ -200,6 +197,62 @@ impl TxCal {
             *w = window(&b[at..at + 5])?.unwrap_or((0, 0));
         }
         Ok(c)
+    }
+
+    /// CAL-6.1: the reached entries per row (row id, the sector's offset of its High row, the step between levels,
+    /// entries reached): UHF 0-12, VHF 0-15, 200-300 0-11 (200-260 MHz), HF 0-11. Stock's order: level 0 is High.
+    const ROWS: [(u8, usize, usize, usize); 4] = [(0, 0x10 * UHF, 0x40, 13), (1, 0x10 * VHF, 0x40, 16), (2, 0x10 * R200, 0x40, 12), (3, 0x190, 0x10, 12)];
+
+    /// CAL-6.1, CAL-20.4: each row's first curve fault: the fault ([`Fault::PaCurve`], an erased or unprogrammed
+    /// byte; [`Fault::LevelOrder`], Low not below High), the entry and the level (0 Low, 1 Mid, 2 High; 0 for the
+    /// order).
+    fn row_fault(b: &[u8; READ_LEN], base: usize, step: usize, n: usize) -> Option<(Fault, u8, u8)> {
+        let at = |lvl: usize, i: usize| b[base + step * (2 - lvl) + i];
+        for i in 0..n {
+            for lvl in 0..3 {
+                let v = at(lvl, i);
+                if v == 0 || v == 0xFF {
+                    return Some((Fault::PaCurve, i as u8, lvl as u8));
+                }
+            }
+        }
+        (0..n).find(|&i| at(0, i) >= at(2, i)).map(|i| (Fault::LevelOrder, i as u8, 0))
+    }
+
+    fn curve_faults(b: &[u8; READ_LEN]) -> u8 {
+        Self::ROWS.iter().filter(|&&(_, base, step, n)| Self::row_fault(b, base, step, n).is_some()).fold(0, |m, &(id, ..)| m | 1 << id)
+    }
+
+    /// CAL-20.4: the first curve fault and where: the fault, then the row ([`ROW_NAMES`]), the entry and the level.
+    /// None for curves without one.
+    pub fn curve_fault_at(b: &[u8; READ_LEN]) -> Option<(Fault, [u8; 3])> {
+        Self::ROWS.iter().find_map(|&(id, base, step, n)| Self::row_fault(b, base, step, n).map(|(f, i, l)| (f, [id, i, l])))
+    }
+
+    /// CAL-6.1: the band rows locked by a curve fault, a bit per [`ROW_NAMES`] row.
+    pub fn locked_rows(&self) -> u8 {
+        self.bad
+    }
+
+    /// CAL-6.1: the row `f` keys on, if the curve checks cover it.
+    fn row_of(f: Freq10) -> Option<u8> {
+        match f / 100_000 {
+            400..560 => Some(0),
+            130..200 => Some(1),
+            200..300 => Some(2),
+            18..64 => Some(3),
+            _ => None,
+        }
+    }
+
+    /// TX-11, CAL-6.1: the PA drive for `f` at `power`, or why not: [`Refusal::Locked`] on a band whose curves
+    /// failed a check (the rest of the radio transmits), [`Refusal::NotCalibrated`] outside every row or on an
+    /// unprogrammed entry ([`TxCal::dac`]).
+    pub fn pa(&self, f: Freq10, power: u8) -> Result<u8, crate::txplan::Refusal> {
+        if Self::row_of(f).is_some_and(|r| self.bad & 1 << r != 0) {
+            return Err(crate::txplan::Refusal::Locked);
+        }
+        self.dac(f, power).ok_or(crate::txplan::Refusal::NotCalibrated)
     }
 
     /// CAL-11, TX-1: `f` lies in one of this radio's enabled TX windows, low <= f < high as stock checks it
@@ -308,13 +361,14 @@ impl Default for Gauge {
     }
 }
 
-#[cfg(test)]
-mod tests {
+/// A sector that passes every check (CAL-6), for tests here and in the store's (CAL-20); unused in the firmware.
+#[doc(hidden)]
+pub mod testing {
     use super::*;
 
     /// The factory-default calibration's tuning block and TX windows (0xF210-0xF24F; identical on both test
     /// radios): 136-174, 400-520, 200-260 and 330-400 MHz, all enabled; no crystal trim (byte 11 0xFF).
-    const FACTORY_F210: [u8; 0x40] = [
+    pub const FACTORY_F210: [u8; 0x40] = [
         0x37, 0x46, 0x3e, 0x1f, 0x1f, 0x28, 0x2a, 0x2a, 0x2a, 0x01, 0x08, 0xff, 0x00, 0x00, 0xff, 0xff, //
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, //
         0x01, 0x01, 0x36, 0x01, 0x74, 0x01, 0x04, 0x00, 0x05, 0x20, 0x01, 0x02, 0x00, 0x02, 0x60, 0xff, //
@@ -323,17 +377,17 @@ mod tests {
 
     /// The test sector's PA curve entry for stock's level `l` (0 High), row `r`, index `i`: High above Mid above
     /// Low at every index, as a real sector (TX-14).
-    fn curve(l: usize, r: usize, i: usize) -> u8 {
+    pub fn curve(l: usize, r: usize, i: usize) -> u8 {
         (180 - l * 40 + r * 4 + i) as u8
     }
 
     /// The HF rows' entries, the same way.
-    fn hf_curve(l: usize, i: usize) -> u8 {
+    pub fn hf_curve(l: usize, i: usize) -> u8 {
         (140 - l * 40 + i) as u8
     }
 
     /// A sector with the curves above, the gauge given, and the factory-default tuning block and windows.
-    fn sector(gauge: [u8; 7]) -> [u8; READ_LEN] {
+    pub fn sector(gauge: [u8; 7]) -> [u8; READ_LEN] {
         let mut b = [0x55u8; READ_LEN];
         for l in 0..3 {
             for r in 0..4 {
@@ -350,9 +404,67 @@ mod tests {
         b[0x210..0x250].copy_from_slice(&FACTORY_F210);
         b
     }
+}
 
-    /// TX-13, CAL-4, CAL-5: calibration is checked, never replaced: an erased sector or a hole in a used row locks
-    /// transmit instead of falling back to built-in curves.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use super::testing::{curve, hf_curve, sector};
+
+    /// CAL-20.4: where a curve check failed: an erased byte in HF's Mid row, then Low not below High on VHF.
+    #[test]
+    fn curve_fault_located() {
+        let mut b = sector(GAUGE_DEFAULT);
+        assert_eq!(TxCal::curve_fault_at(&b), None);
+        b[0x190 + 0x10 + 3] = 0xFF; // HF, stock's level 1 (Mid), entry 3
+        assert_eq!(TxCal::curve_fault_at(&b), Some((Fault::PaCurve, [3, 3, 1])));
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x80 + 0x10 * VHF + 5] = b[0x10 * VHF + 5]; // VHF entry 5: Low equal to High
+        assert_eq!(TxCal::curve_fault_at(&b), Some((Fault::LevelOrder, [1, 5, 0])));
+    }
+
+    /// CAL-6.1 (issue #40, decision 412): the reporter's sector: our factory-default one with its HF High row tuned
+    /// below the flat Mid (8 bytes). It locked every band; it's valid now, every band transmits, HF included.
+    #[test]
+    fn a_tuned_hf_row_is_valid() {
+        let mut b = sector(GAUGE_DEFAULT);
+        for (i, v) in [145u8, 155, 172, 188, 165, 145, 110, 105].into_iter().enumerate() {
+            b[0x190 + 1 + i] = v; // High HF, entries 1-8
+            b[0x190 + 0x10 + 1 + i] = 150; // Mid flat at 150: above High at entries 1, 6, 7, 8
+            b[0x190 + 0x20 + 1 + i] = 100; // Low flat at 100
+        }
+        let c = TxCal::read(&b).expect("valid");
+        assert_eq!(c.locked_rows(), 0);
+        assert_eq!(TxCal::curve_fault_at(&b), None);
+        for f in [mhz(21), mhz(28), mhz(52), mhz(146), mhz(446)] {
+            assert!(c.pa(f, 2).is_ok(), "{f}");
+        }
+    }
+
+    /// CAL-6.1: a curve fault locks its band only: an erased HF byte refuses 28 MHz as Locked and keys 2 m and
+    /// 70 cm; Low above High on VHF locks 2 m only.
+    #[test]
+    fn a_curve_fault_locks_its_band_only() {
+        use crate::txplan::Refusal;
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x190 + 0x20 + 2] = 0xFF; // Low HF entry 2
+        let c = TxCal::read(&b).expect("the sector stands");
+        assert_eq!(c.locked_rows(), 1 << 3);
+        assert_eq!(c.pa(mhz(28), 2), Err(Refusal::Locked));
+        assert_eq!(c.pa(mhz(28), 0), Err(Refusal::Locked), "every level on that band");
+        assert!(c.pa(mhz(146), 2).is_ok() && c.pa(mhz(446), 2).is_ok());
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x80 + 0x10 * VHF + 7] = b[0x10 * VHF + 7] + 1; // Low above High at VHF entry 7
+        let c = TxCal::read(&b).expect("the sector stands");
+        assert_eq!(c.locked_rows(), 1 << 1);
+        assert_eq!(c.pa(mhz(146), 2), Err(Refusal::Locked));
+        assert!(c.pa(mhz(446), 2).is_ok() && c.pa(mhz(28), 2).is_ok());
+        assert_eq!(c.pa(mhz(100), 2), Err(Refusal::NotCalibrated), "outside every row, as before");
+    }
+
+    /// TX-13, CAL-4, CAL-5, CAL-6.1: calibration is checked, never replaced: an erased sector locks transmit, a hole
+    /// in a used row locks its band, instead of falling back to built-in curves.
     #[test]
     fn blank_and_holes_refuse() {
         let mut b = sector(GAUGE_DEFAULT);
@@ -361,24 +473,25 @@ mod tests {
         assert_eq!(TxCal::parse(&b), None, "CAL-5: an erased sector");
         let mut b = sector(GAUGE_DEFAULT);
         b[0x40 + 0x10 * VHF + 5] = 0xFF;
-        assert_eq!(TxCal::parse(&b), None, "a hole in the Mid VHF row");
+        let c = TxCal::parse(&b).expect("CAL-6.1: a hole locks its band, not the sector");
+        assert_eq!(c.pa(mhz(146), 1), Err(crate::txplan::Refusal::Locked), "a hole in the Mid VHF row: 2 m locked");
         let mut b = sector(GAUGE_DEFAULT);
         b[UHF * 0x10 + 14] = 0xFF;
         assert!(TxCal::parse(&b).is_some(), "UHF entries past 520 MHz aren't reached on amateur bands");
     }
 
-    /// TX-14, CAL-6, TX-15, CAL-7 (TX audit F8): the curves must rise Low < Mid < High at every reached entry (the
-    /// factory-default curves do, by 30 or more); the MCU check and the CRC since install gate the result.
+    /// TX-14, CAL-6.1, TX-15, CAL-7 (TX audit F8): Low below High at every reached entry, its band locked
+    /// otherwise (Mid unchecked); the MCU check and the CRC since install gate the result.
     #[test]
     fn level_order_mcu_and_crc() {
         let b = sector(GAUGE_DEFAULT);
         assert!(TxCal::read(&b).is_ok());
         let mut o = b;
-        o[0x40 + 0x10 * VHF + 7] = o[0x10 * VHF + 7]; // Mid = High at VHF entry 7
-        assert_eq!(TxCal::read(&o).err(), Some(Fault::LevelOrder));
+        o[0x40 + 0x10 * VHF + 7] = o[0x10 * VHF + 7]; // Mid = High at VHF entry 7: fine
+        assert_eq!(TxCal::read(&o).map(|c| c.locked_rows()), Ok(0));
         let mut o = b;
-        o[0x190 + 0x20 + 3] = 0xF0; // Low HF (stock's third row) above Mid at entry 3
-        assert_eq!(TxCal::read(&o).err(), Some(Fault::LevelOrder));
+        o[0x190 + 0x20 + 3] = 0xFE; // Low HF (stock's third row) above High at entry 3
+        assert_eq!(TxCal::read(&o).map(|c| c.locked_rows()), Ok(1 << 3));
         let mut o = b;
         o[0x80 + 0x10 * UHF + 14] = 0xFE; // past 520 MHz: not reached on the amateur bands
         assert!(TxCal::read(&o).is_ok());
@@ -534,10 +647,10 @@ mod tests {
         assert_eq!(band_power(mhz(446), 1), 1, "70 cm too");
         let mut b = sector(GAUGE_DEFAULT);
         b[0x80 + 0x10 * R200 + 4] = 0xFF;
-        assert_eq!(TxCal::read(&b).err(), Some(Fault::PaCurve), "a hole in Low 200-300 at 220 MHz");
+        assert_eq!(TxCal::read(&b).map(|c| c.locked_rows()), Ok(1 << 2), "a hole in Low 200-300 at 220 MHz: 1.25 m locked");
         let mut b = sector(GAUGE_DEFAULT);
-        b[0x40 + 0x10 * R200 + 4] = b[0x10 * R200 + 4];
-        assert_eq!(TxCal::read(&b).err(), Some(Fault::LevelOrder), "Mid = High at 220 MHz");
+        b[0x80 + 0x10 * R200 + 4] = b[0x10 * R200 + 4];
+        assert_eq!(TxCal::read(&b).map(|c| c.locked_rows()), Ok(1 << 2), "Low = High at 220 MHz");
         let mut b = sector(GAUGE_DEFAULT);
         b[0x10 * R200 + 12] = 0xFF;
         assert!(TxCal::read(&b).is_ok(), "260 MHz up isn't reached");

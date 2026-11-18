@@ -133,6 +133,56 @@ async fn send_shutdown(app: &mut App, held: &mut Option<RadioCmd>) {
 /// 35): the squelch tables (SQL-1, every build), the PA curves, TX windows and battery gauge (the `tx` build; the
 /// cable log says why transmit is locked, if it is), and the gauge for the percentage (PWR-22). Its own frame
 /// (never inlined), so the sector's copy isn't held in the UI task's frame for the whole power-on (SBAR-23).
+/// CAL-20 (issue #40): the transmit calibration's verdict for About and the refusal, as [`cal_code`] encodes a
+/// [`ferrite_core::msg::CalState`]. About said "Valid" whenever the sector wasn't blank, while the gate below had
+/// locked transmit (a sector changed since install): the owner saw "Ready" and couldn't transmit.
+static CAL_VERDICT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+/// CAL-20.4: the check that failed ([`ferrite_core::msg::CalFault`] as a byte) and where, bytes 1-3.
+static CAL_FAULT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// CAL-20.4: the failed check and where, from [`CAL_FAULT`].
+fn cal_fault() -> (ferrite_core::msg::CalFault, [u8; 3]) {
+    use ferrite_core::msg::CalFault::*;
+    let v = CAL_FAULT.load(Relaxed).to_le_bytes();
+    let f = match v[0] {
+        1 => PaCurve,
+        2 => LevelOrder,
+        3 => Windows,
+        4 => Trim,
+        5 => ToneGain,
+        6 => Unchecked,
+        _ => None,
+    };
+    (f, [v[1], v[2], v[3]])
+}
+
+#[cfg(feature = "tx")]
+fn cal_code(c: ferrite_core::msg::CalState) -> u8 {
+    use ferrite_core::msg::CalState::*;
+    match c {
+        Unknown => 0,
+        Ok => 1,
+        Blank => 2,
+        Invalid => 3,
+        CrcMismatch => 4,
+    }
+}
+
+/// The calibration's state for About: the gate's verdict in a transmit build, the boot check's otherwise.
+fn cal_state() -> ferrite_core::msg::CalState {
+    use ferrite_core::msg::CalState::*;
+    if cfg!(feature = "tx") {
+        return match CAL_VERDICT.load(Relaxed) {
+            1 => Ok,
+            2 => Blank,
+            3 => Invalid,
+            4 => CrcMismatch,
+            _ => Unknown,
+        };
+    }
+    if CHECK_STATE[CHECK_CAL as usize].load(Relaxed) == PASSED { Ok } else { Blank }
+}
+
 #[inline(never)]
 fn read_calibration(store: &store::Store, flash: bool, cal_ok: bool, mcu_ok: bool, cal_crc: ferrite_core::txcal::CalCrc) -> ferrite_core::txcal::Gauge {
     use ferrite_core::sqcal::{self, SqCal};
@@ -159,6 +209,30 @@ fn read_calibration(store: &store::Store, flash: bool, cal_ok: bool, mcu_ok: boo
                 Fault::Changed => b"tx calibration: locked, the sector changed since recorded (or unchecked)",
             });
         }
+        // CAL-20.4: what About shows, the sector's own checks first (a sector failing one and changed too reads
+        // Invalid, with which check and where); the MCU shows on its own row.
+        use ferrite_core::msg::CalState;
+        use ferrite_core::txcal::CalCrc;
+        let sector = if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) };
+        let (state, mut fault) = match (&sector, cal_crc) {
+            (Err(Fault::Blank), _) => (CalState::Blank, 0),
+            (Err(Fault::Windows), _) => (CalState::Invalid, 3),
+            (Err(Fault::Trim), _) => (CalState::Invalid, 4),
+            (Err(Fault::ToneGain), _) => (CalState::Invalid, 5),
+            (Err(_), _) => (CalState::Invalid, 0),
+            (Ok(_), CalCrc::Changed) => (CalState::CrcMismatch, 0),
+            (Ok(_), CalCrc::Unknown) => (CalState::CrcMismatch, 6),
+            (Ok(_), CalCrc::Same | CalCrc::Recorded) => (CalState::Ok, 0),
+        };
+        // CAL-6.1: a curve fault locks its band only: the sector stands (Valid), the fault and where for About
+        let mut at = [0; 3];
+        if fault == 0 && sector.is_ok() {
+            if let Some((f, w)) = TxCal::curve_fault_at(&b) {
+                (fault, at) = (if f == Fault::PaCurve { 1 } else { 2 }, w);
+            }
+        }
+        CAL_FAULT.store(u32::from_le_bytes([fault, at[0], at[1], at[2]]), Relaxed);
+        CAL_VERDICT.store(cal_code(state), Relaxed);
         crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));
     }
     #[cfg(not(feature = "tx"))]
@@ -509,7 +583,8 @@ pub async fn task() {
         t.si4732 = CHECK_STATE[crate::tasks::CHECK_SI as usize].load(Relaxed) == PASSED;
         t.si_rev = core::array::from_fn(|i| crate::tasks::SI_REV[i].load(Relaxed)); // SELF-5
         t.ssb_patch = ssb_ok;
-        t.cal = if CHECK_STATE[CHECK_CAL as usize].load(Relaxed) == PASSED { ferrite_core::msg::CalState::Ok } else { ferrite_core::msg::CalState::Blank };
+        t.cal = cal_state(); // CAL-20: the gate's verdict, not only "not blank"
+        (t.cal_fault, t.cal_at) = cal_fault(); // CAL-20.4
     }
     let mut live_rx = LIVE.receiver().unwrap();
     let mut live = LiveAll::default();
@@ -567,6 +642,19 @@ pub async fn task() {
         macro_rules! sec { ($i:expr) => {{ let c = crate::hal::time::cycles(); PASS[$i].fetch_add(c.wrapping_sub(sec_c), Relaxed); sec_c = c; }} }
         #[cfg(not(feature = "bench"))]
         macro_rules! sec { ($i:expr) => {} }
+        // CAL-20: the owner accepted the calibration as it is now: checked again, the Radio task given it, About told.
+        match store.take_cal_accepted() {
+            Some(true) => {
+                let crc = own_frame(store.check_cal()).await;
+                read_calibration(store, flash.is_some(), cal_ok, mcu_ok, crc);
+                dev.selftest.cal = cal_state();
+                (dev.selftest.cal_fault, dev.selftest.cal_at) = cal_fault();
+                bringup::line(b"calibration accepted by the owner");
+            }
+            // it fails a CAL-6 check: invalid, not only changed, and transmit stays locked
+            Some(false) => dev.selftest.cal = ferrite_core::msg::CalState::Invalid,
+            None => {}
+        }
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
             bringup::line(b"log off: the terminal has the cable");

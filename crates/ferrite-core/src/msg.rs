@@ -1045,6 +1045,26 @@ pub enum CalState {
     CrcMismatch,
 }
 
+/// CAL-20.4: which check locked transmit, for the Calibration page and the refusal ([`SelfTest::cal_at`] says where
+/// in the curves for the two curve checks).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CalFault {
+    #[default]
+    None,
+    /// A PA curve entry the bands reach is 0x00 or 0xFF.
+    PaCurve,
+    /// Low isn't below Mid, or Mid below High, at an entry the bands reach.
+    LevelOrder,
+    /// The TX windows blank or invalid.
+    Windows,
+    /// The factory crystal trim over ±20 ppm.
+    Trim,
+    /// A sub-tone gain over 0x7F.
+    ToneGain,
+    /// The CRC couldn't be checked: the store wasn't mounted (CAL-7 locks then too).
+    Unchecked,
+}
+
 /// What the self-test found, for About (SELF-5) and the Status page.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SelfTest {
@@ -1056,6 +1076,10 @@ pub struct SelfTest {
     pub flash_id: u32,
     pub flash_mb: u8,
     pub cal: CalState,
+    /// CAL-20.4: the check that failed, and for a curve check where: the row (0 UHF, 1 VHF, 2 200 MHz, 3 HF),
+    /// the entry (0-15) and the level (0 Low, 1 Mid, 2 High).
+    pub cal_fault: CalFault,
+    pub cal_at: [u8; 3],
     /// BK4829s that answered, a bit per chip; the SI4732 answered.
     pub chips: u8,
     pub si4732: bool,

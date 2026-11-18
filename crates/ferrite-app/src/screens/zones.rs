@@ -103,6 +103,46 @@ impl NearCache {
     }
 }
 
+/// The Nearby view's rows (CHAN-15): the numbers of the nearest [`NEAR_MAX`] listed channels with a position,
+/// nearest first, and what they were found for ([`near_key`]). Found in one pass when the key changes, never per
+/// draw: the view read its rows again on every redraw, a pass over the channels each, and a full radio (4000
+/// channels with positions) spent seconds a frame (sim/tests/limits.rs). 72 bytes.
+#[derive(Clone, Copy, Debug)]
+pub struct NearList {
+    key: u32,
+    pub n: u8,
+    pub nums: [u16; NEAR_MAX],
+}
+
+/// The Nearby view's length: the nearest this many.
+pub const NEAR_MAX: usize = 32;
+
+impl NearList {
+    pub const NONE: NearList = NearList { key: 0, n: 0, nums: [0; NEAR_MAX] };
+
+    /// The list for the fix and records now, found again only when they changed.
+    pub(crate) fn fresh(&mut self, store: &impl ChannelStore, hidden: bool) -> NearList {
+        let Some(here) = here(store) else { return NearList::NONE };
+        let key = near_key(here, store, hidden);
+        if self.key != key {
+            *self = Self::find(store, here, hidden);
+            self.key = key;
+        }
+        *self
+    }
+
+    #[inline(never)]
+    fn find(store: &impl ChannelStore, here: Pos, hidden: bool) -> NearList {
+        let mut buf = [None; NEAR_MAX];
+        let total = nearest(store, here, hidden, &mut buf);
+        let mut l = NearList { n: total.min(NEAR_MAX as u16) as u8, ..NearList::NONE };
+        for (o, b) in l.nums.iter_mut().zip(buf.iter()) {
+            *o = b.map_or(0, |b| b.num);
+        }
+        l
+    }
+}
+
 /// What the Nearby answer depends on: the fix to about 100 m (0.001 degree), the records, show hidden.
 fn near_key(here: Pos, store: &impl ChannelStore, hidden: bool) -> u32 {
     Mix::new().h(&(here.lat / 10_000)).h(&(here.lon / 10_000)).h(&(store.data().version())).h(&hidden).get()
@@ -709,7 +749,10 @@ impl View for Zones {
                 }
             }
             // OK on Nearby: the channel browser's Nearby view (CHAN-29)
-            (Key::Menu, Short, None) if s.on_nearby() => return app.open_screen(Screen::Browse(super::browse::nearby_view(store, app.set.show_hidden))),
+            (Key::Menu, Short, None) if s.on_nearby() => {
+                let b = super::browse::nearby_view(store, app);
+                return app.open_screen(Screen::Browse(b));
+            }
             // OK on a zone: the active slot takes it and home shows it (CHAN-27, decision 178)
             (Key::Menu, Short, None) if store.zone_name(z).is_some() || z == LOCAL => return accept(app, store, z),
             // SLOT on Local: its setting, MENU 0 2 5 (CHAN-34: Local has no zone settings); BACK returns here
@@ -862,10 +905,10 @@ impl View for Zones {
 /// Where OK on zone `z` puts the active slot (CHAN-27, decision 178): its position in the zone. The slot's own last
 /// channel there when it was last on this zone (`zone` and `pos` stay while it is on its VFO), else the zone's first
 /// channel a slot can sit on in number order (CHAN-10): listed (CHAN-24: hidden ones only with "show hidden") and
-/// not an HF channel (CHAN-26). None: no such channel.
+/// not one below 18 MHz (CHAN-26). None: no such channel.
 pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: ZoneId) -> Option<u16> {
     let hidden = app.set.show_hidden;
-    let usable = |p: u16| app.zat(store, z, p).is_some_and(|c| !c.is_hf() && listed(&c, hidden));
+    let usable = |p: u16| app.zat(store, z, p).is_some_and(|c| !c.hf_mode_only() && listed(&c, hidden));
     let s = app.slot(app.active);
     if s.zone == z && s.ch.is_some() && usable(s.pos) {
         return Some(s.pos);
@@ -888,7 +931,7 @@ fn accept(app: &mut App, store: &impl ChannelStore, z: ZoneId) {
         } else if app.zlen(store, z) == 0 {
             app.show_toast(b"No channels", b"in this zone", false)
         } else {
-            app.show_toast(b"No channels", b"HF or hidden only", false)
+            app.show_toast(b"No channels", b"<18 MHz or hidden", false) // CHAN-26.1: below 18 MHz is HF mode's
         };
     };
     let s = *app.slot(a);

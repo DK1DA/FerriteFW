@@ -901,3 +901,34 @@ fn home_redraws_dont_overdraw() {
         assert!(screens <= most, "{what}: {screens:.2} screens written, at most {most}");
     }
 }
+
+/// VFO-25: choosing a region moves a slot still on its US factory frequency (A 146.520, B 443.475) into that
+/// region's bands, so a UK radio can transmit after setup (users' reports, Nov 17, 2026); the US keeps them, and a
+/// frequency the user tuned is never moved.
+#[test]
+fn region_start_off_us_frequencies() {
+    use ferrite_core::txplan::{check, Region};
+    for (r, a, b) in [
+        (Region::Us, 14_652_000, 44_347_500),
+        (Region::Canada, 14_652_000, 44_347_500),
+        (Region::Australia, 14_652_000, 44_347_500),
+        (Region::Uk, 14_550_000, 43_350_000),
+        (Region::Europe, 14_550_000, 43_350_000),
+        (Region::Japan, 14_550_000, 43_350_000),
+        (Region::NewZealand, 14_652_000, 43_350_000),
+        (Region::Other, 14_550_000, 43_350_000),
+    ] {
+        let mut t = T::new();
+        t.app.settings_mut().set_region(Some(r));
+        t.app.region_start();
+        assert_eq!((t.app.slots[0].vfo, t.app.slots[1].vfo), (a, b), "{r:?}");
+        for f in [a, b] {
+            assert_eq!(check(f, r, false), Ok(()), "{r:?} {f}");
+        }
+    }
+    let mut t = T::new();
+    t.app.slots[0].vfo = 14_700_000; // tuned by the user, out of band in the UK: left alone
+    t.app.settings_mut().set_region(Some(Region::Uk));
+    t.app.region_start();
+    assert_eq!(t.app.slots[0].vfo, 14_700_000);
+}

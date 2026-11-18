@@ -33,6 +33,7 @@ const V_BANDS: u8 = 6;
 pub(crate) const V_BROADCAST: u8 = 6;
 const V_RECENT: u8 = 7;
 const V_NEARBY: u8 = 8;
+use super::zones::NearList;
 /// The band views' edges (CHAN-14: "2 m, 70 cm, air, marine"; BCR-31: broadcast FM, 76-108 MHz, the bands of every
 /// region, BCR-21).
 const BAND_VIEWS: [(Freq10, Freq10); 5] =
@@ -87,6 +88,8 @@ struct ViewOf<'a, S: ChannelStore> {
     zone: ZoneId,
     /// Hidden channels are listed too (the list's options; decision 63).
     hidden: bool,
+    /// Nearby's rows (the App's, found when the fix or the records changed).
+    near: NearList,
 }
 
 impl<S: ChannelStore> ViewOf<'_, S> {
@@ -95,7 +98,7 @@ impl<S: ChannelStore> ViewOf<'_, S> {
             0 => self.store.zone_len(self.zone),
             V_RECENT => (0..RECENT_MAX).take_while(|&r| self.recent(r).is_some()).count() as u16,
             V_NEARBY if self.store.data().fix().is_none() => 0,
-            V_NEARBY => (0..self.store.count()).filter(|&i| self.store.by_number(i).is_some_and(|c| self.store.position(c.num).is_some())).count() as u16,
+            V_NEARBY => self.near.n as u16,
             _ => self.store.count(),
         }
     }
@@ -128,32 +131,24 @@ impl<S: ChannelStore> ViewOf<'_, S> {
     }
 
 
-    /// Nearby: the r-th nearest channel with a position, and its distance and bearing (CHAN-15). Each step
-    /// finds the next by (distance, number), so nothing is sorted in RAM.
+    /// Nearby: the r-th nearest listed channel with a position, and its distance and bearing (CHAN-15), from the
+    /// list found once ([`NearList`]): one record read a row.
     fn nearest(&self, r: u16) -> Option<(Channel, (u32, u16))> {
-        let here = self.store.data().fix()?.pos;
-        let mut prev: Option<(u32, u16)> = None;
-        let mut found = None;
-        for _ in 0..=r {
-            found = None;
-            for c in (0..self.store.count()).filter_map(|i| self.store.by_number(i)) {
-                let Some(p) = self.store.position(c.num) else { continue };
-                let db = dist_bearing(here, p);
-                let key = (db.0, c.num);
-                if prev.is_none_or(|p| key > p) && found.is_none_or(|(f, (fd, _)): (Channel, (u32, u16))| key < (fd, f.num)) {
-                    found = Some((c, db));
-                }
-            }
-            let (c, (d, _)) = found?;
-            prev = Some((d, c.num));
+        if r >= self.near.n as u16 {
+            return None;
         }
-        found
+        let here = self.store.data().fix()?.pos;
+        let (c, p) = self.store.located(self.near.nums[r as usize])?;
+        Some((c, dist_bearing(here, p)))
     }
 }
 
 /// The Nearby view (CHAN-15), opened from the zones page's Nearby row (CHAN-29).
-pub(crate) fn nearby_view(store: &impl ChannelStore, hidden: bool) -> Browse {
-    opened(store, V_NEARBY, hidden)
+pub(crate) fn nearby_view(store: &impl ChannelStore, app: &mut App) -> Browse {
+    let mut b = Browse { view: V_NEARBY, ..Browse::new() };
+    let v = view_of(store, &b, app);
+    b.cur = Cursor::first(v.n(), &|i| v.keep(i));
+    b
 }
 
 /// BCR-31: the Broadcast view, the saved FM stations, opened by OK on the FM screen.
@@ -163,13 +158,22 @@ pub(crate) fn broadcast_view(store: &impl ChannelStore, hidden: bool) -> Browse 
 
 fn opened(store: &impl ChannelStore, view: u8, hidden: bool) -> Browse {
     let mut b = Browse { view, ..Browse::new() };
-    let v = view_of(store, &b, hidden);
+    let v = plain_view(store, &b, hidden);
     b.cur = Cursor::first(v.n(), &|i| v.keep(i));
     b
 }
 
-fn view_of<'a, S: ChannelStore>(store: &'a S, b: &Browse, hidden: bool) -> ViewOf<'a, S> {
-    ViewOf { store, view: b.view, zone: b.zone, hidden }
+/// The view `b` shows; Nearby's rows found again first when the fix or the records changed.
+fn view_of<'a, S: ChannelStore>(store: &'a S, b: &Browse, app: &mut App) -> ViewOf<'a, S> {
+    let hidden = app.set.show_hidden;
+    let near = if b.view == V_NEARBY { app.near_list.fresh(store, hidden) } else { NearList::NONE };
+    ViewOf { store, view: b.view, zone: b.zone, hidden, near }
+}
+
+/// A view other than Nearby, without the App.
+fn plain_view<'a, S: ChannelStore>(store: &'a S, b: &Browse, hidden: bool) -> ViewOf<'a, S> {
+    debug_assert!(b.view != V_NEARBY);
+    ViewOf { store, view: b.view, zone: b.zone, hidden, near: NearList::NONE }
 }
 
 /// The picker's rows: the zones that exist, then the views.
@@ -208,7 +212,7 @@ impl View for Browse {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let mut s = self;
-        let v = view_of(store, &self, app.set.show_hidden);
+        let v = view_of(store, &self, app);
         let ch = if self.view == PICKER { None } else { v.at(self.cur.sel) };
         match (e.key, e.press, self.mode) {
             (Key::Up | Key::Down, Short | Repeat, _) => return self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
@@ -221,7 +225,7 @@ impl View for Browse {
                 let z = store.zones();
                 let i = self.cur.sel;
                 (s.view, s.zone) = if i < z { (0, i) } else { (1 + (i - z) as u8, 0) };
-                let v = view_of(store, &s, app.set.show_hidden);
+                let v = view_of(store, &s, app);
                 s.cur = Cursor::first(v.n(), &|i| v.keep(i));
             }
             // BCR-31: a saved station plays on the FM screen, as a preset did; its actions are in its zone and All
@@ -314,7 +318,11 @@ impl View for Browse {
         match self.mode {
             Mode::List if self.view == PICKER => s.cur = self.cur.step(d, picker_n(store), ROWS1, &|i| picker_keep(store, i)),
             Mode::List => {
-                let v = view_of(store, &self, app.set.show_hidden);
+                let v = view_of(store, &self, app);
+                // an empty view: nothing to move to (each turn searched every record twice, sim/tests/limits.rs)
+                if shown(app, &v) == 0 {
+                    return;
+                }
                 s.cur = self.cur.step(d, v.n(), ROWS2, &|i| v.keep(i));
             }
             Mode::Actions(a) => s.mode = Mode::Actions((a as i32 + d).rem_euclid(ACTIONS.len() as i32) as u8),
@@ -341,14 +349,15 @@ impl View for Browse {
         let data = store.data();
         let list = self.mode == Mode::List;
         app.page(lcd, (self.view != PICKER, list));
-        if !app.gate((self, data.version(), data.fix().map(|f| f.pos))) {
+        // the fix only moves Nearby's rows: in another view a new fix redrew the list, and a full radio's count with it
+        if !app.gate((self, data.version(), data.fix().map(|f| f.pos).filter(|_| self.view == V_NEARBY))) {
             return;
         }
         if self.view == PICKER {
             return picker(app, lcd, store, self.cur);
         }
         let view = self.view;
-        let v = view_of(store, &self, app.set.show_hidden);
+        let v = view_of(store, &self, app);
         let n = v.n();
         let ch = v.at(self.cur.sel);
         if !list {
@@ -356,7 +365,7 @@ impl View for Browse {
         }
         let mut name = Buf::<20>::new();
         name.set(if view == 0 { zone_name(store, self.zone) } else { Buf::from(VIEWS[view as usize - 1].as_bytes()) }.as_bytes());
-        let shown = if (2..=V_BANDS).contains(&view) || !v.hidden { (0..n).filter(|&i| v.keep(i)).count() } else { n as usize };
+        let shown = shown(app, &v) as usize;
         let mut r = Buf::<24>::new();
         match view {
             V_NEARBY => r.set(b"nearest first"),
@@ -473,6 +482,39 @@ fn copy_to_slot(app: &mut App, store: &impl ChannelStore, c: &Channel) {
     }
 }
 
+/// How many channels the view shows: a pass over its records where it filters, kept until the view or the records
+/// change (sim/tests/limits.rs: a full radio's 2 m view counted 3986 channels on every redraw).
+fn shown<S: ChannelStore>(app: &mut App, v: &ViewOf<'_, S>) -> u16 {
+    let n = v.n();
+    if !((2..=V_BANDS).contains(&v.view) || !v.hidden) {
+        return n;
+    }
+    let key = Mix::new().h(&v.view).h(&v.zone).h(&v.store.data().version()).h(&v.hidden).get() | 1;
+    if app.view_count.0 != key {
+        app.view_count = (key, (0..n).filter(|&i| v.keep(i)).count() as u16);
+    }
+    app.view_count.1
+}
+
+/// The band views' channel counts (hidden ones too), in one pass over the records, kept until they change: the
+/// picker counted each band view with a pass of its own on every redraw, 1.6 s a move on a full radio
+/// (sim/tests/limits.rs).
+fn band_counts(app: &mut App, store: &impl ChannelStore) -> [u16; BAND_VIEWS.len()] {
+    let key = store.data().version() | 1 << 31;
+    if app.band_counts.0 != key {
+        let mut n = [0u16; BAND_VIEWS.len()];
+        for c in (0..store.count()).filter_map(|i| store.by_number(i)) {
+            for (k, &(lo, hi)) in BAND_VIEWS.iter().enumerate() {
+                if c.rx >= lo && c.rx < hi {
+                    n[k] += 1;
+                }
+            }
+        }
+        app.band_counts = (key, n);
+    }
+    app.band_counts.1
+}
+
 /// C8: the zones and views, with how many channels each holds.
 fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: Cursor) {
     let mut l = Buf::<24>::new();
@@ -491,14 +533,13 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
             return;
         } else {
             let k = (i - z) as u8 + 1;
-            let vw = ViewOf { store, view: k, zone: 0, hidden: true };
             match k {
                 V_ALL => {
                     let _ = uwrite!(v, "{}", store.count());
                 }
                 V_RECENT | V_NEARBY => v.set(b">"),
                 _ => {
-                    let _ = uwrite!(v, "{}", (0..vw.n()).filter(|&i| vw.keep(i)).count());
+                    let _ = uwrite!(v, "{}", band_counts(app, store)[k as usize - 2]);
                 }
             }
             Buf::from(VIEWS[k as usize - 1].as_bytes())
@@ -560,8 +601,89 @@ fn actions(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, b: Br
 }
 
 /// After the shared confirm deleted a channel: the list again, its cursor on a channel that still exists.
-pub(crate) fn after_delete(b: Browse, store: &impl ChannelStore, hidden: bool) -> Browse {
-    let v = view_of(store, &b, hidden);
+pub(crate) fn after_delete(b: Browse, store: &impl ChannelStore, app: &mut App) -> Browse {
+    let v = view_of(store, &b, app);
     let cur = Cursor { sel: b.cur.sel.min(v.n().saturating_sub(1)), ..b.cur }.shown(v.n(), ROWS2, &|i| v.keep(i));
     Browse { mode: Mode::List, cur, ..b }
+}
+
+#[cfg(test)]
+mod nearby_cost {
+    use super::*;
+    use crate::chan::{Channel, Name, ZoneId};
+    use crate::data::{Data, Fix, Pos};
+    use core::cell::Cell;
+    use std::boxed::Box;
+    use super::super::zones::NEAR_MAX;
+
+    /// 400 channels, each with a position, and a count of the position lookups.
+    struct Many {
+        fix: Option<Fix>,
+        looks: Cell<u32>,
+    }
+    const N: u16 = 400;
+    impl Data for Many {
+        fn fix(&self) -> Option<Fix> {
+            self.fix
+        }
+    }
+    impl ChannelStore for Many {
+        fn zones(&self) -> ZoneId {
+            1
+        }
+        fn zone_name(&self, _: ZoneId) -> Option<Name> {
+            None
+        }
+        fn zone_len(&self, _: ZoneId) -> u16 {
+            N
+        }
+        fn zone_at(&self, _: ZoneId, i: u16) -> Option<Channel> {
+            self.get(i)
+        }
+        fn count(&self) -> u16 {
+            N
+        }
+        fn get(&self, num: u16) -> Option<Channel> {
+            (num < N).then_some(Channel { num, zone: 0, rx: 14_500_000, name: [b'x'; 16], cfg: crate::slot::DEFAULT_CFG, flags: 0, tones: 0 })
+        }
+        fn by_number(&self, i: u16) -> Option<Channel> {
+            self.get(i)
+        }
+        fn position(&self, num: u16) -> Option<Pos> {
+            self.looks.set(self.looks.get() + 1);
+            // spread out, in no order of distance: number k is (k * 37 mod 400) steps away
+            (num < N).then(|| Pos { lat: 450_000_000 + ((num as i32 * 37) % N as i32) * 10_000, lon: -757_000_000 })
+        }
+        fn data(&self) -> &dyn Data {
+            self
+        }
+    }
+
+    /// CHAN-15: a few hundred channels with positions hung the radio on opening Nearby (users' reports, Nov 17,
+    /// 2026: the watchdog restarted it). The list is found in one pass and kept; a row is one lookup; and the
+    /// order is still nearest first.
+    #[test]
+    fn nearby_found_once_not_per_row() {
+        let here = Pos { lat: 450_000_000, lon: -757_000_000 };
+        let s = Many { fix: Some(Fix { pos: here, ..crate::sample::Sample::sample_fix().unwrap() }), looks: Cell::new(0) };
+        let set = Box::leak(Box::new(crate::settings::Settings::DEFAULT));
+        let mut app = App::new(set, Box::leak(Box::new(crate::screens::alert::AlertInfo::NONE)));
+        let b = nearby_view(&s, &mut app);
+        let v = view_of(&s, &b, &mut app);
+        assert_eq!(v.n(), NEAR_MAX as u16);
+        let mut last = 0;
+        for r in 0..10 {
+            let (c, (m, _)) = v.nearest(r).unwrap();
+            assert!(m >= last, "nearest first");
+            last = m;
+            assert_eq!((c.num as u32 * 37) % N as u32, r as u32, "row {r}");
+        }
+        assert!(v.nearest(NEAR_MAX as u16).is_none(), "the nearest {NEAR_MAX} only");
+        // one pass to find the list, then a lookup a row; again with the same fix and records: no pass
+        assert!(s.looks.get() < crate::chan::MAX_CHANNELS as u32 + 20, "{} lookups", s.looks.get());
+        let before = s.looks.get();
+        let v = view_of(&s, &b, &mut app);
+        let _ = v.nearest(3);
+        assert!(s.looks.get() - before < 5, "kept, not found again");
+    }
 }

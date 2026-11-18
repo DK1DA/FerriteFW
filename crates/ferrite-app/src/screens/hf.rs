@@ -52,7 +52,7 @@ pub fn mode_name(m: u8) -> &'static str {
 }
 
 /// Chip 1 takes over from 18 MHz, every mode (HF-9, HF-10; decision 322: as stock and nicFW).
-const CHIP1_FROM: Freq10 = mhz(18);
+pub(crate) const CHIP1_FROM: Freq10 = mhz(18);
 const TOP: Freq10 = mhz(64);
 const BOTTOM: Freq10 = 15_000; // 150 kHz
 

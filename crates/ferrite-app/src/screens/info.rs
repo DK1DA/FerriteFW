@@ -7,7 +7,6 @@
 //! Each page is data ([`def`]): its rows are a [`super::table`] table naming a value function, so adding a row is
 //! one line.
 
-use super::groups::cal_text;
 use super::help::{self, Help};
 use super::shared::*;
 use super::table::{Ctx, Table, Val};
@@ -74,6 +73,8 @@ pub(crate) fn tx_lock(dev: &Device) -> Option<&'static str> {
         Some("Locked: MCU check")
     } else if t.cal != CalState::Ok {
         Some("Locked: calibration")
+    } else if let Some(row) = super::groups::band_locked(t) {
+        Some(["UHF locked", "VHF locked", "200 MHz locked", "HF locked"][row as usize % 4]) // CAL-6.1: the rest transmits
     } else if dev.battery_cutoff {
         Some("Battery too low")
     } else {
@@ -135,7 +136,7 @@ const ABOUT: [InfoRow; 9] = [
         let _ = uwrite!(b, "{} MB \u{b7} {:06X}", t.flash_mb, t.flash_id);
         TEXT
     }),
-    ("Calibration", |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { TEXT } else { AMBER })),
+    ("Calibration", |Ctx { dev: d, .. }, b| fixed(b, super::groups::cal_label(&d.selftest), if d.selftest.cal == CalState::Ok { TEXT } else { AMBER })),
     ("Transmit", |Ctx { dev: d, .. }, b| match tx_lock(d) {
         None => fixed(b, "Ready", GREEN),
         Some(why) => fixed(b, why, AMBER),
@@ -267,9 +268,20 @@ const CHECKS: [InfoRow; 7] = [
     }),
 ];
 
-const CALIBRATION: [InfoRow; 3] = [
-    ("Status", |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { GREEN } else { AMBER })),
+const CALIBRATION: [InfoRow; 4] = [
+    ("Status", |Ctx { dev: d, .. }, b| fixed(b, super::groups::cal_label(&d.selftest), if d.selftest.cal == CalState::Ok { GREEN } else { AMBER })),
+    // CAL-20.4: the sector's own checks: which one failed, and where in the power curves
+    ("Check", |Ctx { dev: d, .. }, b| {
+        let t = &d.selftest;
+        if t.cal == CalState::Unknown {
+            return fixed(b, "Not checked", SUB);
+        }
+        let f = if t.cal == CalState::CrcMismatch && t.cal_fault != ferrite_core::msg::CalFault::Unchecked { ferrite_core::msg::CalFault::None } else { t.cal_fault };
+        super::groups::cal_fault_text(f, t.cal_at, b);
+        if f == ferrite_core::msg::CalFault::None && t.cal != CalState::Blank { GREEN } else { AMBER }
+    }),
     ("CRC at install", |Ctx { dev: d, .. }, b| match d.selftest.cal {
+        CalState::CrcMismatch if d.selftest.cal_fault == ferrite_core::msg::CalFault::Unchecked => fixed(b, "Not checked", AMBER),
         CalState::CrcMismatch => fixed(b, "Changed", RED),
         CalState::Unknown => fixed(b, "Not checked", SUB),
         _ => fixed(b, "Matches", GREEN),
@@ -475,6 +487,8 @@ impl View for Info {
                 let d = if e.key == Key::Right { 1 } else { -1 };
                 app.screen = Screen::Info(Info { page: CYCLE[(i + d).rem_euclid(CYCLE.len() as i32) as usize] });
             }
+            // CAL-20: the calibration reads "Changed": OK asks to use it as it is now
+            (Page::About, Key::Menu) if app.cal_changed => super::confirm::ask(app, super::confirm::Ask::AcceptCal),
             (Page::SsbConfirm, Key::Menu) => {
                 app.back();
                 app.show_toast(b"SSB patch", b"in use", false);
@@ -493,6 +507,9 @@ impl View for Info {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let d = def(self.page);
+        // CAL-20: OK's action; not while the store couldn't check it (accepting needs the store)
+        let t = &cx.dev.selftest;
+        app.cal_changed = t.cal == ferrite_core::msg::CalState::CrcMismatch && t.cal_fault != ferrite_core::msg::CalFault::Unchecked;
         app.new_page(lcd, Mix::new().any(&self.page).get());
         if let Page::Help(h) = self.page {
             return help::render(app, lcd, h);
@@ -528,7 +545,10 @@ impl View for Info {
         }
     }
 
-    fn hints(self, _: &App) -> Hints {
+    fn hints(self, app: &App) -> Hints {
+        if self.page == Page::About && app.cal_changed {
+            return Hints::new(&[("OK", "Calibration"), (ARROWS_LR, "System"), ("BACK", "Back")]); // CAL-20
+        }
         Hints::new(def(self.page).hints)
     }
 }

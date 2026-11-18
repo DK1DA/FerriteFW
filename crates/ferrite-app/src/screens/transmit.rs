@@ -617,7 +617,7 @@ impl View for TxRefused {
         }
     }
 
-    fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         if !app.dirty(1, Mix::new().any(&self).get()) {
             return;
         }
@@ -650,9 +650,39 @@ impl View for TxRefused {
                 a.set(b"The battery is below the transmit cut-off.");
                 more = b"Charge it or fit a fresh one. Its level:";
             }
+            // CAL-20 (issue #40): which check, so the owner isn't told "Ready" on About and "locked" here
             Refusal::Locked => {
-                a.set(b"Transmit is locked: a calibration or hardware check failed.");
-                more = b"Which check failed:";
+                use ferrite_core::msg::CalState;
+                let t = &cx.dev.selftest;
+                (a, more) = match (t.mcu_ok, t.cal) {
+                    (false, _) => (Buf::from(b"Transmit is locked: the MCU isn't the one this radio has.".as_slice()), b"The check:".as_slice()),
+                    (_, CalState::Blank) => (Buf::from(b"Transmit is locked: the calibration is blank.".as_slice()), b"The check:".as_slice()),
+                    // CAL-6.1: the sector stands; this band's curves failed a check
+                    (_, CalState::Ok) if super::groups::band_locked(t).is_some() => {
+                        let mut w = Buf::<40>::new();
+                        super::groups::cal_fault_text(t.cal_fault, t.cal_at, &mut w);
+                        let mut x = Buf::<96>::new();
+                        let _ = uwrite!(x, "Transmit is locked on this band: its calibration failed a check ({}).", super::lists::Txt(w.as_bytes()));
+                        (x, b"The other bands transmit. The check:".as_slice())
+                    }
+                    (_, CalState::Invalid) => {
+                        // CAL-20.4: which check, and where
+                        let mut w = Buf::<40>::new();
+                        super::groups::cal_fault_text(t.cal_fault, t.cal_at, &mut w);
+                        let mut x = Buf::<96>::new();
+                        let _ = uwrite!(x, "Transmit is locked: a calibration value failed its check ({}).", super::lists::Txt(w.as_bytes()));
+                        (x, b"The check:".as_slice())
+                    }
+                    (_, CalState::CrcMismatch) if t.cal_fault == ferrite_core::msg::CalFault::Unchecked => (
+                        Buf::from(b"Transmit is locked: the calibration couldn't be checked (the store isn't ready).".as_slice()),
+                        b"Turn the radio off and on. The check:".as_slice(),
+                    ),
+                    (_, CalState::CrcMismatch) => (
+                        Buf::from(b"Transmit is locked: the calibration changed since Ferrite first read it.".as_slice()),
+                        b"OK on About uses it as it is, if it checks out:".as_slice(),
+                    ),
+                    _ => (Buf::from(b"Transmit is locked: a calibration or hardware check failed.".as_slice()), b"Which check failed:".as_slice()),
+                };
             }
             Refusal::InProgress => a.set(b"Another transmission is in progress."),
             Refusal::NoCallsign => {

@@ -42,6 +42,20 @@ impl App {
         self.reconcile_mode(); // MODE-2
     }
 
+    /// VFO-25: a slot still on its factory frequency (A 146.520, B 443.475: US frequencies) that the chosen region
+    /// refuses moves to 145.500 or 433.500, in band in every region. Users who chose the UK in setup found every
+    /// key-up refused (Nov 17, 2026). A frequency the user tuned is never touched.
+    pub(crate) fn region_start(&mut self) {
+        use ferrite_core::freq::mhz;
+        let region = self.set.tx_region();
+        for (i, (factory, start)) in [(mhz(146) + 52_000, mhz(145) + 50_000), (mhz(443) + 47_500, mhz(433) + 50_000)].into_iter().enumerate() {
+            let s = &mut self.slots[i];
+            if s.vfo_mode && s.vfo == factory && ferrite_core::txplan::check(factory, region, false).is_err() {
+                s.vfo = start;
+            }
+        }
+    }
+
     /// The region changed (setup, 0 9 4): a VFO on 2 m or 1.25 m still on a region default step takes the new
     /// region's (VFO-18), and a VFO in FM or NFM on an FM band the region's mode (SETUP-7). A step the user picked
     /// is left alone.
@@ -124,9 +138,16 @@ impl Cursor {
 
     /// Moves `d` shown items (the knob: any number; ▲▼: one), wrapping at the ends, and scrolls so the
     /// selection stays on a page of `vis` rows.
+    /// Once round the list, the steps left are taken modulo the shown items it found: a fast turn over a sparse
+    /// view (a band view on a full radio: a few channels among 4000 records) went round it again for each, a pass
+    /// over the records each time (sim/tests/limits.rs, Nov 17, 2026).
     pub fn step(self, d: i32, n: u16, vis: u16, keep: &impl Fn(u16) -> bool) -> Cursor {
         let mut sel = self.sel;
-        for _ in 0..d.unsigned_abs().min(n as u32) {
+        let mut left = d.unsigned_abs().min(n as u32);
+        let mut taken = 0u32;
+        while left > 0 {
+            left -= 1;
+            taken += 1;
             sel = match Self::next(sel, d, n, keep) {
                 Some(i) => i,
                 None if d > 0 => match (0..n).find(|&i| keep(i)) {
@@ -138,6 +159,9 @@ impl Cursor {
                     None => return self,
                 },
             };
+            if sel == self.sel {
+                left %= taken; // round once: `taken` shown items
+            }
         }
         Cursor { sel, top: self.top }.shown(n, vis, keep)
     }
@@ -148,11 +172,18 @@ impl Cursor {
         if sel < top || !keep(top) {
             top = sel;
         }
-        // the rows from top to sel, inclusive
-        let mut k = (top..=sel.min(n.saturating_sub(1))).filter(|&i| keep(i)).count() as u16;
-        while k > vis {
-            top = Self::next(top, 1, n, keep).unwrap_or(sel);
-            k -= 1;
+        // back from sel, a page's rows at most and not past top: the page's top when that many were found. (It
+        // counted every row from top to sel and stepped top on: a wrap to a full radio's last channel read 4000
+        // records twice, sim/tests/limits.rs.)
+        let (mut t, mut k) = (sel.min(n.saturating_sub(1)), 1);
+        while k < vis && t > top {
+            match (top..t).rev().find(|&i| keep(i)) {
+                Some(i) => (t, k) = (i, k + 1),
+                None => break,
+            }
+        }
+        if k == vis {
+            top = top.max(t);
         }
         Cursor { sel, top }
     }
