@@ -873,6 +873,8 @@ pub struct StatusBar {
     pub scan: bool,
     /// Watched slots: 3 = TW, 2 = DW, else nothing (SBAR-16).
     pub watch: u8,
+    /// VOX on (0 8 2, SBAR-25): `VOX` in amber after TW/DW, as speech can key the radio.
+    pub vox: bool,
     pub inbox: u8,
     pub alert: bool,
     pub clock: Option<u16>,
@@ -909,8 +911,8 @@ pub const SAT_TEXT: u16 = 0x8000;
 
 impl StatusBar {
     fn left_eq(&self, o: &Self) -> bool {
-        (self.name, self.locked, self.lock_ptt, self.scan, self.watch, self.inbox, self.alert, self.alerts_paused)
-            == (o.name, o.locked, o.lock_ptt, o.scan, o.watch, o.inbox, o.alert, o.alerts_paused)
+        (self.name, self.locked, self.lock_ptt, self.scan, self.watch, self.vox, self.inbox, self.alert, self.alerts_paused)
+            == (o.name, o.locked, o.lock_ptt, o.scan, o.watch, o.vox, o.inbox, o.alert, o.alerts_paused)
     }
 
     fn right_eq(&self, o: &Self) -> bool {
@@ -956,6 +958,7 @@ impl StatusBar {
         let icons = if self.locked { 14 + gap } else { 0 }
             + if self.scan { 21 + gap } else { 0 }
             + if self.watch >= 2 { 14 + gap } else { 0 }
+            + if self.vox { text4_width(b"VOX", &UI_12) + gap } else { 0 }
             + if self.inbox > 0 { 14 + text4_width(count.as_bytes(), &UI_12B) + gap } else { 0 }
             + if self.alerts_paused { 11 + gap } else { 0 };
         let mut x = 8;
@@ -978,6 +981,12 @@ impl StatusBar {
                 field(lcd, x, w + gap, y0, y1, base, t, const { &st(&UI_12, SUB, BG, Align::Left) });
                 x += w + gap;
             }
+        }
+        // SBAR-25: VOX on, in amber (attention, SBAR-12): speech keys the radio.
+        if self.vox {
+            let w = text4_width(b"VOX", &UI_12);
+            field(lcd, x, w + gap, y0, y1, base, b"VOX", const { &st(&UI_12, AMBER, BG, Align::Left) });
+            x += w + gap;
         }
         if self.inbox > 0 {
             let c = if self.alert { RED } else { SUB };
@@ -1029,9 +1038,12 @@ impl StatusBar {
         }
         if self.gps != GpsState::Off {
             x -= 17;
-            lcd.mask4(x, 4, &ICON_GPS, SUB, None, BG);
+            // SBAR-7: searching dim, the ring only; a fix green with its centre filled (a colour and a shape).
             if self.gps == GpsState::Fix {
-                lcd.fill_r(x + 3, 7, 6, 6, 3, SUB);
+                lcd.mask4(x, 4, &ICON_GPS, GREEN, None, BG);
+                lcd.fill_r(x + 3, 7, 6, 6, 3, GREEN);
+            } else {
+                lcd.mask4(x, 4, &ICON_GPS, DIM, None, BG);
             }
         }
         // SBAR-22: Dry TX in amber (night red's red, cyberpunk's magenta), a word as DISP-10 asks: 151..175 at most.
@@ -1184,6 +1196,44 @@ mod tests {
             assert!(b.px == a.px, "theme {t}: off again as before");
         }
         crate::theme::set(crate::theme::DARK);
+    }
+
+    /// SBAR-25: VOX on draws "VOX" in the left half (before the clock's 98) and nothing else, in every theme;
+    /// night red stays red or black (DISP-18).
+    #[test]
+    fn status_bar_vox_mark() {
+        for t in [crate::theme::DARK, crate::theme::DAYLIGHT, crate::theme::NIGHT_RED, crate::theme::CYBERPUNK] {
+            crate::theme::set(t);
+            let off = StatusBar { scan: true, watch: 3, inbox: 12, battery: 4, ..Default::default() };
+            let on = StatusBar { vox: true, ..off };
+            let (mut a, mut b) = (FrameBuffer::new(), FrameBuffer::new());
+            off.draw(&mut a, None);
+            on.draw(&mut b, None);
+            let diff: std::vec::Vec<(i32, i32)> =
+                (0..SBAR_H).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| a.at(x, y) != b.at(x, y)).collect();
+            assert!(!diff.is_empty(), "theme {t}: VOX drawn");
+            assert!(diff.iter().all(|&(x, _)| x < 98), "theme {t}: inside the left half");
+            if t == crate::theme::NIGHT_RED {
+                assert!(diff.iter().all(|&(x, y)| b.at(x, y) & 0x07FF == 0), "night red: red or black only");
+            }
+            off.draw(&mut b, Some(&on));
+            assert!(b.px == a.px, "theme {t}: off again as before");
+        }
+        crate::theme::set(crate::theme::DARK);
+    }
+
+    /// SBAR-7: the GPS mark with a fix is green with its centre filled; searching, dim with the centre empty.
+    #[test]
+    fn status_bar_gps_fix_stands_out() {
+        crate::theme::set(crate::theme::DARK);
+        let (mut a, mut b) = (FrameBuffer::new(), FrameBuffer::new());
+        StatusBar { gps: GpsState::Searching, ..Default::default() }.draw(&mut a, None);
+        StatusBar { gps: GpsState::Fix, ..Default::default() }.draw(&mut b, None);
+        let x = 212 - 17;
+        let px = |f: &FrameBuffer, c: u16| (0..SBAR_H).flat_map(|y| (x..x + 12).map(move |x| (x, y))).filter(|&(x, y)| f.at(x, y) == c).count();
+        assert!(px(&b, GREEN) > 20 && px(&b, DIM) == 0, "a fix: green");
+        assert!(px(&a, DIM) > 0 && px(&a, SUB) == 0 && px(&a, GREEN) == 0, "searching: dim");
+        assert_ne!(a.at(x + 6, 10), b.at(x + 6, 10), "the centre filled only with a fix");
     }
 
     /// SBAR-24, PWR-24: Low Power Mode's "LOW" sits left of the battery (GPS and Bluetooth are off in the mode),
