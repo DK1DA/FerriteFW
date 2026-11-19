@@ -248,6 +248,7 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::Crossband => "repeater running",
         Refusal::RelayMismatch => "TX needs the HF relay",
         Refusal::AmRxOnly => "AM is receive only",
+        Refusal::WfmRxOnly => "WFM is broadcast: RX only",
         Refusal::Emergency => "emergency: PTT twice",
         Refusal::ReleasePtt => "release PTT first",
         Refusal::PttAtBoot => "PTT held at power-on",
@@ -268,7 +269,7 @@ pub(crate) fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, 
         Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 8", "About", Dest::About)),
         Refusal::NoCallsign => Some(("MENU 0 8 6 1", "Callsign", Dest::Setup)),
         Refusal::RelayMismatch => Some(("MENU 5", "Offset", Dest::Value(Item::Offset))),
-        Refusal::AmRxOnly => Some(("MENU 3", "Mode", Dest::Value(Item::Mode))),
+        Refusal::AmRxOnly | Refusal::WfmRxOnly => Some(("MENU 3", "Mode", Dest::Value(Item::Mode))),
         Refusal::InProgress
         | Refusal::ReceiveOnlyHere
         | Refusal::Crossband
@@ -309,7 +310,7 @@ pub fn tx_block(app: &App, slot: u8) -> Option<Refusal> {
         return Some(Refusal::AmRxOnly);
     }
     if slot < SLOTS as u8 && app.tuned_cfg(slot).mode == crate::slot::WFM {
-        return Some(Refusal::ReceiveOnlyHere);
+        return Some(Refusal::WfmRxOnly); // TX-20.6: says it's broadcast FM, not HF mode's "receive only here"
     }
     if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
         return Some(r);
@@ -702,6 +703,7 @@ impl View for TxRefused {
                 more = b"Keep RX and TX on the same side of 64 MHz.";
             }
             Refusal::AmRxOnly => a.set(b"AM is receive only: the radio has no AM modulator."),
+            Refusal::WfmRxOnly => a.set(b"WFM is broadcast FM, receive only. For 25 kHz two-way FM pick FM, for 12.5 kHz NFM."),
             Refusal::Emergency => a.set(b"An emergency frequency: only a person pressing PTT twice transmits here."),
             Refusal::ReleasePtt => a.set(b"The timeout ended the last transmission. Release PTT, then press it again."),
             Refusal::Broadcast => a.set(b"The broadcast receiver was still playing at key-up. Release PTT, then press it again. (TX-24)"),

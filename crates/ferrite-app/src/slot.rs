@@ -427,7 +427,7 @@ impl Item {
             Item::Channel => txt!("Edit this channel: name, zone, number, flags."),
             Item::BatterySave => txt!("Receiver sleep: deeper saves more, hears later."),
             Item::Advanced => txt!("Everything else, in nine groups."),
-            Item::Mode => txt!("FM wide, NFM narrow, AM. USB, LSB, CW: HF mode."),
+            Item::Mode => txt!("FM 25 kHz, NFM 12.5 kHz, AM. WFM: broadcast RX."),
             Item::BusyLock => txt!("Refuse transmit while the channel is busy."),
             Item::Reverse => txt!("Listen on the repeater's input. Hold *, PTT A."),
         }
