@@ -102,16 +102,19 @@ impl Radio {
     pub(super) fn scope_tick(&mut self, now: u32) {
         let Some(mut sc) = self.scope.take() else { return };
         let chip = sc.chip;
+        // SQL-9.4: a latched or held monitor on the strip's slot holds it there, open, as on home without the strip
+        // (it was ignored: monitor worked only once a menu stopped the strip). Not while the slot is muted or off.
+        let monitored = sc.home.is_some_and(|s| self.monitor & !(self.user_mute | self.user_off) & 1 << s != 0);
         if sc.listen != 0 {
             let mut bk = self.chip(chip);
             let (st, rssi) = (bk.status(), bk.rssi_dbm());
-            let open = st.squelch_open;
+            let open = st.squelch_open || monitored;
             let mut heard = open;
             if let Some(s) = sc.home {
                 // MODE-5: the strip held on its slot's frequency: that slot's tone and quick mute (HOME-15) decide
                 // the audio, its card shows it; HOLD_CLOSED closed polls and the sweep goes on where it was.
                 let i = s as usize % SLOTS;
-                heard = self.slots[i].toned(open, &st) && self.user_mute & 1 << s == 0;
+                heard = monitored || self.slots[i].toned(open, &st) && self.user_mute & 1 << s == 0;
                 sc.closed = if open { 0 } else { sc.closed + 1 };
                 if sc.closed >= HOLD_CLOSED {
                     sc.listen = 0;
@@ -139,7 +142,7 @@ impl Radio {
         if sc.look > 0 {
             // MODE-5: the strip on its slot's own frequency: a carrier there holds the sweep.
             sc.look -= 1;
-            let back = if self.chip(chip).status().squelch_open {
+            let back = if monitored || self.chip(chip).status().squelch_open {
                 (sc.listen, sc.closed, sc.look) = (self.slots[sc.home.unwrap_or(0) as usize % SLOTS].rx_freq(), 0, 0);
                 self.open_delay(chip, false); // SQL-17: held on the call, ordinary receive
                 false
@@ -177,7 +180,7 @@ impl Radio {
         }
         if let Some(s) = sc.home {
             sc.since += 1;
-            if sc.since >= LOOK_EVERY {
+            if sc.since >= LOOK_EVERY || monitored {
                 // MODE-5: back to the slot's own frequency for a look, then on from the next point.
                 (sc.since, sc.look) = (0, LOOK_WAITS);
                 let f = self.slots[s as usize % SLOTS].rx_freq();

@@ -298,6 +298,12 @@ pub trait View: Copy {
         false
     }
 
+    /// SIDE1 has a job of its own here (home's squelch and clarifier shortcuts, HF mode, the squelch screen, the
+    /// crossband repeater, the key test); otherwise it is the monitor key (SQL-9.3: [`App::monitor_key`]).
+    fn own_side1(self) -> bool {
+        false
+    }
+
     /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock, hold MENU).
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore);
 
@@ -352,6 +358,10 @@ impl Screen {
 
     pub(crate) fn own_arrows(self) -> bool {
         each!(self, s => s.own_arrows())
+    }
+
+    pub(crate) fn own_side1(self) -> bool {
+        each!(self, s => s.own_side1())
     }
 
     pub(crate) fn bar(self) -> bool {

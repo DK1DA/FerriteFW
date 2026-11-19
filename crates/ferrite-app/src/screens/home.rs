@@ -341,6 +341,10 @@ fn bottom_row(lcd: &mut impl Panel, y0: i32, t: &[u8], c: u16, fix_note: bool, p
 }
 
 impl View for Home {
+    fn own_side1(self) -> bool {
+        true
+    }
+
     /// KEY-19: ◀▶ step the band or zone (NAV-2).
     fn own_arrows(self) -> bool {
         true
@@ -455,20 +459,7 @@ impl View for Home {
             // KEY-22: SIDE2 held alone opens the frequency counter when it comes up; SIDE2 + knob or ▲▼ (big
             // steps) never does, whenever the knob turns.
             (Key::Side(2), LongUp) => app.open(Dest::Counter),
-            (Key::Side(1), Short) if app.off_refuse(app.active) => {} // HOME-15.4
-            (Key::Side(1), Short) => {
-                // A tap latches monitor on the active slot until tapped again; its card says MON.
-                let a = app.active;
-                app.monitor ^= 1 << a;
-                let on = app.monitor & 1 << a != 0;
-                app.out.push(RadioCmd::Monitor { slot: a, on });
-                app.show_toast(b"Monitor", if on { b"on: tap SIDE1 again" } else { b"off" }, false);
-            }
-            // SQL-9.1: held alone, the squelch is open while SIDE1 is held (App::tick_keys closes it at the release).
-            (Key::Side(1), Long) if app.monitor & 1 << app.active == 0 => {
-                app.mon_held = app.active + 1;
-                app.out.push(RadioCmd::Monitor { slot: app.active, on: true });
-            }
+            (Key::Side(1), Short | Long) => app.monitor_key(e.press), // SQL-9
             // KEY-18, SCAN-11: on a scanning slot \* skips the hit, as on the scan screen; otherwise quick mute.
             (Key::Star, Short) if app.scan_mask & 1 << app.active != 0 => super::scan::skip(app, app.active),
             (Key::Star, Short) => quick_mute(app), // HOME-15

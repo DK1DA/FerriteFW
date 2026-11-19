@@ -699,6 +699,10 @@ impl Hf {
 }
 
 impl View for Hf {
+    fn own_side1(self) -> bool {
+        true
+    }
+
     /// KEY-19: ◀▶ step the HF band (and the option on its menu).
     fn own_arrows(self) -> bool {
         true
