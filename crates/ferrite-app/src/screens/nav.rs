@@ -516,31 +516,20 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
         }
         5 => app.open(Dest::Tones),
         6 => cycle(app, Item::Step), // VFO only (VFO-8): on a channel the toast says so
-        // Shift and offset: on a VFO, cycle the shift / open the offset; on a channel, its editor at that cell.
-        7 if on_ch => offset_cell(app), // Dest::ChannelEdit
-        7 => {
-            // Simplex, +, - only: split needs a TX frequency (MENU 5)
-            let cur = Item::Offset.get(app.slot(app.active).cfg()).0;
-            let to = if cur >= 2 { 0 } else { cur + 1 };
-            app.change(Item::Offset, to - cur);
-            let mut b = Buf::<16>::new();
-            app.item_text(Item::Offset, true, &mut b);
-            app.show_toast(b"Shift", b.as_bytes(), false);
-        }
-        8 if on_ch => offset_cell(app), // Dest::ChannelEdit
-        8 => app.open(Dest::Value(Item::Offset)),
+        // VFO-26 (KEY-11): 7 the shift's options (simplex, +, -, split; open until OK or BACK), 8 the offset's
+        // amount, typed; on a VFO and a channel alike (a channel through its rules, saved, EDIT-4).
+        7 => app.open(Dest::Value(Item::Offset)),
+        8 => offset_amount(app),
         // KEY-23: copy, one idea both ways. On a channel "Copy to VFO?" (VFO-23), on a VFO the save form (VFO-9).
         9 if on_ch => super::confirm::ask(app, super::confirm::Ask::CopyToVfo),
         _ => app.open(Dest::SaveChannel),
     }
 }
 
-/// Hold 7 or 8 on a channel: the channel editor at its Offset cell (KEY-11).
-fn offset_cell(app: &mut App) {
-    app.open(Dest::ChannelEdit);
-    if let Screen::ChEdit(e) = &mut app.screen {
-        e.cell = super::chedit::OFFSET_CELL;
-    }
+/// Hold 8 (VFO-26): the offset amount typed, from empty (its Now row shows the slot's).
+pub(crate) fn offset_amount(app: &mut App) {
+    app.open(Dest::Entry(0));
+    app.screen = Screen::Entry(super::entry::Entry::new(super::entry::EntryFor::OffsetAmount, None));
 }
 
 /// Hold 0: the active slot to the home channel, in channel mode, from VFO or any zone (CHAN-19, CHAN-20).

@@ -599,20 +599,28 @@ fn shortcuts_and_menu_paths() {
     let mut t = T::new();
     t.app.radio.tx_built = true; // hold 2 sets power where the slot can transmit (HOME-4.2)
     t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
-    // KEY-11: 1 opens the scope, 3/5/8 their editors, 9 on a VFO the save form (KEY-23); BACK comes home.
-    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (8, "Value editor"), (9, "Save as channel")] {
+    // KEY-11: 1 opens the scope, 3/5/7 their editors, 9 on a VFO the save form (KEY-23); BACK comes home.
+    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (7, "Value editor"), (9, "Save as channel")] {
         t.hold(Key::Digit(d));
         assert_eq!(t.app.screen().name(), name, "hold {d}");
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
+    // VFO-26: 8 types the offset's amount, from empty; BACK comes home
+    t.hold(Key::Digit(8));
+    assert_eq!(t.app.screen().name(), "Frequency entry", "hold 8");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
     t.hold(Key::Digit(2)); // TX power: low -> mid
     assert_eq!(t.app.slot(0).cfg().power, 1);
     let step = t.app.slot(0).cfg().step;
     t.hold(Key::Digit(6)); // step: the next one
     assert_ne!(t.app.slot(0).cfg().step, step);
-    t.hold(Key::Digit(7)); // shift: simplex -> +
+    t.hold(Key::Digit(7)); // VFO-26: the shift's options, the knob picks +
+    t.knob(1);
     assert!(t.app.slot(0).cfg().offset > 0);
+    t.tap(Key::Menu); // OK keeps it
+    assert_eq!(t.app.screen(), Screen::Home);
     let w = t.app.watch;
     t.hold(Key::Digit(4)); // watch on/off
     assert_ne!(t.app.watch, w);

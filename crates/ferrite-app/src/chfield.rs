@@ -7,7 +7,7 @@
 //! TX-37); a refusal names its field, so each caller heads it its own way ("Power: ...", `power: ...`).
 
 use crate::chan::{rx_ok, Channel, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE, ZoneId};
-use crate::slot::{band_near, band_step, Item, BANDS, STEPS};
+use crate::slot::{band_near, band_step, Item, STEPS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
@@ -165,13 +165,13 @@ fn freq_step(f: Freq10, d: i32, region: Option<Region>) -> Freq10 {
 
 /// An item's value `v` (its knob index) on a channel; Offset's 4th choice is Split on today's TX (VFO-16, as MENU
 /// 5's knob), the others with the band's shift.
-fn set_item(c: &mut Channel, it: Item, v: i32) {
+fn set_item(c: &mut Channel, it: Item, v: i32, region: Option<Region>) {
     if it == Item::Offset && v.rem_euclid(4) == 3 {
         let g = &mut c.cfg;
         let tx = if g.split { g.offset.max(0) } else { (c.rx as i64 + g.offset as i64).max(0) as i32 };
         (g.split, g.offset) = (true, tx);
     } else {
-        it.set(&mut c.cfg, v, BANDS[band_near(c.rx)].shift);
+        it.set(&mut c.cfg, v, crate::slot::band_shift(band_near(c.rx), region));
     }
 }
 
@@ -244,9 +244,9 @@ impl ChField {
             (ChField::Tx, Op::Step(d)) if c.cfg.split => {
                 n.cfg.offset = freq_step(c.cfg.offset.max(0) as Freq10, d, cx.region).clamp(mhz(64), mhz(1000) - 1) as i32
             }
-            (ChField::It(it), Op::Step(d)) => set_item(&mut n, it, it.get(&c.cfg).0 + d),
-            (ChField::It(Item::Squelch), Op::Reset) => set_item(&mut n, Item::Squelch, 0),
-            (ChField::It(it), Op::Reset) => set_item(&mut n, it, it.default_of()),
+            (ChField::It(it), Op::Step(d)) => set_item(&mut n, it, it.get(&c.cfg).0 + d, cx.region),
+            (ChField::It(Item::Squelch), Op::Reset) => set_item(&mut n, Item::Squelch, 0, cx.region),
+            (ChField::It(it), Op::Reset) => set_item(&mut n, it, it.default_of(), cx.region),
             (ChField::Flag(bit), Op::Step(_)) => n.flags ^= bit,
             (ChField::Flag(bit), Op::Reset) => n.flags &= !bit,
             (ChField::Scan, Op::Step(d)) => n.set_scan((c.scan() as i32 + d).rem_euclid(3) as u8),

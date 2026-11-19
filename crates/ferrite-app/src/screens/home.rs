@@ -1082,7 +1082,7 @@ pub(crate) fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         s.cfg.narrow = s.cfg.mode == 1;
         s.cfg.step = crate::slot::band_step(nb, region);
         if s.cfg.offset != 0 && !s.cfg.split {
-            s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift; // a split's TX stays where it is
+            s.cfg.offset = s.cfg.offset.signum() * crate::slot::band_shift(nb, region); // a split's TX stays where it is
         }
         app.hf_starts_low(a as u8, from); // TX-36
         app.send_slot(a as u8);

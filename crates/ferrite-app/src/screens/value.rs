@@ -10,7 +10,7 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{band_near, Item, BANDS, QUICK};
+use crate::slot::{band_near, Item, QUICK};
 use crate::{App, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
 use ferrite_ui::assets::*;
@@ -34,6 +34,14 @@ impl Value {
 }
 
 /// The setting's value index on the active slot (or radio-wide), and how many values it has.
+/// VFO-16: Split's TX frequency typed (entry, prefilled with today's); its OK or BACK returns. OK on Split opens it
+/// from the value editor and the quick list alike (VFO-26: the toast says "OK sets the TX frequency").
+pub(crate) fn split_entry(app: &mut App) {
+    let tx = app.slot(app.active).cfg().offset.max(0) as ferrite_core::freq::Freq10;
+    app.open(super::nav::Dest::Entry(0));
+    app.screen = crate::Screen::Entry(super::entry::Entry::with_freq(super::entry::EntryFor::SplitTx, tx));
+}
+
 pub(crate) fn cur(app: &App, item: Item) -> (i32, i32) {
     match item {
         Item::Watch => (app.watch as i32, 3),
@@ -51,13 +59,24 @@ pub(crate) fn text_of(app: &App, item: Item, i: i32, b: &mut Buf<16>) {
         Item::BatterySave => {
             let _ = uwrite!(b, "Level {}", i);
         }
+        Item::Offset if i == 3 => b.set(b"Split"), // VFO-16: its TX frequency is typed (OK)
         _ => {
             let mut c = *app.slots[app.active as usize].cfg();
-            let shift = BANDS[band_near(app.slots[app.active as usize].freq())].shift;
+            let shift = crate::slot::band_shift(band_near(app.slots[app.active as usize].freq()), app.set.region());
             item.set(&mut c, i, shift);
             item.text(&c, true, b);
         }
     }
+}
+
+/// VFO-26.6: under the Offset editor's value, where that choice transmits ("TX 147.120").
+fn tx_line(app: &App, i: i32, b: &mut Buf<24>) {
+    let s = &app.slots[app.active as usize];
+    let mut c = *s.cfg();
+    let shift = crate::slot::band_shift(band_near(s.freq()), app.set.region());
+    Item::Offset.set(&mut c, i, shift);
+    b.set(b"TX ");
+    b.push(w::freq3(c.tx_of(s.freq())).as_bytes());
 }
 
 /// VFO-4.1: what the Mode editor shows after the mode's name: its channel width, or what it is for.
@@ -99,11 +118,7 @@ impl View for Value {
             (Key::Hash, Short) => app.reset(item), // MENU-18
             (Key::Star, Short) => app.do_undo(),   // MENU-22
             // VFO-16: OK on Split sets its TX frequency (entry, prefilled); entry's OK or BACK returns here.
-            (Key::Menu, Short) if item == Item::Offset && app.slot(app.active).cfg().split => {
-                let tx = app.slot(app.active).cfg().offset.max(0) as ferrite_core::freq::Freq10;
-                app.open(super::nav::Dest::Entry(0));
-                app.screen = crate::Screen::Entry(super::entry::Entry::with_freq(super::entry::EntryFor::SplitTx, tx));
-            }
+            (Key::Menu, Short) if item == Item::Offset && app.slot(app.active).cfg().split => split_entry(app),
             (Key::Menu, Short) => app.back(), // MENU-20: OK keeps
             (Key::Exit, Short) => {
                 // MENU-20: BACK restores the old value
@@ -167,7 +182,11 @@ impl View for Value {
             }
         }
         // The value, large, between the arrows; greyed with why (MENU-14).
-        if app.dirty(R_FREQ, Mix::new().h(&vt).h(&grey).get()) {
+        let mut txl = Buf::<24>::new();
+        if item == Item::Offset {
+            tx_line(app, v, &mut txl);
+        }
+        if app.dirty(R_FREQ, Mix::new().h(&vt).h(&grey).h(&txl).get()) {
             let (y0, y1) = (BOX_Y + 28, BOX_Y + 70);
             // Squelch's level bars start at BOX_Y + 68: the band stops above them, as they draw only when they change.
             let bot = if item == Item::Squelch { BOX_Y + 68 } else { y1 };
@@ -182,6 +201,9 @@ impl View for Value {
                     w::field(b, 40, 160, y0 + 10, y0 + 30, y0 + 25, vt.as_bytes(), &w::st(&UI_12B, col, BG, Align::Center));
                     text4_width(vt.as_bytes(), &UI_12B)
                 };
+                if !txl.is_empty() {
+                    w::field(b, 40, 160, y0 + 30, y0 + 42, y0 + 40, txl.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
+                }
                 let ax = (tw / 2 + 22).min(96);
                 b.tri(120 - ax - 10, y0 + 14, 12, 2, SUB);
                 b.tri(120 + ax, y0 + 14, 12, 3, SUB);

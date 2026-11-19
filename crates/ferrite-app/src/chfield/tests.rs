@@ -87,7 +87,7 @@ fn rx_typed() {
 fn offset_and_split() {
     let c = ch(mhz(146) + 52_000);
     let plus = step(ChField::It(Item::Offset), c, 1).unwrap();
-    assert_eq!(plus.cfg.offset, BANDS[band_near(c.rx)].shift, "the band's shift");
+    assert_eq!(plus.cfg.offset, crate::slot::BANDS[band_near(c.rx)].shift, "the band's shift");
     let split = step(ChField::It(Item::Offset), plus, 2).unwrap();
     assert!(split.cfg.split);
     assert_eq!(split.cfg.offset as Freq10, c.rx + 60_000, "today's TX");

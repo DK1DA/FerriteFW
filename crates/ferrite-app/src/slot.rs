@@ -297,6 +297,25 @@ pub const BANDS: [BandDef; 7] = [
 ];
 pub const BAND_125M: usize = 5;
 pub const BAND_VHF: usize = 3;
+pub const BAND_UHF: usize = 6;
+
+/// A band's repeater offset amount in a region (VFO-26): 70 cm in Europe takes IARU Region 1's 7.6 MHz; elsewhere
+/// the band's own (600 kHz on 2 m, 5 MHz on 70 cm).
+pub fn band_shift(b: usize, r: Option<ferrite_core::txplan::Region>) -> i32 {
+    match b {
+        BAND_UHF if r == Some(ferrite_core::txplan::Region::Europe) => 760_000,
+        _ => BANDS[b].shift,
+    }
+}
+
+/// The usual repeater shift for a frequency in a region (VFO-26): its band's amount, down on 2 m below 147 MHz
+/// and on 70 cm in Europe (Region 1's inputs sit 7.6 MHz below), else up.
+pub fn usual_shift(f: Freq10, r: Option<ferrite_core::txplan::Region>) -> i32 {
+    let b = band_near(f);
+    let s = band_shift(b, r);
+    let down = f >= mhz(144) && f < mhz(147) || b == BAND_UHF && r == Some(ferrite_core::txplan::Region::Europe);
+    if down { -s } else { s }
+}
 
 /// A band's default mode in a region (SETUP-7): its FM is wide FM in the Americas, Australia and New Zealand,
 /// NFM in the UK, Europe, Japan and Other; AM bands stay AM. No region chosen yet: wide.
@@ -474,7 +493,9 @@ impl Item {
             // Split needs a TX frequency: the App asks for it (frequency entry) and sets it with `set_split`.
             Item::Offset if v == 3 => return None,
             Item::Offset => {
-                let shift = if shift == 0 { 60_000 } else { shift };
+                // VFO-26: + and - keep the amount the slot has (a custom one from hold 8 too); from simplex or
+                // split, the band's
+                let shift = if !c.split && c.offset != 0 { c.offset.abs() } else if shift == 0 { 60_000 } else { shift };
                 (c.offset, c.split) = ([0, shift, -shift][v as usize], false);
                 (Param::Offset, c.offset)
             }
