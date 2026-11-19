@@ -969,7 +969,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         let mut cols = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
         if lv.scanning {
             let c = &mut cols[0];
-            c.set(slot::MODES[cfg.mode as usize % 6].as_bytes());
+            c.set(slot::MODES[cfg.mode as usize % slot::MODES.len()].as_bytes());
             if lv.hits > 0 && lv.last_hit != f {
                 let mut b = Buf::<16>::new();
                 b.set(b"last ");
@@ -1073,7 +1073,7 @@ pub(crate) fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         s.cfg.narrow = s.cfg.mode == 1;
         s.cfg.step = crate::slot::band_step(nb, region);
         if s.cfg.offset != 0 && !s.cfg.split {
-            s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift; // a split's TX stays where it is
+            s.cfg.offset = s.cfg.offset.signum() * crate::slot::band_shift(nb, region); // a split's TX stays where it is
         }
         app.hf_starts_low(a as u8, from); // TX-36
         app.send_slot(a as u8);

@@ -82,7 +82,7 @@ const HOME: &str = "screen Home \"Home\" title=\"\"
 state frame=17 ago=40 dark=0 locked=0 active=A keyed=- remote=0 mode=off fm=0
 bar lock=0 scan=0 watch=3 inbox=3 alert=0 gps=fix bt_on=0 bt=0 battery=82 low=0 cutoff=0 dry=0 clock=19:06 utc=1 call=\"\"
 card A active=1 head=\"VFO · VHF\" state=\"idle\" freq=146.52000 name=\"\" mode=\"FM\" tone=\"T 100.0\" shift=\"-600k\" power=\"LOW\" s=\"S1\" meter=1 rx=0 scan=0 kind=slot
-card B active=0 head=\"012 · Repeaters\" state=\"idle\" freq=443.47500 name=\"Club repeater\" mode=\"FM-N\" tone=\"T 100.0\" shift=\"+5M\" power=\"LOW\" s=\"S0\" meter=1 rx=0 scan=0 kind=slot
+card B active=0 head=\"012 · Repeaters\" state=\"idle\" freq=443.47500 name=\"Club repeater\" mode=\"NFM\" tone=\"T 100.0\" shift=\"+5M\" power=\"LOW\" s=\"S0\" meter=1 rx=0 scan=0 kind=slot
 card C active=0 head=\"SCAN · Airband\" state=\"scanning\" freq=119.35000 name=\"\" mode=\"AM\" tone=\"\" shift=\"\" power=\"No TX\" s=\"S0\" meter=1 rx=0 scan=1 kind=slot
 hints \"SLOT\" \"A·B·C\" \"OK\" \"Quick\" \"<>\" \"Band\"
 ";

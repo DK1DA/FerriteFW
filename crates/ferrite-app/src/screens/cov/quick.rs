@@ -90,3 +90,26 @@ fn hints_and_heard_tone() {
     t.shows("heard 88.5");
     t.reads("hints \"^v\" \"Move\" \"OK\" \"Use heard\" \"BACK\" \"Back\"");
 }
+
+/// VFO-4.1: the Mode editor shows each mode with its width (FM 25 kHz, NFM 12.5 kHz, WFM broadcast; AM alone), so
+/// FM and NFM read apart; the heading's default stays the name. Each fits the value's 16 bytes.
+#[test]
+fn mode_editor_shows_widths() {
+    use crate::screens::value::mode_width;
+    for m in crate::slot::MODES {
+        assert!(m.len() + mode_width(m.as_bytes()).len() <= 16, "{m} fits");
+    }
+    let mut t = T::new();
+    t.tap(Key::Menu);
+    t.tap(Key::Digit(3)); // Mode highlighted
+    t.tap(Key::Menu); // its editor
+    assert_eq!(t.name(), "Value editor");
+    t.shows("FM \u{b7} 25 kHz");
+    t.shows("default NFM \u{b7} VFO"); // the name alone in the heading
+    t.knob(1);
+    t.shows("NFM \u{b7} 12.5 kHz");
+    t.knob(1);
+    t.shows("AM");
+    t.knob(1);
+    t.shows("WFM \u{b7} broadcast");
+}

@@ -146,7 +146,13 @@ fn s_level(live: &LiveAll) -> (i16, bool) {
 /// `secs` as m:ss after what `b` holds.
 fn mmss_after<const N: usize>(b: &mut Buf<N>, secs: u32) {
     let mut m = Buf::<8>::new();
-    crate::screens::activity::mmss(secs, &mut m);
+    if secs >= 3600 {
+        // SAT-17.1: an hour or more as hours and minutes ("1h03"): "62:45" was cut off in the pointing page's field
+        let mins = secs / 60;
+        let _ = uwrite!(m, "{}h{}{}", mins / 60, (mins % 60) / 10, mins % 10);
+    } else {
+        crate::screens::activity::mmss(secs, &mut m);
+    }
     b.push(m.as_bytes());
 }
 
@@ -371,7 +377,12 @@ impl View for SatScr {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        app.page(lcd, (self.page, self.picker != 0, self.filter, self.opt != 0));
+        let fresh = app.page(lcd, (self.page, self.picker != 0, self.filter, self.opt != 0));
+        // SAT-12.1: while the alarm picker is up the page under it waits (drawn once as it opens, whole again as it
+        // closes): its countdown and live values redrew every second over the box and tore it (Nov 18, 2026)
+        if self.picker != 0 && !fresh {
+            return picker(app, lcd, self.picker - 1);
+        }
         if self.opt != 0 {
             return opts_page(app, lcd, self);
         }
@@ -666,7 +677,10 @@ fn list(app: &mut App, lcd: &mut impl Panel, s: SatScr) {
             }
             lcd.text4(124, b, t.as_bytes(), &UI_12B, if up { GREEN } else { fg }, bg);
             lcd.text4(172, b, el.as_bytes(), &UI_12B, fg, bg);
-            w::field(lcd, 208, rw - 208, y, y + ROW_H - 1, b, m.as_bytes(), &w::st(&UI_12B, fg, bg, Align::Left));
+            // while up, the time to set ("10:30") is wider than the length's column: right-aligned from the Max
+            // column's end (its "90°" ends by 193)
+            let (mx, al) = if up { (198, Align::Right) } else { (208, Align::Left) };
+            w::field(lcd, mx, rw - mx, y, y + ROW_H - 1, b, m.as_bytes(), &w::st(&UI_12B, fg, bg, al));
         });
     }
     app.scroll_cue(lcd, (2, ROWS), ROW_Y, ROWS as i32 * ROW_H, n > ROWS, top as u32, ROWS as u32, n as u32);
@@ -1168,7 +1182,7 @@ fn point(app: &mut App, lcd: &mut impl Panel, s: SatScr, live: &LiveAll) {
             lcd.fill(0, 266, 240, 2, LINE);
             arrow(lcd, 14, 276, false, GREEN);
             lcd.text4(30, 289, f.as_bytes(), &UI_15B, TEXT, BG);
-            w::field(lcd, 140, 88, 272, 296, 289, r.as_bytes(), &w::st(&UI_15B, if p.up(now) { GREEN } else { AMBER }, BG, Align::Right));
+            w::field(lcd, 128, 100, 272, 296, 289, r.as_bytes(), &w::st(&UI_15B, if p.up(now) { GREEN } else { AMBER }, BG, Align::Right));
         });
     }
 }
