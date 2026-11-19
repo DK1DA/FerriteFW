@@ -239,6 +239,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry(concat!("On transmit|On|", txtc!("Light up while transmitting."))),
         Entry(concat!("Wake on|Keys and RX|", txtc!("What wakes the screen."))),
         Entry(concat!("Key light|With screen|", txtc!("Off, with the screen, on key press, always."))),
+        Entry(concat!("Dim on timeout|No|", txtc!("Dim the screen instead of switching it off."))),
     ]),
     ((7, 5), &[
         Entry(concat!("Key beep|On|", txtc!("Beep on key presses."))),
@@ -475,7 +476,7 @@ pub(crate) fn all_values() -> std::vec::Vec<([u8; 3], std::vec::Vec<std::string:
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 98 + cfg!(feature = "bench") as usize] = [
+static SETTINGS: [Setting; 99 + cfg!(feature = "bench") as usize] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -550,6 +551,7 @@ static SETTINGS: [Setting; 98 + cfg!(feature = "bench") as usize] = [
     field!([7, 4, 3], tx_light: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 4, 4], wake_on: u8, Kind::Pick(&WAKE_ON), Nothing),
     field!([7, 4, 5], keypad_light: u8, Kind::Pick(&KEYPAD_LIGHTS), Nothing),
+    field!([7, 4, 6], dim_dark: bool, Kind::Flip(&NO_YES), Nothing),
     field!([7, 5, 1], key_beep: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 5, 2], beep_vol: u8, Kind::Level(1, 3, 1, beep_vol_text), BeepVol),
     field!([7, 5, 3], alert_tones: bool, Kind::Flip(&ON_OFF), Nothing),

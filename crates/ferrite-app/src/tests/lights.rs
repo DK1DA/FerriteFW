@@ -254,6 +254,55 @@ fn backlight_on_transmit() {
     assert!(t.app.backlight_duty() > 0, "back at unkey");
 }
 
+/// 0 7 4 6 Dim on timeout: off by default (dark, duty 0); on, a timed-out screen dims to DIM_DUTY (never above the
+/// level set) and is otherwise timed out as before: the waking key only wakes, full brightness back after it;
+/// transmitting with 0 7 4 3 off still darkens it; the setting survives a save and load.
+#[test]
+fn dim_on_timeout() {
+    use crate::lights::{BRIGHTNESS, DIM_DUTY};
+    let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s
+    const { assert!(!Settings::DEFAULT.dim_dark) };
+    t.wait(16_000);
+    assert!(t.app.dark());
+    assert_eq!(t.app.backlight_duty(), 0, "No: dark");
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 4, 6], 1));
+    assert!(t.app.set.dim_dark);
+    assert_eq!(t.app.backlight_duty(), DIM_DUTY, "Yes: dimmed, not off");
+    assert!(DIM_DUTY > 0 && DIM_DUTY < BRIGHTNESS[6]);
+    let f = t.freq();
+    t.tap(Key::Up);
+    assert!(!t.app.dark());
+    assert_eq!(t.freq(), f, "the waking press only wakes, dimmed as dark");
+    assert_eq!(t.app.backlight_duty(), BRIGHTNESS[6], "full level back");
+    // Never brighter than the level set.
+    t.app.set.brightness = 1;
+    t.wait(16_000);
+    assert_eq!(t.app.backlight_duty(), BRIGHTNESS[0].min(DIM_DUTY));
+    // 0 7 4 3 off: dark while keyed, dimmed or not.
+    t.app.set.tx_light = false;
+    t.live.tx.keyed = true;
+    t.wait(200);
+    assert_eq!(t.app.backlight_duty(), 0);
+    t.live.tx.keyed = false;
+    // Saved and loaded; a record from before the setting (one byte shorter) reads it as No.
+    use crate::persist::{Persist, Sink, SliceSource};
+    struct V(std::vec::Vec<u8>);
+    impl Sink for V {
+        fn put(&mut self, b: &[u8]) {
+            self.0.extend_from_slice(b);
+        }
+    }
+    let mut v = V(std::vec::Vec::new());
+    t.app.set.save(&mut v);
+    let mut s = Settings::DEFAULT;
+    s.load(&mut SliceSource(&v.0));
+    assert!(s.dim_dark);
+    let mut s = Settings::DEFAULT;
+    s.load(&mut SliceSource(&v.0[..v.0.len() - 1]));
+    assert!(!s.dim_dark, "an older record: No");
+}
+
 /// DISP-16.1, DISP-23: 0 7 4 2's levels 1-10 as PWM duty, rising, 10 full on, 0 while dark; night red keeps its own
 /// level, and 0 7 4 2 sets the one for the theme in use.
 #[test]

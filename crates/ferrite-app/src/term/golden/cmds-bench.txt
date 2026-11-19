@@ -801,6 +801,7 @@
   | set 0 7 4 3 On                    # On transmit
   | set 0 7 4 4 Keys and RX           # Wake on
   | set 0 7 4 5 With screen           # Key light
+  | set 0 7 4 6 No                    # Dim on timeout
   | set 0 7 5 1 On                    # Key beep
   | set 0 7 5 2 Mid                   # Beep volume
   | set 0 7 5 3 On                    # Alert tones
@@ -1063,6 +1064,7 @@
   | set 0 7 4 3 On                    # On transmit
   | set 0 7 4 4 Keys and RX           # Wake on
   | set 0 7 4 5 With screen           # Key light
+  | set 0 7 4 6 No                    # Dim on timeout
   | set 0 7 5 1 On                    # Key beep
   | set 0 7 5 2 Mid                   # Beep volume
   | set 0 7 5 3 On                    # Alert tones

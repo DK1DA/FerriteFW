@@ -102,6 +102,8 @@ pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
 pub const THEMES: [&str; 4] = ["Dark", "Daylight", "Night red", "Cyberpunk"];
 pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
+/// 0 7 4 6 Dim on timeout: No (the screen goes dark), Yes (it dims to [`crate::lights::DIM_DUTY`]).
+pub const NO_YES: [&str; 2] = ["No", "Yes"];
 /// Power-on message (0 7 3 2): what the logo screen shows under the version (BOOT-9).
 pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 /// Boot screen (0 7 3 3).
@@ -333,6 +335,10 @@ pub struct Settings {
     pub sat_min_el: u8,
     /// 0 5 9 8 Decode log (APRS-56): each packet heard but not decoded goes to the event log. Off by default.
     pub decode_log: bool,
+    /// 0 7 4 6 Dim on timeout: when the backlight time runs out the screen dims to [`crate::lights::DIM_DUTY`]
+    /// and keeps drawing instead of going dark (the panel doesn't sleep). Everything else about a timed-out
+    /// screen stays: the first key only wakes it, the LED heartbeat flashes. Off (No) by default.
+    pub dim_dark: bool,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -550,6 +556,7 @@ impl Settings {
         local: crate::local::DEFAULT_RANGE,
         sat_min_el: SAT_MIN_EL_START,
         decode_log: false,
+        dim_dark: false,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's

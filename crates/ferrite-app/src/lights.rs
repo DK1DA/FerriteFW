@@ -6,7 +6,8 @@
 //! - **Dark:** no key, PTT or receiving for the backlight time (0 7 4 1). The key press that wakes a dark screen
 //!   only wakes it; PTT acts at once (decision 63). Receive and transmit wake it and hold it lit only as 0 7 4 4
 //!   says (DISP-15); with 0 7 4 3 on, a lit screen stays lit through a transmission, off it is dark while keyed
-//!   (DISP-26).
+//!   (DISP-26). With 0 7 4 6 (Dim on timeout) on, dark is a dimmed screen instead ([`DIM_DUTY`]): the panel stays
+//!   awake and drawn, and the rest of being dark holds (the waking key, the heartbeat).
 //! - **Brightness:** 0 7 4 2's level for the theme (night red its own), as a PWM duty: [`App::backlight_duty`]
 //!   (DISP-16, DISP-23).
 //! - **LEDs:** red while transmitting, green while a slot receives; while the screen is dark, a heartbeat in the
@@ -25,6 +26,10 @@ pub const BRIGHTNESS: [u16; 10] = [45, 65, 90, 125, 180, 250, 355, 500, 710, 100
 /// DISP-22.1: the keypad light's curve is the screen's scaled to this top (thousandths): half the power at every
 /// level (Alex, Oct 22, 2026; on the launch-defaults list).
 pub const KEYPAD_MAX: u16 = 500;
+
+/// 0 7 4 6 Dim on timeout: the backlight's duty (thousandths) once the backlight time runs out, brightness level 1:
+/// the dimmest found readable (2 % was too dark, Oct 12, 2026).
+pub const DIM_DUTY: u16 = BRIGHTNESS[0];
 
 /// `a` is at or after `b` (wrapping ms).
 fn after(a: u32, b: u32) -> bool {
@@ -80,11 +85,16 @@ impl App {
 
     /// The backlight's PWM duty in thousandths (DISP-16, DISP-23): 0 while dark, else 0 7 4 2's level for the theme
     /// in use on a perceptual curve, 1000 at 10.
+    /// With 0 7 4 6 (Dim on timeout) on, a timed-out screen gets [`DIM_DUTY`] instead of 0, so the panel stays awake
+    /// and keeps drawing; never brighter than the level set.
     pub fn backlight_duty(&self) -> u16 {
-        if self.dark() || self.lit & TX_DARK != 0 {
+        if self.lit & TX_DARK != 0 {
             return 0;
         }
         let d = BRIGHTNESS[self.set.brightness() as usize - 1];
+        if self.dark() {
+            return if self.set.dim_dark { d.min(DIM_DUTY) } else { 0 };
+        }
         if self.low_power() { d.min(crate::lpm::LPM_BACKLIGHT) } else { d } // PWR-24.5
     }
 
