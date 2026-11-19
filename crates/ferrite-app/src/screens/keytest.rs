@@ -112,6 +112,10 @@ impl KeyTest {
 }
 
 impl View for KeyTest {
+    fn own_side1(self) -> bool {
+        true
+    }
+
     /// KEY-19: every key is under test.
     fn own_arrows(self) -> bool {
         true

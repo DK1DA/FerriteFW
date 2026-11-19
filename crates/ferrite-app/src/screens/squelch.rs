@@ -48,6 +48,10 @@ impl Squelch {
 }
 
 impl View for Squelch {
+    fn own_side1(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Squelch"
     }

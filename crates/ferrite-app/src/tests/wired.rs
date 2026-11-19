@@ -245,3 +245,53 @@ fn aprs_symbol_delay_and_level() {
     assert!(a[0] < a[1] && a[1] == ferrite_core::audio::AFSK_AMP && a[1] < a[2]);
     assert_eq!(ferrite_core::audio::afsk_tx(300).amp, ferrite_core::audio::afsk_tx_at(300, 1).amp);
 }
+
+/// SQL-9.3: SIDE1 is the monitor key on every screen that doesn't give it a job of its own (it worked on home
+/// only: Satellites, the menus and the rest ignored it). A tap latches it, a hold opens it while held, and the
+/// screens with their own SIDE1 (the squelch screen, the key test) keep theirs.
+#[test]
+fn side1_monitors_on_every_screen() {
+    use crate::screens::nav::Dest;
+    let mon = |c: &[RadioCmd]| c.iter().find_map(|c| if let RadioCmd::Monitor { slot, on } = c { Some((*slot, *on)) } else { None });
+    for dest in [Dest::Satellites, Dest::Scan, Dest::About] {
+        let mut t = T::new();
+        t.open(dest);
+        t.cmds();
+        let at = t.app.screen();
+        t.tap(Key::Side(1));
+        assert_eq!(mon(&t.cmds()), Some((0, true)), "{dest:?}: tap latches");
+        assert_eq!(t.app.screen(), at, "{dest:?}: the screen stays");
+        t.tap(Key::Side(1));
+        assert_eq!(mon(&t.cmds()), Some((0, false)), "{dest:?}: tap again ends it");
+        // SQL-9.1: held, open while held and closed at the release
+        t.hold(Key::Side(1));
+        let c = t.cmds();
+        assert!(c.contains(&RadioCmd::Monitor { slot: 0, on: true }) && c.contains(&RadioCmd::Monitor { slot: 0, on: false }), "{dest:?}: held: {c:?}");
+    }
+    // The quick settings menu (MENU) too
+    let mut t = T::new();
+    t.tap(Key::Menu);
+    t.cmds();
+    t.tap(Key::Side(1));
+    assert_eq!(mon(&t.cmds()), Some((0, true)), "the menu");
+    assert!(matches!(t.app.screen(), Screen::Quick(_)), "the menu stays open");
+    // The key test keeps SIDE1 as a key under test, the scope listens with it; the counter has no audio
+    for dest in [Dest::KeyTest, Dest::Counter, Dest::BandScope] {
+        let mut t = T::new();
+        t.open(dest);
+        t.cmds();
+        t.tap(Key::Side(1));
+        assert_eq!(mon(&t.cmds()), None, "{dest:?}: its own");
+    }
+}
+
+/// SQL-11, SQL-9.3: locked (the keypad lock lets the side keys through), SIDE1 still monitors off home.
+#[test]
+fn side1_monitors_while_locked_off_home() {
+    let mut t = T::new();
+    t.open(crate::screens::nav::Dest::Satellites);
+    lock_in(&mut t, Lock::Keypad);
+    t.cmds();
+    t.tap(Key::Side(1));
+    assert!(t.cmds().contains(&RadioCmd::Monitor { slot: 0, on: true }));
+}

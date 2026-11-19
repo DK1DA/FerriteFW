@@ -161,6 +161,11 @@ impl Scope {
 }
 
 impl View for Scope {
+    /// SIDE1 or SIDE2 listens here (SCOPE-*), not the monitor key.
+    fn own_side1(self) -> bool {
+        true
+    }
+
     /// KEY-19: ◀▶ move the marker; the knob moves the centre.
     fn own_arrows(self) -> bool {
         true
