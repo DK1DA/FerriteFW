@@ -250,6 +250,44 @@ pub fn counter_chip(f: Freq10) -> Option<u8> {
     }
 }
 
+/// How long a counter reading stays on screen after its chip's last agreeing pair (TSRCH-10.3).
+pub const COUNTER_SHOW_MS: u32 = 2_000;
+
+/// The counter's two chips measuring at once (TSRCH-10.3: both band receive selects on, SAFE-24): each chip's last
+/// raw reading and its last kept one. A reading counts only on the chip whose band it is in and when it agrees with
+/// that chip's reading before (`counter_agree`), so the junk a strong UHF carrier puts into the VHF chip (overload,
+/// images) never shows or hides the UHF chip's reading. On screen: the strongest kept reading of the last
+/// [`COUNTER_SHOW_MS`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CounterPair {
+    last: [Option<Freq10>; 2],
+    kept: [Option<(Freq10, i16, u32)>; 2],
+}
+
+impl CounterPair {
+    /// Chip `chip`'s reading `got` (10 Hz) at `rssi` dBm, at `now` ms: the frequency when it is kept.
+    pub fn reading(&mut self, chip: u8, got: Freq10, rssi: i16, now: u32) -> Option<Freq10> {
+        let c = (chip & 1) as usize;
+        let prev = self.last[c].replace(got);
+        if counter_chip(got) != Some(chip & 1) {
+            return None;
+        }
+        let f = prev.and_then(|p| counter_agree(p, got))?;
+        self.kept[c] = Some((f, rssi, now));
+        Some(f)
+    }
+
+    /// What the screen shows at `now`: the strongest reading kept in the last [`COUNTER_SHOW_MS`] (frequency, dBm).
+    pub fn shown(&self, now: u32) -> Option<(Freq10, i16)> {
+        self.kept
+            .iter()
+            .flatten()
+            .filter(|&&(_, _, at)| now.wrapping_sub(at) < COUNTER_SHOW_MS)
+            .max_by_key(|&&(_, rssi, _)| rssi)
+            .map(|&(f, rssi, _)| (f, rssi))
+    }
+}
+
 /// The mic meter (TX-12) from PA0, the mic-level tap stock's VOX reads (decision 76): stock uses the reading's top
 /// 8 bits; this many counts is shown as full deviation (to confirm on the bench, with the VOX thresholds' scale:
 /// level 1 opens at 101).
@@ -312,6 +350,32 @@ mod tests {
         assert_eq!(counter_chip(mhz(700)), None, "the chip's gap");
         assert_eq!(counter_chip(mhz(1296)), Some(1));
         assert_eq!(counter_chip(mhz(28)), None, "HF needs the relay");
+    }
+
+    /// TSRCH-10.3: both chips at once. A strong UHF carrier's junk in the VHF chip neither shows nor hides the UHF
+    /// chip's reading; the strongest fresh reading shows; a reading goes after COUNTER_SHOW_MS.
+    #[test]
+    fn counter_pair() {
+        let mut c = CounterPair::default();
+        let uhf = mhz(446) + 47_500;
+        // The VHF chip returns junk every reading (never two alike, or out of its band); the UHF chip reads true.
+        let junk = [mhz(148) + 65_830, mhz(223) + 23_750, mhz(149) + 1_200, mhz(446) + 47_500, mhz(150) + 7];
+        let mut t = 0;
+        for (i, j) in junk.iter().enumerate() {
+            assert_eq!(c.reading(0, *j, -60, t), None, "junk {i} kept");
+            let u = c.reading(1, uhf + (i as u32 % 2) * 10, -40, t + 50);
+            if i > 0 {
+                assert!(u.is_some(), "the UHF reading {i}");
+            }
+            t += 300;
+        }
+        assert_eq!(c.shown(t).map(|(f, _)| f / 100), Some(uhf / 100));
+        // A real VHF carrier, stronger: it shows.
+        c.reading(0, mhz(146) + 52_000, -20, t);
+        c.reading(0, mhz(146) + 52_010, -20, t + 300);
+        assert_eq!(c.shown(t + 300), Some((mhz(146) + 52_005, -20)));
+        // Both gone: after COUNTER_SHOW_MS nothing shows.
+        assert_eq!(c.shown(t + 300 + COUNTER_SHOW_MS), None);
     }
 
     #[test]

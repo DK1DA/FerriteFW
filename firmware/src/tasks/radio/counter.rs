@@ -3,27 +3,79 @@
 use super::*;
 
 impl Radio {
-    /// The frequency counter on or off (TSRCH-10): an exclusive mode like HF mode; watch and scans pause.
-    pub(super) fn counter(&mut self, on: bool) {
+    /// The frequency counter on or off (TSRCH-10): an exclusive mode like HF mode; watch and scans pause. Off, the
+    /// both-selects hold goes if the counter set it (TSRCH-10.3).
+    pub(super) async fn counter(&mut self, on: bool) {
         for n in 0..2u8 {
             if self.has(n) {
                 self.chip(n).freq_scan(false);
             }
         }
+        if let Some(c) = self.counter.take() {
+            if c.held {
+                let mut s = Steps::default();
+                let _ = self.path.set_both(false, &mut s);
+                self.run(&s).await;
+            }
+        }
         self.tuned = [None; 2]; // the counter, or the engines afterwards, tune them again
         let first = (0..2u8).find(|&n| self.has(n)).unwrap_or(0);
-        self.counter = on.then_some(Counter { chip: first, since: 0, last: None });
+        let both = self.has(0) && self.has(1);
+        self.counter = on.then_some(Counter { both, held: false, chip: first, since: 0, last: None, pair: Default::default() });
         self.live.mode = if on { ModeLive::Probe { freq: 0, rssi: -127, tone: 0 } } else { ModeLive::Off };
         speaker(false);
         log(b"counter ", on as u32);
     }
 
-    /// The counter's tick: one chip measures with the BK4829's frequency scan (stock's counter, 0x08021BC4), the
-    /// other sleeps; a reading counts when the next one agrees within 500 Hz (`tonegen::counter_agree`). After
-    /// `COUNTER_TURN_MS` with nothing, the other chip takes a turn. Each chip's path is asked for with
-    /// `Cause::Auto`: the relay never moves (SAFE-20), so a chip whose band would need it just isn't used.
+    /// The counter's tick. With both chips: both measure at once, chip 0 on VHF and chip 1 on UHF, with both band
+    /// receive selects on (TSRCH-10.3, SAFE-24: never the HF select or the relay; a key-up clears both first), so a
+    /// strong carrier's junk in one chip can't keep the other from its turn. Each chip's path is asked for with
+    /// `Cause::Auto`: the relay never moves (SAFE-20). If the hold is refused, or with one chip, they take turns.
     pub(super) async fn counter_tick(&mut self, now: u32) {
         let Some(mut c) = self.counter else { return };
+        if c.both {
+            if self.tuned[0].is_none() || self.tuned[1].is_none() {
+                self.tune_chip(0, Some((COUNTER_SLOT, COUNTER_TUNE[0]))).await;
+                self.tune_chip(1, Some((COUNTER_SLOT, COUNTER_TUNE[1]))).await;
+                self.select_rx(COUNTER_TUNE[0], Cause::Auto).await;
+                let was = self.path.both();
+                let mut s = Steps::default();
+                let ok = self.path.rx_now() == Rx::Bk(Sel::rx(COUNTER_TUNE[0])) && self.path.set_both(true, &mut s).is_ok();
+                self.run(&s).await;
+                if ok {
+                    c.held |= !was;
+                    for n in 0..2u8 {
+                        self.chip(n).freq_scan(true);
+                    }
+                    log(b"counter: both chips ", 1);
+                } else {
+                    // Refused (the relay energised by a slot, say): one chip at a time, as before.
+                    c.both = false;
+                    self.tuned = [None; 2];
+                    log(b"counter: both chips ", 0);
+                }
+                self.counter = Some(c);
+                return;
+            }
+            for n in 0..2u8 {
+                let mut bk = self.chip(n);
+                if let Some(hz) = bk.freq_scan_result() {
+                    bk.freq_scan(false);
+                    let got = hz / 10;
+                    let rssi = bk.rssi_dbm();
+                    let kept = c.pair.reading(n, got, rssi, now);
+                    // The cable log says what each chip read and whether it counted (a report's first question).
+                    log(if kept.is_some() { if n == 0 { b"counter c0 kept khz " } else { b"counter c1 kept khz " } } else if n == 0 { b"counter c0 drop khz " } else { b"counter c1 drop khz " }, got / 100);
+                    self.chip(n).freq_scan(true);
+                }
+            }
+            self.live.mode = match c.pair.shown(now) {
+                Some((freq, rssi)) => ModeLive::Probe { freq, rssi, tone: 0 },
+                None => ModeLive::Probe { freq: 0, rssi: -127, tone: 0 },
+            };
+            self.counter = Some(c);
+            return;
+        }
         let n = c.chip;
         let f = COUNTER_TUNE[n as usize];
         if self.tuned[n as usize].is_none() {
@@ -44,11 +96,11 @@ impl Radio {
                     if let Some(freq) = c.last.and_then(|l| tonegen::counter_agree(l, got)) {
                         self.live.mode = ModeLive::Probe { freq, rssi, tone: 0 };
                         log(b"counter khz ", freq / 100);
+                        c.since = now; // TSRCH-10.3: only a kept reading holds the turn
                     }
                     c.last = Some(got);
                 }
                 self.chip(n).freq_scan(true);
-                c.since = now;
             } else if now.wrapping_sub(c.since) > COUNTER_TURN_MS {
                 bk.freq_scan(false);
                 self.live.mode = ModeLive::Probe { freq: 0, rssi: -127, tone: 0 };
