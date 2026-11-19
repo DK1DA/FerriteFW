@@ -408,13 +408,20 @@ const LOOK_WAITS: u8 = 7;
 /// The hold ends after this many closed polls in a row: stock's 100 ms receive-end debounce at the 10 ms tick.
 const HOLD_CLOSED: u8 = 10;
 
-/// The frequency counter: which chip measures now, when its scan started, and its last reading (stock keeps a
-/// reading only when the next one agrees, `tonegen::counter_agree`).
+/// The frequency counter. With both chips, both measure at once with both band receive selects on (TSRCH-10.3,
+/// SAFE-24): `pair` keeps each chip's readings. Otherwise (one chip, or the selects refused) they take turns:
+/// which chip measures now, when its scan started, and its last reading (stock keeps a reading only when the next
+/// one agrees, `tonegen::counter_agree`).
 #[derive(Clone, Copy)]
 struct Counter {
+    /// Both chips at once (TSRCH-10.3).
+    both: bool,
+    /// The counter set the both-selects hold, so it clears it when it closes (not when the bench test had it on).
+    held: bool,
     chip: u8,
     since: u32,
     last: Option<Freq10>,
+    pair: tonegen::CounterPair,
 }
 
 /// The BK4829's SAME receiver (DEC-19): on the chip of a slot tuned to a weather channel, the burst being put

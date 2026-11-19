@@ -207,7 +207,7 @@ impl Radio {
                 speaker(false);
                 log(b"shutdown: chips off at ms ", now_ms() as u32);
             }
-            RadioCmd::Counter(on) => self.counter(on),
+            RadioCmd::Counter(on) => self.counter(on).await,
             RadioCmd::Lease => {} // MODE-3: renewed above (`Lease::note`)
             RadioCmd::Same(on) => self.same_on = on,
             RadioCmd::DtmfRx(on) => self.dtmf_on = on,
