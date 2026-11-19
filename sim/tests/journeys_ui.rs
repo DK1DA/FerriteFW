@@ -321,3 +321,43 @@ fn compose_lists_repaint_by_row() {
     let quick = per_step(&mut r);
     assert!(book <= channels * 5 / 4 && quick <= channels * 5 / 4, "book {book}, quick {quick}, channels {channels} px a step");
 }
+
+/// SAT-12.1, SAT-17.1: the alarm picker stays whole while the page under it ticks (the countdown before the rise, the live
+/// values while up), and closing it leaves the page exactly as a radio that never opened it; with the pass up the
+/// list's time to set and, over an hour away, the pointing page's rise fit their fields (the drop checks the cuts).
+#[test]
+fn sat_alarm_picker_stays_whole() {
+    use ferrite_core::keys::Key;
+    let box_px = |r: &Radio| -> Vec<u32> {
+        let px = r.sim.screen_rgb();
+        (84..234).flat_map(|y| (40..200).map(move |x| (x, y))).map(|(x, y)| px[y * 240 + x]).collect()
+    };
+    let (mut a, mut b) = (Radio::new(), Radio::new());
+    for r in [&mut a, &mut b] {
+        r.sim.jump(68);
+        r.wait(1000);
+        r.press(Key::Menu).wait(800); // the pass page, ISS an hour away
+        r.press(Key::Digit(0)).wait(800); // the pointing page: "rises 1h02"
+        r.press(Key::Digit(0)).wait(800); // the plot again
+    }
+    for up in [false, true] {
+        if up {
+            for r in [&mut a, &mut b] {
+                r.press(Key::Exit).wait(500);
+                r.wait(64 * 60_000); // ISS up
+                r.press(Key::Menu).wait(800);
+            }
+        }
+        a.press(Key::Hash).wait(300); // a press is 200 ms: the twin waits the same 500
+        b.wait(500);
+        let open = box_px(&a);
+        for _ in 0..5 {
+            a.wait(1000);
+            b.wait(1000);
+            assert!(box_px(&a) == open, "up={up}: the picker changed while the page ticked");
+        }
+        a.press(Key::Exit).wait(300);
+        b.wait(500);
+        assert!(a.sim.screen_rgb() == b.sim.screen_rgb(), "up={up}: closing it left something behind");
+    }
+}
