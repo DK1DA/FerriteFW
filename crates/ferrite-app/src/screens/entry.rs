@@ -153,6 +153,8 @@ pub struct Entry {
     pub n: u8,
     /// Four MHz digits (1000-1300 MHz): the automatic point comes after the fourth.
     pub wide: bool,
+    /// VFO-26.5: the offset amount's sign chosen with ▲ (+1) or ▼ (-1); 0 keeps the slot's (`offset_sign`).
+    pub sign: i8,
 }
 
 /// VFO-21: the hint after \* \* on 100-130: what the fourth MHz digit makes.
@@ -196,6 +198,11 @@ const OFFSET_MAX: Freq10 = mhz(100);
 
 /// VFO-26: the direction a typed offset amount goes: the slot's, or from simplex or split the band's usual one
 /// (up where a band has none).
+/// VFO-26.5: the sign the amount goes in with: ▲ or ▼ if pressed, else the slot's ([`offset_sign`]).
+fn amount_sign(e: &Entry, app: &App) -> i32 {
+    if e.sign != 0 { e.sign as i32 } else { offset_sign(app) }
+}
+
 fn offset_sign(app: &App) -> i32 {
     let s = app.slot(app.active());
     match s.cfg().offset.signum() {
@@ -213,7 +220,7 @@ const HI: Freq10 = mhz(1300);
 
 impl Entry {
     pub fn new(to: EntryFor, first: Option<u8>) -> Self {
-        let mut e = Entry { to, buf: [0; 10], n: 0, wide: false };
+        let mut e = Entry { to, buf: [0; 10], n: 0, wide: false, sign: 0 };
         if let Some(d) = first {
             e.push(b'0' + d);
         }
@@ -222,7 +229,7 @@ impl Entry {
 
     /// Prefilled with a frequency ("146.52"; trailing zeros after the point dropped), to edit or keep with OK.
     pub fn with_freq(to: EntryFor, f: Freq10) -> Self {
-        let mut e = Entry { to, buf: [0; 10], n: 0, wide: f >= mhz(1000) };
+        let mut e = Entry { to, buf: [0; 10], n: 0, wide: f >= mhz(1000), sign: 0 };
         let (int, mut frac, mut k) = (f / 100_000, f % 100_000, 5);
         while k > 1 && frac % 10 == 0 {
             frac /= 10;
@@ -422,6 +429,8 @@ impl View for Entry {
             // (and \* \* on 100-130 the fourth MHz digit, VFO-11). It never types a second point.
             (Key::Star, Press::Short) if s.accepts_star() => return commit(s, app, store),
             (Key::Star, Press::Short) => s.push(b'.'),
+            // VFO-26.5: ▲ makes the offset +, ▼ makes it -; the TX row follows at once
+            (Key::Up | Key::Down, Press::Short) if s.to == EntryFor::OffsetAmount => s.sign = if e.key == Key::Up { 1 } else { -1 },
             (Key::Exit, Press::Short) if s.n == 0 => return app.back(),
             // APRS-15.1: # with nothing typed puts the APRS frequency back on the region's (MENU-18's #, here too)
             (Key::Hash, Press::Short) if s.n == 0 && s.to == EntryFor::Setting(FreqSet::Aprs) => {
@@ -492,6 +501,8 @@ impl View for Entry {
             // VFO-21: "129" after \* \*: the fourth MHz digit's range (130 has only 1300 in reach)
             let range = WIDE[(self.three() as usize).saturating_sub(100).min(WIDE.len() - 1)];
             Hints::new(&[(if self.three() == 130 { "0" } else { "0-9" }, range), back])
+        } else if self.to == EntryFor::OffsetAmount && !self.accepts_star() {
+            Hints::new(&[("^v", "+/-"), ("OK", "Go"), back]) // VFO-26.5
         } else if self.n == 0 && self.to == EntryFor::Setting(FreqSet::Aprs) {
             Hints::new(&[("#", "Region default"), ("OK", "Go"), back]) // APRS-15.1
         } else if self.freq_mode() {
@@ -561,7 +572,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
         if !(OFFSET_MIN..=OFFSET_MAX).contains(&f) {
             return app.show_toast(b"Offset", b"10 kHz to 100 MHz", false);
         }
-        if app.set_shift(offset_sign(app) * f as i32) {
+        if app.set_shift(amount_sign(&e, app) * f as i32) {
             app.back();
         }
         return;
@@ -645,10 +656,14 @@ match self.to {
                 let mut b = Buf::<16>::new();
                 app.item_text(crate::slot::Item::Offset, true, &mut b);
                 rows[0].1.set(b.as_bytes());
+                // VFO-26.5: the sign it goes in with (▲ +, ▼ -), and where it would transmit
+                let sign = amount_sign(&self, app);
+                rows[1].0 = b"Shift";
+                rows[1].1.set(if sign < 0 { b"-" } else { b"+" });
                 if let Some(f) = self.freq().filter(|f| (OFFSET_MIN..=OFFSET_MAX).contains(f)) {
-                    rows[1].0 = b"TX";
+                    rows[2].0 = b"TX";
                     let rx = app.slot(app.active()).freq() as i64;
-                    rows[1].1.set(w::freq3((rx + offset_sign(app) as i64 * f as i64).max(0) as Freq10).as_bytes());
+                    rows[2].1.set(w::freq3((rx + sign as i64 * f as i64).max(0) as Freq10).as_bytes());
                 } else if self.n > 0 {
                     note = b"10 kHz to 100 MHz";
                 }
@@ -710,7 +725,7 @@ match self.to {
         match self.to {
             EntryFor::Vfo => txt!("After three digits the point comes by itself; * types it, and * again enters (52*525*)."),
             EntryFor::Channel => txt!("Type the channel number, then OK."),
-            EntryFor::OffsetAmount => txt!("The repeater offset in MHz: 7*6 is 7.6. + or - stays as it is; OK keeps it."),
+            EntryFor::OffsetAmount => txt!("The repeater offset in MHz: 7*6 is 7.6. Up makes it +, Down -; OK keeps it."),
             EntryFor::SplitTx => txt!("Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift."),
             _ => txt!("* is the point, then * or OK keeps it. BACK deletes."),
         }

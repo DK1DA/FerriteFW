@@ -69,6 +69,16 @@ pub(crate) fn text_of(app: &App, item: Item, i: i32, b: &mut Buf<16>) {
     }
 }
 
+/// VFO-26.6: under the Offset editor's value, where that choice transmits ("TX 147.120").
+fn tx_line(app: &App, i: i32, b: &mut Buf<24>) {
+    let s = &app.slots[app.active as usize];
+    let mut c = *s.cfg();
+    let shift = crate::slot::band_shift(band_near(s.freq()), app.set.region());
+    Item::Offset.set(&mut c, i, shift);
+    b.set(b"TX ");
+    b.push(w::freq3(c.tx_of(s.freq())).as_bytes());
+}
+
 const BOX_Y: i32 = 44;
 const BOX_H: i32 = 162;
 
@@ -158,7 +168,11 @@ impl View for Value {
             }
         }
         // The value, large, between the arrows; greyed with why (MENU-14).
-        if app.dirty(R_FREQ, Mix::new().h(&vt).h(&grey).get()) {
+        let mut txl = Buf::<24>::new();
+        if item == Item::Offset {
+            tx_line(app, v, &mut txl);
+        }
+        if app.dirty(R_FREQ, Mix::new().h(&vt).h(&grey).h(&txl).get()) {
             let (y0, y1) = (BOX_Y + 28, BOX_Y + 70);
             // Squelch's level bars start at BOX_Y + 68: the band stops above them, as they draw only when they change.
             let bot = if item == Item::Squelch { BOX_Y + 68 } else { y1 };
@@ -173,6 +187,9 @@ impl View for Value {
                     w::field(b, 40, 160, y0 + 10, y0 + 30, y0 + 25, vt.as_bytes(), &w::st(&UI_12B, col, BG, Align::Center));
                     text4_width(vt.as_bytes(), &UI_12B)
                 };
+                if !txl.is_empty() {
+                    w::field(b, 40, 160, y0 + 30, y0 + 42, y0 + 40, txl.as_bytes(), const { &w::st(&UI_12, SUB, BG, Align::Center) });
+                }
                 let ax = (tw / 2 + 22).min(96);
                 b.tri(120 - ax - 10, y0 + 14, 12, 2, SUB);
                 b.tri(120 + ax, y0 + 14, 12, 3, SUB);
