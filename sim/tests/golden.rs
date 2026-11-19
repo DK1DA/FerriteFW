@@ -331,3 +331,44 @@ fn low_power_home_matches_its_goldens() {
     r.up(Key::Side(2)).up(Key::Side(1));
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// KEY-11, VFO-26: hold 7 opens the shift's options; hold 8 the offset's amount, typed (7.6 here), all text uncut.
+#[test]
+fn offset_editors_match_their_goldens() {
+    use ferrite_core::keys::Key;
+    let mut failures = Vec::new();
+    let mut r = Radio::new();
+    r.home();
+    r.hold(Key::Digit(7)).wait(1500);
+    failures.extend(check("offset-hold7", &r.sim.screen_rgb()));
+    r.press(Key::Exit).home();
+    r.hold(Key::Digit(8)).wait(1500);
+    failures.extend(check("offset-hold8", &r.sim.screen_rgb()));
+    r.type_("7.6").wait(300);
+    failures.extend(check("offset-hold8-typed", &r.sim.screen_rgb()));
+    r.press(Key::Menu).wait(1500);
+    failures.extend(check("offset-home-7m6", &r.sim.screen_rgb()));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// VFO-4, TX-20.6: the Mode picker's help names FM 25 kHz, NFM 12.5 kHz and WFM broadcast; PTT on a WFM
+/// slot says it's broadcast, receive only (the toast, then the refused screen), all text uncut.
+#[test]
+fn wfm_mode_and_refusal_match_their_goldens() {
+    use ferrite_core::keys::Key;
+    let mut failures = Vec::new();
+    let mut r = Radio::new();
+    r.home();
+    r.press(Key::Menu).press(Key::Digit(3)).wait(500);
+    failures.extend(check("wfm-mode-help", &r.sim.screen_rgb()));
+    r.knob(3).wait(300); // FM, NFM, AM, WFM
+    failures.extend(check("wfm-mode-set", &r.sim.screen_rgb()));
+    r.home().wait(1500);
+    r.sim.key(Key::Ptt(0), true);
+    r.wait(300);
+    failures.extend(check("wfm-ptt-refused", &r.sim.screen_rgb()));
+    r.sim.key(Key::Ptt(0), false);
+    r.wait(300);
+    failures.extend(check("wfm-ptt-released", &r.sim.screen_rgb()));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

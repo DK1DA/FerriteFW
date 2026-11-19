@@ -163,8 +163,9 @@ fn ram_is_small() {
     // auto reply's settings in the App's AprsCfg (APRS-57: on and delay, the pattern, the 45-character reply), 56
     // to 2056; the Nearby view's rows found once, not per draw (CHAN-15, Nov 17, 2026: 32 channel numbers, their
     // count and what they were found for), 72, to 2128; the channel browser's counts kept between redraws (its view's,
-    // 8, and the picker's band views', 16: a full radio counted 4000 records a redraw), 24, to 2152
-    assert!(n <= 2152, "App is {n} bytes");
+    // 8, and the picker's band views', 16: a full radio counted 4000 records a redraw), 24, to 2152;
+    // the status bar as last drawn gains VOX's mark (SBAR-25: 1 byte), 8 with padding, to 2160
+    assert!(n <= 2160, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -598,20 +599,28 @@ fn shortcuts_and_menu_paths() {
     let mut t = T::new();
     t.app.radio.tx_built = true; // hold 2 sets power where the slot can transmit (HOME-4.2)
     t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
-    // KEY-11: 1 opens the scope, 3/5/8 their editors, 9 on a VFO the save form (KEY-23); BACK comes home.
-    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (8, "Value editor"), (9, "Save as channel")] {
+    // KEY-11: 1 opens the scope, 3/5/7 their editors, 9 on a VFO the save form (KEY-23); BACK comes home.
+    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (7, "Value editor"), (9, "Save as channel")] {
         t.hold(Key::Digit(d));
         assert_eq!(t.app.screen().name(), name, "hold {d}");
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
+    // VFO-26: 8 types the offset's amount, from empty; BACK comes home
+    t.hold(Key::Digit(8));
+    assert_eq!(t.app.screen().name(), "Frequency entry", "hold 8");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
     t.hold(Key::Digit(2)); // TX power: low -> mid
     assert_eq!(t.app.slot(0).cfg().power, 1);
     let step = t.app.slot(0).cfg().step;
     t.hold(Key::Digit(6)); // step: the next one
     assert_ne!(t.app.slot(0).cfg().step, step);
-    t.hold(Key::Digit(7)); // shift: simplex -> +
+    t.hold(Key::Digit(7)); // VFO-26: the shift's options, the knob picks +
+    t.knob(1);
     assert!(t.app.slot(0).cfg().offset > 0);
+    t.tap(Key::Menu); // OK keeps it
+    assert_eq!(t.app.screen(), Screen::Home);
     let w = t.app.watch;
     t.hold(Key::Digit(4)); // watch on/off
     assert_ne!(t.app.watch, w);
@@ -1331,7 +1340,7 @@ fn chip_slots_never_move() {
     // The widest text each slot shows fits it.
     use ferrite_ui::assets::UI_12;
     use ferrite_ui::gfx::text4_width;
-    for (s, (_, w)) in [("FM-N", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("No TX", SLOT_POWER)] {
+    for (s, (_, w)) in [("NFM", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("No TX", SLOT_POWER)] {
         assert!(text4_width(s.as_bytes(), &UI_12) <= w - 4, "{s} fits its slot");
     }
     assert!(SLOT_POWER.0 + SLOT_POWER.1 == 226 && SLOT_SHIFT.0 + SLOT_SHIFT.1 < SLOT_POWER.0);

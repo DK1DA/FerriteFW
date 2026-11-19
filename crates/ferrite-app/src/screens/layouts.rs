@@ -308,7 +308,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         // The value line in fixed columns (HOME-4): mode, tone, power pinned right; a scan's mode and last hit.
         let mut cols = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
         if lv.scanning {
-            cols[0].set(crate::slot::MODES[cfg.mode as usize % 6].as_bytes());
+            cols[0].set(crate::slot::MODES[cfg.mode as usize % crate::slot::MODES.len()].as_bytes());
             if lv.hits > 0 && lv.last_hit != f {
                 cols[1].set(b"last ");
                 let hn = app.hit_name(s, live, cx.store); // HOME-4.1: a channel scan's hit by name

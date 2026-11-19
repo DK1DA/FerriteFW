@@ -17,10 +17,12 @@ pub const MIC_STOCK: u8 = 0x24;
 /// writes the mic gain again.
 pub const MIC_DATA: u8 = 0x34;
 
-/// VOX-15: REG_7D[5:0] (0.5 dB a step) for Mic gain 1-9 (0 8 3): stock's default 0x24 at 5, 1 dB a step around
-/// it (0x1C at 1, 0x2C at 9: stock's setting 1, 0x2D, is a step above 9).
+/// VOX-15: REG_7D[5:0] (0.5 dB a step) for Mic gain 1-9 (0 8 3): 9 is 0x39, stock's loudest (its setting 2, the
+/// calibration's 0xF210 byte 0: 0x37 on both bench radios) and a step more, 10.5 dB over stock's default 0x24; 2.5 dB
+/// a step down to 0x11 at 1. 5 (the default) is 0x25, half a dB over stock's default. The field's top (0x3F) is
+/// left unused.
 pub fn mic_reg(gain: u8) -> u8 {
-    (MIC_STOCK as i16 + (gain.clamp(1, 9) as i16 - 5) * 2) as u8
+    0x39 - (9 - gain.clamp(1, 9)) * 5
 }
 
 /// Stock's hysteresis: speech goes on above the threshold and stays on down to this many counts below it.
@@ -207,12 +209,13 @@ mod tests {
         assert!(!v.step(799, 5, 2000, false, 9000), "the whistle (49) is below level 5's 61");
     }
 
-    /// VOX-15: Mic gain 5 (the default) writes stock's default REG_7D[5:0] 0x24; 1 dB a step, within the field.
+    /// VOX-15: 9 writes stock's loudest and a step (0x39), 2.5 dB a step down; 5 (the default) half a dB over stock's
+    /// default.
     #[test]
     fn mic_gain_to_reg_7d() {
-        assert_eq!(mic_reg(5), MIC_STOCK);
-        assert_eq!((mic_reg(1), mic_reg(9)), (0x1C, 0x2C));
-        assert_eq!((mic_reg(0), mic_reg(12)), (0x1C, 0x2C), "clamped to 1-9");
-        assert!((1..=9).all(|g| mic_reg(g) <= 0x3F));
+        assert_eq!((mic_reg(1), mic_reg(5), mic_reg(9)), (0x11, 0x25, 0x39));
+        assert_eq!((mic_reg(0), mic_reg(12)), (0x11, 0x39), "clamped to 1-9");
+        assert!(mic_reg(5).abs_diff(MIC_STOCK) <= 1, "5 within half a dB of stock's default");
+        assert!(mic_reg(8) < 0x37 && mic_reg(9) >= 0x37, "9 reaches stock's loudest, its setting 2 (0xF210 byte 0 on the bench radios)");
     }
 }

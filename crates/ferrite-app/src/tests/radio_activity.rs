@@ -960,24 +960,68 @@ fn transmit_keeps_slot_order() {
     assert!(place(2, 2).0 + 164 <= 300 && place(HF_SLOT, 2).0 + 23 <= 300);
 }
 
-/// KEY-11: hold 7 and 8 on a channel open its editor at the Offset cell; on a VFO 7 cycles the shift.
+/// KEY-11, VFO-26.3, VFO-26.4: hold 7 opens the shift's options and hold 8 the amount entry, on a VFO and a channel alike.
 #[test]
-fn shift_and_offset_on_a_channel_open_the_editor() {
+fn shift_and_offset_open_their_editors() {
+    use crate::screens::entry::EntryFor;
     let mut t = T::new();
-    for d in [7, 8] {
-        t.tap(Key::VfoMem);
-        assert!(t.app.slot(0).on_channel());
-        t.hold(Key::Digit(d));
-        match t.app.screen() {
-            Screen::ChEdit(e) => assert_eq!(e.cell, crate::screens::chedit::OFFSET_CELL, "hold {d}"),
-            s => panic!("hold {d}: {}", s.name()),
+    for ch in [false, true] {
+        if ch {
+            t.tap(Key::VfoMem);
+            assert!(t.app.slot(0).on_channel());
         }
-        t.hold(Key::Exit);
-        t.tap(Key::VfoMem);
-        assert!(!t.app.slot(0).on_channel());
+        t.hold(Key::Digit(7));
+        assert!(matches!(t.app.screen(), Screen::Value(v) if v.item == Item::Offset), "hold 7: {}", t.app.screen().name());
+        t.app.go_home();
+        t.hold(Key::Digit(8));
+        assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::OffsetAmount), "hold 8: {}", t.app.screen().name());
+        t.app.go_home();
     }
+}
+
+/// VFO-26.2, VFO-26.3: hold 8 types the amount; the direction stays; + and - keep it; from simplex the band's again.
+#[test]
+fn hold_8_types_the_offset_amount() {
+    let mut t = ready();
+    tune(&mut t, 14_534_000);
+    t.app.set_shift(-60_000);
     t.hold(Key::Digit(8));
-    assert!(matches!(t.app.screen(), Screen::Value(v) if v.item == Item::Offset), "VFO: the offset editor");
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.n == 0), "empty: the Now row shows today's");
+    for k in [Key::Digit(1), Key::Star, Key::Digit(2), Key::Menu] {
+        t.tap(k);
+    }
+    assert!(matches!(t.app.screen(), Screen::Home), "OK keeps it: {}", t.app.screen().name());
+    assert_eq!(t.app.slot(0).cfg().offset, -120_000, "1.2 MHz down, the direction kept");
+    t.app.change(Item::Offset, -1); // - to +
+    assert_eq!(t.app.slot(0).cfg().offset, 120_000, "+ keeps the amount");
+    t.app.change(Item::Offset, -1); // to simplex
+    t.app.change(Item::Offset, 2); // simplex to -: the band's again
+    assert_eq!(t.app.slot(0).cfg().offset, -60_000);
+    // Out of range: refused, the entry stays.
+    t.hold(Key::Digit(8));
+    for k in [Key::Digit(2), Key::Digit(0), Key::Digit(0), Key::Menu] {
+        t.tap(k);
+    }
+    assert!(matches!(t.app.screen(), Screen::Entry(_)), "200 MHz refused: {}", t.app.screen().name());
+}
+
+/// VFO-26, VFO-26.1: Europe's 70 cm offset is 7.6 MHz down; 2 m stays 600 kHz; the US keeps 5 MHz.
+#[test]
+fn region_offsets() {
+    use crate::slot::{band_shift, usual_shift, BAND_UHF, BAND_VHF};
+    assert_eq!(band_shift(BAND_UHF, Some(Region::Europe)), 760_000);
+    assert_eq!(usual_shift(43_900_000, Some(Region::Europe)), -760_000);
+    assert_eq!(band_shift(BAND_VHF, Some(Region::Europe)), 60_000);
+    assert_eq!(usual_shift(14_570_000, Some(Region::Europe)), -60_000);
+    assert_eq!(usual_shift(44_400_000, Some(Region::Us)), 500_000);
+    assert_eq!(band_shift(BAND_UHF, None), 500_000);
+    // A VFO turned onto + on 70 cm in Europe takes 7.6 MHz.
+    let mut t = ready();
+    t.app.set_region(Some(Region::Europe), false);
+    tune(&mut t, 43_900_000);
+    t.app.set_shift(0);
+    t.app.change(Item::Offset, 2); // simplex to -
+    assert_eq!(t.app.slot(0).cfg().offset, -760_000);
 }
 
 /// KEY-11: hold 6 (step) on a channel changes nothing and says why (VFO-8).
@@ -1079,15 +1123,6 @@ fn split_tx() {
     t.app.slots[0].cfg.reverse = true;
     assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);
     assert_eq!(t.app.slot(0).cfg().rx_of(14_652_000), 22_350_000);
-    t.app.slots[0].cfg.reverse = false;
-    // Hold 7 cycles simplex, +, - only: from split it goes to simplex, never back to split.
-    t.app.slots[0].cfg.offset = 14_652_000;
-    crate::screens::nav::shortcut(&mut t.app, 7, &store());
-    assert!(!t.app.slot(0).cfg().split);
-    for _ in 0..4 {
-        crate::screens::nav::shortcut(&mut t.app, 7, &store());
-        assert!(!t.app.slot(0).cfg().split, "hold 7 never picks split");
-    }
 }
 
 /// A channel keeps a split through the store's record, and saving it from the slot keeps it.

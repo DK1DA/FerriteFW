@@ -60,6 +60,7 @@ const NAME: u8 = 1;
 const FREQ: u8 = 2;
 const GRID0: u8 = 3;
 /// The Offset cell (shift and offset), where hold 7 and 8 open the editor on a channel.
+#[cfg(test)]
 pub(crate) const OFFSET_CELL: u8 = GRID0 + 3;
 /// Grid geometry: 3 columns of 72 at 77 apart, 4 rows of 29 at 34 apart (HomeEditCh).
 const GX: i32 = 7;

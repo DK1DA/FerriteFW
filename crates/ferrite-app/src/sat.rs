@@ -193,6 +193,7 @@ impl App {
             return false;
         }
         self.sat.toast_at = 0;
+        self.drawn.popup_gone |= self.toast.is_some_and(|t| t.center); // a centred one's box is drawn over again
         self.toast = None;
         if let Some(p) = self.sat_data().alarm() {
             self.sat.cur = Some(p);

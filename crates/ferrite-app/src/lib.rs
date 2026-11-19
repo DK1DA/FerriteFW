@@ -1830,6 +1830,7 @@ impl App {
         let rx = self.slots[a as usize].freq();
         let mut c = *self.slots[a as usize].cfg();
         let was_split = c.split;
+        (c.offset, c.split) = (0, false); // the amount given, not the one kept (VFO-26)
         let Some((param, value)) = Item::Offset.set(&mut c, (shift.signum() + 3) % 3, shift.abs()) else { return false };
         if !ferrite_core::txplan::relay_ok(c.rx_of(rx), c.tx_of(rx)) {
             self.relay_toast();
@@ -1922,7 +1923,7 @@ impl App {
             }
             _ => {
                 let rx = self.slots[a as usize].freq();
-                let shift = BANDS[band_near(rx)].shift;
+                let shift = crate::slot::band_shift(band_near(rx), self.set.region());
                 let on_ch = self.slots[a as usize].on_channel();
                 let c = self.slots[a as usize].cfg_mut();
                 let mut v = item.get(c).0 + d;

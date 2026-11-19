@@ -10,7 +10,7 @@
 //!   something, the time since the last, the backlight off, the key lock, the active slot, the slot transmitting,
 //!   remote PTT, the exclusive mode running (MODE-1: off, scope, strip, tone, counter, fm, hf, xb) and whether
 //!   broadcast FM plays.
-//! - `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=fix bt_on=1 bt=0 battery=80 low=0 cutoff=0 dry=0 clock=14:32 utc=0 call=""`: the status bar
+//! - `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=fix bt_on=1 bt=0 battery=80 low=0 cutoff=0 dry=0 lpm=0 vox=0 clock=14:32 utc=0 call=""`: the status bar
 //!   (`call` the callsign drawn in the clock's place with no time, SBAR-2); while locked `lockmode=keypad`,
 //!   `allbutptt` or `all` follows `lock=1` (KEY-14).
 //! - `toast "head" "body"` or `popup "head" "body"` while one shows; `qmenu "PTT A" "Reverse" "off"` per row of the
@@ -480,6 +480,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "cutoff", b.battery_cutoff as u32);
         kn(l, "dry", b.dry as u32); // TX-48, SBAR-22
         kn(l, "lpm", b.lpm as u32); // PWR-24, SBAR-24
+        kn(l, "vox", b.vox as u32); // SBAR-25
         if b.sat != 0 {
             // SAT-20: the pass alarm's mark: minutes to the rise, or up
             let m = b.sat & ferrite_ui::widgets::SAT_UP;

@@ -62,7 +62,7 @@ fn repeater_below_64() {
     t.open(Dest::AddRepeater);
     t.knob(0);
     let mut s = form(&t);
-    s.set_freq(mhz(29) + 60_000);
+    s.set_freq(mhz(29) + 60_000, None);
     s.row = 6;
     t.app.screen = Screen::Save(s);
     t.draw();
