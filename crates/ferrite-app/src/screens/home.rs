@@ -978,7 +978,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         let mut cols = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
         if lv.scanning {
             let c = &mut cols[0];
-            c.set(slot::MODES[cfg.mode as usize % 6].as_bytes());
+            c.set(slot::MODES[cfg.mode as usize % slot::MODES.len()].as_bytes());
             if lv.hits > 0 && lv.last_hit != f {
                 let mut b = Buf::<16>::new();
                 b.set(b"last ");

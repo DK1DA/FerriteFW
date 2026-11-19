@@ -391,5 +391,6 @@ fn wfm_is_a_broadcast_slot_on_64_to_108() {
     t.wait(100);
     assert_eq!(t.app.bcast_slot(), Some(0), "WFM on 70.05: broadcast");
     assert_eq!(t.app.fm_range(), (6_400, 10_800), "its range is the SI4732's");
-    assert_eq!(crate::screens::transmit::refusal(&t.app, 0), Some(ferrite_core::txplan::Refusal::ReceiveOnlyHere));
+    assert_eq!(crate::screens::transmit::refusal(&t.app, 0), Some(ferrite_core::txplan::Refusal::WfmRxOnly), "TX-20.6: WFM says it is broadcast");
+    assert_eq!(crate::screens::transmit::short(ferrite_core::txplan::Refusal::WfmRxOnly), "WFM is broadcast: RX only");
 }

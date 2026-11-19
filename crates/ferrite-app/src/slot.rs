@@ -427,7 +427,7 @@ impl Item {
             Item::Channel => txt!("Edit this channel: name, zone, number, flags."),
             Item::BatterySave => txt!("Receiver sleep: deeper saves more, hears later."),
             Item::Advanced => txt!("Everything else, in nine groups."),
-            Item::Mode => txt!("FM wide, NFM narrow, AM. USB, LSB, CW: HF mode."),
+            Item::Mode => txt!("FM 25 kHz, NFM 12.5 kHz, AM. WFM: broadcast RX."),
             Item::BusyLock => txt!("Refuse transmit while the channel is busy."),
             Item::Reverse => txt!("Listen on the repeater's input. Hold *, PTT A."),
         }
@@ -571,9 +571,9 @@ pub fn params(c: &SlotCfg) -> [(Param, i32); 10] {
     ]
 }
 
-/// The mode chip: "FM-N" for NFM (the home cards' long-standing look), else the mode.
+/// The mode chip: the mode's name, as everywhere else (NFM, not the cards' old "FM-N": decision 417).
 pub fn mode_chip(c: &SlotCfg, b: &mut Buf<16>) {
-    b.set(if c.mode == 1 { b"FM-N" } else { MODES[c.mode as usize % MODES.len()].as_bytes() });
+    b.set(MODES[c.mode as usize % MODES.len()].as_bytes());
 }
 
 /// The clarifier in 100 Hz as "CLR +0.3" (VFO-22).
@@ -631,7 +631,7 @@ mod tests {
         Item::Step.text(&c, true, &mut b);
         assert_eq!(s(&b), "12.5 kHz");
         mode_chip(&c, &mut b);
-        assert_eq!(s(&b), "FM-N");
+        assert_eq!(s(&b), "NFM");
     }
 
     #[test]
