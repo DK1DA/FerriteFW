@@ -516,6 +516,20 @@ impl View for Home {
 
 /// [`Home`]'s drawing, on the panel or in a band.
 fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
+    // HOME-3.1: the layout changed while home is up (from the terminal or Console: the menu's way goes through a
+    // screen change, which clears): the whole area cleared and every region forgotten, as a new page. The cards
+    // stayed behind under the strip's one card before. On a fresh screen (regions all forgotten) nothing more.
+    // Low Power Mode's home keeps its own page state in R_PAGE (lowpower.rs); leaving it clears once from here.
+    let key = Mix::new().h(&app.home_layout()).get() | 1;
+    let was = app.drawn.hash[R_PAGE];
+    if was != key && app.home_layout() != crate::lpm::HOME_LOW_POWER {
+        if was != 0 {
+            lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
+            app.drawn.hash[R_HINT + 1..R_PAGE].fill(0);
+            app.drawn.meter = [None; SLOTS];
+        }
+        app.drawn.hash[R_PAGE] = key;
+    }
     // HOME-3: the other two layouts draw differently; the keys are the same.
     match app.home_layout() {
         crate::lpm::HOME_LOW_POWER => return super::lowpower::render(app, lcd, cx), // PWR-24.7

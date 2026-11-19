@@ -523,3 +523,28 @@ fn messages_mark_all_read_and_delete_all() {
     r.run("menu 0 5 2; wait 300ms");
     r.expect_no_text("VE3KPW-9");
 }
+
+/// HOME-3.1: the layout changed while home is up (the terminal's `set 0 7 2`, as on black on Nov 18, 2026, or
+/// Console) repaints the whole of home: the three cards stayed behind under single + scope's one card. The screen
+/// must match, pixel for pixel, a radio that came to that layout through a screen change (MENU, BACK).
+#[test]
+fn layout_change_on_home_leaves_nothing_behind() {
+    for (to, name) in [(1, "Single + scope"), (2, "Watch + activity")] {
+        let line = format!("\r:set 0 7 2 {name}\r");
+        let mut a = Radio::new();
+        let mut b = Radio::new();
+        for r in [&mut a, &mut b] {
+            r.wait(1000);
+            r.sim.term_feed(line.as_bytes());
+            r.wait(400);
+        }
+        assert_eq!(a.sim.app().home_layout(), to);
+        a.wait(400); // the same time as b's two presses
+        b.press(Key::Menu).press(Key::Exit);
+        a.wait(600);
+        b.wait(600);
+        let (pa, pb) = (a.sim.screen_rgb(), b.sim.screen_rgb());
+        let rows: Vec<usize> = (0..320).filter(|y| (0..240).any(|x| pa[y * 240 + x] != pb[y * 240 + x])).collect();
+        assert!(rows.is_empty(), "{name}: rows {:?}..{:?} differ from a fresh home", rows.first(), rows.last());
+    }
+}
