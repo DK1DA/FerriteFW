@@ -331,3 +331,22 @@ fn low_power_home_matches_its_goldens() {
     r.up(Key::Side(2)).up(Key::Side(1));
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// KEY-11, VFO-26: hold 7 opens the shift's options; hold 8 the offset's amount, typed (7.6 here), all text uncut.
+#[test]
+fn offset_editors_match_their_goldens() {
+    use ferrite_core::keys::Key;
+    let mut failures = Vec::new();
+    let mut r = Radio::new();
+    r.home();
+    r.hold(Key::Digit(7)).wait(1500);
+    failures.extend(check("offset-hold7", &r.sim.screen_rgb()));
+    r.press(Key::Exit).home();
+    r.hold(Key::Digit(8)).wait(1500);
+    failures.extend(check("offset-hold8", &r.sim.screen_rgb()));
+    r.type_("7.6").wait(300);
+    failures.extend(check("offset-hold8-typed", &r.sim.screen_rgb()));
+    r.press(Key::Menu).wait(1500);
+    failures.extend(check("offset-home-7m6", &r.sim.screen_rgb()));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

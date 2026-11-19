@@ -13,7 +13,7 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::{ChannelStore, MAX_CHANNELS};
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{band_name, band_of, band_near, chan_label, BANDS, STEPS};
+use crate::slot::{band_name, band_of, band_near, chan_label, STEPS};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
@@ -41,6 +41,8 @@ pub enum EntryFor {
     ScopeCentre,
     /// A setting that holds a frequency (MENU-31): OK keeps it when it is in the setting's range.
     Setting(FreqSet),
+    /// The active slot's offset amount (hold 8, VFO-26): MHz, 10 kHz to 100 MHz, in the direction it has.
+    OffsetAmount,
 }
 
 /// The settings that hold a frequency, each typed in this one entry box (MENU-31), and by the terminal's `set`
@@ -187,6 +189,23 @@ const WIDE: [&str; 31] = [
     "1290-1299 MHz",
     "1300 MHz",
 ];
+
+/// VFO-26: the offset amounts hold 8 takes, 10 kHz to 100 MHz (10 Hz units).
+const OFFSET_MIN: Freq10 = 1_000;
+const OFFSET_MAX: Freq10 = mhz(100);
+
+/// VFO-26: the direction a typed offset amount goes: the slot's, or from simplex or split the band's usual one
+/// (up where a band has none).
+fn offset_sign(app: &App) -> i32 {
+    let s = app.slot(app.active());
+    match s.cfg().offset.signum() {
+        d if d != 0 && !s.cfg().split => d,
+        _ => match crate::slot::usual_shift(s.freq(), app.set.region()).signum() {
+            0 => 1,
+            d => d,
+        },
+    }
+}
 
 /// Home VFOs tune 18 MHz and up (VFO-14), to what the chips reach.
 const LO: Freq10 = mhz(18);
@@ -497,7 +516,7 @@ pub(crate) fn tune_vfo(app: &mut App, slot: u8, f: Freq10) {
         s.cfg.narrow = s.cfg.mode == 1;
         s.cfg.step = crate::slot::band_step(new, region);
         if s.cfg.offset != 0 && !s.cfg.split {
-            s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;
+            s.cfg.offset = s.cfg.offset.signum() * crate::slot::band_shift(new, region);
         }
     }
     let from = s.vfo;
@@ -537,6 +556,16 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             }
         };
     }
+    if e.to == EntryFor::OffsetAmount {
+        // VFO-26: an amount, not a frequency; a refusal (range, TX-37's relay, a channel's rules) leaves the digits
+        if !(OFFSET_MIN..=OFFSET_MAX).contains(&f) {
+            return app.show_toast(b"Offset", b"10 kHz to 100 MHz", false);
+        }
+        if app.set_shift(offset_sign(app) * f as i32) {
+            app.back();
+        }
+        return;
+    }
     if let Some(why) = refuse(f) {
         // VFO-21: the entry stays open with its digits, so they can be fixed
         let (head, body) = why.split_once(": ").unwrap_or((why, ""));
@@ -562,7 +591,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
         EntryFor::Repeater => {
             app.back();
             if let Screen::Save(mut s) = app.screen {
-                s.set_freq(f);
+                s.set_freq(f, app.set.region());
                 app.screen = Screen::Save(s);
             }
         }
@@ -579,7 +608,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
                 app.screen = super::scope::recentre(app, s, f);
             }
         }
-        EntryFor::Channel | EntryFor::Setting(_) => {}
+        EntryFor::Channel | EntryFor::Setting(_) | EntryFor::OffsetAmount => {}
     }
 }
 
@@ -601,6 +630,7 @@ match self.to {
             EntryFor::Repeater => b"Repeater output, MHz",
             EntryFor::SplitTx => b"Split: TX frequency, MHz",
             EntryFor::ScopeCentre => b"Scope centre, MHz",
+            EntryFor::OffsetAmount => b"Offset, MHz",
             EntryFor::Setting(fs) => fs.label(),
 }
     }
@@ -609,7 +639,20 @@ match self.to {
     pub fn info(self, app: &App, store: &impl ChannelStore, dev: &ferrite_core::msg::Device) -> Info {
             let mut rows: [(&'static [u8], Buf<40>, u16); 4] = [(b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT)];
             let mut note: &'static [u8] = b"";
-            if let EntryFor::Setting(fs) = self.to {
+            if self.to == EntryFor::OffsetAmount {
+                // VFO-26: the offset now, and where this one would transmit
+                rows[0].0 = b"Now";
+                let mut b = Buf::<16>::new();
+                app.item_text(crate::slot::Item::Offset, true, &mut b);
+                rows[0].1.set(b.as_bytes());
+                if let Some(f) = self.freq().filter(|f| (OFFSET_MIN..=OFFSET_MAX).contains(f)) {
+                    rows[1].0 = b"TX";
+                    let rx = app.slot(app.active()).freq() as i64;
+                    rows[1].1.set(w::freq3((rx + offset_sign(app) as i64 * f as i64).max(0) as Freq10).as_bytes());
+                } else if self.n > 0 {
+                    note = b"10 kHz to 100 MHz";
+                }
+            } else if let EntryFor::Setting(fs) = self.to {
                 // MENU-31: what the setting holds now and what it takes; no band, step or transmit rows
                 rows[0].0 = b"Now";
                 match fs.current(app, store) {
@@ -667,6 +710,7 @@ match self.to {
         match self.to {
             EntryFor::Vfo => txt!("After three digits the point comes by itself; * types it, and * again enters (52*525*)."),
             EntryFor::Channel => txt!("Type the channel number, then OK."),
+            EntryFor::OffsetAmount => txt!("The repeater offset in MHz: 7*6 is 7.6. + or - stays as it is; OK keeps it."),
             EntryFor::SplitTx => txt!("Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift."),
             _ => txt!("* is the point, then * or OK keeps it. BACK deletes."),
         }

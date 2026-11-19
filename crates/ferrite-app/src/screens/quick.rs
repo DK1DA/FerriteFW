@@ -77,6 +77,8 @@ impl View for Quick {
                 // MENU 8: save the VFO as a channel, or edit the channel.
                 Item::Channel if app.slots[app.active as usize].on_channel() => app.open(Dest::ChannelEdit),
                 Item::Channel => app.open(Dest::SaveChannel),
+                // VFO-26: on Split, OK types its TX frequency at once, as its toast says
+                Item::Offset if app.slot(app.active).cfg().split => super::value::split_entry(app),
                 _ => app.open(Dest::value(item)), // MENU-17
             },
             (Key::Hash, Short) => app.reset(item), // MENU-18
