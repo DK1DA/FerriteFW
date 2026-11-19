@@ -571,9 +571,9 @@ pub fn params(c: &SlotCfg) -> [(Param, i32); 10] {
     ]
 }
 
-/// The mode chip: "FM-N" for NFM (the home cards' long-standing look), else the mode.
+/// The mode chip: the mode's name, as everywhere else (NFM, not the cards' old "FM-N": decision 417).
 pub fn mode_chip(c: &SlotCfg, b: &mut Buf<16>) {
-    b.set(if c.mode == 1 { b"FM-N" } else { MODES[c.mode as usize % MODES.len()].as_bytes() });
+    b.set(MODES[c.mode as usize % MODES.len()].as_bytes());
 }
 
 /// The clarifier in 100 Hz as "CLR +0.3" (VFO-22).
@@ -631,7 +631,7 @@ mod tests {
         Item::Step.text(&c, true, &mut b);
         assert_eq!(s(&b), "12.5 kHz");
         mode_chip(&c, &mut b);
-        assert_eq!(s(&b), "FM-N");
+        assert_eq!(s(&b), "NFM");
     }
 
     #[test]

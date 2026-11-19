@@ -152,7 +152,7 @@ pub fn card_border(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, c: u16,
     }
 }
 
-/// An outlined chip ("FM-N", "T 100.0"); returns its width.
+/// An outlined chip ("NFM", "T 100.0"); returns its width.
 #[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) -> i32 {
     clip_site!();
@@ -164,7 +164,7 @@ pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) ->
 
 /// The big card's chip row in fixed slots (HOME-4): mode, tone, shift and power each keep their own x and width, so
 /// a value coming or going never moves its neighbours; power is pinned to the right edge. Widths fit the widest
-/// text each can show in UI_12 (7 px a character, 4 px padding each side): "FM-N", "T 254.1", "R-12.5M" (a
+/// text each can show in UI_12 (7 px a character, 4 px padding each side): "NFM", "T 254.1", "R-12.5M" (a
 /// reversed shift) and "No TX". x..x+w, all inside 15..226.
 pub const SLOT_MODE: (i32, i32) = (15, 36);
 pub const SLOT_TONE: (i32, i32) = (54, 57);
@@ -1215,7 +1215,7 @@ mod tests {
         freq(&mut fb, 15, 225, 89, 14_652_000, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
         assert!(fb.at(15, 89 - digit_h(&DIG_46) - 1) == 0x1234, "freq painted above its digits");
         assert!(fb.at(15, 90) == 0x1234, "freq painted below the baseline");
-        chips(&mut fb, 15, 97, 210, &[b"FM-N", "T 100.0".as_bytes()], SURFACE);
+        chips(&mut fb, 15, 97, 210, &[b"NFM", "T 100.0".as_bytes()], SURFACE);
         meter(&mut fb, 15, 124, None, 7, GREEN, SURFACE);
         assert_eq!(fb.at(16, 128), GREEN);
         assert_eq!(fb.at(15 + 8 * 10 + 1, 128), LINE);
