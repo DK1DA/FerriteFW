@@ -1,0 +1,16 @@
+# Build Ferrite in a container (DEVELOPING.md, "Build in Docker"): `tools/docker.sh` wraps this.
+services:
+  build:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ferrite-build
+    volumes:
+      - .:/src
+      # The downloaded crates, kept between runs.
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+
+volumes:
+  cargo-registry:
+  cargo-git:

@@ -44,6 +44,20 @@ tools/mkbtf.sh reader      # target/ferrite-reader.btf: the read-only backup rea
 - Your own builds aren't signed: Console takes them with "Allow unsigned files" ticked, `flash.py` with `--dev-unsigned`.
 - Flash the `.ffw`, not the bare `.btf`: the `.btf` leaves out the text and other parts kept in SPI flash.
 
+## Build in Docker
+
+Nothing to install but Docker: `docker/Dockerfile` has the pinned nightly, the ARM binutils and Python.
+
+```sh
+tools/docker.sh                          # target/ferrite-tx.ffw, the user build
+tools/docker.sh tools/mkbtf.sh reader    # any other command in the build environment
+tools/docker.sh cargo test
+```
+
+- The repo is mounted, not copied: the files land in `target/` as with a local build, owned by you.
+- The first run builds the image (the toolchain, a few minutes); the downloaded crates stay in two named volumes.
+- The simulator's window (`cargo simw`) and the tools that talk to a radio (`flash.py`, `term.py`) run on the host.
+
 ## Before a commit
 
 ```sh

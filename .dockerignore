@@ -1,0 +1,3 @@
+# The build image needs only the toolchain pin: the repo is mounted at run time (compose.yaml).
+*
+!rust-toolchain.toml
