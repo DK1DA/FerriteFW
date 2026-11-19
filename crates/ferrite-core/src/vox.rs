@@ -17,11 +17,12 @@ pub const MIC_STOCK: u8 = 0x24;
 /// writes the mic gain again.
 pub const MIC_DATA: u8 = 0x34;
 
-/// VOX-15: REG_7D[5:0] (0.5 dB a step) for Mic gain 1-9 (0 8 3): stock's default 0x24 at 5, 3.5 dB a step around
-/// it (0x08 at 1), 9 the field's top, 0x3F (+13.5 dB). Stock's loudest, its setting 2 (the calibration's 0xF210
-/// byte 0: 0x37 on both bench radios), falls between 7 and 8, so a quiet speaker mic goes further than on stock.
+/// VOX-15: REG_7D[5:0] (0.5 dB a step) for Mic gain 1-9 (0 8 3): 9 the field's top, 0x3F, 3 dB a step down to
+/// 0x0F at 1. 5 (the default) is 0x27, 1.5 dB over stock's default 0x24 (which falls between 4 and 5); stock's
+/// loudest, its setting 2 (the calibration's 0xF210 byte 0: 0x37 on both bench radios), falls between 7 and 8, so a
+/// quiet speaker mic goes further than on stock.
 pub fn mic_reg(gain: u8) -> u8 {
-    (MIC_STOCK as i16 + (gain.clamp(1, 9) as i16 - 5) * 7).min(0x3F) as u8
+    0x3F - (9 - gain.clamp(1, 9)) * 6
 }
 
 /// Stock's hysteresis: speech goes on above the threshold and stays on down to this many counts below it.
@@ -208,14 +209,13 @@ mod tests {
         assert!(!v.step(799, 5, 2000, false, 9000), "the whistle (49) is below level 5's 61");
     }
 
-    /// VOX-15: Mic gain 5 (the default) writes stock's default REG_7D[5:0] 0x24; 3.5 dB a step, 9 the field's top, past
+    /// VOX-15: 9 writes the field's top, 3 dB a step down; 5 (the default) a step above stock's default, 8 past
     /// stock's loudest (0x37).
     #[test]
     fn mic_gain_to_reg_7d() {
-        assert_eq!(mic_reg(5), MIC_STOCK);
-        assert_eq!((mic_reg(1), mic_reg(9)), (0x08, 0x3F));
-        assert_eq!((mic_reg(0), mic_reg(12)), (0x08, 0x3F), "clamped to 1-9");
+        assert_eq!((mic_reg(1), mic_reg(5), mic_reg(9)), (0x0F, 0x27, 0x3F));
+        assert_eq!((mic_reg(0), mic_reg(12)), (0x0F, 0x3F), "clamped to 1-9");
+        assert!(mic_reg(4) < MIC_STOCK && mic_reg(5) > MIC_STOCK, "stock's default falls between 4 and 5");
         assert!(mic_reg(7) < 0x37 && mic_reg(8) > 0x37, "8 passes stock's loudest, its setting 2 (0xF210 byte 0 on the bench radios)");
-        assert!((1..=9).all(|g| mic_reg(g) <= 0x3F));
     }
 }
