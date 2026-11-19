@@ -128,3 +128,29 @@ fn channel_frequency_below_64() {
     t.tap(Key::Menu);
     assert_eq!(t.toast(), "Below 64 MHz / save it in HF mode");
 }
+
+/// VFO-26.5, VFO-26.6: hold 8's ▲ makes the amount +, ▼ makes it -, its Shift and TX rows following; hold 7's
+/// editor shows where each choice transmits.
+#[test]
+fn offset_sign_and_tx_shown() {
+    let mut t = T::ready();
+    t.tune(14_534_000); // 145.340: the usual shift is down
+    t.hold(Key::Digit(8));
+    for k in [Key::Digit(5), Key::Up] {
+        t.tap(k);
+    }
+    t.shows("Shift +");
+    t.shows("TX 150.340");
+    t.tap(Key::Down);
+    t.shows("Shift -");
+    t.shows("TX 140.340");
+    t.tap(Key::Up);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Home));
+    assert_eq!(t.app.slot(0).cfg().offset, 500_000, "5 MHz up, as chosen");
+    // Hold 7: the choice's TX under it
+    t.hold(Key::Digit(7));
+    t.shows("TX 150.340");
+    t.knob(-1); // to simplex
+    t.shows("TX 145.340");
+}

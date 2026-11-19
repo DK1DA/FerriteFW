@@ -1456,6 +1456,8 @@ impl App {
                     self.lock_ask = 0;
                     self.lock_toast();
                 }
+                // SQL-11, SQL-9.3: SIDE1 is the monitor key while locked too, wherever it has no job of its own
+                (Key::Side(1), Short | Long) if sides && !self.screen.own_side1() => self.monitor_key(e.press),
                 (Key::Side(_), _) if sides => self.screen.key(self, e, store),
                 (Key::Up | Key::Down, Short | Repeat) if sides && self.side1_squelch() => self.screen.key(self, e, store),
                 _ => self.locked_toast(),
@@ -1472,6 +1474,10 @@ impl App {
                 self.show_toast(b"No options here", b"", false);
             }
             return;
+        }
+        // SQL-9.3: SIDE1 is the monitor key on every screen that doesn't give it a job of its own.
+        if matches!((e.key, e.press), (Key::Side(1), Short | Long)) && !self.screen.own_side1() {
+            return self.monitor_key(e.press);
         }
         // KEY-19: ◀▶ are the knob, unless the screen gives them a job of its own.
         if matches!((e.key, e.press), (Key::Left | Key::Right, Short | Repeat)) && !self.screen.own_arrows() {
@@ -1655,6 +1661,27 @@ impl App {
 
     /// HOME-15.4: what an off active slot can't do (PTT, a scan, monitor) is refused with a toast and the refusal
     /// beep. True when refused.
+    /// SQL-9: SIDE1 on the active slot. A tap latches monitor until tapped again (its card says MON); held alone,
+    /// the squelch is open while it is held ([`App::tick_keys`] closes it at the release, SQL-9.1). The same on
+    /// every screen that doesn't give SIDE1 a job of its own (SQL-9.3).
+    pub(crate) fn monitor_key(&mut self, press: keys::Press) {
+        let a = self.active;
+        match press {
+            keys::Press::Short if self.off_refuse(a) => {} // HOME-15.4
+            keys::Press::Short => {
+                self.monitor ^= 1 << a;
+                let on = self.monitor & 1 << a != 0;
+                self.out.push(RadioCmd::Monitor { slot: a, on });
+                self.show_toast(b"Monitor", if on { b"on: tap SIDE1 again" } else { b"off" }, false);
+            }
+            keys::Press::Long if self.monitor & 1 << a == 0 => {
+                self.mon_held = a + 1;
+                self.out.push(RadioCmd::Monitor { slot: a, on: true });
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn off_refuse(&mut self, s: u8) -> bool {
         if !self.slot_off(s) {
             return false;
@@ -1830,6 +1857,7 @@ impl App {
         let rx = self.slots[a as usize].freq();
         let mut c = *self.slots[a as usize].cfg();
         let was_split = c.split;
+        (c.offset, c.split) = (0, false); // the amount given, not the one kept (VFO-26)
         let Some((param, value)) = Item::Offset.set(&mut c, (shift.signum() + 3) % 3, shift.abs()) else { return false };
         if !ferrite_core::txplan::relay_ok(c.rx_of(rx), c.tx_of(rx)) {
             self.relay_toast();
@@ -1922,7 +1950,7 @@ impl App {
             }
             _ => {
                 let rx = self.slots[a as usize].freq();
-                let shift = BANDS[band_near(rx)].shift;
+                let shift = crate::slot::band_shift(band_near(rx), self.set.region());
                 let on_ch = self.slots[a as usize].on_channel();
                 let c = self.slots[a as usize].cfg_mut();
                 let mut v = item.get(c).0 + d;

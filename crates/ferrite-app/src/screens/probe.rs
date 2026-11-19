@@ -302,6 +302,11 @@ impl Counter {
 }
 
 impl View for Counter {
+    /// SQL-9.3: the counter has no audio to monitor; SIDE1 does nothing here.
+    fn own_side1(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Frequency counter"
     }

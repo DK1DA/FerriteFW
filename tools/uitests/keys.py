@@ -144,17 +144,18 @@ def auto_lock(t):
     t.eq(t.ui().bar["lock"], 0, "hold # unlocks")
 
 
-@test("KEY-11", "KEY-21", "MENU-14", pages=("ChEdit", "Home"))
+@test("KEY-11", "KEY-21", "MENU-14", "VFO-26", pages=("Value", "Entry", "Home"))
 def digit_shortcuts_on_a_channel(t):
-    """Hold 6 on a channel changes nothing and says VFO only; hold 7 and 8 open the channel's editor."""
+    """Hold 6 on a channel changes nothing and says VFO only; hold 7 opens the shift's options and hold 8 the
+    offset's amount, on a channel as on a VFO."""
     t.need("ch " in t.slot("B"), "slot B isn't on a channel")
     t.cmd("slot B active")
     u = t.press("6", long=True)
     t.check(u.popup and "VFO only" in u.popup["head"] + " " + u.popup["body"], "hold 6: VFO only", u.popup)
-    for d in ("7", "8"):
+    for d, want in (("7", "Value"), ("8", "Entry")):
         t.home()
         u = t.press(d, long=True)
-        t.eq(u.id, "ChEdit", f"hold {d} on a channel: its editor")
+        t.eq(u.id, want, f"hold {d} on a channel")
     t.home()
     t.cmd("slot A active")
 

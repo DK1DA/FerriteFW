@@ -259,6 +259,10 @@ pub(crate) fn stop(app: &mut App, by: u8, why: u8) {
 }
 
 impl View for Crossband {
+    fn own_side1(self) -> bool {
+        true
+    }
+
     /// KEY-19: ◀▶▲▼ move between the start screen's cells.
     fn own_arrows(self) -> bool {
         true

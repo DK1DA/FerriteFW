@@ -79,11 +79,6 @@ impl F {
     }
 }
 
-/// The usual repeater shift for a frequency: its band's amount; down on 2 m below 147 MHz, else up.
-fn auto_shift(f: Freq10) -> i32 {
-    let s = BANDS[band_near(f)].shift;
-    if f >= mhz(144) && f < mhz(147) { -s } else { s }
-}
 
 impl Save {
     pub fn new(repeater: bool) -> Self {
@@ -108,9 +103,9 @@ impl Save {
     }
 
     /// Add repeater's frequency, typed (A1): the shift follows it.
-    pub fn set_freq(&mut self, f: Freq10) {
+    pub fn set_freq(&mut self, f: Freq10, region: Option<ferrite_core::txplan::Region>) {
         self.freq = f;
-        self.offset = auto_shift(f);
+        self.offset = crate::slot::usual_shift(f, region); // VFO-26
     }
 
     fn freq_of(self, app: &App) -> Freq10 {
@@ -131,7 +126,7 @@ impl Save {
         let from = sl.ch.map_or(0, |c| (c.num + 1) % MAX_CHANNELS);
         s.num = store.free_num(from).unwrap_or(UNSET - 1);
         s.zone = if sl.zone < store.zones() { sl.zone } else { NO_ZONE }; // the zone being browsed
-        s.set_freq(sl.vfo);
+        s.set_freq(sl.vfo, app.set.region());
         app.text.clear();
         app.screen = Screen::Save(s);
         s
@@ -170,7 +165,7 @@ impl View for Save {
             (Key::Up, Short | Repeat) => s.row = (s.row + n - 1) % n,
             (Key::Down, Short | Repeat) => s.row = (s.row + 1) % n,
             (Key::Hash, Short) => match s.at() {
-                F::Shift => s.offset = auto_shift(s.freq),
+                F::Shift => s.offset = crate::slot::usual_shift(s.freq, app.set.region()),
                 F::Tone => s.tone = 0,
                 F::Zone => s.zone = NO_ZONE,
                 _ => {}
@@ -269,10 +264,10 @@ fn change(mut s: Save, app: &App, store: &impl ChannelStore, d: i32) -> Save {
     match s.at() {
         F::Freq => {
             let step = STEPS[crate::slot::band_step(band_near(s.freq), app.set.region()) as usize].0 as i32;
-            s.set_freq((s.freq as i32 + d * step).clamp(mhz(64) as i32, mhz(1300) as i32) as Freq10);
+            s.set_freq((s.freq as i32 + d * step).clamp(mhz(64) as i32, mhz(1300) as i32) as Freq10, app.set.region());
         }
         F::Shift => {
-            let a = BANDS[band_near(s.freq)].shift.max(60_000);
+            let a = crate::slot::band_shift(band_near(s.freq), app.set.region()).max(60_000);
             let i = (s.offset.signum() + 3) % 3; // simplex, +, -
             s.offset = [0, a, -a][(i + d).rem_euclid(3) as usize];
         }

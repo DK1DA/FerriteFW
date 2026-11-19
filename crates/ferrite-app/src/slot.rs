@@ -297,6 +297,25 @@ pub const BANDS: [BandDef; 7] = [
 ];
 pub const BAND_125M: usize = 5;
 pub const BAND_VHF: usize = 3;
+pub const BAND_UHF: usize = 6;
+
+/// A band's repeater offset amount in a region (VFO-26): 70 cm in Europe takes IARU Region 1's 7.6 MHz; elsewhere
+/// the band's own (600 kHz on 2 m, 5 MHz on 70 cm).
+pub fn band_shift(b: usize, r: Option<ferrite_core::txplan::Region>) -> i32 {
+    match b {
+        BAND_UHF if r == Some(ferrite_core::txplan::Region::Europe) => 760_000,
+        _ => BANDS[b].shift,
+    }
+}
+
+/// The usual repeater shift for a frequency in a region (VFO-26): its band's amount, down on 2 m below 147 MHz
+/// and on 70 cm in Europe (Region 1's inputs sit 7.6 MHz below), else up.
+pub fn usual_shift(f: Freq10, r: Option<ferrite_core::txplan::Region>) -> i32 {
+    let b = band_near(f);
+    let s = band_shift(b, r);
+    let down = f >= mhz(144) && f < mhz(147) || b == BAND_UHF && r == Some(ferrite_core::txplan::Region::Europe);
+    if down { -s } else { s }
+}
 
 /// A band's default mode in a region (SETUP-7): its FM is wide FM in the Americas, Australia and New Zealand,
 /// NFM in the UK, Europe, Japan and Other; AM bands stay AM. No region chosen yet: wide.
@@ -427,7 +446,7 @@ impl Item {
             Item::Channel => txt!("Edit this channel: name, zone, number, flags."),
             Item::BatterySave => txt!("Receiver sleep: deeper saves more, hears later."),
             Item::Advanced => txt!("Everything else, in nine groups."),
-            Item::Mode => txt!("FM wide, NFM narrow, AM. USB, LSB, CW: HF mode."),
+            Item::Mode => txt!("FM 25 kHz, NFM 12.5 kHz, AM. WFM: broadcast RX."),
             Item::BusyLock => txt!("Refuse transmit while the channel is busy."),
             Item::Reverse => txt!("Listen on the repeater's input. Hold *, PTT A."),
         }
@@ -474,7 +493,9 @@ impl Item {
             // Split needs a TX frequency: the App asks for it (frequency entry) and sets it with `set_split`.
             Item::Offset if v == 3 => return None,
             Item::Offset => {
-                let shift = if shift == 0 { 60_000 } else { shift };
+                // VFO-26: + and - keep the amount the slot has (a custom one from hold 8 too); from simplex or
+                // split, the band's
+                let shift = if !c.split && c.offset != 0 { c.offset.abs() } else if shift == 0 { 60_000 } else { shift };
                 (c.offset, c.split) = ([0, shift, -shift][v as usize], false);
                 (Param::Offset, c.offset)
             }
@@ -571,9 +592,9 @@ pub fn params(c: &SlotCfg) -> [(Param, i32); 10] {
     ]
 }
 
-/// The mode chip: "FM-N" for NFM (the home cards' long-standing look), else the mode.
+/// The mode chip: the mode's name, as everywhere else (NFM, not the cards' old "FM-N": decision 417).
 pub fn mode_chip(c: &SlotCfg, b: &mut Buf<16>) {
-    b.set(if c.mode == 1 { b"FM-N" } else { MODES[c.mode as usize % MODES.len()].as_bytes() });
+    b.set(MODES[c.mode as usize % MODES.len()].as_bytes());
 }
 
 /// The clarifier in 100 Hz as "CLR +0.3" (VFO-22).
@@ -631,7 +652,7 @@ mod tests {
         Item::Step.text(&c, true, &mut b);
         assert_eq!(s(&b), "12.5 kHz");
         mode_chip(&c, &mut b);
-        assert_eq!(s(&b), "FM-N");
+        assert_eq!(s(&b), "NFM");
     }
 
     #[test]
