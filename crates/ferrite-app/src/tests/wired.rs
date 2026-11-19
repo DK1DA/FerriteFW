@@ -295,3 +295,18 @@ fn side1_monitors_while_locked_off_home() {
     t.tap(Key::Side(1));
     assert!(t.cmds().contains(&RadioCmd::Monitor { slot: 0, on: true }));
 }
+
+/// SAT-1: SIDE2 (scan) does nothing in satellite mode: the satellites own both chips, so no scan starts, tapped
+/// or held, and the screen stays.
+#[test]
+fn side2_does_nothing_in_satellite_mode() {
+    let mut t = T::new();
+    t.open(crate::screens::nav::Dest::Satellites);
+    t.cmds();
+    let at = t.app.screen();
+    t.tap(Key::Side(2));
+    t.hold(Key::Side(2));
+    let c = t.cmds();
+    assert!(!c.iter().any(|c| matches!(c, RadioCmd::Scan { .. })), "no scan: {c:?}");
+    assert_eq!(t.app.screen(), at);
+}
