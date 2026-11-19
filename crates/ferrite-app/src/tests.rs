@@ -163,8 +163,9 @@ fn ram_is_small() {
     // auto reply's settings in the App's AprsCfg (APRS-57: on and delay, the pattern, the 45-character reply), 56
     // to 2056; the Nearby view's rows found once, not per draw (CHAN-15, Nov 17, 2026: 32 channel numbers, their
     // count and what they were found for), 72, to 2128; the channel browser's counts kept between redraws (its view's,
-    // 8, and the picker's band views', 16: a full radio counted 4000 records a redraw), 24, to 2152
-    assert!(n <= 2152, "App is {n} bytes");
+    // 8, and the picker's band views', 16: a full radio counted 4000 records a redraw), 24, to 2152;
+    // the status bar as last drawn gains VOX's mark (SBAR-25: 1 byte), 8 with padding, to 2160
+    assert!(n <= 2160, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -1339,7 +1340,7 @@ fn chip_slots_never_move() {
     // The widest text each slot shows fits it.
     use ferrite_ui::assets::UI_12;
     use ferrite_ui::gfx::text4_width;
-    for (s, (_, w)) in [("FM-N", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("No TX", SLOT_POWER)] {
+    for (s, (_, w)) in [("NFM", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("No TX", SLOT_POWER)] {
         assert!(text4_width(s.as_bytes(), &UI_12) <= w - 4, "{s} fits its slot");
     }
     assert!(SLOT_POWER.0 + SLOT_POWER.1 == 226 && SLOT_SHIFT.0 + SLOT_SHIFT.1 < SLOT_POWER.0);

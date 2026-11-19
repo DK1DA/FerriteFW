@@ -25,7 +25,7 @@ def hold_back_goes_home(t):
 
 @test("HOME-4", "VFO-20", smoke=True, pages=("Home", "Quick"))
 def active_card_fields(t):
-    """The active card: letter, VFO/channel and band, frequency, mode chip (FM, FM-N, AM), tones, shift, power."""
+    """The active card: letter, VFO/channel and band, frequency, mode chip (FM, NFM, AM, WFM), tones, shift, power."""
     t.cmd("slot A vfo 146.52 fm low tone 100.0 offset -0.6")
     u = t.ui()
     a = u.cards["A"]
@@ -34,7 +34,7 @@ def active_card_fields(t):
     t.eq(a["freq"], "146.52000", "the frequency")
     t.eq((a["mode"], a["tone"], a["shift"], a["power"]), ("FM", "T 100.0", "-600k", "LOW"),
          "chips: mode, tone, shift; the power shows at Low too")
-    for word, chip in (("nfm", "FM-N"), ("am", "AM"), ("fm", "FM")):
+    for word, chip in (("nfm", "NFM"), ("am", "AM"), ("fm", "FM")):
         t.cmd(f"slot A {word}")
         t.eq(t.ui().cards["A"]["mode"], chip, f"mode {word}: the chip")
     u = t.keys("MENU")

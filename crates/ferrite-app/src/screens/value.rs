@@ -79,6 +79,16 @@ fn tx_line(app: &App, i: i32, b: &mut Buf<24>) {
     b.push(w::freq3(c.tx_of(s.freq())).as_bytes());
 }
 
+/// VFO-4.1: what the Mode editor shows after the mode's name: its channel width, or what it is for.
+pub(crate) fn mode_width(name: &[u8]) -> &'static str {
+    match name {
+        b"FM" => " \u{b7} 25 kHz",
+        b"NFM" => " \u{b7} 12.5 kHz",
+        b"WFM" => " \u{b7} broadcast",
+        _ => "",
+    }
+}
+
 const BOX_Y: i32 = 44;
 const BOX_H: i32 = 162;
 
@@ -135,6 +145,10 @@ impl View for Value {
         let qi = QUICK.iter().position(|&q| q == item);
         let mut vt = Buf::<16>::new();
         text_of(app, item, v, &mut vt);
+        if item == Item::Mode {
+            // VFO-4.1: the mode with its width, so FM and NFM read apart (the heading's default stays the name)
+            vt.push(mode_width(vt.as_bytes()).as_bytes());
+        }
         let grey = app.greyed(item);
         // The box's frame and heading: number, name, default and whose.
         let mut def = Buf::<32>::new();
