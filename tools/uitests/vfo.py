@@ -293,7 +293,7 @@ def band_follows_the_frequency(t):
         u = t.ui()
         a = u.active
         t.eq(a["head"], f"VFO · {band}", f"{f} MHz: the band")
-        want = mode if mode == "AM" or wide else "FM-N"
+        want = mode if mode == "AM" or wide else "NFM"
         t.eq(a["mode"], want, f"{f} MHz: the band's mode ({region})")
         want = "LOW"
         t.check(a["power"] in (want, "No TX"), f"{f} MHz: the power chip ({want}, or No TX where it can't transmit)",

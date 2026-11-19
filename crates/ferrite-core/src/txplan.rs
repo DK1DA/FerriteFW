@@ -122,6 +122,8 @@ pub enum Refusal {
     RelayMismatch,
     /// The slot is in AM: the BK4829 has no AM modulator (TX-20).
     AmRxOnly,
+    /// The slot is in WFM: broadcast FM on the SI4732, receive only (BCR-33, TX-20.6).
+    WfmRxOnly,
     /// An emergency frequency without a person's second PTT (TX-3, TX-35).
     Emergency,
     /// The timeout ended the last transmission and PTT is still held (TX-30).
